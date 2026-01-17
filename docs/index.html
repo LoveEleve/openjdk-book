@@ -33,6 +33,12 @@
         '/.*/_sidebar.md': '/_sidebar.md'
       },
       
+      // 强制不缓存 MD 文件
+      executeScript: true,
+      requestHeaders: {
+        'cache-control': 'max-age=0',
+      },
+      
       // 其它配置
       auto2top: true,
       search: {
