@@ -21,58 +21,27 @@
       --heading-h3-font-size: 1.1rem;
     }
     
-    /* 侧边栏首页隐藏逻辑 */
+    /* 首页侧边栏简洁逻辑 */
     .sidebar-nav a[href="#/"] + ul,
     .sidebar-nav a[href="#/README"] + ul { display: none !important; }
     .sidebar-nav a[href="#/"]::after,
     .sidebar-nav a[href="#/README"]::after { display: none !important; }
 
-    /* 侧边栏样式 */
+    /* 侧边栏字体微调 */
     .sidebar-nav > ul > li { margin: 10px 0; font-weight: bold; font-size: 14px; }
     .sidebar-nav .section-link { font-size: 12px !important; color: #666; }
 
-    /* 代码块手动折叠样式 */
-    .code-wrapper {
-      position: relative;
-    }
-    .collapse-btn {
-      position: absolute;
-      right: 130px; /* 避开复制按钮 */
-      top: 0;
-      z-index: 1;
-      padding: 4px 8px;
-      font-size: 12px;
-      color: #666;
-      background: #f8f8f8;
-      border: 1px solid #ddd;
-      border-top: none;
-      border-right: none;
-      cursor: pointer;
-      border-radius: 0 0 0 4px;
-      transition: all 0.2s;
-    }
-    .collapse-btn:hover {
-      background: #eee;
-      color: #42b983;
-    }
-    .code-collapsed pre {
-      height: 0 !important;
-      padding: 0 !important;
-      margin: 0 !important;
-      overflow: hidden;
-    }
-    .code-collapsed .collapse-btn {
-      position: relative;
-      right: 0;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      margin-bottom: 10px;
-      display: inline-block;
+    /* 代码块复制按钮微调，确保不遮挡折叠按钮 */
+    .docsify-copy-code-button {
+      background: #f8f8f8 !important;
+      padding: 4px 8px !important;
+      font-size: 12px !important;
+      border: 1px solid #ddd !important;
     }
   </style>
 </head>
 <body>
-  <div id="app">正在加载...</div>
+  <div id="app">正在加载 (V7.0)...</div>
   <script>
     window.$docsify = {
       name: 'LoveEleve',
@@ -84,41 +53,19 @@
       executeScript: true,
       requestHeaders: { 'cache-control': 'max-age=0' },
       auto2top: true,
-      plugins: [
-        function(hook, vm) {
-          hook.doneEach(function() {
-            // 为每个代码块添加折叠功能
-            document.querySelectorAll('pre').forEach(function(pre) {
-              const wrapper = document.createElement('div');
-              wrapper.className = 'code-wrapper';
-              pre.parentNode.insertBefore(wrapper, pre);
-              wrapper.appendChild(pre);
-
-              const btn = document.createElement('button');
-              btn.className = 'collapse-btn';
-              btn.innerHTML = '收起代码';
-              wrapper.insertBefore(btn, pre);
-
-              btn.onclick = function() {
-                const isCollapsed = wrapper.classList.contains('code-collapsed');
-                if (isCollapsed) {
-                  wrapper.classList.remove('code-collapsed');
-                  btn.innerHTML = '收起代码';
-                } else {
-                  wrapper.classList.add('code-collapsed');
-                  btn.innerHTML = '展开代码';
-                }
-              };
-            });
-          });
-        }
-      ]
+      // 代码折叠插件配置
+      flexibleAlerts: { style: 'flat' }
     };
   </script>
   
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-sidebar-collapse/dist/docsify-sidebar-collapse.min.js"></script>
+  
+  <!-- 使用更稳健的代码折叠方案 -->
+  <script src="https://cdn.jsdelivr.net/npm/docsify-releaser/dist/plugins/embed-code.min.js"></script>
+  <script src="https://unpkg.com/docsify-expandable-code-block@0.0.1/dist/main.js"></script>
+
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-java.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-copy-code@2"></script>
