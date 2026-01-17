@@ -629,8 +629,18 @@
         display: block;
       }
 
-      body.has-toc-aside .toc-fab {
+      .toc-fab {
         display: inline-flex;
+      }
+
+      body:not(.has-toc-aside) .toc-fab {
+        opacity: 0.55;
+        border-color: rgba(0, 0, 0, 0.10);
+        color: #57606a;
+      }
+
+      body.has-toc-aside .toc-fab {
+        opacity: 1;
       }
     }
 
@@ -1902,9 +1912,16 @@
               btn.className = 'toc-fab';
               btn.textContent = '目录';
               btn.setAttribute('aria-label', '打开目录');
+              btn.setAttribute('aria-disabled', 'true');
               document.body.appendChild(btn);
             }
             return btn;
+          }
+
+          function setTocFabState(hasItems) {
+            const btn = ensureTocFab();
+            try { btn.setAttribute('aria-disabled', hasItems ? 'false' : 'true'); } catch (e) { /* ignore */ }
+            try { btn.classList.toggle('is-disabled', !hasItems); } catch (e) { /* ignore */ }
           }
 
           function ensureTocMobileDelegation() {
@@ -1917,8 +1934,29 @@
               if (fab) {
                 e.preventDefault();
                 e.stopPropagation();
+
                 const toc = ensureToc();
-                if ((toc && toc.dataset && toc.dataset.hasItems) !== '1') return;
+                const has = (toc && toc.dataset && toc.dataset.hasItems) === '1';
+
+                if (!has) {
+                  // 再尝试重算一次：有些页面标题渲染更晚
+                  try { if (tocLastVm) scheduleTocRender(tocLastVm); } catch (err) { /* ignore */ }
+
+                  setTimeout(() => {
+                    const toc2 = ensureToc();
+                    const has2 = (toc2 && toc2.dataset && toc2.dataset.hasItems) === '1';
+                    if (!has2) {
+                      const body = toc2.querySelector('#toc-body');
+                      if (body && !(body.innerHTML || '').trim()) {
+                        body.innerHTML = '<div style="padding:6px 8px;color:#57606a;line-height:1.6">当前页未检测到可用标题（建议至少包含 <b>##</b> 或 <b>###</b>）。</div>';
+                      }
+                    }
+                    try { toc2.classList.add('is-open'); } catch (err) { /* ignore */ }
+                  }, 120);
+
+                  return;
+                }
+
                 try { toc.classList.add('is-open'); } catch (err) { /* ignore */ }
                 return;
               }
@@ -2061,6 +2099,7 @@
               try { toc.classList.remove('is-open'); } catch (e) { /* ignore */ }
               try { document.body.classList.remove(TOC_BODY_CLASS); } catch (e) { /* ignore */ }
               body.innerHTML = '';
+              setTocFabState(false);
               tocScrollUpdate = null;
               if (tocObserver) {
                 try { tocObserver.disconnect(); } catch (e) {}
@@ -2072,7 +2111,7 @@
             try { toc.dataset.hasItems = '1'; } catch (e) { /* ignore */ }
             try { document.body.classList.add(TOC_BODY_CLASS); } catch (e) { /* ignore */ }
             ensureTocMobileDelegation();
-            ensureTocFab();
+            setTocFabState(true);
             body.innerHTML = items
               .map((it) => {
                 const cls = it.level === 'h1' ? 'toc-l1' : it.level === 'h2' ? 'toc-l2' : it.level === 'h3' ? 'toc-l3' : 'toc-l4';
