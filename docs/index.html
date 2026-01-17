@@ -497,6 +497,11 @@
       display: none;
     }
 
+    /* 防止某次误判导致行内 display 卡死：用 data 属性控制是否真正显示 */
+    .toc-aside[data-has-items="0"] {
+      display: none !important;
+    }
+
     .toc-head {
       position: sticky;
       top: 0;
@@ -1804,12 +1809,82 @@
           let tocScrollBound = false;
           let tocScrollUpdate = null;
 
+          // TOC 有时会因为渲染时机（图片/插件二次渲染/异步 DOM 变化）在 doneEach 时还拿不到 heading
+          // 这里增加：延迟重算 + MutationObserver，自愈“某次误判 items=[] 导致目录永远不出来”的问题
+          let tocRenderObserver = null;
+          let tocRenderTtlTimer = null;
+          let tocLastVm = null;
+          let tocResizeBound = false;
+
+          function stopTocRenderObserver() {
+            if (tocRenderTtlTimer) {
+              try { clearTimeout(tocRenderTtlTimer); } catch (e) { /* ignore */ }
+              tocRenderTtlTimer = null;
+            }
+            if (tocRenderObserver) {
+              try { tocRenderObserver.disconnect(); } catch (e) { /* ignore */ }
+              tocRenderObserver = null;
+            }
+          }
+
+          function scheduleTocRender(vm) {
+            tocLastVm = vm;
+
+            const tryOnce = () => {
+              const ok = renderToc(vm);
+              if (ok) stopTocRenderObserver();
+              return ok;
+            };
+
+            // 先尽快渲染一次
+            if (tryOnce()) return;
+
+            // 兜底：两帧后 + 多个延迟点再算一次（处理异步渲染/回流）
+            try { requestAnimationFrame(() => requestAnimationFrame(tryOnce)); } catch (e) { /* ignore */ }
+            setTimeout(tryOnce, 80);
+            setTimeout(tryOnce, 260);
+            setTimeout(tryOnce, 900);
+
+            // 仍然没拿到 heading 时，监听正文区域 DOM 变化，直到成功或超时
+            stopTocRenderObserver();
+            const section = document.querySelector('.markdown-section');
+            if (!section || typeof MutationObserver !== 'function') return;
+
+            tocRenderObserver = new MutationObserver(() => {
+              if (tryOnce()) stopTocRenderObserver();
+            });
+
+            try {
+              tocRenderObserver.observe(section, { childList: true, subtree: true });
+            } catch (e) {
+              stopTocRenderObserver();
+              return;
+            }
+
+            tocRenderTtlTimer = setTimeout(stopTocRenderObserver, 2500);
+
+            // 窗口尺寸变化可能改变 TOC 是否可见（断点），绑定一次全局 resize 做兜底重算
+            if (!tocResizeBound) {
+              tocResizeBound = true;
+              let t = null;
+              window.addEventListener('resize', () => {
+                if (t) {
+                  try { clearTimeout(t); } catch (e) { /* ignore */ }
+                }
+                t = setTimeout(() => {
+                  if (tocLastVm) scheduleTocRender(tocLastVm);
+                }, 160);
+              }, { passive: true });
+            }
+          }
+
           function ensureToc() {
             let toc = document.querySelector('#toc-aside');
             if (!toc) {
               toc = document.createElement('aside');
               toc.id = 'toc-aside';
               toc.className = 'toc-aside';
+              try { toc.dataset.hasItems = '0'; } catch (e) { /* ignore */ }
               toc.innerHTML = `
                 <div class="toc-head">
                   <div class="toc-title">目录</div>
@@ -1850,7 +1925,7 @@
 
           function renderToc(vm) {
             const section = document.querySelector('.markdown-section');
-            if (!section) return;
+            if (!section) return false;
 
             const toc = ensureToc();
             const body = toc.querySelector('#toc-body');
@@ -1860,17 +1935,18 @@
 
             // 没有小标题就不展示 TOC（避免空卡片）
             if (items.length < 1) {
-              toc.style.display = 'none';
+              try { toc.dataset.hasItems = '0'; } catch (e) { /* ignore */ }
               try { document.body.classList.remove(TOC_BODY_CLASS); } catch (e) { /* ignore */ }
+              body.innerHTML = '';
               tocScrollUpdate = null;
               if (tocObserver) {
                 try { tocObserver.disconnect(); } catch (e) {}
                 tocObserver = null;
               }
-              return;
+              return false;
             }
 
-            toc.style.display = '';
+            try { toc.dataset.hasItems = '1'; } catch (e) { /* ignore */ }
             try { document.body.classList.add(TOC_BODY_CLASS); } catch (e) { /* ignore */ }
             body.innerHTML = items
               .map((it) => {
@@ -2015,6 +2091,8 @@
 
             setTimeout(schedule, 120);
             setTimeout(schedule, 600);
+
+            return true;
           }
 
           /* ---------------- 阅读体验增强：进度条 / 面包屑 / 上一篇下一篇 ---------------- */
@@ -2354,7 +2432,7 @@
             renderHeadingLinks(vm);
 
             // 右侧目录：自动生成 + 当前小节高亮
-            renderToc(vm);
+            scheduleTocRender(vm);
 
             // 阅读体验：进度条 / 面包屑 / 上一篇下一篇
             ensureProgressBar();
