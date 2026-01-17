@@ -6,167 +6,175 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
   <meta name="referrer" content="no-referrer">
-  
+
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-sidebar-collapse/dist/sidebar.min.css" />
-  
+
   <style>
     :root {
       --theme-color: #42b983;
       --sidebar-width: 250px;
-      --content-max-width: 900px;
-      --base-font-size: 14px;
+      --content-max-width: 850px;
+      --base-font-size: 13px;
     }
-    
-    /* 侧边栏首页隐藏逻辑 */
+
+    /* 侧边栏：首页不展示“页面内目录” */
     .sidebar-nav a[href="#/"] + ul,
     .sidebar-nav a[href="#/README"] + ul { display: none !important; }
     .sidebar-nav a[href="#/"]::after,
     .sidebar-nav a[href="#/README"]::after { display: none !important; }
 
-    /* --- 完整代码折叠系统 --- */
-    .advanced-code-block {
-      position: relative;
-      margin: 2em 0;
-      background: #fdfdfd;
-      border: 1px solid #e1e4e8;
-      border-radius: 8px;
+    /* ---------- 代码块：顶栏工具条（复制/收起/结构折叠） ---------- */
+    pre[class*="language-"] {
+      position: relative !important;
+      margin: 1.5em 0 !important;
+      padding: 3em 1.2em 1.2em !important; /* 顶部留出工具栏空间 */
+      border-radius: 8px !important;
+      border: 1px solid rgba(0,0,0,0.06) !important;
+      background: #fdfdfd !important;
       overflow: hidden;
-      font-family: 'Fira Code', 'Consolas', monospace;
     }
 
-    /* 统一控制栏 */
-    .code-toolbar {
+    pre.is-collapsed {
+      max-height: 42px !important;
+      padding-bottom: 0 !important;
+      cursor: pointer;
+    }
+
+    .code-tools {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 32px;
+      padding: 0 12px;
+      background: #f6f8fa;
+      border-bottom: 1px solid rgba(0,0,0,0.05);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 8px 16px;
-      background: #f6f8fa;
-      border-bottom: 1px solid #e1e4e8;
+      z-index: 10;
       user-select: none;
     }
-    .code-info {
+
+    .code-tools-left {
+      font-size: 11px;
+      color: #8b949e;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+
+    .code-tools-right {
       display: flex;
       align-items: center;
       gap: 12px;
-      font-size: 12px;
-      color: #586069;
-    }
-    .lang-tag {
-      padding: 2px 6px;
-      background: #e1e4e8;
-      border-radius: 3px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-    .toolbar-actions {
-      display: flex;
-      gap: 8px;
-    }
-    .toolbar-btn {
-      padding: 4px 8px;
-      font-size: 11px;
-      color: var(--theme-color);
-      background: transparent;
-      border: 1px solid var(--theme-color);
-      border-radius: 4px;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-weight: 500;
-    }
-    .toolbar-btn:hover {
-      background: var(--theme-color);
-      color: white;
     }
 
-    /* 代码主体 */
-    .code-main {
-      display: flex;
+    .tool-btn {
+      font-size: 11px;
+      color: var(--theme-color);
+      cursor: pointer;
+      font-weight: 600;
+      transition: opacity 0.15s ease;
+    }
+    .tool-btn:hover { opacity: 0.75; }
+
+    /* 禁用 docsify-copy-code 的按钮（我们自己实现复制并放到顶栏） */
+    .docsify-copy-code-button { display: none !important; }
+
+    /* ---------- 结构折叠视图（飞书风格轻量版） ---------- */
+    pre.fold-view-on > code { display: none !important; }
+
+    .fold-view {
+      display: none;
+      margin: 0;
+      padding: 0;
+    }
+    pre.fold-view-on .fold-view { display: block; }
+
+    .fold-rows {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 13px;
+      line-height: 1.55;
       background: #fff;
     }
 
-    /* 行号与折叠控制 */
-    .line-gutter {
+    .fold-row {
+      display: flex;
+      align-items: stretch;
+      white-space: pre;
+    }
+
+    .fold-row.is-hidden { display: none; }
+
+    .fold-gutter {
+      flex: 0 0 56px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      padding: 0 10px 0 8px;
+      color: #b1bac4;
       background: #f6f8fa;
-      border-right: 1px solid #e1e4e8;
-      padding: 1em 0;
-      min-width: 50px;
+      border-right: 1px solid rgba(0,0,0,0.05);
       user-select: none;
     }
-    .line-item {
-      height: 1.5em;
-      display: flex;
-      align-items: center;
-      padding: 0 8px;
+
+    .fold-line-no {
+      font-variant-numeric: tabular-nums;
       font-size: 12px;
-      color: #bbb;
-      position: relative;
-    }
-    .line-number {
+      width: 28px;
       text-align: right;
-      min-width: 25px;
     }
 
-    /* 折叠箭头 */
     .fold-toggle {
-      position: absolute;
-      left: 2px;
-      width: 12px;
-      height: 12px;
-      cursor: pointer;
-      display: flex;
+      width: 14px;
+      height: 14px;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      border-radius: 2px;
-      transition: all 0.2s;
+      cursor: pointer;
+      border-radius: 3px;
+      transition: background 0.15s ease;
     }
-    .fold-toggle:hover { background: #e1e4e8; }
-    .fold-toggle svg {
-      width: 8px;
-      height: 8px;
-      fill: #586069;
-      transition: transform 0.2s;
-    }
-    .fold-toggle.folded svg { transform: rotate(-90deg); }
+    .fold-toggle:hover { background: rgba(0,0,0,0.06); }
 
-    /* 代码内容区 */
-    .code-content {
+    .fold-toggle svg {
+      width: 9px;
+      height: 9px;
+      fill: #6e7681;
+      transition: transform 0.15s ease;
+    }
+    .fold-toggle.is-folded svg { transform: rotate(-90deg); }
+
+    .fold-code {
       flex: 1;
+      padding: 0 12px;
       overflow-x: auto;
     }
-    .code-line {
-      height: 1.5em;
-      padding: 0 1em;
-      line-height: 1.5em;
-      font-size: 13px;
-      white-space: pre;
-      transition: all 0.3s;
-    }
-    .code-line.folded { 
-      display: none; 
-    }
-    .code-line.fold-placeholder {
+
+    .fold-text { color: #24292f; }
+
+    .fold-ellipsis {
+      display: none;
+      margin-left: 8px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: rgba(66, 185, 131, 0.10);
       color: var(--theme-color);
-      background: #f0f8f0;
+      font-size: 12px;
       cursor: pointer;
-      font-style: italic;
-      display: flex;
-      align-items: center;
+      user-select: none;
     }
 
-    /* 隐藏原始 pre 标签 */
-    pre[class*="language-"] {
-      display: none !important;
-    }
+    .fold-row.is-fold-head .fold-ellipsis { display: inline-block; }
 
-    /* 隐藏默认复制按钮 */
-    .docsify-copy-code-button {
-      display: none !important;
-    }
+    /* 侧边栏样式 */
+    .sidebar-nav > ul > li { margin: 10px 0; font-weight: bold; font-size: 14px; }
   </style>
 </head>
 <body>
-  <div id="app">正在加载高级代码引擎...</div>
+  <div id="app">正在加载...</div>
+
   <script>
     window.$docsify = {
       name: 'LoveEleve',
@@ -178,183 +186,301 @@
       executeScript: true,
       requestHeaders: { 'cache-control': 'max-age=0' },
       auto2top: true,
-      
+
       plugins: [
         function(hook, vm) {
-          hook.doneEach(function() {
-            document.querySelectorAll('pre[data-lang]').forEach(function(pre) {
-              if (pre.parentElement.classList.contains('advanced-code-block')) return;
+          function getCodeTextFromPre(pre) {
+            const codeEl = pre.querySelector('code');
+            if (!codeEl) return '';
+            return (codeEl.innerText || '').replace(/\n$/, '');
+          }
 
-              const lang = pre.getAttribute('data-lang');
-              const codeText = pre.innerText;
-              const lines = codeText.split('\n').filter(line => line.trim() !== '');
-              
-              // 创建高级代码块容器
-              const container = document.createElement('div');
-              container.className = 'advanced-code-block';
-              
-              // 工具栏
-              const toolbar = document.createElement('div');
-              toolbar.className = 'code-toolbar';
-              toolbar.innerHTML = `
-                <div class="code-info">
-                  <span class="lang-tag">${lang}</span>
-                  <span>${lines.length} lines</span>
-                </div>
-                <div class="toolbar-actions">
-                  <button class="toolbar-btn copy-btn">复制代码</button>
-                  <button class="toolbar-btn fold-all-btn">折叠全部</button>
-                </div>
-              `;
+          function buildFoldBlocks(lines) {
+            // 轻量括号匹配：尽量忽略字符串/注释里的 { }
+            const blocks = [];
+            const stack = [];
+            let inBlockComment = false;
+            let inString = null; // ' or "
+            let escape = false;
 
-              // 主体区域
-              const main = document.createElement('div');
-              main.className = 'code-main';
+            function scanLine(line) {
+              const opens = [];
+              const closes = [];
+              for (let i = 0; i < line.length; i++) {
+                const ch = line[i];
+                const next = i + 1 < line.length ? line[i + 1] : '';
+
+                if (escape) {
+                  escape = false;
+                  continue;
+                }
+
+                if (inString) {
+                  if (ch === '\\') {
+                    escape = true;
+                    continue;
+                  }
+                  if (ch === inString) {
+                    inString = null;
+                  }
+                  continue;
+                }
+
+                if (inBlockComment) {
+                  if (ch === '*' && next === '/') {
+                    inBlockComment = false;
+                    i++;
+                  }
+                  continue;
+                }
+
+                // 行注释
+                if (ch === '/' && next === '/') break;
+
+                // 块注释
+                if (ch === '/' && next === '*') {
+                  inBlockComment = true;
+                  i++;
+                  continue;
+                }
+
+                // 字符串开始
+                if (ch === '"' || ch === "'") {
+                  inString = ch;
+                  continue;
+                }
+
+                if (ch === '{') opens.push(i);
+                if (ch === '}') closes.push(i);
+              }
+              return { opens, closes };
+            }
+
+            lines.forEach((line, idx) => {
+              const { opens, closes } = scanLine(line);
+              // 每个 '{' 视为一个 block start
+              opens.forEach(() => stack.push(idx));
+              closes.forEach(() => {
+                if (stack.length === 0) return;
+                const start = stack.pop();
+                const end = idx;
+                if (end >= start + 2) {
+                  blocks.push({ start, end, folded: false });
+                }
+              });
+            });
+
+            // 同一行可能开多个块，stack 的 idx 粗略足够；排序便于重算
+            blocks.sort((a, b) => (a.start - b.start) || (b.end - a.end));
+            return blocks;
+          }
+
+          function ensureFoldView(pre) {
+            let view = pre.querySelector('.fold-view');
+            if (view) return view;
+            view = document.createElement('div');
+            view.className = 'fold-view';
+            const rows = document.createElement('div');
+            rows.className = 'fold-rows';
+            view.appendChild(rows);
+            pre.appendChild(view);
+            return view;
+          }
+
+          function renderFoldView(pre) {
+            const codeText = getCodeTextFromPre(pre);
+            const lines = codeText.split('\n');
+            const blocks = buildFoldBlocks(lines);
+
+            const view = ensureFoldView(pre);
+            const rows = view.querySelector('.fold-rows');
+            rows.innerHTML = '';
+
+            const rowEls = new Array(lines.length);
+            const toggleByStart = new Map();
+
+            function makeChevron() {
+              const span = document.createElement('span');
+              span.className = 'fold-toggle';
+              span.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.5L8 10l3.5-3.5"/></svg>';
+              return span;
+            }
+
+            for (let i = 0; i < lines.length; i++) {
+              const row = document.createElement('div');
+              row.className = 'fold-row';
 
               const gutter = document.createElement('div');
-              gutter.className = 'line-gutter';
+              gutter.className = 'fold-gutter';
 
-              const content = document.createElement('div');
-              content.className = 'code-content';
+              const lineNo = document.createElement('span');
+              lineNo.className = 'fold-line-no';
+              lineNo.textContent = String(i + 1);
 
-              // 分析代码结构并生成可折叠的行
-              const foldableBlocks = analyzeFoldableBlocks(lines);
-              
-              lines.forEach((line, index) => {
-                // 行号区域
-                const lineItem = document.createElement('div');
-                lineItem.className = 'line-item';
-                
-                const lineNumber = document.createElement('span');
-                lineNumber.className = 'line-number';
-                lineNumber.textContent = index + 1;
-                lineItem.appendChild(lineNumber);
+              // 占位符：默认不显示，折叠时展示
+              const ellipsis = document.createElement('span');
+              ellipsis.className = 'fold-ellipsis';
+              ellipsis.textContent = '…';
 
-                // 检查是否是可折叠块的开始
-                const blockInfo = foldableBlocks.find(block => block.start === index);
-                if (blockInfo) {
-                  const toggle = document.createElement('div');
-                  toggle.className = 'fold-toggle';
-                  toggle.innerHTML = `<svg viewBox="0 0 16 16"><path d="M12.78 6L8 10.78 3.22 6z"/></svg>`;
-                  toggle.onclick = () => toggleFold(blockInfo, toggle);
-                  lineItem.appendChild(toggle);
-                }
+              const code = document.createElement('div');
+              code.className = 'fold-code';
 
-                gutter.appendChild(lineItem);
+              const text = document.createElement('span');
+              text.className = 'fold-text';
+              text.textContent = lines[i];
 
-                // 代码内容
-                const codeLine = document.createElement('div');
-                codeLine.className = 'code-line';
-                codeLine.textContent = line;
-                codeLine.setAttribute('data-line', index);
-                content.appendChild(codeLine);
+              code.appendChild(text);
+              code.appendChild(ellipsis);
+
+              // 若该行是某个 block start，添加 toggle
+              const startBlocks = blocks.filter(b => b.start === i);
+              if (startBlocks.length > 0) {
+                const toggle = makeChevron();
+                gutter.appendChild(toggle);
+                toggleByStart.set(i, { toggle, blocks: startBlocks });
+              } else {
+                // 保持对齐
+                const spacer = document.createElement('span');
+                spacer.style.width = '14px';
+                spacer.style.display = 'inline-block';
+                gutter.appendChild(spacer);
+              }
+
+              gutter.appendChild(lineNo);
+              row.appendChild(gutter);
+              row.appendChild(code);
+              rows.appendChild(row);
+
+              rowEls[i] = row;
+            }
+
+            function recomputeVisibility() {
+              const hidden = new Array(lines.length).fill(false);
+
+              // 先把所有 ellipsis 清掉
+              rowEls.forEach(r => r.classList.remove('is-fold-head'));
+
+              blocks.forEach(b => {
+                if (!b.folded) return;
+                for (let i = b.start + 1; i <= b.end; i++) hidden[i] = true;
+                // start 行显示 ellipsis
+                rowEls[b.start].classList.add('is-fold-head');
               });
 
-              // 组装容器
-              pre.parentNode.insertBefore(container, pre);
-              container.appendChild(toolbar);
-              container.appendChild(main);
-              main.appendChild(gutter);
-              main.appendChild(content);
-
-              // 绑定事件
-              toolbar.querySelector('.copy-btn').onclick = () => copyCode(lines.join('\n'));
-              toolbar.querySelector('.fold-all-btn').onclick = () => toggleAllFolds(container, foldableBlocks);
-
-              // 折叠功能实现
-              function toggleFold(blockInfo, toggle) {
-                const isCurrentlyFolded = toggle.classList.contains('folded');
-                const lines = content.querySelectorAll('.code-line');
-                
-                if (isCurrentlyFolded) {
-                  // 展开
-                  toggle.classList.remove('folded');
-                  for (let i = blockInfo.start + 1; i <= blockInfo.end; i++) {
-                    if (lines[i]) lines[i].classList.remove('folded');
-                  }
-                  // 移除占位符
-                  const placeholder = content.querySelector(`[data-placeholder="${blockInfo.start}"]`);
-                  if (placeholder) placeholder.remove();
-                } else {
-                  // 折叠
-                  toggle.classList.add('folded');
-                  for (let i = blockInfo.start + 1; i <= blockInfo.end; i++) {
-                    if (lines[i]) lines[i].classList.add('folded');
-                  }
-                  // 添加占位符
-                  const placeholder = document.createElement('div');
-                  placeholder.className = 'code-line fold-placeholder';
-                  placeholder.setAttribute('data-placeholder', blockInfo.start);
-                  placeholder.textContent = `    ... ${blockInfo.end - blockInfo.start} lines folded ...`;
-                  placeholder.onclick = () => toggle.click();
-                  lines[blockInfo.start].after(placeholder);
-                }
+              for (let i = 0; i < rowEls.length; i++) {
+                rowEls[i].classList.toggle('is-hidden', hidden[i]);
               }
 
-              function toggleAllFolds(container, blocks) {
-                const btn = container.querySelector('.fold-all-btn');
-                const isAllFolded = btn.textContent === '展开全部';
-                
-                blocks.forEach(block => {
-                  const toggle = gutter.children[block.start].querySelector('.fold-toggle');
-                  if (toggle) {
-                    const currentlyFolded = toggle.classList.contains('folded');
-                    if (isAllFolded && currentlyFolded) toggle.click();
-                    else if (!isAllFolded && !currentlyFolded) toggle.click();
-                  }
-                });
-                
-                btn.textContent = isAllFolded ? '折叠全部' : '展开全部';
-              }
+              // 更新 toggle 旋转状态：只要该 start 上任一块 folded 就标记
+              toggleByStart.forEach((v, start) => {
+                const anyFolded = v.blocks.some(b => b.folded);
+                v.toggle.classList.toggle('is-folded', anyFolded);
+              });
+            }
 
-              function copyCode(text) {
-                navigator.clipboard.writeText(text).then(() => {
-                  const btn = toolbar.querySelector('.copy-btn');
-                  const original = btn.textContent;
-                  btn.textContent = '已复制!';
-                  btn.style.background = var(--theme-color);
-                  btn.style.color = 'white';
-                  setTimeout(() => {
-                    btn.textContent = original;
-                    btn.style.background = 'transparent';
-                    btn.style.color = 'var(--theme-color)';
-                  }, 1500);
-                });
+            toggleByStart.forEach((v, start) => {
+              // 点击 toggle：默认折叠“最长的那个块”（飞书体验更接近）
+              const pick = v.blocks.reduce((acc, cur) => {
+                const accLen = acc.end - acc.start;
+                const curLen = cur.end - cur.start;
+                return curLen > accLen ? cur : acc;
+              }, v.blocks[0]);
+
+              v.toggle.onclick = (e) => {
+                e.stopPropagation();
+                pick.folded = !pick.folded;
+                recomputeVisibility();
+              };
+
+              // 点击 start 行的 ellipsis：展开
+              const ellipsis = rowEls[start].querySelector('.fold-ellipsis');
+              if (ellipsis) {
+                ellipsis.onclick = (e) => {
+                  e.stopPropagation();
+                  pick.folded = false;
+                  recomputeVisibility();
+                };
               }
             });
 
-            // 分析可折叠代码块的函数
-            function analyzeFoldableBlocks(lines) {
-              const blocks = [];
-              const stack = [];
-              
-              lines.forEach((line, index) => {
-                const trimmed = line.trim();
-                
-                // 检测代码块开始 (包含 { 的行)
-                if (trimmed.includes('{') && !trimmed.startsWith('//')) {
-                  stack.push(index);
+            // 初始：全部展开
+            recomputeVisibility();
+            pre._foldState = { lines, blocks, rowEls };
+          }
+
+          hook.doneEach(function() {
+            document.querySelectorAll('pre[data-lang]').forEach(function(pre) {
+              const lang = pre.getAttribute('data-lang') || '';
+              const codeEl = pre.querySelector('code');
+              if (!codeEl) return;
+
+              // 工具栏
+              let tools = pre.querySelector('.code-tools');
+              if (!tools) {
+                tools = document.createElement('div');
+                tools.className = 'code-tools';
+                tools.innerHTML = `
+                  <div class="code-tools-left">${lang}</div>
+                  <div class="code-tools-right">
+                    <span class="tool-btn btn-copy">复制</span>
+                    <span class="tool-btn btn-toggle">收起代码</span>
+                    <span class="tool-btn btn-fold">结构折叠</span>
+                  </div>
+                `;
+                pre.insertBefore(tools, pre.firstChild);
+              } else {
+                // 确保新增按钮存在（兼容旧页面缓存）
+                if (!tools.querySelector('.btn-fold')) {
+                  const right = tools.querySelector('.code-tools-right');
+                  const fold = document.createElement('span');
+                  fold.className = 'tool-btn btn-fold';
+                  fold.textContent = '结构折叠';
+                  right.appendChild(fold);
                 }
-                
-                // 检测代码块结束 (单独的 } 或包含 } 的行)
-                if (trimmed.includes('}') && !trimmed.startsWith('//')) {
-                  if (stack.length > 0) {
-                    const start = stack.pop();
-                    if (index > start) {
-                      blocks.push({ start, end: index });
-                    }
-                  }
+              }
+
+              const copyBtn = tools.querySelector('.btn-copy');
+              const toggleBtn = tools.querySelector('.btn-toggle');
+              const foldBtn = tools.querySelector('.btn-fold');
+
+              // 复制：永远从 code 节点取文本（避免把工具栏文字复制进去）
+              copyBtn.onclick = function(e) {
+                e.stopPropagation();
+                const code = (codeEl.innerText || '').replace(/\n$/, '');
+                navigator.clipboard.writeText(code).then(() => {
+                  copyBtn.textContent = '已复制';
+                  setTimeout(() => { copyBtn.textContent = '复制'; }, 1200);
+                });
+              };
+
+              // 整段收起/展开
+              const handleToggle = function(e) {
+                if (e) e.stopPropagation();
+                const isCollapsed = pre.classList.toggle('is-collapsed');
+                toggleBtn.textContent = isCollapsed ? '展开代码' : '收起代码';
+              };
+              toggleBtn.onclick = handleToggle;
+              pre.onclick = function() {
+                if (pre.classList.contains('is-collapsed')) handleToggle();
+              };
+
+              // 结构折叠：切换到“飞书风格”行折叠视图（可折 method/if/else 等）
+              foldBtn.onclick = function(e) {
+                e.stopPropagation();
+                const on = pre.classList.toggle('fold-view-on');
+                foldBtn.textContent = on ? '退出折叠' : '结构折叠';
+                if (on) {
+                  // 进入折叠视图：渲染一次
+                  renderFoldView(pre);
                 }
-              });
-              
-              return blocks;
-            }
+              };
+            });
           });
         }
       ]
     };
   </script>
-  
+
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-sidebar-collapse/dist/docsify-sidebar-collapse.min.js"></script>
