@@ -555,12 +555,12 @@
     .toc-l4 { padding-left: 22px; opacity: 0.95; }
 
     /* 只在大屏显示右侧 TOC：是否给正文预留空间由 body class 控制 */
-    @media (min-width: 1200px) {
+    @media (min-width: 1024px) {
       .toc-aside { display: block; }
       body.has-toc-aside .content { padding-right: 300px; }
     }
 
-    @media (max-width: 1199px) {
+    @media (max-width: 1023px) {
       .toc-aside { display: none; }
       .content { padding-right: 0; }
     }
@@ -1717,6 +1717,60 @@
             }, true);
           }
 
+          // 某些情况下（插件/主题/Markdown 写法）标题可能没有 id：这里兜底生成一个稳定 id，保证 TOC/复制链接可用
+          function hashString(str) {
+            let h = 5381;
+            for (let i = 0; i < str.length; i++) {
+              h = ((h << 5) + h) ^ str.charCodeAt(i);
+            }
+            return (h >>> 0).toString(16);
+          }
+
+          function ensureHeadingId(h) {
+            if (!h || !h.getAttribute) return '';
+            let id = h.getAttribute('id') || '';
+            if (id) return id;
+
+            // 尝试从 docsify 注入的 anchor 上提取 id
+            try {
+              const a = h.querySelector ? (h.querySelector('a.anchor[data-id], a.anchor[href]') || null) : null;
+              if (a) {
+                const dataId = a.getAttribute('data-id') || '';
+                if (dataId) id = dataId;
+                if (!id) {
+                  const href = a.getAttribute('href') || '';
+                  const q = href.split('?')[1] || '';
+                  const m = q.match(/(?:^|&)id=([^&]+)/);
+                  if (m && m[1]) {
+                    try { id = decodeURIComponent(m[1]); } catch (e) { id = m[1]; }
+                  }
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
+
+            if (!id) {
+              const raw = (h.textContent || '').replace(/\s+/g, ' ').trim();
+              id = raw ? ('h-' + hashString(raw).slice(0, 8)) : ('h-' + Math.random().toString(16).slice(2, 10));
+            }
+
+            // 保证唯一
+            try {
+              let cand = id;
+              let i = 2;
+              while (document.getElementById(cand)) {
+                cand = `${id}-${i++}`;
+              }
+              id = cand;
+              h.setAttribute('id', id);
+            } catch (e) {
+              // ignore
+            }
+
+            return id;
+          }
+
           function renderHeadingLinks(vm) {
             ensureHeadingLinkDelegation();
 
@@ -1727,7 +1781,7 @@
             headings.forEach((h) => {
               if (!h || h.querySelector('.heading-link-btn')) return;
 
-              const id = h.getAttribute('id');
+              const id = ensureHeadingId(h);
               if (!id) return;
 
               // 不给 Meta/TOC 这类非正文区域加按钮
@@ -1784,7 +1838,7 @@
             return headings
               .map((h) => {
                 const level = h.tagName.toLowerCase();
-                const id = h.getAttribute('id');
+                const id = ensureHeadingId(h);
                 const text = getHeadingPureText(h);
                 if (!id || !text) return null;
                 return { el: h, id, text, level };
