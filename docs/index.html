@@ -688,12 +688,298 @@
       font-weight: bold;
       font-size: 14px;
     }
+
+    /* ---------------- 主题切换按钮（暗色/亮色/跟随系统） ---------------- */
+    .theme-toggle {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 1002;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(0, 0, 0, 0.10);
+      background: rgba(255, 255, 255, 0.86);
+      color: #111827;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.10);
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      backdrop-filter: saturate(180%) blur(12px);
+      -webkit-backdrop-filter: saturate(180%) blur(12px);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+    }
+
+    .theme-toggle:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 38px rgba(0, 0, 0, 0.14);
+      border-color: rgba(66, 185, 131, 0.28);
+    }
+
+    .theme-toggle:active {
+      transform: translateY(0);
+    }
+
+    .theme-toggle .theme-icon {
+      width: 18px;
+      height: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      background: rgba(66, 185, 131, 0.10);
+      color: var(--theme-color);
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .theme-toggle .theme-text {
+      opacity: 0.9;
+    }
+
+    @media (max-width: 900px) {
+      .theme-toggle {
+        right: 12px;
+        bottom: 12px;
+      }
+    }
+
+    /* ---------------- 暗色模式：仅覆盖必要区域，避免破坏现有代码块/工具栏 ---------------- */
+    html[data-theme="dark"] {
+      color-scheme: dark;
+
+      --code-border: rgba(255, 255, 255, 0.10);
+      --code-toolbar-bg: rgba(17, 24, 39, 0.92);
+      --code-gutter-bg: rgba(17, 24, 39, 0.92);
+      --code-text: rgba(226, 232, 240, 0.96);
+      --code-muted: rgba(226, 232, 240, 0.62);
+    }
+
+    html[data-theme="dark"] body {
+      background: #0b1220;
+      color: rgba(226, 232, 240, 0.92);
+    }
+
+    html[data-theme="dark"] .sidebar {
+      background: #0f172a;
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    html[data-theme="dark"] .sidebar-nav a {
+      color: rgba(226, 232, 240, 0.78);
+    }
+
+    html[data-theme="dark"] .sidebar-nav a:hover,
+    html[data-theme="dark"] .sidebar-nav li.active > a {
+      color: rgba(226, 232, 240, 0.96);
+    }
+
+    html[data-theme="dark"] .markdown-section {
+      color: rgba(226, 232, 240, 0.92);
+    }
+
+    html[data-theme="dark"] .markdown-section a {
+      color: rgba(102, 219, 162, 0.95);
+    }
+
+    html[data-theme="dark"] .markdown-section h1,
+    html[data-theme="dark"] .markdown-section h2,
+    html[data-theme="dark"] .markdown-section h3,
+    html[data-theme="dark"] .markdown-section h4 {
+      color: rgba(226, 232, 240, 0.98);
+    }
+
+    /* 卡片类容器：Tabs / Alerts / TOC / 导航卡片 / 评论卡片 */
+    html[data-theme="dark"] .markdown-section .docsify-tabs,
+    html[data-theme="dark"] .markdown-section .alert,
+    html[data-theme="dark"] .markdown-section #giscus .giscus-card,
+    html[data-theme="dark"] .toc-aside,
+    html[data-theme="dark"] .page-nav a {
+      background: rgba(15, 23, 42, 0.92) !important;
+      border-color: rgba(255, 255, 255, 0.10) !important;
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.16) !important;
+    }
+
+    html[data-theme="dark"] .markdown-section .alert .title,
+    html[data-theme="dark"] .markdown-section #giscus .giscus-head,
+    html[data-theme="dark"] .code-tools {
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.92)) !important;
+      border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+    }
+
+    html[data-theme="dark"] .markdown-section #giscus .giscus-title,
+    html[data-theme="dark"] .page-nav .nav-title {
+      color: rgba(226, 232, 240, 0.96) !important;
+    }
+
+    html[data-theme="dark"] .page-nav a:hover {
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35) !important;
+    }
+
+    /* 代码块（你这里有大量 !important，所以暗色也需要同级别覆盖） */
+    html[data-theme="dark"] pre[data-lang] {
+      background: rgba(2, 6, 23, 0.90) !important;
+      border-color: rgba(255, 255, 255, 0.10) !important;
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.20),
+        0 18px 40px rgba(0, 0, 0, 0.40) !important;
+    }
+
+    html[data-theme="dark"] .fold-wrap {
+      background: transparent !important;
+    }
+
+    html[data-theme="dark"] .fold-gutter {
+      border-right-color: rgba(255, 255, 255, 0.06) !important;
+    }
+
+    html[data-theme="dark"] .fold-code-row.is-fold-head {
+      background: rgba(66, 185, 131, 0.08) !important;
+    }
+
+    html[data-theme="dark"] pre[data-lang].line-numbers .line-numbers-rows {
+      border-right-color: rgba(255, 255, 255, 0.06) !important;
+    }
+
+    html[data-theme="dark"] .theme-toggle {
+      border-color: rgba(255, 255, 255, 0.10);
+      background: rgba(15, 23, 42, 0.72);
+      color: rgba(226, 232, 240, 0.92);
+      box-shadow: 0 16px 45px rgba(0, 0, 0, 0.40);
+    }
+
+    html[data-theme="dark"] .theme-toggle .theme-icon {
+      background: rgba(66, 185, 131, 0.16);
+      color: rgba(102, 219, 162, 0.95);
+    }
   </style>
 </head>
 <body>
   <div id="app">正在加载...</div>
+  <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题" title="切换主题">
+    <span class="theme-icon" aria-hidden="true">⭮</span>
+    <span class="theme-text">跟随</span>
+  </button>
 
   <script>
+    /* ---------------- 主题切换：跟随系统 / 暗色 / 亮色（持久化） ---------------- */
+    (function () {
+      const KEY = 'docsify:theme-mode';
+      const MODES = ['auto', 'dark', 'light'];
+      const media = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)')) ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+      function getMode() {
+        try {
+          return localStorage.getItem(KEY) || 'auto';
+        } catch (e) {
+          return 'auto';
+        }
+      }
+
+      function resolve(mode) {
+        if (mode === 'dark' || mode === 'light') return mode;
+        const isDark = media ? !!media.matches : false;
+        return isDark ? 'dark' : 'light';
+      }
+
+      function renderButton(mode, resolved) {
+        const btn = document.getElementById('theme-toggle');
+        if (!btn) return;
+
+        const icon = btn.querySelector('.theme-icon');
+        const text = btn.querySelector('.theme-text');
+
+        btn.setAttribute('data-mode', mode);
+
+        if (mode === 'auto') {
+          if (icon) icon.textContent = '⭮';
+          if (text) text.textContent = '跟随';
+          btn.title = '主题：跟随系统（点击切换）';
+          return;
+        }
+
+        if (resolved === 'dark') {
+          if (icon) icon.textContent = '☾';
+          if (text) text.textContent = '暗色';
+          btn.title = '主题：暗色（点击切换）';
+          return;
+        }
+
+        if (icon) icon.textContent = '☀';
+        if (text) text.textContent = '亮色';
+        btn.title = '主题：亮色（点击切换）';
+      }
+
+      function dispatchChange(mode, resolved) {
+        try {
+          window.dispatchEvent(new CustomEvent('docsify-theme-change', {
+            detail: { mode: mode, resolved: resolved }
+          }));
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      function apply(mode, persist) {
+        const resolved = resolve(mode);
+        document.documentElement.setAttribute('data-theme', resolved);
+        document.documentElement.setAttribute('data-theme-mode', mode);
+
+        if (persist) {
+          try {
+            localStorage.setItem(KEY, mode);
+          } catch (e) {
+            // ignore
+          }
+        }
+
+        renderButton(mode, resolved);
+        dispatchChange(mode, resolved);
+      }
+
+      function nextMode(cur) {
+        const idx = MODES.indexOf(cur);
+        return MODES[(idx + 1 + MODES.length) % MODES.length] || 'auto';
+      }
+
+      // 首次：尽量早点应用，减少闪烁
+      apply(getMode(), false);
+
+      // 跟随系统：系统主题变化时自动刷新
+      if (media) {
+        const handler = function () {
+          if (getMode() === 'auto') apply('auto', false);
+        };
+        try {
+          media.addEventListener('change', handler);
+        } catch (e) {
+          try { media.addListener(handler); } catch (err) { /* ignore */ }
+        }
+      }
+
+      // 点击按钮：三态循环
+      document.addEventListener('click', function (e) {
+        const btn = e && e.target && e.target.closest ? e.target.closest('#theme-toggle') : null;
+        if (!btn) return;
+        e.preventDefault();
+        const cur = btn.getAttribute('data-mode') || getMode();
+        const next = nextMode(cur);
+        apply(next, true);
+      }, true);
+
+      // 对外暴露（必要时可在控制台手动切换）
+      window.__docsifyTheme = {
+        getMode: getMode,
+        apply: function (mode) { apply(mode || 'auto', true); },
+        resolve: resolve
+      };
+    })();
+
     window.$docsify = {
       name: 'LoveEleve',
       repo: 'https://github.com/LoveEleve/LoveEleve.github.io',
@@ -1153,8 +1439,8 @@
             reactionsEnabled: '1',
             emitMetadata: '0',
             inputPosition: 'bottom',
-            // 固定为浅色主题，避免系统深色模式导致评论区黑底与正文风格冲突
-            theme: 'light',
+            // 跟随当前站点主题（暗色/亮色）
+            theme: (document.documentElement.getAttribute('data-theme') === 'dark') ? 'dark' : 'light',
             lang: 'zh-CN'
           };
 
@@ -1728,6 +2014,42 @@
             host.appendChild(s);
           }
 
+          let giscusThemeBound = false;
+
+          function rerenderGiscus(term) {
+            const host = ensureGiscusHost();
+            if (!host) return;
+
+            const mount = host.querySelector('.giscus-body') || host;
+
+            // 清理 iframe/script，强制重新初始化（主题切换需要重渲染）
+            try {
+              host.querySelectorAll('iframe.giscus-frame').forEach((el) => el.remove());
+              host.querySelectorAll('script[src*="giscus.app/client.js"]').forEach((el) => el.remove());
+            } catch (e) {
+              // ignore
+            }
+
+            mount.innerHTML = '';
+            renderOrUpdateGiscus(term);
+          }
+
+          function bindThemeChangeForGiscus() {
+            if (giscusThemeBound) return;
+            giscusThemeBound = true;
+
+            window.addEventListener('docsify-theme-change', function (ev) {
+              const resolved = (ev && ev.detail && ev.detail.resolved) ? ev.detail.resolved : (document.documentElement.getAttribute('data-theme') || 'light');
+              const want = resolved === 'dark' ? 'dark' : 'light';
+              if (GISCUS_CFG.theme === want) return;
+
+              GISCUS_CFG.theme = want;
+              rerenderGiscus(getGiscusTerm(vm));
+            });
+          }
+
+          bindThemeChangeForGiscus();
+
           hook.doneEach(function () {
             document.querySelectorAll('pre[data-lang]').forEach(function (pre) {
               // 避免重复初始化
@@ -1762,7 +2084,8 @@
             // 图片缩放：随路由切换重新绑定（只绑定正文图片）
             scheduleImageZoom();
 
-            // 评论区：随路由切换自动刷新
+            // 评论区：主题跟随 + 随路由切换自动刷新
+            GISCUS_CFG.theme = (document.documentElement.getAttribute('data-theme') === 'dark') ? 'dark' : 'light';
             renderOrUpdateGiscus(getGiscusTerm(vm));
           });
         }
