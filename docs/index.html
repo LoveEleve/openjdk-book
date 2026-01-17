@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>我的文档站点</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+  <meta name="description" content="我的个人文档站点">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+  
+  <!-- Vue 主题 -->
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify@4/lib/themes/vue.css">
+  
+  <!-- 暗黑模式支持 -->
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify-darklight-theme@latest/dist/style.min.css"/>
+  
+  <style>
+    :root {
+      --base-font-size: 16px;
+      --theme-color: #42b983;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">🚀 加载中...</div>
+  
+  <script>
+    window.$docsify = {
+      name: '我的文档站点',
+      repo: 'https://github.com/LoveEleve/LoveEleve.github.io.git',
+      
+      // 加载侧边栏和导航栏
+      loadSidebar: true,
+      loadNavbar: true,
+      
+      // 封面页
+      coverpage: true,
+      onlyCover: false,
+      
+      // 侧边栏层级
+      subMaxLevel: 3,
+      
+      // 自动跳转到页面顶部
+      auto2top: true,
+      
+      // 搜索配置
+      search: {
+        paths: 'auto',
+        placeholder: '🔍 搜索',
+        noData: '😞 没有找到结果',
+        depth: 6,
+      },
+      
+      // 字数统计
+      count: {
+        countable: true,
+        position: 'top',
+        margin: '10px',
+        float: 'right',
+        fontsize: '0.9em',
+        color: 'rgb(90,90,90)',
+        language: 'chinese',
+      },
+      
+      // 分页导航
+      pagination: {
+        previousText: '⬅️ 上一篇',
+        nextText: '下一篇 ➡️',
+        crossChapter: true,
+      },
+      
+      // 代码复制
+      copyCode: {
+        buttonText: '📋 复制',
+        errorText: '❌ 错误',
+        successText: '✅ 已复制'
+      },
+      
+      // 页脚
+      plugins: [
+        function(hook, vm) {
+          hook.beforeEach(function(html) {
+            const footer = [
+              '<hr/>',
+              '<footer>',
+              '<span>📝 最后更新：{docsify-updated}</span>',
+              '<span style="float:right">Made with ❤️</span>',
+              '</footer>'
+            ].join('');
+            return html + footer;
+          });
+        }
+      ],
+      
+      // 格式化更新时间
+      formatUpdated: '{YYYY}-{MM}-{DD} {HH}:{mm}',
+    }
+  </script>
+  
+  <!-- Docsify 核心 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify@4"></script>
+  
+  <!-- 全文搜索 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/search.min.js"></script>
+  
+  <!-- 代码复制 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify-copy-code@2"></script>
+  
+  <!-- 字数统计 -->
+  <script src="//unpkg.com/docsify-count/dist/countable.js"></script>
+  
+  <!-- 分页导航 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify-pagination@2/dist/docsify-pagination.min.js"></script>
+  
+  <!-- 图片缩放 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/zoom-image.min.js"></script>
+  
+  <!-- Emoji 支持 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/emoji.min.js"></script>
+  
+  <!-- 代码高亮 -->
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-javascript.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-python.min.js"></script>
+  
+  <!-- 暗黑模式 -->
+  <script src="//cdn.jsdelivr.net/npm/docsify-darklight-theme@latest/dist/index.min.js"></script>
+</body>
+</html>
