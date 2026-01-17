@@ -18,76 +18,100 @@
       --base-font-size: 13px;
     }
     
-    /* 侧边栏首页简洁逻辑 */
+    /* 侧边栏首页隐藏逻辑 */
     .sidebar-nav a[href="#/"] + ul,
     .sidebar-nav a[href="#/README"] + ul { display: none !important; }
     .sidebar-nav a[href="#/"]::after,
     .sidebar-nav a[href="#/README"]::after { display: none !important; }
 
-    /* 代码块美化与折叠样式 */
-    pre {
+    /* --- 现代代码块容器设计 --- */
+    .code-container {
       position: relative;
-      transition: max-height 0.5s cubic-bezier(0, 1, 0, 1);
+      margin: 1.5em 0;
+      border-radius: 8px;
       overflow: hidden;
-      max-height: 10000px; /* 默认展开 */
-      border-radius: 8px !important;
-      border: 1px solid rgba(0,0,0,0.05) !important;
-      background: #fdfdfd !important;
+      border: 1px solid rgba(0,0,0,0.08);
+      background: #fdfdfd;
+      transition: box-shadow 0.3s;
+    }
+    .code-container:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     }
 
-    pre.collapsed {
-      max-height: 45px !important; /* 折叠高度 */
+    /* 控制顶栏 */
+    .code-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 12px;
+      background: #f8f8f8;
+      border-bottom: 1px solid rgba(0,0,0,0.05);
+      font-family: 'Segoe UI', system-ui, sans-serif;
       cursor: pointer;
     }
-
-    pre.collapsed::after {
-      content: "点击展开全文";
-      position: absolute;
-      bottom: 0; left: 0; right: 0;
-      height: 100%;
-      background: linear-gradient(rgba(255,255,255,0), rgba(255,255,255,0.9));
+    .code-lang {
+      font-size: 11px;
+      font-weight: 700;
+      color: #aaa;
+      text-transform: uppercase;
+    }
+    .code-toggle {
+      font-size: 11px;
+      color: var(--theme-color);
       display: flex;
       align-items: center;
-      justify-content: center;
-      color: var(--theme-color);
-      font-size: 12px;
-      font-weight: bold;
+      gap: 4px;
+      font-weight: 600;
+    }
+    .code-toggle svg {
+      transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .collapsed .code-toggle svg {
+      transform: rotate(-180deg);
     }
 
-    /* 自定义折叠按钮 */
-    .custom-toggle-btn {
-      position: absolute;
-      top: 5px;
-      right: 120px; /* 避开复制按钮 */
-      z-index: 10;
-      padding: 2px 8px;
-      font-size: 11px;
-      color: #999;
-      background: rgba(255,255,255,0.8);
-      border: 1px solid #eee;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: all 0.2s;
+    /* 内容区动画 */
+    .code-content {
+      overflow: hidden;
+      transition: max-height 0.6s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s;
+      max-height: 2000px; /* 足够容纳长代码 */
+    }
+    .collapsed .code-content {
+      max-height: 0;
+      opacity: 0;
     }
 
-    .custom-toggle-btn:hover {
-      color: var(--theme-color);
-      border-color: var(--theme-color);
-      background: #fff;
+    pre[class*="language-"] {
+      margin: 0 !important;
+      border: none !important;
+      border-radius: 0 !important;
+      padding: 1.2em !important;
     }
 
-    /* 修复复制按钮样式 */
+    /* 修复复制按钮白板问题 */
     .docsify-copy-code-button {
-      background: rgba(255,255,255,0.8) !important;
-      color: #999 !important;
+      top: 35px !important;
+      right: 10px !important;
+      background: rgba(255, 255, 255, 0.9) !important;
+      color: #666 !important; /* 强制文字颜色 */
       border: 1px solid #eee !important;
-      padding: 4px 10px !important;
-      border-radius: 4px !important;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05) !important;
+      opacity: 0;
+      transition: opacity 0.3s, color 0.2s !important;
     }
+    .code-container:hover .docsify-copy-code-button {
+      opacity: 1;
+    }
+    .docsify-copy-code-button:after {
+      color: #666 !important; /* 强制“已复制”提示颜色 */
+    }
+    
+    /* 侧边栏样式 */
+    .sidebar-nav > ul > li { margin: 10px 0; font-weight: bold; font-size: 14px; }
   </style>
 </head>
 <body>
-  <div id="app">正在加载 (Stability Fix)...</div>
+  <div id="app">正在加载 (Premium V8.0)...</div>
   <script>
     window.$docsify = {
       name: 'LoveEleve',
@@ -103,26 +127,37 @@
       plugins: [
         function(hook, vm) {
           hook.doneEach(function() {
-            // 为每个代码块添加“收起”按钮
-            document.querySelectorAll('pre').forEach(function(pre) {
-              if (pre.querySelector('.custom-toggle-btn')) return;
+            document.querySelectorAll('pre[data-lang]').forEach(function(pre) {
+              if (pre.parentElement.classList.contains('code-content')) return;
 
-              const btn = document.createElement('button');
-              btn.className = 'custom-toggle-btn';
-              btn.innerText = '收起代码';
-              pre.appendChild(btn);
+              const lang = pre.getAttribute('data-lang');
+              const container = document.createElement('div');
+              container.className = 'code-container';
+              
+              const header = document.createElement('div');
+              header.className = 'code-header';
+              header.innerHTML = `
+                <span class="code-lang">${lang}</span>
+                <span class="code-toggle">
+                  <span class="toggle-text">收起代码</span>
+                  <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+              `;
 
-              btn.onclick = function(e) {
-                e.stopPropagation();
-                pre.classList.toggle('collapsed');
-                btn.innerText = pre.classList.contains('collapsed') ? '展开' : '收起代码';
-              };
+              const content = document.createElement('div');
+              content.className = 'code-content';
 
-              pre.onclick = function() {
-                if (pre.classList.contains('collapsed')) {
-                  pre.classList.remove('collapsed');
-                  btn.innerText = '收起代码';
-                }
+              pre.parentNode.insertBefore(container, pre);
+              container.appendChild(header);
+              container.appendChild(content);
+              content.appendChild(pre);
+
+              header.onclick = function() {
+                container.classList.toggle('collapsed');
+                const text = header.querySelector('.toggle-text');
+                text.innerText = container.classList.contains('collapsed') ? '展开代码' : '收起代码';
               };
             });
           });
