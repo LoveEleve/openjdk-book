@@ -9,7 +9,6 @@
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-sidebar-collapse/dist/sidebar.min.css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/line-numbers/prism-line-numbers.min.css" />
 
   <style>
     :root {
@@ -145,7 +144,7 @@
     }
 
     .fold-gutter {
-      flex: 0 0 56px;
+      flex: 0 0 36px;
       background: transparent;
       border-right: 1px solid rgba(0, 0, 0, 0.04);
       user-select: none;
@@ -192,30 +191,10 @@
       transform: rotate(-90deg);
     }
 
-    /* 展示行号：方便讲解/排查（与折叠三角共存） */
-    .fold-line-no {
-      display: inline-block;
-      min-width: 2.6em;
-      text-align: right;
-      font-size: 12px;
-      color: var(--code-muted);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      opacity: 0.85;
-    }
-
     .fold-code-scroll {
       flex: 1;
       overflow-x: auto;
       padding: 10px 0;
-    }
-
-    /* Prism 行号插件：适配我们的顶栏（大代码块会走 Prism 行号） */
-    pre[data-lang].line-numbers {
-      padding: 3.1em 0 0 3.8em !important;
-    }
-
-    pre[data-lang].line-numbers .line-numbers-rows {
-      top: 3.1em !important;
     }
 
     pre[data-lang][data-inline-fold-skipped="1"] > code {
@@ -842,10 +821,6 @@
       background: rgba(66, 185, 131, 0.08) !important;
     }
 
-    html[data-theme="dark"] pre[data-lang].line-numbers .line-numbers-rows {
-      border-right-color: rgba(255, 255, 255, 0.06) !important;
-    }
-
     html[data-theme="dark"] .theme-toggle {
       border-color: rgba(255, 255, 255, 0.10);
       background: rgba(15, 23, 42, 0.72);
@@ -1173,15 +1148,10 @@
                 toggleByStart.set(i, toggle);
               } else {
                 const spacer = document.createElement('span');
-                spacer.style.width = '14px';
+                spacer.style.width = '20px';
                 spacer.style.display = 'inline-block';
                 gr.appendChild(spacer);
               }
-
-              const ln = document.createElement('span');
-              ln.className = 'fold-line-no';
-              ln.textContent = String(i + 1);
-              gr.appendChild(ln);
 
               gutter.appendChild(gr);
               gutterRows[i] = gr;
@@ -2060,15 +2030,7 @@
               initInlineFolding(pre);
               initToolbar(pre);
 
-              // 大代码块（跳过逐行折叠）：启用 Prism 行号（并补一次 highlight 触发行号渲染）
-              if (pre.dataset.inlineFoldSkipped === '1') {
-                pre.classList.add('line-numbers');
-                const codeEl = pre.querySelector('code');
-                if (codeEl && codeEl.dataset.prismLinenumInited !== '1' && window.Prism) {
-                  codeEl.dataset.prismLinenumInited = '1';
-                  try { Prism.highlightElement(codeEl); } catch (e) { /* ignore */ }
-                }
-              }
+              // 大代码块（跳过逐行折叠）：保持原样（不展示行号）
             });
 
             // 文章元信息：随路由切换刷新（更新时间/阅读时长/字数）
@@ -2105,6 +2067,5 @@
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-go.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-python.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/line-numbers/prism-line-numbers.min.js"></script>
 </body>
 </html>
