@@ -18,96 +18,76 @@
       --base-font-size: 13px;
     }
     
-    /* 侧边栏首页隐藏逻辑 */
+    /* 侧边栏首页简洁逻辑 */
     .sidebar-nav a[href="#/"] + ul,
     .sidebar-nav a[href="#/README"] + ul { display: none !important; }
     .sidebar-nav a[href="#/"]::after,
     .sidebar-nav a[href="#/README"]::after { display: none !important; }
 
-    /* --- 高级代码折叠 UI 设计 --- */
-    .code-wrapper {
+    /* 代码块美化与折叠样式 */
+    pre {
       position: relative;
-      margin: 1.5em 0;
-      border: 1px solid rgba(0,0,0,0.05);
-      border-radius: 8px;
+      transition: max-height 0.5s cubic-bezier(0, 1, 0, 1);
       overflow: hidden;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      background: #fdfdfd;
+      max-height: 10000px; /* 默认展开 */
+      border-radius: 8px !important;
+      border: 1px solid rgba(0,0,0,0.05) !important;
+      background: #fdfdfd !important;
     }
 
-    .code-wrapper pre {
-      margin: 0 !important;
-      padding: 1.2em !important;
-      transition: max-height 0.4s ease-out;
-      max-height: 10000px; /* 默认展开高度 */
-    }
-
-    /* 收起状态的样式 */
-    .code-wrapper.collapsed pre {
-      max-height: 0px !important;
-      padding: 0 1.2em !important;
-      opacity: 0;
-    }
-
-    /* 悬浮控制条 */
-    .code-control-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 16px;
-      background: #f8f8f8;
-      border-bottom: 1px solid rgba(0,0,0,0.05);
+    pre.collapsed {
+      max-height: 45px !important; /* 折叠高度 */
       cursor: pointer;
-      user-select: none;
-      transition: background 0.2s;
     }
 
-    .code-control-bar:hover {
-      background: #f0f0f0;
+    pre.collapsed::after {
+      content: "点击展开全文";
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 100%;
+      background: linear-gradient(rgba(255,255,255,0), rgba(255,255,255,0.9));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--theme-color);
+      font-size: 12px;
+      font-weight: bold;
     }
 
-    .code-type-label {
+    /* 自定义折叠按钮 */
+    .custom-toggle-btn {
+      position: absolute;
+      top: 5px;
+      right: 120px; /* 避开复制按钮 */
+      z-index: 10;
+      padding: 2px 8px;
       font-size: 11px;
       color: #999;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      font-weight: 600;
+      background: rgba(255,255,255,0.8);
+      border: 1px solid #eee;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
     }
 
-    .toggle-action-text {
-      font-size: 12px;
+    .custom-toggle-btn:hover {
       color: var(--theme-color);
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      font-weight: 500;
+      border-color: var(--theme-color);
+      background: #fff;
     }
 
-    /* 展开收起图标动画 */
-    .toggle-icon {
-      transition: transform 0.3s;
-      border: solid var(--theme-color);
-      border-width: 0 2px 2px 0;
-      display: inline-block;
-      padding: 3px;
-      transform: rotate(45deg); /* 默认向上箭头 */
-    }
-    
-    .collapsed .toggle-icon {
-      transform: rotate(-135deg); /* 收起时变为向下 */
-    }
-
-    /* 修复复制按钮位置 */
+    /* 修复复制按钮样式 */
     .docsify-copy-code-button {
-      top: 36px !important; /* 避开控制条 */
-      right: 8px !important;
       background: rgba(255,255,255,0.8) !important;
+      color: #999 !important;
+      border: 1px solid #eee !important;
+      padding: 4px 10px !important;
       border-radius: 4px !important;
     }
   </style>
 </head>
 <body>
-  <div id="app">正在加载 (Premium UI)...</div>
+  <div id="app">正在加载 (Stability Fix)...</div>
   <script>
     window.$docsify = {
       name: 'LoveEleve',
@@ -123,37 +103,25 @@
       plugins: [
         function(hook, vm) {
           hook.doneEach(function() {
-            document.querySelectorAll('pre[data-lang]').forEach(function(pre) {
-              if (pre.parentNode.classList.contains('code-wrapper')) return;
+            // 为每个代码块添加“收起”按钮
+            document.querySelectorAll('pre').forEach(function(pre) {
+              if (pre.querySelector('.custom-toggle-btn')) return;
 
-              const lang = pre.getAttribute('data-lang');
-              const wrapper = document.createElement('div');
-              wrapper.className = 'code-wrapper';
-              
-              // 创建控制条
-              const bar = document.createElement('div');
-              bar.className = 'code-control-bar';
-              bar.innerHTML = `
-                <span class="code-type-label">${lang}</span>
-                <span class="toggle-action-text">
-                  <span class="text-label">收起代码</span>
-                  <i class="toggle-icon"></i>
-                </span>
-              `;
+              const btn = document.createElement('button');
+              btn.className = 'custom-toggle-btn';
+              btn.innerText = '收起代码';
+              pre.appendChild(btn);
 
-              pre.parentNode.insertBefore(wrapper, pre);
-              wrapper.appendChild(bar);
-              wrapper.appendChild(pre);
+              btn.onclick = function(e) {
+                e.stopPropagation();
+                pre.classList.toggle('collapsed');
+                btn.innerText = pre.classList.contains('collapsed') ? '展开' : '收起代码';
+              };
 
-              bar.onclick = function() {
-                const isCollapsed = wrapper.classList.contains('collapsed');
-                const label = bar.querySelector('.text-label');
-                if (isCollapsed) {
-                  wrapper.classList.remove('collapsed');
-                  label.innerText = '收起代码';
-                } else {
-                  wrapper.classList.add('collapsed');
-                  label.innerText = '展开代码';
+              pre.onclick = function() {
+                if (pre.classList.contains('collapsed')) {
+                  pre.classList.remove('collapsed');
+                  btn.innerText = '收起代码';
                 }
               };
             });
