@@ -19,7 +19,7 @@
       --sidebar-width: 250px;
       --content-max-width: 850px;
       
-      /* 字体大小调整 - 进一步缩小 */
+      /* 字体大小调整 */
       --base-font-size: 13px;
       --heading-h1-font-size: 1.6rem;
       --heading-h2-font-size: 1.3rem;
@@ -28,34 +28,38 @@
       --code-font-size: 0.85rem;
     }
     
-    /* 1. 彻底隐藏侧边栏中的文章内部标题 (TOC) */
-    .sidebar-nav .section-link,
-    .sidebar-nav ul li ul li ul {
+    /* 1. 恢复显示文章内部标题 (TOC) */
+    .sidebar-nav .section-link {
+      display: block !important;
+    }
+
+    /* 2. 专门隐藏侧边栏第一项（首页）的子目录 */
+    /* 这样首页就不会有下拉箭头和内部标题了 */
+    .sidebar-nav > ul > li:first-child > ul {
+      display: none !important;
+    }
+    .sidebar-nav > ul > li:first-child.collapse::after {
       display: none !important;
     }
 
-    /* 2. 修正侧边栏间距 */
+    /* 3. 侧边栏样式微调 */
     .sidebar-nav > ul > li {
-      margin: 10px 0;
+      margin: 8px 0;
     }
-
-    /* 3. 字体微调 */
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* 4. 侧边栏一级目录样式 */
     .sidebar-nav > ul > li > a,
     .sidebar-nav > ul > li > strong {
       font-weight: bold;
       font-size: 14px;
     }
 
-    /* 5. 解决复制按钮样式问题 */
+    /* 4. 代码复制按钮样式 */
     .docsify-copy-code-button {
-      font-size: 12px !important;
-      padding: 4px 8px !important;
+      font-size: 11px !important;
+      padding: 3px 6px !important;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     }
   </style>
 </head>
@@ -72,13 +76,13 @@
         '/.*/_sidebar.md': '/_sidebar.md'
       },
       
-      // subMaxLevel 设置为 0，配合 CSS 彻底隐藏 TOC
-      subMaxLevel: 0,
+      // 恢复子标题抓取，设置为 2 即可显示文章内的 H2 标题
+      subMaxLevel: 2,
       
       // 侧边栏折叠插件配置
       sidebarDisplayLevel: 0, 
       
-      // 强制不缓存 MD 文件
+      // 强制不缓存
       executeScript: true,
       requestHeaders: {
         'cache-control': 'max-age=0',
