@@ -2598,6 +2598,10 @@
             // 标题：复制链接按钮
             renderHeadingLinks(vm);
 
+            // 目录（小屏/兜底入口）：先确保按钮与点击绑定一定存在，再触发重算
+            try { ensureTocMobileDelegation(); } catch (e) { /* ignore */ }
+            try { setTocFabState(false); } catch (e) { /* ignore */ }
+
             // 右侧目录：自动生成 + 当前小节高亮
             scheduleTocRender(vm);
 
