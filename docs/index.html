@@ -2,174 +2,168 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>LoveEleve's Tech Blog</title>
-  <meta name="description" content="深入源码，探索技术本质">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+  <title>LoveEleve - Personal Homepage</title>
+  <meta name="description" content="Personal academic homepage">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="https://cdn.jsdelivr.net/gh/docsifyjs/docsify@master/docs/_media/icon.svg">
 
-  <!-- 简洁主题 -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/themes/vue.css">
+  <!-- docsify-themeable: Simple 主题 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple.css">
 
-  <!-- 简洁自定义样式 -->
+  <!-- 学术风格定制 -->
   <style>
     :root {
-      --theme-color: #42b983;
-      --text-color: #2c3e50;
+      /* 主色调：学术蓝 */
+      --theme-color: #2c3e50;
+      --theme-color-secondary: #3498db;
+      
+      /* 侧边栏 */
+      --sidebar-width: 240px;
+      --sidebar-background: #fafafa;
+      --sidebar-border-width: 0;
+      
+      /* 内容区 */
+      --content-max-width: 800px;
+      
+      /* 字体 */
+      --base-font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+      --base-font-size: 15px;
+      --base-line-height: 1.7;
+      
+      /* 标题 */
+      --heading-font-weight: 600;
+      --heading-color: #2c3e50;
+      
+      /* 链接 */
+      --link-color: #3498db;
+      --link-text-decoration: none;
+      --link-text-decoration--hover: underline;
+      
+      /* 代码 */
+      --code-font-size: 13px;
+      --code-inline-background: #f4f4f4;
+      --code-inline-color: #c7254e;
+      
+      /* 禁用封面 */
+      --cover-background-color: none;
     }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    /* 头像样式 */
+    .profile-photo {
+      width: 150px;
+      height: 150px;
+      border-radius: 50%;
+      margin: 0 auto 20px;
+      display: block;
+      border: 3px solid #eee;
     }
 
-    /* 侧边栏 */
-    .sidebar {
-      border-right: 1px solid #eee;
+    /* 个人信息居中 */
+    .profile-header {
+      text-align: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #eee;
+      margin-bottom: 30px;
     }
 
-    .sidebar-nav a {
-      color: var(--text-color);
+    .profile-header h1 {
+      border: none;
+      margin-bottom: 10px;
     }
 
-    .sidebar-nav a:hover,
-    .sidebar-nav li.active > a {
-      color: var(--theme-color);
+    .profile-header p {
+      color: #666;
+      margin: 5px 0;
     }
 
-    /* 内容区 */
-    .markdown-section h1 {
-      font-weight: 600;
-      border-bottom: 2px solid var(--theme-color);
-      padding-bottom: 0.5rem;
+    /* 联系方式图标 */
+    .contact-links {
+      margin-top: 15px;
     }
 
+    .contact-links a {
+      margin: 0 10px;
+      color: #666;
+      font-size: 14px;
+    }
+
+    .contact-links a:hover {
+      color: #3498db;
+    }
+
+    /* 章节标题 */
     .markdown-section h2 {
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 8px;
+      margin-top: 40px;
+    }
+
+    /* 发表列表 */
+    .publication {
+      margin-bottom: 20px;
+      padding-left: 20px;
+      border-left: 3px solid #eee;
+    }
+
+    .publication:hover {
+      border-left-color: #3498db;
+    }
+
+    .publication .title {
       font-weight: 600;
-      color: var(--text-color);
+      color: #2c3e50;
     }
 
-    /* 代码块 */
-    .markdown-section pre {
-      border-radius: 6px;
-      background: #f8f8f8 !important;
+    .publication .authors {
+      color: #666;
+      font-size: 14px;
     }
 
-    .markdown-section code {
-      background: #f5f5f5;
-      color: #476582;
-      padding: 2px 6px;
-      border-radius: 3px;
+    .publication .venue {
+      color: #999;
+      font-size: 13px;
+      font-style: italic;
     }
 
-    .markdown-section pre code {
-      background: transparent;
+    /* 隐藏不需要的元素 */
+    .github-corner,
+    .sidebar-toggle {
+      display: none;
     }
 
-    /* 引用 */
-    .markdown-section blockquote {
-      border-left: 4px solid var(--theme-color);
-      background: #f9f9f9;
-      padding: 1rem;
-      margin: 1rem 0;
+    /* 简洁的侧边栏 */
+    .sidebar-nav > ul > li > a {
+      font-weight: 500;
     }
 
-    /* 表格 */
-    .markdown-section table {
-      border-collapse: collapse;
-      width: 100%;
-    }
-
-    .markdown-section table th,
-    .markdown-section table td {
-      border: 1px solid #ddd;
-      padding: 10px;
-    }
-
-    .markdown-section table th {
-      background: #f5f5f5;
-    }
-
-    /* 链接 */
-    .markdown-section a {
-      color: var(--theme-color);
-      text-decoration: none;
-    }
-
-    .markdown-section a:hover {
-      text-decoration: underline;
-    }
-
-    /* 搜索框 */
-    .search input {
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      padding: 8px 12px;
-    }
-
-    .search input:focus {
-      border-color: var(--theme-color);
-      outline: none;
-    }
-
-    /* 封面页 */
-    section.cover {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-    }
-
-    section.cover h1 {
-      font-weight: 600;
-    }
-
-    section.cover .cover-main > p:last-child a {
-      border-radius: 4px;
-      padding: 10px 20px;
+    /* 响应式 */
+    @media (max-width: 768px) {
+      .profile-photo {
+        width: 120px;
+        height: 120px;
+      }
     }
   </style>
 </head>
 <body>
-<div id="app">加载中...</div>
+<div id="app"></div>
 
 <script>
   window.$docsify = {
-    name: 'LoveEleve\'s Blog',
-    repo: 'https://github.com/LoveEleve/LoveEleve.github.io',
-    coverpage: true,
+    name: '',
     loadSidebar: true,
-    loadNavbar: true,
-    subMaxLevel: 3,
+    subMaxLevel: 2,
     auto2top: true,
-
-    search: {
-      maxAge: 0,
-      placeholder: '搜索',
-      noData: '未找到结果',
-      depth: 4
-    },
-
-    copyCode: {
-      buttonText: '复制',
-      successText: '已复制'
-    },
-
-    pagination: {
-      previousText: '上一篇',
-      nextText: '下一篇'
-    }
+    coverpage: false,
+    
+    // 禁用仓库链接
+    repo: false,
+    
+    // 禁用搜索（学术主页通常不需要）
+    search: 'false'
   }
 </script>
 
-<!-- Docsify -->
 <script src="https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/docsify.min.js"></script>
-
-<!-- 插件 -->
-<script src="https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/plugins/search.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/docsify-copy-code@2.1.1/dist/docsify-copy-code.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/docsify-pagination@2.10.1/dist/docsify-pagination.min.js"></script>
-
-<!-- 代码高亮 -->
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-java.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-python.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-javascript.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-sql.min.js"></script>
 </body>
 </html>

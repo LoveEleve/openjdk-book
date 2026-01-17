@@ -1,1 +1,3 @@
-* [首页](/)
+* [Home](/)
+* [Publications](publications.md)
+* [CV](cv.md)
