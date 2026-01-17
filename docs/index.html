@@ -321,6 +321,70 @@
       width: 100%;
     }
 
+    /* ---------------- 文章元信息（更新时间 / 阅读时长 / 字数） ---------------- */
+    .page-meta-card {
+      margin: 18px 0 18px;
+      border-radius: 12px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      background: #fff;
+      overflow: hidden;
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.02),
+        0 12px 28px rgba(0, 0, 0, 0.06);
+    }
+
+    .page-meta-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: linear-gradient(180deg, rgba(246, 248, 250, 0.98), rgba(246, 248, 250, 0.92));
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      backdrop-filter: saturate(180%) blur(10px);
+      -webkit-backdrop-filter: saturate(180%) blur(10px);
+    }
+
+    .page-meta-title {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: #1f2328;
+    }
+
+    .page-meta-body {
+      padding: 10px 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      color: #57606a;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .page-meta-body b {
+      color: #1f2328;
+      font-weight: 800;
+    }
+
+    .page-meta-sep {
+      opacity: 0.5;
+      padding: 0 2px;
+    }
+
+    .page-tip {
+      padding: 10px 14px;
+      border-top: 1px dashed rgba(0, 0, 0, 0.10);
+      background: rgba(66, 185, 131, 0.06);
+      color: #1f2328;
+      font-size: 13px;
+    }
+
+    .page-tip b {
+      color: var(--theme-color);
+    }
+
     /* 侧边栏样式 */
     .sidebar-nav > ul > li {
       margin: 10px 0;
@@ -695,6 +759,170 @@
             return 'docsify:' + path;
           }
 
+          /* ---------------- 文章元信息：更新时间 / 阅读时长 / 字数 ---------------- */
+          const META_CFG = {
+            githubOwner: 'LoveEleve',
+            githubRepo: 'LoveEleve.github.io',
+            // GitHub API 未登录限流较紧：做本地缓存降低请求频率
+            cacheTTLms: 6 * 60 * 60 * 1000,
+            // 顶部提示文案
+            tipHtml: '提示：发现错误欢迎在评论区 <b>勘误</b> / 交流～'
+          };
+
+          function getRouteFile(vm) {
+            let file = (vm && vm.route && vm.route.file) ? vm.route.file : '';
+            if (!file) {
+              let p = (vm && vm.route && vm.route.path) ? vm.route.path : '';
+              p = (p || '').split('?')[0];
+              if (!p || p === '/') return 'README.md';
+              if (p.endsWith('/')) p += 'README';
+              if (!p.endsWith('.md')) p += '.md';
+              file = p;
+            }
+            file = (file || '').replace(/^\//, '');
+            return file || 'README.md';
+          }
+
+          function ensurePageMeta(section) {
+            if (!section) return null;
+
+            let meta = section.querySelector('#page-meta');
+            if (!meta) {
+              meta = document.createElement('div');
+              meta.id = 'page-meta';
+              meta.className = 'page-meta-card';
+              meta.innerHTML = `
+                <div class="page-meta-head">
+                  <div class="page-meta-title">本文信息</div>
+                </div>
+                <div class="page-meta-body">
+                  <span>最后更新：<b id="meta-updated">加载中…</b></span>
+                  <span class="page-meta-sep">·</span>
+                  <span>预计阅读：<b id="meta-read">-</b></span>
+                  <span class="page-meta-sep">·</span>
+                  <span>字数：<b id="meta-words">-</b></span>
+                </div>
+                <div id="page-tip" class="page-tip"></div>
+              `;
+              section.insertBefore(meta, section.firstChild);
+            }
+
+            const tip = meta.querySelector('#page-tip');
+            if (tip) tip.innerHTML = META_CFG.tipHtml;
+
+            return meta;
+          }
+
+          function formatCount(n) {
+            if (!Number.isFinite(n)) return '-';
+            if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, '') + 'w';
+            if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+            return String(n);
+          }
+
+          function computeReadingStats(section) {
+            try {
+              const clone = section.cloneNode(true);
+              clone.querySelectorAll('#page-meta, #giscus, pre, code, .code-tools').forEach((el) => el.remove());
+              const text = (clone.textContent || '').replace(/\s+/g, ' ').trim();
+
+              const cn = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+              const enWords = (text.replace(/[\u4e00-\u9fff]/g, ' ').match(/\b[\w'-]+\b/g) || []).length;
+
+              const minutes = Math.max(1, Math.ceil(cn / 350 + enWords / 220));
+              const total = cn + enWords;
+              return { minutes, total };
+            } catch (e) {
+              return { minutes: 1, total: 0 };
+            }
+          }
+
+          function formatUpdated(iso) {
+            try {
+              const d = new Date(iso);
+              if (Number.isNaN(d.getTime())) return '未知';
+              return new Intl.DateTimeFormat('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+              }).format(d);
+            } catch (e) {
+              return '未知';
+            }
+          }
+
+          async function fetchLastUpdatedISO(file) {
+            const candidates = [
+              `docs/${file}`,
+              file
+            ];
+
+            for (const p of candidates) {
+              const cacheKey = `pageLastUpdated:${p}`;
+              try {
+                const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+                if (cached && cached.iso && cached.ts && (Date.now() - cached.ts < META_CFG.cacheTTLms)) {
+                  return cached.iso;
+                }
+              } catch (e) {
+                // ignore cache parse
+              }
+
+              const url = `https://api.github.com/repos/${META_CFG.githubOwner}/${META_CFG.githubRepo}/commits?path=${encodeURIComponent(p)}&page=1&per_page=1`;
+
+              try {
+                const controller = new AbortController();
+                const t = setTimeout(() => controller.abort(), 5000);
+
+                const resp = await fetch(url, {
+                  headers: { 'Accept': 'application/vnd.github+json' },
+                  signal: controller.signal
+                });
+
+                clearTimeout(t);
+
+                if (!resp.ok) continue;
+                const data = await resp.json();
+                const iso = data && data[0] && data[0].commit && data[0].commit.committer && data[0].commit.committer.date;
+                if (iso) {
+                  try {
+                    localStorage.setItem(cacheKey, JSON.stringify({ iso, ts: Date.now() }));
+                  } catch (e) {
+                    // ignore
+                  }
+                  return iso;
+                }
+              } catch (e) {
+                // ignore
+              }
+            }
+
+            return '';
+          }
+
+          async function renderPageMeta(vm) {
+            const section = document.querySelector('.markdown-section');
+            if (!section) return;
+
+            const meta = ensurePageMeta(section);
+            if (!meta) return;
+
+            const { minutes, total } = computeReadingStats(section);
+            const readEl = meta.querySelector('#meta-read');
+            const wordsEl = meta.querySelector('#meta-words');
+            if (readEl) readEl.textContent = `${minutes} 分钟`;
+            if (wordsEl) wordsEl.textContent = `${formatCount(total)}`;
+
+            const file = getRouteFile(vm);
+            const updatedEl = meta.querySelector('#meta-updated');
+            if (updatedEl) updatedEl.textContent = '加载中…';
+
+            const iso = await fetchLastUpdatedISO(file);
+            if (updatedEl) updatedEl.textContent = iso ? formatUpdated(iso) : '未知';
+          }
+
           function ensureGiscusHost() {
             const section = document.querySelector('.markdown-section');
             if (!section) return null;
@@ -782,6 +1010,9 @@
               initInlineFolding(pre);
               initToolbar(pre);
             });
+
+            // 文章元信息：随路由切换刷新（更新时间/阅读时长/字数）
+            renderPageMeta(vm);
 
             // 评论区：随路由切换自动刷新
             renderOrUpdateGiscus(getGiscusTerm(vm));
