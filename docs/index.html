@@ -471,6 +471,102 @@
       .content { padding-right: 0; }
     }
 
+    /* ---------------- 阅读体验增强：进度条 / 面包屑 / 上一篇下一篇 ---------------- */
+    #read-progress {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 3px;
+      width: 0;
+      background: var(--theme-color);
+      z-index: 999;
+      transition: width 0.08s linear;
+    }
+
+    .page-breadcrumb {
+      margin: 10px 0 12px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--code-muted);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .page-breadcrumb a {
+      color: inherit;
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(66, 185, 131, 0.25);
+    }
+
+    .page-breadcrumb a:hover {
+      color: #1f2328;
+      border-bottom-color: rgba(66, 185, 131, 0.55);
+    }
+
+    .page-breadcrumb .crumb-sep {
+      opacity: 0.5;
+    }
+
+    .page-nav {
+      margin: 18px 0 26px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .page-nav a {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      background: #fff;
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+      text-decoration: none;
+      color: #1f2328;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+
+    .page-nav a:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.06);
+      border-color: rgba(66, 185, 131, 0.25);
+    }
+
+    .page-nav .nav-kicker {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--code-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .page-nav .nav-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #1f2328;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .page-nav .is-disabled {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+
+    @media (max-width: 768px) {
+      .page-nav {
+        grid-template-columns: 1fr;
+      }
+    }
+
     /* 侧边栏样式 */
     .sidebar-nav > ul > li {
       margin: 10px 0;
@@ -1119,6 +1215,210 @@
             else setActive(items[0].id);
           }
 
+          /* ---------------- 阅读体验增强：进度条 / 面包屑 / 上一篇下一篇 ---------------- */
+          let progressBound = false;
+          let progressUpdate = null;
+
+          function ensureProgressBar() {
+            let bar = document.getElementById('read-progress');
+            if (!bar) {
+              bar = document.createElement('div');
+              bar.id = 'read-progress';
+              document.body.appendChild(bar);
+            }
+
+            function calcProgress() {
+              const doc = document.documentElement;
+              const scrollTop = doc.scrollTop || document.body.scrollTop || 0;
+              const height = (doc.scrollHeight || 0) - (doc.clientHeight || 0);
+              if (height <= 0) return 0;
+              return Math.max(0, Math.min(1, scrollTop / height));
+            }
+
+            function update() {
+              const pct = calcProgress();
+              bar.style.width = `${(pct * 100).toFixed(2)}%`;
+            }
+
+            progressUpdate = update;
+
+            if (!progressBound) {
+              progressBound = true;
+              let ticking = false;
+              const onScroll = () => {
+                if (ticking) return;
+                ticking = true;
+                requestAnimationFrame(() => {
+                  ticking = false;
+                  if (progressUpdate) progressUpdate();
+                });
+              };
+
+              window.addEventListener('scroll', onScroll, { passive: true });
+              window.addEventListener('resize', onScroll, { passive: true });
+            }
+
+            update();
+          }
+
+          function normalizePath(p) {
+            if (!p) return '/';
+            p = String(p).split('?')[0];
+            if (!p.startsWith('/')) p = '/' + p;
+            // docsify route path 一般不以 / 结尾（根路径除外）
+            if (p.length > 1) p = p.replace(/\/+$/, '');
+            return p || '/';
+          }
+
+          function normalizeHrefToPath(href) {
+            if (!href) return '';
+            const h = String(href);
+            if (!h.startsWith('#')) return '';
+            const afterHash = h.slice(1);
+            return normalizePath(afterHash);
+          }
+
+          function getSidebarLinks() {
+            const nav = document.querySelector('.sidebar-nav');
+            if (!nav) return [];
+
+            const anchors = Array.from(nav.querySelectorAll('a[href]'));
+            const seen = new Set();
+            const list = [];
+
+            anchors.forEach((a) => {
+              const href = a.getAttribute('href') || '';
+              if (!href.startsWith('#/')) return;
+              if (href === '#') return;
+
+              const path = normalizeHrefToPath(href);
+              if (!path) return;
+
+              // 过滤掉只用于目录的 hash 链接（比如 #/xxx?id=...），我们只看 path
+              const key = path;
+              if (seen.has(key)) return;
+              seen.add(key);
+
+              const text = (a.textContent || '').trim();
+              if (!text) return;
+
+              list.push({ href, path, text, el: a });
+            });
+
+            return list;
+          }
+
+          function ensureBreadcrumb(section) {
+            let bc = section.querySelector('#page-breadcrumb');
+            if (!bc) {
+              bc = document.createElement('div');
+              bc.id = 'page-breadcrumb';
+              bc.className = 'page-breadcrumb';
+              const meta = section.querySelector('#page-meta');
+              if (meta) meta.insertAdjacentElement('afterend', bc);
+              else section.insertBefore(bc, section.firstChild);
+            }
+            return bc;
+          }
+
+          function renderBreadcrumbAndNav(vm) {
+            const section = document.querySelector('.markdown-section');
+            if (!section) return;
+
+            const currentPath = normalizePath(vm && vm.route && vm.route.path ? vm.route.path : '/');
+            const links = getSidebarLinks();
+
+            // Sidebar 可能稍后才渲染好，做一次轻量重试
+            if (!links.length) {
+              setTimeout(() => {
+                const again = getSidebarLinks();
+                if (again.length) renderBreadcrumbAndNav(vm);
+              }, 250);
+              return;
+            }
+
+            const idx = links.findIndex((it) => it.path === currentPath);
+
+            // 面包屑：从 sidebar DOM 向上找父级 li 的标题
+            const bc = ensureBreadcrumb(section);
+            let crumbHtml = '';
+
+            function getLiLabel(li) {
+              const a = li.querySelector(':scope > a');
+              if (a) return (a.textContent || '').trim();
+              const p = li.querySelector(':scope > p');
+              if (p) return (p.textContent || '').trim();
+              const span = li.querySelector(':scope > span');
+              if (span) return (span.textContent || '').trim();
+              const first = li.childNodes && li.childNodes[0] ? (li.childNodes[0].textContent || '') : '';
+              return String(first).trim();
+            }
+
+            let currentEl = null;
+            if (idx >= 0) currentEl = links[idx].el;
+            else {
+              // fallback：按 href 前缀匹配
+              const cand = links.find((it) => it.href && normalizeHrefToPath(it.href) === currentPath);
+              currentEl = cand ? cand.el : null;
+            }
+
+            const crumbs = [{ text: '首页', href: '#/' }];
+
+            if (currentEl) {
+              let li = currentEl.closest('li');
+              const chain = [];
+              while (li) {
+                const label = getLiLabel(li);
+                const a = li.querySelector(':scope > a');
+                const href = a ? a.getAttribute('href') : '';
+                if (label) chain.push({ text: label, href: href && href.startsWith('#/') ? href : '' });
+                li = li.parentElement ? li.parentElement.closest('li') : null;
+              }
+              chain.reverse();
+              chain.forEach((c, i) => {
+                // 最后一项是当前页，不用做链接
+                if (i === chain.length - 1) crumbs.push({ text: c.text, href: '' });
+                else crumbs.push(c);
+              });
+            }
+
+            crumbHtml = crumbs
+              .map((c, i) => {
+                const sep = i === 0 ? '' : '<span class="crumb-sep">/</span>';
+                const text = escapeHtml(c.text);
+                const node = c.href ? `<a href="${c.href}">${text}</a>` : `<span>${text}</span>`;
+                return `${sep}${node}`;
+              })
+              .join(' ');
+
+            bc.innerHTML = crumbHtml;
+
+            // 上一篇 / 下一篇
+            let nav = section.querySelector('#page-nav');
+            if (!nav) {
+              nav = document.createElement('div');
+              nav.id = 'page-nav';
+              nav.className = 'page-nav';
+              const g = section.querySelector('#giscus');
+              if (g) section.insertBefore(nav, g);
+              else section.appendChild(nav);
+            }
+
+            const prev = idx > 0 ? links[idx - 1] : null;
+            const next = idx >= 0 && idx < links.length - 1 ? links[idx + 1] : null;
+
+            nav.innerHTML = `
+              <a class="${prev ? '' : 'is-disabled'}" href="${prev ? prev.href : '#'}" aria-disabled="${prev ? 'false' : 'true'}">
+                <div class="nav-kicker">← 上一篇</div>
+                <div class="nav-title">${prev ? escapeHtml(prev.text) : '没有了'}</div>
+              </a>
+              <a class="${next ? '' : 'is-disabled'}" href="${next ? next.href : '#'}" aria-disabled="${next ? 'false' : 'true'}">
+                <div class="nav-kicker">下一篇 →</div>
+                <div class="nav-title">${next ? escapeHtml(next.text) : '没有了'}</div>
+              </a>
+            `;
+          }
+
           function ensureGiscusHost() {
             const section = document.querySelector('.markdown-section');
             if (!section) return null;
@@ -1212,6 +1512,10 @@
 
             // 右侧目录：自动生成 + 当前小节高亮
             renderToc(vm);
+
+            // 阅读体验：进度条 / 面包屑 / 上一篇下一篇
+            ensureProgressBar();
+            renderBreadcrumbAndNav(vm);
 
             // 评论区：随路由切换自动刷新
             renderOrUpdateGiscus(getGiscusTerm(vm));
