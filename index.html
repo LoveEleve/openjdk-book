@@ -16,27 +16,46 @@
     :root {
       /* 主题色 */
       --theme-color: #42b983;
-      --sidebar-width: 260px;
-      --content-max-width: 900px;
+      --sidebar-width: 250px;
+      --content-max-width: 850px;
       
-      /* 字体大小调整 - 整体缩小 */
-      --base-font-size: 14px;
-      --heading-h1-font-size: 1.8rem;
-      --heading-h2-font-size: 1.4rem;
-      --heading-h3-font-size: 1.2rem;
+      /* 字体大小调整 - 进一步缩小 */
+      --base-font-size: 13px;
+      --heading-h1-font-size: 1.6rem;
+      --heading-h2-font-size: 1.3rem;
+      --heading-h3-font-size: 1.1rem;
       --sidebar-nav-link-font-size: 13px;
       --code-font-size: 0.85rem;
     }
     
-    /* 侧边栏加粗一级目录 */
-    .sidebar-nav > ul > li > strong,
-    .sidebar-nav > ul > li > a {
-      font-weight: 600;
+    /* 1. 彻底隐藏侧边栏中的文章内部标题 (TOC) */
+    .sidebar-nav .section-link,
+    .sidebar-nav ul li ul li ul {
+      display: none !important;
     }
 
-    /* 侧边栏子项字体 */
-    .sidebar-nav .section-link {
-      font-size: 13px !important;
+    /* 2. 修正侧边栏间距 */
+    .sidebar-nav > ul > li {
+      margin: 10px 0;
+    }
+
+    /* 3. 字体微调 */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* 4. 侧边栏一级目录样式 */
+    .sidebar-nav > ul > li > a,
+    .sidebar-nav > ul > li > strong {
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    /* 5. 解决复制按钮样式问题 */
+    .docsify-copy-code-button {
+      font-size: 12px !important;
+      padding: 4px 8px !important;
     }
   </style>
 </head>
@@ -52,10 +71,11 @@
       alias: {
         '/.*/_sidebar.md': '/_sidebar.md'
       },
-      // 设置为 0，首页等页面不会抓取内部标题显示在侧边栏
+      
+      // subMaxLevel 设置为 0，配合 CSS 彻底隐藏 TOC
       subMaxLevel: 0,
       
-      // 侧边栏折叠配置
+      // 侧边栏折叠插件配置
       sidebarDisplayLevel: 0, 
       
       // 强制不缓存 MD 文件
@@ -70,7 +90,7 @@
         maxAge: 86400000,
         placeholder: '搜索',
         noData: '未找到结果',
-        depth: 4
+        depth: 2
       }
     };
   </script>
