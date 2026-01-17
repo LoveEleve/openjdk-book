@@ -19,8 +19,8 @@
 
 ## 联系方式
 
-- GitHub: [https://github.com/LoveEleve/LoveEleve.github.io.git)
-- Email: your.email@example.com
+- GitHub: [LoveEleve](https://github.com/LoveEleve/LoveEleve.github.io)
+- Email: 欢迎联系交流
 
 ## 版权说明
 

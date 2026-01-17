@@ -1,16 +1,16 @@
 ![logo](https://docsify.js.org/_media/icon.svg)
 
-# 我的文档站点
+# LoveEleve's Tech Blog
 
-> 📚 记录学习，分享知识
+> 🚀 深入源码，探索技术本质
 
 - 🎯 简洁美观的文档体验
 - 🔍 强大的全文搜索功能
 - 💡 持续更新的优质内容
 - 📝 开源免费，欢迎贡献
 
-[GitHub](https://github.com/LoveEleve/LoveEleve.github.io.git)
+[GitHub](https://github.com/LoveEleve/LoveEleve.github.io)
 [开始阅读](#欢迎来到我的文档站点-)
 
-<!-- 背景色 -->
-![color](#f0f0f0)
+<!-- 透明背景，与粒子效果协调 -->
+![color](transparent)
