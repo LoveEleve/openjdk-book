@@ -23,13 +23,12 @@
       --heading-h3-font-size: 1.1rem;
     }
     
-    /* 1. 强制显示所有文章内部目录 (TOC) */
+    /* 1. 允许侧边栏折叠 (移除之前的 display: block !important) */
     .sidebar-nav ul li ul {
-      display: block !important;
+      /* display: block; */ /* 由插件控制 */
     }
 
-    /* 2. 专门针对“首页”进行隐藏 */
-    /* 匹配链接为 #/ 或 #/README 的项，隐藏其紧随其后的子列表 */
+    /* 2. 专门针对“首页”进行隐藏其子列表 */
     .sidebar-nav a[href="#/"] + ul,
     .sidebar-nav a[href="#/README"] + ul {
       display: none !important;
@@ -56,16 +55,18 @@
       color: #666;
     }
 
-    /* 5. 确保复制按钮可用 */
-    .docsify-copy-code-button {
+    /* 5. 确保复制按钮和折叠按钮样式 */
+    .docsify-copy-code-button, .docsify-hide-code-button {
       background: #f8f8f8 !important;
       color: #666 !important;
       border: 1px solid #ddd !important;
+      padding: 4px 8px !important;
+      font-size: 12px !important;
     }
   </style>
 </head>
 <body>
-  <div id="app">正在加载 (Final Fix)...</div>
+  <div id="app">正在加载 (Fixing Collapse)...</div>
   <script>
     window.$docsify = {
       name: 'LoveEleve',
@@ -76,16 +77,15 @@
         '/.*/_sidebar.md': '/_sidebar.md'
       },
       
-      // 恢复抓取级别，确保文章内标题被抓取
       subMaxLevel: 3,
       
-      // 侧边栏折叠配置
-      sidebarDisplayLevel: 1, 
+      // 侧边栏折叠配置：设为 0 以允许所有层级手动收缩
+      sidebarDisplayLevel: 0, 
       
       // 代码折叠插件配置
       hideCode: {
-        scroll: false, // 展开时不自动滚动
-        height: 300   // 默认显示的像素高度
+        scroll: false,
+        height: 300
       },
       
       executeScript: true,
@@ -105,7 +105,11 @@
   
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
+  <!-- 侧边栏折叠插件 -->
   <script src="https://cdn.jsdelivr.net/npm/docsify-sidebar-collapse/dist/docsify-sidebar-collapse.min.js"></script>
+  <!-- 代码块折叠插件 (关键：之前漏掉了脚本) -->
+  <script src="https://cdn.jsdelivr.net/npm/docsify-hide-code/dist/docsify-hide-code.min.js"></script>
+  
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-java.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
