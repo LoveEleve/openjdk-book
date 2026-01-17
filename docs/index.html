@@ -244,6 +244,21 @@
       color: #999;
     }
 
+    /* ---------------- 评论区（giscus） ---------------- */
+    .markdown-section #giscus {
+      margin-top: 26px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .markdown-section #giscus:empty {
+      display: none;
+    }
+
+    .markdown-section .giscus-frame {
+      width: 100%;
+    }
+
     /* 侧边栏样式 */
     .sidebar-nav > ul > li {
       margin: 10px 0;
@@ -577,6 +592,91 @@
             };
           }
 
+          const GISCUS_CFG = {
+            src: 'https://giscus.app/client.js',
+            repo: 'LoveEleve/LoveEleve.github.io',
+            repoId: 'R_kgDOQ7i-XQ',
+            category: 'Announcements',
+            categoryId: 'DIC_kwDOQ7i-Xc4C1Edj',
+            mapping: 'specific',
+            strict: '0',
+            reactionsEnabled: '1',
+            emitMetadata: '0',
+            inputPosition: 'bottom',
+            theme: 'preferred_color_scheme',
+            lang: 'zh-CN'
+          };
+
+          function getGiscusTerm(vm) {
+            // 让每个 Docsify 路由对应一个 discussion（避免全站串楼）
+            let path = (vm && vm.route && vm.route.path) ? vm.route.path : '';
+            if (!path) {
+              path = (location.hash || '#/').replace(/^#/, '').split('?')[0];
+            }
+            if (!path || path === '/') path = '/README';
+            try {
+              path = decodeURIComponent(path);
+            } catch (e) {
+              // ignore
+            }
+            return 'docsify:' + path;
+          }
+
+          function ensureGiscusHost() {
+            const section = document.querySelector('.markdown-section');
+            if (!section) return null;
+
+            let host = section.querySelector('#giscus');
+            if (!host) {
+              host = document.createElement('div');
+              host.id = 'giscus';
+              section.appendChild(host);
+            }
+            return host;
+          }
+
+          function renderOrUpdateGiscus(term) {
+            const host = ensureGiscusHost();
+            if (!host) return;
+
+            // 已经有 iframe：用 postMessage 切换到新的 term
+            const iframe = host.querySelector('iframe.giscus-frame');
+            if (iframe && iframe.contentWindow) {
+              try {
+                iframe.contentWindow.postMessage({
+                  giscus: {
+                    setConfig: {
+                      term: term
+                    }
+                  }
+                }, 'https://giscus.app');
+                return;
+              } catch (e) {
+                // fallback to re-render
+              }
+            }
+
+            // 首次渲染 / 兜底重渲染
+            host.innerHTML = '';
+            const s = document.createElement('script');
+            s.src = GISCUS_CFG.src;
+            s.async = true;
+            s.crossOrigin = 'anonymous';
+            s.setAttribute('data-repo', GISCUS_CFG.repo);
+            s.setAttribute('data-repo-id', GISCUS_CFG.repoId);
+            s.setAttribute('data-category', GISCUS_CFG.category);
+            s.setAttribute('data-category-id', GISCUS_CFG.categoryId);
+            s.setAttribute('data-mapping', GISCUS_CFG.mapping);
+            s.setAttribute('data-term', term);
+            s.setAttribute('data-strict', GISCUS_CFG.strict);
+            s.setAttribute('data-reactions-enabled', GISCUS_CFG.reactionsEnabled);
+            s.setAttribute('data-emit-metadata', GISCUS_CFG.emitMetadata);
+            s.setAttribute('data-input-position', GISCUS_CFG.inputPosition);
+            s.setAttribute('data-theme', GISCUS_CFG.theme);
+            s.setAttribute('data-lang', GISCUS_CFG.lang);
+            host.appendChild(s);
+          }
+
           hook.doneEach(function () {
             document.querySelectorAll('pre[data-lang]').forEach(function (pre) {
               // 避免重复初始化
@@ -587,6 +687,9 @@
               initInlineFolding(pre);
               initToolbar(pre);
             });
+
+            // 评论区：随路由切换自动刷新
+            renderOrUpdateGiscus(getGiscusTerm(vm));
           });
         }
       ]
