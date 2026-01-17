@@ -246,12 +246,74 @@
 
     /* ---------------- 评论区（giscus） ---------------- */
     .markdown-section #giscus {
-      margin-top: 26px;
-      padding-top: 18px;
-      border-top: 1px solid rgba(0, 0, 0, 0.08);
+      margin-top: 28px;
     }
 
-    .markdown-section #giscus:empty {
+    .markdown-section #giscus .giscus-card {
+      border-radius: 12px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      background: #fff;
+      overflow: hidden;
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.02),
+        0 12px 28px rgba(0, 0, 0, 0.06);
+    }
+
+    .markdown-section #giscus .giscus-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: linear-gradient(180deg, rgba(246, 248, 250, 0.98), rgba(246, 248, 250, 0.92));
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      backdrop-filter: saturate(180%) blur(10px);
+      -webkit-backdrop-filter: saturate(180%) blur(10px);
+    }
+
+    .markdown-section #giscus .giscus-head-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .markdown-section #giscus .giscus-title {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: #1f2328;
+    }
+
+    .markdown-section #giscus .giscus-meta {
+      font-size: 12px;
+      color: var(--code-muted);
+    }
+
+    .markdown-section #giscus .giscus-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(66, 185, 131, 0.22);
+      background: rgba(66, 185, 131, 0.08);
+      color: var(--theme-color);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      text-decoration: none;
+    }
+
+    .markdown-section #giscus .giscus-badge:hover {
+      background: rgba(66, 185, 131, 0.14);
+      border-color: rgba(66, 185, 131, 0.30);
+    }
+
+    .markdown-section #giscus .giscus-body {
+      padding: 12px 14px 16px;
+    }
+
+    .markdown-section #giscus .giscus-body:empty {
       display: none;
     }
 
@@ -603,7 +665,8 @@
             reactionsEnabled: '1',
             emitMetadata: '0',
             inputPosition: 'bottom',
-            theme: 'preferred_color_scheme',
+            // 固定为浅色主题，避免系统深色模式导致评论区黑底与正文风格冲突
+            theme: 'light',
             lang: 'zh-CN'
           };
 
@@ -630,8 +693,28 @@
             if (!host) {
               host = document.createElement('div');
               host.id = 'giscus';
+              host.innerHTML = `
+                <div class="giscus-card">
+                  <div class="giscus-head">
+                    <div class="giscus-head-left">
+                      <div class="giscus-title">评论</div>
+                      <div class="giscus-meta">GitHub Discussions</div>
+                    </div>
+                    <a class="giscus-badge" href="https://github.com/LoveEleve/LoveEleve.github.io/discussions" target="_blank" rel="noopener noreferrer">打开讨论区</a>
+                  </div>
+                  <div class="giscus-body"></div>
+                </div>
+              `;
               section.appendChild(host);
             }
+
+            // 兼容旧结构兜底
+            if (!host.querySelector('.giscus-body')) {
+              const body = document.createElement('div');
+              body.className = 'giscus-body';
+              host.appendChild(body);
+            }
+
             return host;
           }
 
@@ -639,8 +722,10 @@
             const host = ensureGiscusHost();
             if (!host) return;
 
+            const mount = host.querySelector('.giscus-body') || host;
+
             // 已经有 iframe：用 postMessage 切换到新的 term
-            const iframe = host.querySelector('iframe.giscus-frame');
+            const iframe = mount.querySelector('iframe.giscus-frame');
             if (iframe && iframe.contentWindow) {
               try {
                 iframe.contentWindow.postMessage({
@@ -657,7 +742,7 @@
             }
 
             // 首次渲染 / 兜底重渲染
-            host.innerHTML = '';
+            mount.innerHTML = '';
             const s = document.createElement('script');
             s.src = GISCUS_CFG.src;
             s.async = true;
