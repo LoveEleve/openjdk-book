@@ -38,15 +38,25 @@
     pre[data-lang] {
       position: relative !important;
       margin: 1.5em 0 !important;
-      padding: 3em 0 0 !important; /* 顶部留工具栏 */
-      border-radius: 10px !important;
-      border: 1px solid var(--code-border) !important;
-      background: #fdfdfd !important;
+      padding: 3.1em 0 0 !important; /* 顶部留工具栏 */
+      border-radius: 12px !important;
+      border: 1px solid rgba(0, 0, 0, 0.08) !important;
+      background: #ffffff !important;
       overflow: hidden;
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.02),
+        0 12px 28px rgba(0, 0, 0, 0.06);
+      transition: box-shadow 0.2s ease, transform 0.2s ease;
+    }
+
+    pre[data-lang]:hover {
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.02),
+        0 16px 34px rgba(0, 0, 0, 0.08);
     }
 
     pre[data-lang].is-collapsed {
-      max-height: 42px !important;
+      max-height: 44px !important;
       padding-bottom: 0 !important;
       cursor: pointer;
     }
@@ -56,52 +66,70 @@
       top: 0;
       left: 0;
       right: 0;
-      height: 32px;
+      height: 34px;
       padding: 0 12px;
-      background: var(--code-toolbar-bg);
-      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+      background: linear-gradient(180deg, rgba(246, 248, 250, 0.98), rgba(246, 248, 250, 0.92));
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
       display: flex;
       justify-content: space-between;
       align-items: center;
       z-index: 10;
       user-select: none;
+      backdrop-filter: saturate(180%) blur(10px);
+      -webkit-backdrop-filter: saturate(180%) blur(10px);
     }
 
     .code-tools-left {
       font-size: 11px;
       color: var(--code-muted);
-      font-weight: 700;
+      font-weight: 800;
       text-transform: uppercase;
-      letter-spacing: 0.6px;
+      letter-spacing: 0.7px;
       display: flex;
       align-items: center;
       gap: 10px;
     }
 
+    /* macOS 风格三色点 */
     .code-tools-left .dot {
-      width: 7px;
-      height: 7px;
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
       display: inline-block;
-      background: rgba(0, 0, 0, 0.12);
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
     }
+
+    .code-tools-left .dot:nth-of-type(1) { background: #ff5f57; }
+    .code-tools-left .dot:nth-of-type(2) { background: #febc2e; }
+    .code-tools-left .dot:nth-of-type(3) { background: #28c840; }
 
     .code-tools-right {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
 
     .tool-btn {
       font-size: 11px;
       color: var(--theme-color);
       cursor: pointer;
-      font-weight: 600;
-      transition: opacity 0.15s ease;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(66, 185, 131, 0.22);
+      background: rgba(66, 185, 131, 0.08);
+      transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+      line-height: 1;
     }
 
     .tool-btn:hover {
-      opacity: 0.75;
+      background: rgba(66, 185, 131, 0.14);
+      border-color: rgba(66, 185, 131, 0.30);
+      transform: translateY(-1px);
+    }
+
+    .tool-btn:active {
+      transform: translateY(0);
     }
 
     /* 禁用 docsify-copy-code 的按钮（我们自己实现复制并放到顶栏） */
