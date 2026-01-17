@@ -554,10 +554,10 @@
     .toc-l3 { padding-left: 12px; }
     .toc-l4 { padding-left: 22px; opacity: 0.95; }
 
-    /* 只在大屏显示右侧 TOC，并给内容留出空间 */
+    /* 只在大屏显示右侧 TOC：是否给正文预留空间由 body class 控制 */
     @media (min-width: 1200px) {
       .toc-aside { display: block; }
-      .content { padding-right: 300px; }
+      body.has-toc-aside .content { padding-right: 300px; }
     }
 
     @media (max-width: 1199px) {
@@ -1792,6 +1792,8 @@
               .filter(Boolean);
           }
 
+          const TOC_BODY_CLASS = 'has-toc-aside';
+
           function renderToc(vm) {
             const section = document.querySelector('.markdown-section');
             if (!section) return;
@@ -1802,9 +1804,10 @@
 
             const items = buildTocItems(section);
 
-            // 小标题太少就不展示 TOC（避免空卡片）
-            if (items.length < 3) {
+            // 没有小标题就不展示 TOC（避免空卡片）
+            if (items.length < 1) {
               toc.style.display = 'none';
+              try { document.body.classList.remove(TOC_BODY_CLASS); } catch (e) { /* ignore */ }
               tocScrollUpdate = null;
               if (tocObserver) {
                 try { tocObserver.disconnect(); } catch (e) {}
@@ -1814,6 +1817,7 @@
             }
 
             toc.style.display = '';
+            try { document.body.classList.add(TOC_BODY_CLASS); } catch (e) { /* ignore */ }
             body.innerHTML = items
               .map((it) => {
                 const cls = it.level === 'h2' ? 'toc-l2' : it.level === 'h3' ? 'toc-l3' : 'toc-l4';
