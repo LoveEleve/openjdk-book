@@ -2057,12 +2057,36 @@
           function getHeadingPureText(h) {
             try {
               const clone = h.cloneNode(true);
+
+              // 我们自己追加的“复制链接”按钮，不应计入标题文本
               clone.querySelectorAll('.heading-link-btn').forEach((el) => el.remove());
-              // docsify 有时会注入一个 a.anchor（如显示“#”的锚点），避免污染 TOC 文本
-              clone.querySelectorAll('a.anchor').forEach((el) => el.remove());
-              return (clone.textContent || '').trim();
+
+              // docsify / 主题可能会注入 a.anchor：
+              // - 有的只渲染一个 "#" 符号
+              // - 有的会把“标题文字本身”包在 a.anchor 里
+              // 所以这里不能一刀切 remove，否则可能把标题文字也删没了。
+              clone.querySelectorAll('a.anchor').forEach((a) => {
+                const t = (a.textContent || '').replace(/\s+/g, ' ').trim();
+
+                // 纯符号锚点：直接剔除
+                if (!t || t === '#' || t === '¶' || t === '§') {
+                  a.remove();
+                  return;
+                }
+
+                // 其他情况：解包（保留文字/子节点，去掉链接属性），避免污染 TOC 文本
+                const frag = document.createDocumentFragment();
+                while (a.firstChild) frag.appendChild(a.firstChild);
+                try {
+                  a.parentNode && a.parentNode.replaceChild(frag, a);
+                } catch (e) {
+                  // ignore
+                }
+              });
+
+              return (clone.textContent || '').replace(/\s+/g, ' ').trim();
             } catch (e) {
-              return ((h && h.textContent) ? h.textContent : '').trim();
+              return ((h && h.textContent) ? h.textContent : '').replace(/\s+/g, ' ').trim();
             }
           }
 
