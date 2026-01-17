@@ -16,32 +16,98 @@
       --sidebar-width: 250px;
       --content-max-width: 850px;
       --base-font-size: 13px;
-      --heading-h1-font-size: 1.6rem;
-      --heading-h2-font-size: 1.3rem;
-      --heading-h3-font-size: 1.1rem;
     }
     
-    /* 首页侧边栏简洁逻辑 */
+    /* 侧边栏首页隐藏逻辑 */
     .sidebar-nav a[href="#/"] + ul,
     .sidebar-nav a[href="#/README"] + ul { display: none !important; }
     .sidebar-nav a[href="#/"]::after,
     .sidebar-nav a[href="#/README"]::after { display: none !important; }
 
-    /* 侧边栏字体微调 */
-    .sidebar-nav > ul > li { margin: 10px 0; font-weight: bold; font-size: 14px; }
-    .sidebar-nav .section-link { font-size: 12px !important; color: #666; }
+    /* --- 高级代码折叠 UI 设计 --- */
+    .code-wrapper {
+      position: relative;
+      margin: 1.5em 0;
+      border: 1px solid rgba(0,0,0,0.05);
+      border-radius: 8px;
+      overflow: hidden;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      background: #fdfdfd;
+    }
 
-    /* 代码块复制按钮微调，确保不遮挡折叠按钮 */
+    .code-wrapper pre {
+      margin: 0 !important;
+      padding: 1.2em !important;
+      transition: max-height 0.4s ease-out;
+      max-height: 10000px; /* 默认展开高度 */
+    }
+
+    /* 收起状态的样式 */
+    .code-wrapper.collapsed pre {
+      max-height: 0px !important;
+      padding: 0 1.2em !important;
+      opacity: 0;
+    }
+
+    /* 悬浮控制条 */
+    .code-control-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 16px;
+      background: #f8f8f8;
+      border-bottom: 1px solid rgba(0,0,0,0.05);
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.2s;
+    }
+
+    .code-control-bar:hover {
+      background: #f0f0f0;
+    }
+
+    .code-type-label {
+      font-size: 11px;
+      color: #999;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 600;
+    }
+
+    .toggle-action-text {
+      font-size: 12px;
+      color: var(--theme-color);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 500;
+    }
+
+    /* 展开收起图标动画 */
+    .toggle-icon {
+      transition: transform 0.3s;
+      border: solid var(--theme-color);
+      border-width: 0 2px 2px 0;
+      display: inline-block;
+      padding: 3px;
+      transform: rotate(45deg); /* 默认向上箭头 */
+    }
+    
+    .collapsed .toggle-icon {
+      transform: rotate(-135deg); /* 收起时变为向下 */
+    }
+
+    /* 修复复制按钮位置 */
     .docsify-copy-code-button {
-      background: #f8f8f8 !important;
-      padding: 4px 8px !important;
-      font-size: 12px !important;
-      border: 1px solid #ddd !important;
+      top: 36px !important; /* 避开控制条 */
+      right: 8px !important;
+      background: rgba(255,255,255,0.8) !important;
+      border-radius: 4px !important;
     }
   </style>
 </head>
 <body>
-  <div id="app">正在加载 (V7.0)...</div>
+  <div id="app">正在加载 (Premium UI)...</div>
   <script>
     window.$docsify = {
       name: 'LoveEleve',
@@ -53,19 +119,53 @@
       executeScript: true,
       requestHeaders: { 'cache-control': 'max-age=0' },
       auto2top: true,
-      // 代码折叠插件配置
-      flexibleAlerts: { style: 'flat' }
+      
+      plugins: [
+        function(hook, vm) {
+          hook.doneEach(function() {
+            document.querySelectorAll('pre[data-lang]').forEach(function(pre) {
+              if (pre.parentNode.classList.contains('code-wrapper')) return;
+
+              const lang = pre.getAttribute('data-lang');
+              const wrapper = document.createElement('div');
+              wrapper.className = 'code-wrapper';
+              
+              // 创建控制条
+              const bar = document.createElement('div');
+              bar.className = 'code-control-bar';
+              bar.innerHTML = `
+                <span class="code-type-label">${lang}</span>
+                <span class="toggle-action-text">
+                  <span class="text-label">收起代码</span>
+                  <i class="toggle-icon"></i>
+                </span>
+              `;
+
+              pre.parentNode.insertBefore(wrapper, pre);
+              wrapper.appendChild(bar);
+              wrapper.appendChild(pre);
+
+              bar.onclick = function() {
+                const isCollapsed = wrapper.classList.contains('collapsed');
+                const label = bar.querySelector('.text-label');
+                if (isCollapsed) {
+                  wrapper.classList.remove('collapsed');
+                  label.innerText = '收起代码';
+                } else {
+                  wrapper.classList.add('collapsed');
+                  label.innerText = '展开代码';
+                }
+              };
+            });
+          });
+        }
+      ]
     };
   </script>
   
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-sidebar-collapse/dist/docsify-sidebar-collapse.min.js"></script>
-  
-  <!-- 使用更稳健的代码折叠方案 -->
-  <script src="https://cdn.jsdelivr.net/npm/docsify-releaser/dist/plugins/embed-code.min.js"></script>
-  <script src="https://unpkg.com/docsify-expandable-code-block@0.0.1/dist/main.js"></script>
-
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-java.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-copy-code@2"></script>
