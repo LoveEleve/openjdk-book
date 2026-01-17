@@ -26,13 +26,16 @@
   
   <script>
     window.$docsify = {
-      // 基础配置
       name: 'LoveEleve',
       repo: 'https://github.com/LoveEleve/LoveEleve.github.io',
       
       // 侧边栏配置
       loadSidebar: true,
-      subMaxLevel: 3,
+      alias: {
+        '/.*/_sidebar.md': '/_sidebar.md'
+      },
+      subMaxLevel: 2,
+      maxLevel: 3,
       
       // 插件配置
       search: {
