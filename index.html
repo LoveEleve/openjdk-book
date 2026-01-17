@@ -9,6 +9,7 @@
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-sidebar-collapse/dist/sidebar.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/line-numbers/prism-line-numbers.min.css" />
 
   <style>
     :root {
@@ -144,7 +145,7 @@
     }
 
     .fold-gutter {
-      flex: 0 0 26px;
+      flex: 0 0 56px;
       background: transparent;
       border-right: 1px solid rgba(0, 0, 0, 0.04);
       user-select: none;
@@ -155,8 +156,9 @@
       height: 1.55em;
       display: flex;
       align-items: center;
-      justify-content: center;
-      padding: 0;
+      justify-content: flex-start;
+      padding: 0 8px;
+      gap: 8px;
     }
 
     .fold-toggle {
@@ -168,6 +170,7 @@
       cursor: pointer;
       border-radius: 6px;
       transition: background 0.15s ease;
+      flex: 0 0 20px;
     }
 
     .fold-toggle:hover {
@@ -189,15 +192,127 @@
       transform: rotate(-90deg);
     }
 
-    /* 不展示行号，只保留折叠三角 */
+    /* 展示行号：方便讲解/排查（与折叠三角共存） */
     .fold-line-no {
-      display: none;
+      display: inline-block;
+      min-width: 2.6em;
+      text-align: right;
+      font-size: 12px;
+      color: var(--code-muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      opacity: 0.85;
     }
 
     .fold-code-scroll {
       flex: 1;
       overflow-x: auto;
       padding: 10px 0;
+    }
+
+    /* Prism 行号插件：适配我们的顶栏（大代码块会走 Prism 行号） */
+    pre[data-lang].line-numbers {
+      padding: 3.1em 0 0 3.8em !important;
+    }
+
+    pre[data-lang].line-numbers .line-numbers-rows {
+      top: 3.1em !important;
+    }
+
+    pre[data-lang][data-inline-fold-skipped="1"] > code {
+      display: block;
+      padding: 10px 14px;
+      overflow-x: auto;
+    }
+
+    /* ---------------- Tabs / Alerts / 图片缩放（产品级文档组件） ---------------- */
+    /* Tabs（docsify-tabs） */
+    .markdown-section .docsify-tabs {
+      margin: 14px 0;
+      border-radius: 12px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      background: #fff;
+      overflow: hidden;
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+    }
+
+    .markdown-section .docsify-tabs__tab {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.4px;
+    }
+
+    .markdown-section .docsify-tabs__tab--active {
+      color: var(--theme-color);
+    }
+
+    .markdown-section .docsify-tabs__content {
+      padding: 10px 12px 2px;
+    }
+
+    /* Alerts（docsify-plugin-flexible-alerts） */
+    .markdown-section .alert {
+      margin: 14px 0;
+      border-radius: 12px;
+      border: 1px solid rgba(0, 0, 0, 0.10);
+      background: #fff;
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+      overflow: hidden;
+    }
+
+    .markdown-section .alert .title {
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      background: linear-gradient(180deg, rgba(246, 248, 250, 0.98), rgba(246, 248, 250, 0.92));
+    }
+
+    .markdown-section .alert p,
+    .markdown-section .alert ul,
+    .markdown-section .alert ol {
+      margin: 10px 12px;
+    }
+
+    .markdown-section .alert.note,
+    .markdown-section .alert.info {
+      border-left: 4px solid #2f81f7;
+    }
+
+    .markdown-section .alert.tip,
+    .markdown-section .alert.success {
+      border-left: 4px solid var(--theme-color);
+    }
+
+    .markdown-section .alert.warning {
+      border-left: 4px solid #d29922;
+    }
+
+    .markdown-section .alert.danger,
+    .markdown-section .alert.error {
+      border-left: 4px solid #cf222e;
+    }
+
+    /* 图片缩放（medium-zoom） */
+    .medium-zoom-overlay {
+      z-index: 1000;
+    }
+
+    .medium-zoom-image--opened {
+      z-index: 1001;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    }
+
+    /* 让正文图片可点击（有些主题/样式会意外禁用 pointer-events） */
+    .markdown-section img {
+      pointer-events: auto !important;
+      cursor: zoom-in !important;
+    }
+
+    .markdown-section a > img {
+      cursor: zoom-in !important;
     }
 
     /* 关键：不要用 flex 渲染代码行，避免空白字符黏连导致“代码变形” */
@@ -590,6 +705,20 @@
       requestHeaders: { 'cache-control': 'max-age=0' },
       auto2top: true,
 
+      tabs: {
+        persist: true,
+        sync: true,
+        theme: 'material'
+      },
+
+      'flexible-alerts': {
+        style: 'callout',
+        note: { label: 'NOTE' },
+        tip: { label: 'TIP' },
+        warning: { label: 'WARNING' },
+        danger: { label: 'DANGER' }
+      },
+
       plugins: [
         function (hook, vm) {
           function escapeHtml(str) {
@@ -908,6 +1037,109 @@
             pre.onclick = function () {
               if (pre.classList.contains('is-collapsed')) handleToggle();
             };
+          }
+
+          /* ---------------- 图片缩放：medium-zoom（仅作用于正文图片） ---------------- */
+          let zoomInstance = null;
+          let zoomBindTimer = null;
+          let zoomBindTimer2 = null;
+          let zoomDelegationInited = false;
+
+          // 事件委托：哪怕图片被链接包住/DOM 二次变更，也能点开
+          function ensureImageZoomDelegation() {
+            if (zoomDelegationInited) return;
+            zoomDelegationInited = true;
+
+            document.addEventListener('click', function (e) {
+              if (!e || e.defaultPrevented) return;
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+
+              // 有些场景 click 的 target 不是 img（比如外层包了链接/插件插入了包裹层），
+              // 用 composedPath() 更稳地找出真正的 IMG 节点。
+              const path = (typeof e.composedPath === 'function') ? e.composedPath() : null;
+              let img = null;
+
+              if (path && path.length) {
+                for (let i = 0; i < path.length; i++) {
+                  const el = path[i];
+                  if (el && el.tagName === 'IMG') {
+                    img = el;
+                    break;
+                  }
+                }
+              }
+
+              if (!img) {
+                const t = e.target;
+                if (t && t.tagName === 'IMG') img = t;
+              }
+
+              if (!img) return;
+
+              const section = img.closest('.markdown-section');
+              if (!section) return;
+              if (img.closest('#giscus') || img.closest('#page-meta')) return;
+              if (img.hasAttribute('data-no-zoom')) return;
+
+              if (!window.mediumZoom) return;
+
+              // 阻止图片外层链接的默认跳转
+              e.preventDefault();
+              e.stopPropagation();
+
+              if (!zoomInstance) {
+                zoomInstance = window.mediumZoom({
+                  background: 'rgba(15, 23, 42, 0.72)',
+                  margin: 24,
+                  scrollOffset: 60
+                });
+              }
+
+              try { zoomInstance.attach(img); } catch (err) { /* ignore */ }
+              try { zoomInstance.open({ target: img }); } catch (err) { /* ignore */ }
+            }, true);
+          }
+
+          function ensureImageZoom() {
+            ensureImageZoomDelegation();
+
+            const section = document.querySelector('.markdown-section');
+            if (!section) return;
+            if (!window.mediumZoom) return;
+
+            if (!zoomInstance) {
+              zoomInstance = window.mediumZoom({
+                background: 'rgba(15, 23, 42, 0.72)',
+                margin: 24,
+                scrollOffset: 60
+              });
+            }
+
+            const imgs = Array.from(section.querySelectorAll('img'))
+              .filter((img) => !img.closest('#giscus') && !img.closest('#page-meta') && !img.hasAttribute('data-no-zoom'));
+
+            // 先全部解绑，再绑定当前页图片（避免路由切换后绑定泄漏）
+            try { zoomInstance.detach(); } catch (e) { /* ignore */ }
+            try { zoomInstance.attach(imgs); } catch (e) { /* ignore */ }
+          }
+
+          // 重要：部分插件（如 tabs/alerts）可能在 doneEach 后继续改 DOM，
+          // 所以这里做“多次延迟重绑”，提高稳定性。
+          function scheduleImageZoom() {
+            if (zoomBindTimer) clearTimeout(zoomBindTimer);
+            if (zoomBindTimer2) clearTimeout(zoomBindTimer2);
+
+            // 第一轮：立即（下一轮事件循环）
+            zoomBindTimer = setTimeout(() => {
+              zoomBindTimer = null;
+              ensureImageZoom();
+            }, 0);
+
+            // 第二轮：稍后再来一次（覆盖插件的异步 DOM 变更）
+            zoomBindTimer2 = setTimeout(() => {
+              zoomBindTimer2 = null;
+              ensureImageZoom();
+            }, 180);
           }
 
           const GISCUS_CFG = {
@@ -1505,6 +1737,16 @@
               // 先初始化折叠（会保存 rawCode），再加工具栏
               initInlineFolding(pre);
               initToolbar(pre);
+
+              // 大代码块（跳过逐行折叠）：启用 Prism 行号（并补一次 highlight 触发行号渲染）
+              if (pre.dataset.inlineFoldSkipped === '1') {
+                pre.classList.add('line-numbers');
+                const codeEl = pre.querySelector('code');
+                if (codeEl && codeEl.dataset.prismLinenumInited !== '1' && window.Prism) {
+                  codeEl.dataset.prismLinenumInited = '1';
+                  try { Prism.highlightElement(codeEl); } catch (e) { /* ignore */ }
+                }
+              }
             });
 
             // 文章元信息：随路由切换刷新（更新时间/阅读时长/字数）
@@ -1517,6 +1759,9 @@
             ensureProgressBar();
             renderBreadcrumbAndNav(vm);
 
+            // 图片缩放：随路由切换重新绑定（只绑定正文图片）
+            scheduleImageZoom();
+
             // 评论区：随路由切换自动刷新
             renderOrUpdateGiscus(getGiscusTerm(vm));
           });
@@ -1525,10 +1770,18 @@
     };
   </script>
 
+  <script src="https://cdn.jsdelivr.net/npm/medium-zoom@1/dist/medium-zoom.min.js"></script>
+  <script src="https://unpkg.com/docsify-tabs/dist/docsify-tabs.min.js"></script>
+  <script src="https://unpkg.com/docsify-plugin-flexible-alerts"></script>
+
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-sidebar-collapse/dist/docsify-sidebar-collapse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-markup.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-java.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/line-numbers/prism-line-numbers.min.js"></script>
 </body>
 </html>
