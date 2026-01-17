@@ -8,7 +8,6 @@ HashMap 是一个基于哈希表的 Map 接口的实现。它存储的是键值�
 
 HashMap 实例有两个影响其性能的参数：**初始容量和负载因子**
 
-暂时无法在飞书文档外展示此内容
 
 + 初始化
 
@@ -70,7 +69,6 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
 
 这里需要注意两点:这两个问题会在后面做解答
 
-暂时无法在飞书文档外展示此内容
 
 继续阅读putVal()方法
 
@@ -441,8 +439,6 @@ if (oldTab != null) {
 
 到这里put()方法就简单介绍到这里了,但是还有几个其他的点值得学习一下
 
-暂时无法在飞书文档外展示此内容
-
 1. key的hash值为什么不是直接使用hashCode()返回的值,而是要再与自己的高16位做异或运算呢？「**<font style="color:rgb(216,57,49);">这可以称为扰动函数</font>**」
 
 为了减少哈希冲突,因为hashMap内部的数组的长度通常不会超过2^16次方,也即length的长度最多为：
@@ -460,7 +456,6 @@ length = 0000 0000 0000 0001 0000 0000 0000 0000 (2^16次方) length - 1 = 0000 
 
 1. 为什么hashMap内部的数组长度一定是2的次幂的？
 
-暂时无法在飞书文档外展示此内容
 
 + get(key):获取key所对应的value
 
@@ -497,7 +492,6 @@ final Node<K,V> getNode(int hash, Object key) {
 
 下面再来看下hashMap的另外3个问题
 
-暂时无法在飞书文档外展示此内容
 
 + fast-fail机制
 
@@ -2402,7 +2396,6 @@ void linkLast(E e) {
 
 算法：读操作和写操作对比
 
-暂时无法在飞书文档外展示此内容
 
 到这里：并发容器就简单介绍到这里了,对于ConcurrentLinkedQueue这个类并没有做分析，因为其实就是链表的CAS操作
 
