@@ -2,168 +2,19 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>LoveEleve - Personal Homepage</title>
-  <meta name="description" content="Personal academic homepage">
+  <title>LoveEleve's Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" href="https://cdn.jsdelivr.net/gh/docsifyjs/docsify@master/docs/_media/icon.svg">
-
-  <!-- docsify-themeable: Simple 主题 -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple.css">
-
-  <!-- 学术风格定制 -->
-  <style>
-    :root {
-      /* 主色调：学术蓝 */
-      --theme-color: #2c3e50;
-      --theme-color-secondary: #3498db;
-      
-      /* 侧边栏 */
-      --sidebar-width: 240px;
-      --sidebar-background: #fafafa;
-      --sidebar-border-width: 0;
-      
-      /* 内容区 */
-      --content-max-width: 800px;
-      
-      /* 字体 */
-      --base-font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
-      --base-font-size: 15px;
-      --base-line-height: 1.7;
-      
-      /* 标题 */
-      --heading-font-weight: 600;
-      --heading-color: #2c3e50;
-      
-      /* 链接 */
-      --link-color: #3498db;
-      --link-text-decoration: none;
-      --link-text-decoration--hover: underline;
-      
-      /* 代码 */
-      --code-font-size: 13px;
-      --code-inline-background: #f4f4f4;
-      --code-inline-color: #c7254e;
-      
-      /* 禁用封面 */
-      --cover-background-color: none;
-    }
-
-    /* 头像样式 */
-    .profile-photo {
-      width: 150px;
-      height: 150px;
-      border-radius: 50%;
-      margin: 0 auto 20px;
-      display: block;
-      border: 3px solid #eee;
-    }
-
-    /* 个人信息居中 */
-    .profile-header {
-      text-align: center;
-      padding-bottom: 20px;
-      border-bottom: 1px solid #eee;
-      margin-bottom: 30px;
-    }
-
-    .profile-header h1 {
-      border: none;
-      margin-bottom: 10px;
-    }
-
-    .profile-header p {
-      color: #666;
-      margin: 5px 0;
-    }
-
-    /* 联系方式图标 */
-    .contact-links {
-      margin-top: 15px;
-    }
-
-    .contact-links a {
-      margin: 0 10px;
-      color: #666;
-      font-size: 14px;
-    }
-
-    .contact-links a:hover {
-      color: #3498db;
-    }
-
-    /* 章节标题 */
-    .markdown-section h2 {
-      border-bottom: 2px solid #3498db;
-      padding-bottom: 8px;
-      margin-top: 40px;
-    }
-
-    /* 发表列表 */
-    .publication {
-      margin-bottom: 20px;
-      padding-left: 20px;
-      border-left: 3px solid #eee;
-    }
-
-    .publication:hover {
-      border-left-color: #3498db;
-    }
-
-    .publication .title {
-      font-weight: 600;
-      color: #2c3e50;
-    }
-
-    .publication .authors {
-      color: #666;
-      font-size: 14px;
-    }
-
-    .publication .venue {
-      color: #999;
-      font-size: 13px;
-      font-style: italic;
-    }
-
-    /* 隐藏不需要的元素 */
-    .github-corner,
-    .sidebar-toggle {
-      display: none;
-    }
-
-    /* 简洁的侧边栏 */
-    .sidebar-nav > ul > li > a {
-      font-weight: 500;
-    }
-
-    /* 响应式 */
-    @media (max-width: 768px) {
-      .profile-photo {
-        width: 120px;
-        height: 120px;
-      }
-    }
-  </style>
 </head>
 <body>
 <div id="app"></div>
-
 <script>
   window.$docsify = {
-    name: '',
+    name: 'LoveEleve',
     loadSidebar: true,
-    subMaxLevel: 2,
-    auto2top: true,
-    coverpage: false,
-    
-    // 禁用仓库链接
-    repo: false,
-    
-    // 禁用搜索（学术主页通常不需要）
-    search: 'false'
+    subMaxLevel: 2
   }
 </script>
-
-<script src="https://cdn.jsdelivr.net/npm/docsify@4.13.1/lib/docsify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
 </body>
 </html>
