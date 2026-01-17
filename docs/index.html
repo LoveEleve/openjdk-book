@@ -444,6 +444,9 @@
             return blocks;
           }
 
+          // 性能兜底：超长代码块不要做“逐行 DOM 折叠”，避免页面卡顿
+          const INLINE_FOLD_MAX_LINES = 360;
+
           function initInlineFolding(pre) {
             const langRaw = (pre.getAttribute('data-lang') || '').toLowerCase();
             const lang = langRaw === 'plain' ? 'markup' : langRaw;
@@ -454,6 +457,13 @@
             // 取“纯文本代码”，避免把 token span 再次解析
             const raw = (codeEl.textContent || '').replace(/\n$/, '');
             const lines = raw.split('\n');
+
+            // 超长代码块：保留原生 Prism 渲染（更省 DOM），只保留复制/整块收起
+            if (lines.length > INLINE_FOLD_MAX_LINES) {
+              pre.dataset.rawCode = raw;
+              pre.dataset.inlineFoldSkipped = '1';
+              return;
+            }
 
             // 生成折叠结构
             const blocks = buildFoldBlocks(lines);
