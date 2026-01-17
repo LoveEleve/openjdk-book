@@ -6,37 +6,22 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple.css">
-  <style>
-    :root {
-      --theme-color: #42b983;
-    }
-    /* 强制显示侧边栏 */
-    .sidebar {
-      padding-top: 20px;
-    }
-  </style>
 </head>
 <body>
-  <div id="app">正在加载侧边栏配置...</div>
+  <div id="app">正在加载 (V4.0)...</div>
   <script>
+    // 强制清理之前的缓存
+    if (window.localStorage) { window.localStorage.clear(); }
+
     window.$docsify = {
       name: 'LoveEleve',
       repo: 'https://github.com/LoveEleve/LoveEleve.github.io',
-      
-      // 侧边栏核心配置
       loadSidebar: true,
+      subMaxLevel: 2,
+      // 这里的 alias 确保在任何目录下都能找到侧边栏
       alias: {
-        '/.*/_sidebar.md': '/_sidebar.md',
-        '/_sidebar.md': '/_sidebar.md'
-      },
-      
-      // 目录层级
-      subMaxLevel: 3,
-      sidebarDisplayLevel: 1,
-      
-      // 其它
-      auto2top: true,
-      search: 'auto'
+        '/.*/_sidebar.md': '/_sidebar.md'
+      }
     };
   </script>
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
