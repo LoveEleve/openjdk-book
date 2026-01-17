@@ -523,6 +523,51 @@
       color: #1f2328;
     }
 
+    .toc-close {
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      background: rgba(255, 255, 255, 0.7);
+      color: #57606a;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      user-select: none;
+    }
+
+    .toc-close:hover {
+      background: rgba(66, 185, 131, 0.10);
+      border-color: rgba(66, 185, 131, 0.22);
+      color: #1f2328;
+    }
+
+    .toc-fab {
+      position: fixed;
+      right: 14px;
+      bottom: 16px;
+      z-index: 9998;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(66, 185, 131, 0.22);
+      background: rgba(255, 255, 255, 0.92);
+      color: #1f2328;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      cursor: pointer;
+      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.10);
+      backdrop-filter: saturate(180%) blur(10px);
+      -webkit-backdrop-filter: saturate(180%) blur(10px);
+    }
+
     .toc-body {
       padding: 10px 10px 12px;
       font-size: 12px;
@@ -555,6 +600,7 @@
       font-weight: 800;
     }
 
+    .toc-l1 { padding-left: 0; font-weight: 900; }
     .toc-l2 { padding-left: 0; }
     .toc-l3 { padding-left: 12px; }
     .toc-l4 { padding-left: 22px; opacity: 0.95; }
@@ -566,8 +612,26 @@
     }
 
     @media (max-width: 1023px) {
-      .toc-aside { display: none; }
       .content { padding-right: 0; }
+
+      /* 小屏：目录以浮层形式打开，默认隐藏，通过按钮唤起 */
+      .toc-aside {
+        display: none;
+        left: 12px;
+        right: 12px;
+        top: 74px;
+        width: auto;
+        max-height: calc(100vh - 96px);
+        z-index: 9999;
+      }
+
+      .toc-aside.is-open {
+        display: block;
+      }
+
+      body.has-toc-aside .toc-fab {
+        display: inline-flex;
+      }
     }
 
     /* ---------------- 标题：复制链接（不污染 TOC 文本） ---------------- */
@@ -1827,6 +1891,61 @@
             }
           }
 
+          let tocMobileDelegationInited = false;
+
+          function ensureTocFab() {
+            let btn = document.querySelector('#toc-fab');
+            if (!btn) {
+              btn = document.createElement('button');
+              btn.id = 'toc-fab';
+              btn.type = 'button';
+              btn.className = 'toc-fab';
+              btn.textContent = '目录';
+              btn.setAttribute('aria-label', '打开目录');
+              document.body.appendChild(btn);
+            }
+            return btn;
+          }
+
+          function ensureTocMobileDelegation() {
+            if (tocMobileDelegationInited) return;
+            tocMobileDelegationInited = true;
+
+            document.addEventListener('click', function (e) {
+              const t = e && e.target;
+              const fab = t && t.closest ? t.closest('#toc-fab') : null;
+              if (fab) {
+                e.preventDefault();
+                e.stopPropagation();
+                const toc = ensureToc();
+                if ((toc && toc.dataset && toc.dataset.hasItems) !== '1') return;
+                try { toc.classList.add('is-open'); } catch (err) { /* ignore */ }
+                return;
+              }
+
+              const closeBtn = t && t.closest ? t.closest('#toc-aside .toc-close') : null;
+              if (closeBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const toc = ensureToc();
+                try { toc.classList.remove('is-open'); } catch (err) { /* ignore */ }
+                return;
+              }
+
+              // 小屏点击空白关闭浮层
+              try {
+                if (window.innerWidth <= 1023) {
+                  const toc = document.querySelector('#toc-aside');
+                  if (!toc || !toc.classList.contains('is-open')) return;
+                  const inside = t && t.closest ? (t.closest('#toc-aside') || t.closest('#toc-fab')) : null;
+                  if (!inside) toc.classList.remove('is-open');
+                }
+              } catch (err) {
+                // ignore
+              }
+            }, true);
+          }
+
           function scheduleTocRender(vm) {
             tocLastVm = vm;
 
@@ -1888,6 +2007,7 @@
               toc.innerHTML = `
                 <div class="toc-head">
                   <div class="toc-title">目录</div>
+                  <button type="button" class="toc-close" aria-label="关闭目录">×</button>
                 </div>
                 <div class="toc-body" id="toc-body"></div>
               `;
@@ -1909,7 +2029,9 @@
           }
 
           function buildTocItems(section) {
-            const headings = Array.from(section.querySelectorAll('h2, h3, h4'));
+            let headings = Array.from(section.querySelectorAll('h2, h3, h4'));
+            // 兜底：有些页面可能只有 h1（或没有二级标题），此时也生成一个最小可用目录
+            if (!headings.length) headings = Array.from(section.querySelectorAll('h1'));
             return headings
               .map((h) => {
                 const level = h.tagName.toLowerCase();
@@ -1936,6 +2058,7 @@
             // 没有小标题就不展示 TOC（避免空卡片）
             if (items.length < 1) {
               try { toc.dataset.hasItems = '0'; } catch (e) { /* ignore */ }
+              try { toc.classList.remove('is-open'); } catch (e) { /* ignore */ }
               try { document.body.classList.remove(TOC_BODY_CLASS); } catch (e) { /* ignore */ }
               body.innerHTML = '';
               tocScrollUpdate = null;
@@ -1948,9 +2071,11 @@
 
             try { toc.dataset.hasItems = '1'; } catch (e) { /* ignore */ }
             try { document.body.classList.add(TOC_BODY_CLASS); } catch (e) { /* ignore */ }
+            ensureTocMobileDelegation();
+            ensureTocFab();
             body.innerHTML = items
               .map((it) => {
-                const cls = it.level === 'h2' ? 'toc-l2' : it.level === 'h3' ? 'toc-l3' : 'toc-l4';
+                const cls = it.level === 'h1' ? 'toc-l1' : it.level === 'h2' ? 'toc-l2' : it.level === 'h3' ? 'toc-l3' : 'toc-l4';
                 return `<a class="${cls}" href="#/${(vm && vm.route && vm.route.path ? vm.route.path : '').replace(/^\//, '')}?id=${encodeURIComponent(it.id)}" data-target="${it.id}">${escapeHtml(it.text)}</a>`;
               })
               .join('');
@@ -1980,6 +2105,9 @@
                   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   setActive(id);
                   replaceUrlId(id);
+                  try {
+                    if (window.innerWidth <= 1023) toc.classList.remove('is-open');
+                  } catch (err) { /* ignore */ }
                 }
               };
             });
