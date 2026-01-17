@@ -8,17 +8,14 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple.css">
 </head>
 <body>
-  <div id="app">正在加载 (V4.0)...</div>
+  <div id="app">正在加载 (V5.0)...</div>
   <script>
-    // 强制清理之前的缓存
-    if (window.localStorage) { window.localStorage.clear(); }
-
     window.$docsify = {
       name: 'LoveEleve',
       repo: 'https://github.com/LoveEleve/LoveEleve.github.io',
       loadSidebar: true,
-      subMaxLevel: 2,
-      // 这里的 alias 确保在任何目录下都能找到侧边栏
+      subMaxLevel: 3,
+      // 这里的 alias 非常关键，确保所有路径都能指向根侧边栏
       alias: {
         '/.*/_sidebar.md': '/_sidebar.md'
       }
