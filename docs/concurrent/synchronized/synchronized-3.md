@@ -1,19 +1,18 @@
-# Synchronized浅析（3）：park/unpark 与 Parker
-
 > 虽然文章的命名是Synchronized浅析,但是实际上分析的是线程相关的一些行为,比如调用wait(),notify(),LockSupport.park()等等方法的行为
 >
 > 以下jvm的源码基于openjdk11
->
 
 
 
 ## 一：Parker和ParkEvent
+
 这两个都是Hotspot JVM 用来实现线程同步和阻塞的两个核心内部类,通常用于线程的挂起与唤醒,但是设计目标与使用场景有所不同
 
 ### 1.Parker
+
 数据结构
 
-```cpp
+```c++
 // park.hpp
 class Parker : public os::PlatformParker {
 private:
@@ -39,14 +38,15 @@ protected:
 };
 ```
 
-核心为_counter，其语义为：
+核心为\_counter，其语义为：
 
-+ _counter > 0 : 有许可,park()会立即返回
-+ _counter = 0 : 没有许可证, park()会阻塞
+* \_counter > 0 : 有许可,park()会立即返回
+
+* \_counter = 0 : 没有许可证, park()会阻塞
 
 这种特性导致：如果先调用了unpark()方法,那么会导致park()不会阻塞
 
-+ 源码
+* 源码
 
 park()
 
@@ -60,7 +60,7 @@ public static void park(Object blocker) {
 }
 ```
 
-```cpp
+```c++
 void Parker::park(bool isAbsolute, jlong time) {
 
   // 直接将 _counter属性设置为0,并且返回旧的_counter
@@ -155,7 +155,7 @@ public static void unpark(Thread thread) {
 }
 ```
 
-```cpp
+```c++
 void Parker::unpark() {
   int status = pthread_mutex_lock(_mutex); // 获取_mutex锁
   assert_status(status == 0, status, "invariant");
@@ -174,12 +174,11 @@ void Parker::unpark() {
 }
 ```
 
-这里为什么要先释放_mutex锁再进行唤醒呢? 在Java中一般的编程范式是怎么样的呢？
+这里为什么要先释放\_mutex锁再进行唤醒呢? 在Java中一般的编程范式是怎么样的呢？
 
 我们经常会强调要在finally{}块中释放（为了避免锁没有被正常释放），但是这里在signal()之后尽量避免做复杂的操作，因为await()内部线程在被唤醒之后,依然需要去竞争锁,如果获取不到,那么依然会重新去阻塞
 
-> 这里已经回答了上面的问题了,也即为什么要先释放_mutex锁,再调用signal()来进行唤醒，这是为了避免无效的唤醒(无效的上下文切换)
->
+> 这里已经回答了上面的问题了,也即为什么要先释放\_mutex锁,再调用signal()来进行唤醒，这是为了避免无效的唤醒(无效的上下文切换)
 
 ```java
 Thread t1 = new Thread(() -> {
@@ -218,12 +217,13 @@ Thread t3 = new Thread(() -> {
 
 
 
----
+***
 
 ### 2. ParkEvent
+
 数据结构
 
-```cpp
+```c++
 // park.hpp
 class ParkEvent : public os::PlatformEvent {
 private:
@@ -253,7 +253,7 @@ private:
 
 park()
 
-```cpp
+```c++
 void os::PlatformEvent::park() {       // AKA "down()"
   // Transitions for _event:
   //   -1 => -1 : illegal 非法操作，已经在阻塞了,不能多次阻塞
@@ -320,6 +320,7 @@ _MuxEvent = ParkEvent::Allocate(this);
 
 
 ## 二：wait() 与 notify()
+
 ```java
 public final native void wait(long timeout) throws InterruptedException;
 public final native void notify();
@@ -330,8 +331,8 @@ public final native void notify();
 这两个方法都是native方法
 
 ### 1. wait()
+
 > wait()和notify()的原理在之前的文章中讲解过，不过之前讲解的是基于jdk21的,这里是基于jdk11的
->
 
 案例
 
@@ -341,7 +342,7 @@ synchronized (lock){
 }
 ```
 
-```cpp
+```c++
 // synchronizer.cpp
 int ObjectSynchronizer::wait(Handle obj, jlong millis, TRAPS) {
   // ... 不考虑偏向锁的逻辑
@@ -370,14 +371,13 @@ int ObjectSynchronizer::wait(Handle obj, jlong millis, TRAPS) {
 }
 ```
 
-+ ObjectMonitor
+* ObjectMonitor
 
 这个对象非常重要（内部还有一个重要的类：ObjectWaiter - 等待节点）
 
 > 在看Synchronized以及相关的方法时{比如wait()/notify()}时,会发现和JDK中的AQS/ReentrantLock/Condition很类似,这点其实也可以印证一个结论：高级语言中的锁其实就是管程的一种具体实现,遵循管程的模型
->
 
-```cpp
+```c++
 class ObjectWaiter : public StackObj {
 public:
   enum TStates { TS_UNDEF, TS_READY, TS_RUN, TS_WAIT, TS_ENTER, TS_CXQ };
@@ -415,7 +415,7 @@ volatile jint _count;          // 引用计数，防止 deflation
 
 wait()
 
-```cpp
+```c++
 void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
   Thread * const Self = THREAD;
   assert(Self->is_Java_thread(), "Must be Java thread!");
@@ -585,15 +585,15 @@ void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
 
 核心工作原理：和JDK中的Condition是十分类似的
 
-**检查当前线程是否持有锁 -> 检查中断 -> 创建等待节点 - > 添加到等待队列 -> 释放synchronized锁 -> 阻塞**
+**<span style="color: rgb(216,57,49); background-color: inherit">检查当前线程是否持有锁 -> 检查中断 -> 创建等待节点 - > 添加到等待队列 -> 释放synchronized锁 -> 阻塞 </span>**
 
 简易模型如下：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NDhjNjM2NmQ3NWUyZjY0ZTRmNjg3N2JjMDU4YzY4MzlfNXZ4b29DbDZXUEhZS0E3bDBMNGV4b29nR0ZYR2xweTFfVG9rZW46U1lDVWJ4VUdob3ZPNzh4QjNWQ2MwZ1FtbnBQXzE3Njg2NTYyNDY6MTc2ODY1OTg0Nl9WNA)
+![](images/image-1.png)
 
 ### 2. notify()
-```cpp
+
+```c++
 // objectMonitor.cpp
 void ObjectMonitor::notify(TRAPS) {
   CHECK_OWNER(); // 检查是否持有锁
@@ -655,13 +655,13 @@ if (policy == 2) {
 
 在这里notify()会根据不同的策略来进行不同的处理
 
-也即：**如果EntryList为空,那么放入到EntryList,否则EntryList不为空,那么CAS到_cxq的头部**
+也即：**<span style="color: rgb(216,57,49); background-color: inherit">如果EntryList为空,那么放入到EntryList,否则EntryList不为空,那么CAS到_cxq的头部</span>**
 
 那么锁释放的逻辑是如何处理呢？在这里也有策略
 
-逻辑为：**如果_entryList不为空,那么首先尝试唤醒_entryList的head节点，否则检查_cxq,如果不为空,那么将_cxq中所有节点批量的移动到_entryList中,然后唤醒_entryList的头节点**
+逻辑为：**<span style="color: rgb(216,57,49); background-color: inherit">如果_entryList不为空,那么首先尝试唤醒_entryList的head节点，否则检查_cxq,如果不为空,那么将_cxq中所有节点批量的移动到_entryList中,然后唤醒_entryList的头节点</span>**
 
-```cpp
+```c++
 // 1. 先尝试从 EntryList 唤醒
 w = _EntryList;
 if (w != NULL) {
@@ -698,11 +698,12 @@ if (w != NULL) {
 
 ```
 
-那么在这里为什么要有_cxq和_entryList呢？使用一个也可以,核心还是为了提高性能，将入队操作和出队操作分离，只有持有锁的线程才会去执行出队操作(通常是释放锁的线程),没有并发问题
+那么在这里为什么要有\_cxq和\_entryList呢？使用一个也可以,核心还是为了提高性能，将入队操作和出队操作分离，只有持有锁的线程才会去执行出队操作(通常是释放锁的线程),没有并发问题
 
 
 
 ## 三：中断原理
+
 ```java
 thread.interrupt(); // 中断线程 
 thread.isInterrupted(); // 判断线程是否被中断 - 不清除中断标识符
@@ -710,6 +711,7 @@ Thread.interrupted(); // 判断线程是否被中断 - 清除中断标识符
 ```
 
 ### 1. interrupt
+
 ```java
 public void interrupt() {
     // thread may be blocked in an I/O operation
@@ -737,9 +739,9 @@ public void interrupt() {
 private native void interrupt0();
 ```
 
-+ interrupt0()
+* interrupt0()
 
-```cpp
+```c++
 // os_posix.cpp
 void os::interrupt(Thread* thread) {
   // 获取当前线程所关联的OSThread对象 
@@ -764,10 +766,10 @@ void os::interrupt(Thread* thread) {
 }
 ```
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YTUxOWE3Y2QwNjhjYTNkNjZhZDFhZWQ4ODYyZDk3ODNfM2w3aXVWUzRnU2o1SjhZUFJncUJ5cUkzaTBpSUJ2Y2xfVG9rZW46SFlaZGJNV3pFb3AzUkt4a2xPaGNuWmoyblN4XzE3Njg2NTYyNDY6MTc2ODY1OTg0Nl9WNA)
+![](images/image.png)
 
 ### 2. thread.isInterrupted()
+
 ```java
 public boolean isInterrupted() {
     return isInterrupted(false);
@@ -785,9 +787,8 @@ private native boolean isInterrupted(boolean ClearInterrupted);
 这两个方法最终调用的方法都是一样的,不过是传入的参数不同,一个是false,一个是true
 
 > 原理很简单,不再赘述
->
 
-```cpp
+```c++
 bool os::is_interrupted(Thread* thread, bool clear_interrupted) {
   // 获取线程对应的OSThread对象
   OSThread* osthread = thread->osthread();
@@ -806,13 +807,15 @@ bool os::is_interrupted(Thread* thread, bool clear_interrupted) {
 
 
 ## 四：sleep()
+
 ### 1. sleep()
+
 ```java
 Thread.sleep(12)
 public static native void sleep(long millis) throws InterruptedException;
 ```
 
-```cpp
+```c++
 JVM_ENTRY(void, JVM_Sleep(JNIEnv * env, jclass threadClass, jlong millis))
     JVMWrapper("JVM_Sleep");
     // 如果要睡眠的时间<0,抛出异常
@@ -863,11 +866,11 @@ JVM_ENTRY(void, JVM_Sleep(JNIEnv * env, jclass threadClass, jlong millis))
 JVM_END
 ```
 
-+ os::slepp()
+* os::slepp()
 
 核心原理其实就是调用parkEvent.park()方法，只不过这里调用的是SleepEvent
 
-```cpp
+```c++
 int os::sleep(Thread* thread, jlong millis, bool interruptible) {
   assert(thread == Thread::current(),  "thread consistency check");
   // 获取专门用于Sleep的"ParkEvent" - SleepEvent
@@ -945,12 +948,12 @@ int os::sleep(Thread* thread, jlong millis, bool interruptible) {
 那么从这里看来,java中的sleep()方法并没有调用到linux内核中的sleep()系统调用
 
 > 我之前一直以为都是调用了sleep()系统调用的
->
 
 ### 2. yield()
+
 直接调用linux系统调用 yield()
 
-```cpp
+```c++
 JVM_ENTRY(void, JVM_Yield(JNIEnv * env, jclass threadClass))
     JVMWrapper("JVM_Yield");
     if (os::dont_yield()) return;
@@ -963,3 +966,4 @@ void os::naked_yield() {
     sched_yield();
 }
 ```
+

@@ -1,7 +1,4 @@
-# Synchronized浅析（2）：wait/notify 与等待队列
-
 > 以下源码基于hotspot21
->
 
 在上一篇文章中,对synchronized的核心原理已经简单的介绍了一下，但是还有一个问题没有解决，那就是没看到等待队列，这篇文章就来简单的探索一下synchronized中的等待队列(条件队列)
 
@@ -26,8 +23,7 @@ public class ConditionalDemo {
 
 很明显,使用条件变量的一个前提就是已经获取到锁了
 
-> 这也很好理解,条件变量的初衷就是:**当线程获取到锁后**,发现继续往下执行的条件不满足了,然后阻塞在条件变量上
->
+> 这也很好理解,条件变量的初衷就是:**<span style="color: rgb(216,57,49); background-color: inherit">当线程获取到锁后</span>**,发现继续往下执行的条件不满足了,然后阻塞在条件变量上
 
 那么在这里synchronized也是同理
 
@@ -55,13 +51,12 @@ public final void wait() throws InterruptedException {
 private final native void wait0(long timeoutMillis) throws InterruptedException;
 ```
 
-> 在上篇篇文章中其实就已经提到过等待队列,其位于ObjectMonitor#waitSet属性中,这代表了什么？  
-代表了当调用wait()时,需要用到ObjectMonitor,这就会导致原本是轻量级锁,但是主动膨胀为重量级锁(注意这里是持有轻量级锁的线程主动膨胀为重量级锁)
->
+> 在上篇篇文章中其实就已经提到过等待队列,其位于ObjectMonitor#waitSet属性中,这代表了什么？
+> 代表了当调用wait()时,需要用到ObjectMonitor,这就会导致原本是轻量级锁,但是主动膨胀为重量级锁(注意这里是持有轻量级锁的线程主动膨胀为重量级锁)
 
 
 
-```cpp
+```c++
 // hotspot/share/runtime/synchronizer.cpp
 // -----------------------------------------------------------------------------
 //  Wait/Notify/NotifyAll
@@ -138,8 +133,7 @@ void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
 
 验证#1
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MjdlZTE5Nzk1MGM1ZWFjODRkMTcxYTI3YTBmN2JmMWZfdkpiSUlWS0V5Z29CQlFHbG1jaWF3ZXBwTnJWdWNMTXBfVG9rZW46R1RGaWJPRmFub1BUYWR4eDBuMmN3S0ZBbndmXzE3Njg2NTYyMzY6MTc2ODY1OTgzNl9WNA)
+![](images/image-3.png)
 
 此时当前线程(线程节点就阻塞在了ObjectMonitor中的waitSet链表中了),并且也是通过ParkEvent来进行阻塞的
 
@@ -175,17 +169,15 @@ public class ConditionalDemo {
 
 此时的结构如下：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Njc5Y2M3NWEyZDI0NGVlMGMwZDEwOGY1ZDg0ZThhZWZfeTNrY0NRd3VVR0dYYlN5bHVXdVJQeWFYa2o3enhqUXJfVG9rZW46WjM2Z2JkUmxmbzF0WUp4U3VPM2M5aW9tbnlmXzE3Njg2NTYyMzY6MTc2ODY1OTgzNl9WNA)
+![](images/image.png)
 
 符合预期
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YTkzNTcyNjM4YWE1MGM5YzkyNTk1NDg2MjJjMDFlMDBfdWF2dGxSMDdvZGxPNFdTdlNvYnVpUG80WU5XUFlQQVdfVG9rZW46VnMyVmJWOXE5b0R2SFJ4OVVmTGNBVmhSbkFlXzE3Njg2NTYyMzY6MTc2ODY1OTgzNl9WNA)
+![](images/image-2.png)
 
 下面再来看下唤醒的操作：object.notify()
 
-```cpp
+```c++
 // native方法
 public final native void notify();
 JVM_ENTRY(void, JVM_MonitorNotify(JNIEnv* env, jobject handle))
@@ -263,12 +255,11 @@ void ObjectMonitor::INotify(JavaThread* current) {
 }
 ```
 
-到这里,notify()就结束了,可以看到该方法并没有唤醒线程,它只是将线程等待节点从_waitSet(等待队列/条件队列)移动到入口队列(_entryList/_cxq)中，并没有真正的将线程唤醒
+到这里,notify()就结束了,可以看到该方法并没有唤醒线程,它只是将线程等待节点从\_waitSet(等待队列/条件队列)移动到入口队列(\_entryList/\_cxq)中，并没有真正的将线程唤醒
 
 > ReentrantLock#Condition也是这样的做法,为什么呢？因为唤醒根本没有意义啊,此时的锁还被当前执行唤醒动作的线程拿着呢,就算唤醒了也一定抢不到锁(因为当前线程还没有释放呢)
 >
 > 并且也可以知道:synchronized和reentrantLock都是经典的MESA管程模型的一种具体实现「也即在条件满足时(signal())不会立即唤醒线程，而是将等待节点从条件队列移动到入口队列」
->
 
 下面来验证一下：
 
@@ -302,12 +293,11 @@ public class Test_2 {
 }
 ```
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MTQxZmRkOTA1OTc1MzBiZGUxYTJhZDRlODZhM2E4YTBfZFVwYUtmbVVaZnZCV3BuRUVORElRazFnbHpTTFBoYlJfVG9rZW46QTV4amJPcG9ob01WY3l4ODY5dmM3N2lRbkxnXzE3Njg2NTYyMzY6MTc2ODY1OTgzNl9WNA)
+![](images/image-1.png)
 
 现在回过头再来看下,当wait()被唤醒后的处理
 
-```cpp
+```c++
 {
     {
       ClearSuccOnSuspend csos(this);
@@ -365,3 +355,4 @@ void ObjectMonitor::ReenterI(JavaThread* current, ObjectWaiter* currentNode) {
 }
 
 ```
+

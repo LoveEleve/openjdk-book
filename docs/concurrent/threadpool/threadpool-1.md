@@ -1,11 +1,10 @@
-# 线程池学习笔记（1）：ThreadPoolExecutor
-
 jdk11线程池的学习笔记
 
 ## 介绍
+
 ### 思想
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MWVkMDU4MmE0MTI1MTI3M2I5NWYxM2JiODBiYzQ0NGVfckY0cDkxTUNPUEJVSFNQcGh4MjNuQ0pSbzJWNWw4SWpfVG9rZW46THl1RGJQQUtVb1hUNEx4YVBGOWNWSTVObnpoXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+
+![](images/LyuDbPAKUoXT4LxaPF9cVI5Nnzh.png)
 
 
 
@@ -13,25 +12,27 @@ jdk11线程池的学习笔记
 
 当面对任务请求时，一种粗暴的方式就是使用一个线程来完成这个请求，但是问题是任务请求的数量和请求频率是无法预估的,如果每来一个任务就创建一个线程来处理会存在什么问题？
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Y2FjZDVjNjYwMDM1ZjRlYTNmN2ZiMjFmMDM5ZDY1YTRfcWtZRlFDenA0QWhnVFVyemxXR2t1N0lWNXpXQlFuR1BfVG9rZW46Rm5SeWJvWGFMb1JmWUx4SXgzN2NpTkdkbmZoXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/FnRyboXaLoRfYLxIx37ciNGdnfh.png)
 
 
 
 1. CPU资源：频繁的创建和"销毁"线程 - - **用户态和内核态的上下文切换频繁**
+
 2. 内存资源：线程对象本身需要占用一定的内存
+
 3. CPU资源：当线程数远远大于CPU核心数时,CPU为了保证各个线程能尽可能的公平执行,在每个线程运行一段时间后会根据OS的调度策略来选择下一个要执行的线程，所以这里就会涉及到频繁的**线程上下文的切换**
+
 4. CPU利用率下降：在用户的角度上,虽然CPU一直在跑,但是由于大量的线程上下文切换,导致CPU绝大部分时间都在忙于线程切换了,而真正执行用户任务的时间相对就少了。
 
 所以为了**缓解**上述问题：就引入了线程池，线程池的核心思想其实就是**池化技术**,避免线程的无限创建。并且通过参数暴露来运行用户影响线程池的行为。
 
 ### 类关系图
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MWE3YzI1ZmYxMjZmOWIwYjE4ZGJkNGVlMGJhYThhOTFfN3VCZDN5WXRuSVdLYnlhaWx6azlyN0xtODRjc1MxTkFfVG9rZW46S210MGJsUHlNb05Db2Z4OFk2T2NoaHVhbkVmXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+
+![](images/Kmt0blPyMoNCofx8Y6OchhuanEf.png)
 
 
 
-```plain
+```plain&#x20;text
 public interface Executor {
     void execute(Runnable command);
 }
@@ -39,25 +40,25 @@ public interface Executor {
 
 该接口为线程池的顶级接口,该内部只定义了一个行为：执行,参数为要执行的任务。 这样的设计思想为：将**任务的提交**与**任务的执行**分离开来(职责划分),开发人员只需要专注于任务(或者说是业务的编写)，而不用关系具体是如何被执行的。
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MDE0ZDJjYTUwMzlmZTAyYTA4MzA4YjNmYTQ3Y2MxMzVfb011NWExQzNkeWQwelAzQURDY1Z0dVJQdERodHM2anBfVG9rZW46TlZTNGJrME1xbzgwdXh4bjhRbWNQZFRrbm9kXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/NVS4bk0Mqo80uxxn8QmcPdTknod.png)
 
 
 
 ## ThreadPoolExecutor源码解析
+
 线程池一般使用流程：创建 -> 执行提交的任务 -> 关闭。所以对应线程池来说它应该是有状态的，比如刚刚创建时处于NEW状态，执行提交的任务时处于RUNNING状态，关闭时处于TERMINATED状态，所以这里就会涉及到线程池的状态流转。「在这里只是说明一下线程池是具有状态的,具体的状态转换则在后续介绍。」
 
 ### 构造函数
+
 线程池完整的构造函数拥有7个入参,不同的参数配置会影响着线程池行为
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ODU1YjAwMzg5OGYxZTM5OTUxZGQ3NzM5Y2NiZmM0ZTFfT2hpclhRc1VEcEVjWlVtdlB3alZ2eXJiY3htckdPOE1fVG9rZW46VllqZmI5SU1sb1kyOGF4Rks2YWNhMHR0blZaXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/VYjfb9IMloY28axFK6aca0ttnVZ.png)
 
 构造函数入参
 
 构造函数进行相关属性的赋值
 
-```plain
+```plain&#x20;text
 public ThreadPoolExecutor(int corePoolSize,
                           int maximumPoolSize,
                           long keepAliveTime,
@@ -85,19 +86,19 @@ public ThreadPoolExecutor(int corePoolSize,
 
 1.官网的介绍链接 [ThreadPoolExecutor (Java SE 11 & JDK 11 )](https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/util/concurrent/ThreadPoolExecutor.html)
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MmUyYTZjNGUzZmIwZDdhOGFkZjU5ODM3OTAxY2FhOTBfNWI4UVYxY01VU0hvbDhxU1FiSU8zWG5Vczdsa3ZkRE1fVG9rZW46S01KWmJoVENjb1Z0aTB4QmpCQWN3NVJvbnpmXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/KMJZbhTCcoVti0xBjBAcw5Ronzf.png)
 
 核心工作原理
 
 ### 类关系图
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OWNhN2M0NzAyYTFkMjgwZTQ2ZTM3YjMxYmJlN2Y2NTZfNUpNUUpBSldDV0FaY0g1NGQzcHRUR3Mxc3JqVW1FM0dfVG9rZW46QVJpTGJYamdKb1JUMDd4aTRMb2NIQ3pibkU5XzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+
+![](images/ARiLbXjgJoRT07xi4LocHCzbnE9.png)
 
 
 
 ### 类属性
-```plain
+
+```plain&#x20;text
 private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));
 ```
 
@@ -105,34 +106,31 @@ private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));
 
 初始状态如下：&#x20;
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZWQ2MjFkZGY0YTVhMjQ4ZGEwZGQ0NGQ4ZDJiMWMyMzhfZjVkdGkzenMxaUhnbVZKa0ZWWDBYYWhBNGlqMm14N2NfVG9rZW46RTdLUGI5ZHk4b3Aya3p4S1NCM2NJc3publdnXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/E7KPb9dy8op2kzxKSB3cIsznnWg.png)
 
 
 
 使用一个原子变量来存储多个信息的好处： 1.**单个CAS操作能够同时更新线程池工作状态和工作线程数(主要)** 2.内存占用更少
 
 ### 源码解析
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NWY3YWFkNmFjZmQ1ZTllOWE2NjAyMjQ5OWU5Y2JlYjVfU3FQQm9aWkNLN2dLZ2I1YU9yeGtVQ1c5UERsV29WSFRfVG9rZW46WUFEemJPQWs0b1ZSazF4aUxGamM2Y09tblljXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+
+![](images/YADzbOAk4oVRk1xiLFjc6cOmnYc.png)
 
 
 
 向线程池中提交任务：线程池此时的状态为：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NTU2YzlhNjk5YjhjYjYwNTNkZjU0NTUxMDFiZjA0YjJfM0lqOGRGSnhsVUMwbElKSFZ4Umlob2dEZGt0N3VvYmxfVG9rZW46UEJnMmJSZ1JObzVlUDl4UmE2MGNFRjBLbmdaXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/PBg2bRgRNo5eP9xRa60cEF0KngZ.png)
 
 
 
 在这个execute(run)方法中,doug lea也写了注释来描述提交时的工作原理,而代码就是对原理的实现,在这里先复述一遍其工作原理，然后再去看代码：&#x20;
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ODIzNTFmMzI2YmJlOGE5NGQ2YjQ5N2Y0ZjcyYWUzMzVfTmhubWx6elhRYlV4YUhZWlVXSEFLbjlSOGgyemJLaGJfVG9rZW46RzhXYmJwVzJwb0h6R2p4OFVjUmNBSmVIbjdiXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/G8WbbpW2poHzGjx8UcRcAJeHn7b.png)
 
 
 
-```plain
+```plain&#x20;text
 public void execute(Runnable command) { 
     if (command == null) // 如果任务为空,那么直接抛出异常
         throw new NullPointerException();
@@ -155,21 +153,19 @@ public void execute(Runnable command) {
 }
 ```
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZmU0N2VjYTdlYTcyYTc4MmU4NGY1YWVhYThkNDM0Y2VfNHdGSWZvdEh1ZTNzUTdlQ2RzVjltQlVDYkNYa3RTRVNfVG9rZW46SVVWS2JyZE5EbzNSdEF4TUNzM2NYRlh4blJmXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/IUVKbrdNDo3RtAxMCs3cXFXxnRf.png)
 
 addWorker()源码讲解
 
 该函数的入参为：该线程是否有第一个任务 以及 是否以corePoolSize作为线程数量的边界 , 此时再回顾一下线程池的状态
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MjVmZmQyYWJlMWY5OTk5MTljNGUwNGI3ZDhlNzQxZDBfQm1MN2NDUWl2bjVLRzJ2Nkxka3UwWUV6bGZ6MWV6MkNfVG9rZW46R0pqZ2JZTWhOb1VGZEt4dWZFMmNhNnZrblplXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/GJjgbYMhNoUFdKxufE2ca6vknZe.png)
 
 
 
 线程池的状态类型如下：
 
-```plain
+```plain&#x20;text
 private static final int RUNNING    = -1 << COUNT_BITS;
     private static final int SHUTDOWN   =  0 << COUNT_BITS;
     private static final int STOP       =  1 << COUNT_BITS;
@@ -177,16 +173,15 @@ private static final int RUNNING    = -1 << COUNT_BITS;
     private static final int TERMINATED =  3 << COUNT_BITS;
 ```
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NWMxZGJjYzVhNDk3MmYxYTE5ZjljM2RkZmE3MDI2MDFfTjJqZ0tyMFpoVWU3YzdxM3dKeW5jVGFUcEQwYzFvR1dfVG9rZW46TGR3UGJaS0Fxb0ZqZlV4aks0V2M1cExPbkZMXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/LdwPbZKAqoFjfUxjK4Wc5pLOnFL.png)
 
 
 
-+ addWorker()源码解析
+* addWorker()源码解析
 
 第一部分代码逻辑如上图所述：如果连条件1都不满足，那么说明当前线程池的状态为Running。 否则条件1+条件2-1说明当前线程池的状态>=STOP,如果firstTask==null && workQueue == empty,那么此次新增线程来执行任务失败。这是什么意思？代码如下
 
-```plain
+```plain&#x20;text
 for (int c = ctl.get();;) { // 获取当前最新的ctl
     if (runStateAtLeast(c, SHUTDOWN)  // 线程池的状态需要>=shutdown
         && (runStateAtLeast(c, STOP)
@@ -197,37 +192,33 @@ for (int c = ctl.get();;) { // 获取当前最新的ctl
 
 再细分一下：&#x20;
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZWUzM2JlNmViNmVkYjA1ZDFiZTVjZDEyZGZlOTlhY2RfVG92VFBkbnI5MmZlWml0SzRoM3lHTFNVMG9lNDBpQjRfVG9rZW46Tnc0bmI3Y1dOb3BTY2J4UHoxemNjZk5JbkRoXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/Nw4nb7cWNopScbxPz1zccfNInDh.png)
 
 
 
 当条件1 = true，并且条件2-1 = true时,那么条件2-2/3是不起作用的,此时线程池的状态 >= STOP,也即至少是STOP,那么添加新线程来执行任务会失败，此时addWokrer()会返回false,同样,在execute()方法中，也不会执行第二个if,而第三个分支则会被命中,也即执行reject()策略,也即：当线程池处于STOP状态(具体来说是>=STOP状态)时,线程池是拒绝接收新的任务的！！
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YjVmOGQwOTc4OGExMDViYThhYTRlYWFlNGRiOGQyMmNfMWFBSVBwWDFPRHNrWUhRZXQwSjRrV3FwODRKdWRFZEJfVG9rZW46QTFCV2JmSWFZb00yMlN4QmIxQWNpc1FSbnhkXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/A1BWbfIaYoM22SxBb1AcisQRnxd.png)
 
 
 
 当条件1 = true，并且条件2-1 = false时，这代表线程池此时处于shutdown状态,并且如果此时firstTask!=null，那么也会返回false。同样不会进入到第二个if，会命中第三个分支，也即执行reject()策略，也即当线程池处于shutdown状态时，线程池拒绝新的任务
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MTlhMDdhODFiMTlmYzFkZGNkYjgwNWY4YTVlNTViZjJfTnlPTjVKUVJXdXlVWnFGa3NsZUJYQzRxYzd6aHVzdGhfVG9rZW46Vm4wNWJGM0JGb3hYeDB4WUM3a2NVdkhzblJlXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/Vn05bF3BFoxXx0xYC7kcUvHsnRe.png)
 
 
 
 在上面的基础上，如果线程池处于shutdown状态,并且不能添加新任务，并且工作队列中没有任务需要被执行了,那么也会返回false，然后执行拒绝策略，这说明：当线程池处于shutdown状态时，但是如果工作队列还有任务需要被执行，那么是可以新增线程来完成队列中未完成的任务的。
 
-得出结论：**一个新的问题&#x20;**： _那么当线程池处于stop状态时，队列中的任务会被如何处置呢？_
+得出结论：**一个新的问题&#x20;**： *那么当线程池处于stop状态时，队列中的任务会被如何处置呢？*
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZTE5NWQ1Y2FhNzFiZTIwZTQ2NGE1NjAyODIxMjgyODNfMEhaQW1JNHhJYno1aXVyYWZ6RVYzQ3hvSXcyRjlOdUJfVG9rZW46RkNJbGJZdU5Bb0dnMnp4OENMOWNBc2EybmtoXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/FCIlbYuNAoGg2zx8CL9cAsa2nkh.png)
 
 
 
 当然这里不是主线分支,因为此时线程池还是处于Running状态呢，那么继续看下面的代码：
 
-```plain
+```plain&#x20;text
 private boolean addWorker(Runnable firstTask, boolean core) {
     retry:
     for (int c = ctl.get();;) { // 获取当前最新的ctl
@@ -257,7 +248,7 @@ private boolean addWorker(Runnable firstTask, boolean core) {
 
 这里的代码逻辑比较清晰了,如果没有超过线程限制,并且线程池还是处于running状态，那么在这里只是cas将工作线程数+1,但是还没有启动线程,继续看下面的代码
 
-```plain
+```plain&#x20;text
 boolean workerStarted = false; 
 boolean workerAdded = false; 
 Worker w = null;
@@ -276,15 +267,13 @@ Worker(Runnable firstTask) {
 
 此时的状态如下：在这里有两个关键点：1.设置state为-1来防止过早中断，以及创建线程时,传入的Runnable是当前worker对象,那么对应的线程在启动之后,执行的则是worker.run()方法,而不是用户的run()方法
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZTVmNzBhNDQ0ZTU5MGI3OGQzYTBmMTdmZDUxMGZkOTBfUWlwTExSY1dKSlRhTXl2Q0NrQmNydngxamloTkJleDZfVG9rZW46TVJXUmJtOUdMb0xZTXp4UlQ2YWNSTUZObnpiXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/MRWRbm9GLoLYMzxRT6acRMFNnzb.png)
 
 worker状态
 
 那么在这里将state设置为-1的意义是什么呢？&#x20;
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NzExMGI3Mjk1MjljZWViZjAwOTA1MDA3NGJkNmVkMjJfdUIyeVZ6dGlSalVVa1BvTmRScjNyZ0xiUnVxWVNCUUJfVG9rZW46T2VNYmJIeVJ4b3pBelp4aERlT2NBa3g4bmdlXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/OeMbbHyRxozAzZxhDeOcAkx8nge.png)
 
 
 
@@ -292,7 +281,7 @@ worker状态
 
 runWorker()是什么？前面说过在创建线程的时候会把对应的worker对象传入进去(worker对象本身就是一个runnable),那么线程最终在执行的时候,回调的就是worker的run()方法，而在该run()方法中就会调用runWorker()方法,并且也把自己传入进去了，当然最终肯定是要执行this.task.run()的。
 
-```plain
+```plain&#x20;text
 public void run() {
     runWorker(this);
 }
@@ -308,26 +297,24 @@ final void runWorker(Worker w) {
 
 而在runWorker()中,在执行task.run()之前会执行w.unlock()
 
-```plain
+```plain&#x20;text
 // 在这里会将state+1,也即从 -1 -> 0 
 public void unlock() { release(1); }
 ```
 
 而执行到runWorker()则代表线程已经开始运行起来了,换句话说，工作线程能够在完全准备好之前不被意外的中断。除此之外还有另外一个点：**防止在线程池关闭过程中,刚创建但是还未开始工作的线程被过早的中断** 这里可以引出另外一个问题：线程池是如何让其他线程停止下来的？
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=N2YzMWNhNzc5YzEwZTRiNjI4ZjVjNWMyOTUzYmQ1M2ZfcDlFb3N1Tk5Lb3lpcXJaNmpQNFBQT2kwbWpFbmFkMEhfVG9rZW46TzJwbmJBVnYxb1F4ZmZ4dzdTUWMyVVIwbktjXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/O2pnbAVv1oQxffxw7SQc2UR0nKc.png)
 
 
 
 继续回到addWorker()方法中：再回顾一下此时的状态&#x20;
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NzY0NzJlMTFhMzQzMDA2ODRiYzQzYzA0M2NjZDE3MDNfTENZMVVjcWs4YndzSHRmMlFEM1daSWd2WjlyWnhzNjNfVG9rZW46UDdOWGJ3OUxEb25kVDZ4MDQyamNHT09KbmhnXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/P7NXbw9LDondT6x042jcGOOJnhg.png)
 
 
 
-```plain
+```plain&#x20;text
 // w = new Worker(firstTask); 上面讲述到了这行代码,继续看下面的代码
 final Thread t = w.thread;
 if (t != null) { // 如果创建的线程不为空「此时只是通过new Thread(worker)创建了一个线程对象,但是还未真正的启动」
@@ -361,39 +348,35 @@ finally {
 }
 ```
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MTJlOWQyOWEwYzQwOTdkMjRhOTE4NjRlODBlYjJlNWRfWVpZc0dlb01aZ1NGRDVxY3hhTmh4aUIyN282UHY0eEZfVG9rZW46VEo0TGJEbmFZb2dTU1N4ek1VVmNIa0liblJjXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/TJ4LbDnaYogSSSxzMUVcHkIbnRc.png)
 
 
 
 到这里addWorker()的方法就介绍到这里了,此时线程池的状态如下：&#x20;
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MzQ4Nzc5MGNhYTFiYzhlMGVkNjE2NGQ4NmI3Y2IxNjlfM2FSc05NbkdXdE5XZld2OGgxU3RqMkpFMkdwOEhMaVFfVG9rZW46WDFVQmJrUFJKb0lVZnJ4d0R0d2NNWmNwbmZYXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/X1UBbkPRJoIUfrxwDtwcMZcpnfX.png)
 
 
 
 下面就是线程回调执行worker中的run()方法,下面进入到该方法中
 
-```plain
+```plain&#x20;text
 public void run() {
      runWorker(this);
  }
 ```
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZTQ4ODExMTE1ODQzNjFlODIxYzQ2YWYzNmNiNGUyNTFfS3NrV3hTbEpYN0tvcUtGc0hzc1E2VEx3U1lvTmY0OUpfVG9rZW46QXZ0a2JJaXpFb3lJU1Z4UnRFNGNhZk0ybmsxXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/AvtkbIizEoyISVxRtE4cafM2nk1.png)
 
 
 
 先来看下doug lea对runWorker()工作原理的总结：&#x20;
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YjFmNWNlYWJkM2ViZjY5NTgxNDNjYjUyMzQyNDFmODJfNnNjVm1wSzJZVlBZRnZpNk5iZWYzdUhSbkVnT0JTNEpfVG9rZW46Q3ZNa2J1TU5pbzlFbGp4RzBHRGNVc1NLblRlXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/CvMkbuMNio9EljxG0GDcUsSKnTe.png)
 
 
 
-```plain
+```plain&#x20;text
 final void runWorker(Worker w) {
     Thread wt = Thread.currentThread(); // 获取当前工作线程
     Runnable task = w.firstTask; // 获取线程的首任务(通常是核心线程才有firstTask),并且保存在局部变量task中
@@ -413,12 +396,11 @@ final void runWorker(Worker w) {
 
 核心逻辑如下： 1.将线程设置为可中断状态 2.执行任务：firstTask 或者 从队列中拉取任务
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NWI3MTc4M2NiYTRlMGIxZTI2NWYzN2Y4NzA4ODBlYjFfYWJJbVVSN2Z5YXBseXV0OXVGd2ZDUFpERU1oSlRYNFdfVG9rZW46UWI5ZWJzcDlsb3N4TTl4YWhoUmM1dnAwbmJjXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/Qb9ebsp9losxM9xahhRc5vp0nbc.png)
 
 
 
-```plain
+```plain&#x20;text
 while (task != null || (task = getTask()) != null) {
         w.lock(); // 获取锁 -- 将state从0 -> 1,那么不允许被shutdown()中断
         if ((
@@ -433,12 +415,11 @@ while (task != null || (task = getTask()) != null) {
 
 这里有两个判断如下：目的就是为了能够正确的处理中断&#x20;
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZWE1MmE2MTk5NmZhOTc3YWJmMGU2Y2I0OWRhMDUyYmFfaVp6UFJoOUdmOG93bDVZdlNnUldJWmRUNEVlck5naHFfVG9rZW46VTVidmJCeXZXb3k3c1B4OUFQV2NGQXd5bnZmXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/U5bvbByvWoy7sPx9APWcFAwynvf.png)
 
 
 
-```plain
+```plain&#x20;text
 try {
     beforeExecute(wt, task); // 任务执行的前置回调
     try {
@@ -455,19 +436,17 @@ try {
 }
 ```
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NmVkNmRjYWZkYzUyMDlhODQ4YmIwOTk3YmZlMGU5ZTZfY2hZc0JHbEE0R1NKd3Zha3FGS2toWnFRbnBCbmdHSENfVG9rZW46TG44WmI5d0NQb3FvN0F4aURXSmNTV1hubnhiXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/Ln8Zb9wCPoqo7AxiDWJcSWXnnxb.png)
 
 
 
 如果没出意外的话,递交给核心线程的firstTask就被执行完了，然后工作线程会重新执行while循环，此时就是从队列中获取任务了,下面再看下获取任务的原理,然后再看下线程正常退出和异常退出的情况
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZDY3OWExNjVhM2I1MDVkNjc5OGU5NDVmNjE4NzA2MjVfalBLSG1NU3ZRaHhselJsbFdyMlRUam1hUTR6NzNCZ0ZfVG9rZW46WG4xc2JtU3R4b3plRHB4YTU4MWM3bXVNblVYXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/Xn1sbmStxozeDpxa581c7muMnUX.png)
 
 
 
-```plain
+```plain&#x20;text
 private Runnable getTask() {
 
     boolean timedOut = false; // Did the last poll() time out? 上次通过poll()从队列中获取任务是否超时,默认为false
@@ -489,8 +468,7 @@ private void decrementWorkerCount() {
 }
 ```
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OWIyYWRmOGZkZjgxOWU0MDJmN2VlZWQ4M2JjNGQ1NWNfU011SGVXbjE0WG1zdFlXUGVLVVcxSXA0NTRwak1jVmRfVG9rZW46QThWMmI5QVFob0hBdnl4R0hkemNQM2FobnFpXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/A8V2b9AQhoHAvyxGHdzcP3ahnqi.png)
 
 
 
@@ -500,19 +478,17 @@ private void decrementWorkerCount() {
 
 而这里的代码逻辑：主要就是为了保证非核心线程超时没有获取到任务时，timeOut会被设置为true,当再次尝试获取任务时，在这里就会被终止。
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NmFiOTlmYjI3ZTVhNGY4Yjg2ZTJhMjZhNzg3ZWQxZWVfN2dBSExmTEZtcGx5c3NFTlhmcTJlSDNYSTNmWnRYeFpfVG9rZW46TlU5SmJkckhmbzZ0R1F4YXNIT2NvZFBmbllkXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/NU9JbdrHfo6tGQxasHOcodPfnYd.png)
 
 工作线程超时退出逻辑
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MDBiNTEwNzMwMjNmMDM3YTMxMDRjZmM4YWI5OTdkYjhfOTQ0SVRqdG9xT1dCVmhNSU1LMXduR1dnYXlRZk5iVHNfVG9rZW46RzBEUmJOUU5Gb05vU3B4QnFsaGNxbkJzbjNnXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/G0DRbNQNFoNoSpxBqlhcqnBsn3g.png)
 
 工作线程从队列中获取任务的逻辑
 
-+ getTask()的代码逻辑如下：核心就是从工作队列中获取任务返回的task不为空，否则超时等待返回的task = null,下面看下当getTask()返回null时以及出现异常，在runWorker()中的处理逻辑
+* getTask()的代码逻辑如下：核心就是从工作队列中获取任务返回的task不为空，否则超时等待返回的task = null,下面看下当getTask()返回null时以及出现异常，在runWorker()中的处理逻辑
 
-```plain
+```plain&#x20;text
 private Runnable getTask() {
 
     boolean timedOut = false; // Did the last poll() time out? 上次通过poll()从队列中获取任务是否超时,默认为false
@@ -553,12 +529,11 @@ private Runnable getTask() {
 }
 ```
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YzhhNjc3ODNiNWE5NjEwNTI2ZThjMGVlZWI3ZWM4OTVfTktqeUR2YUJUYkE4VlRIMXFDdUFUTHh3cTBiUWhvc1hfVG9rZW46TWQ0dmI4QXh4b2M1Z0l4d0lWRmNxNDN5blZoXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/Md4vb8Axxoc5gIxwIVFcq43ynVh.png)
 
 
 
-```plain
+```plain&#x20;text
 // getTask()返回null,那么completedAbruptly = false
 final void runWorker(Worker w) {
     // ....
@@ -590,14 +565,13 @@ final void runWorker(Worker w) {
 }
 ```
 
-+ &#x20;processWorkerExit(w, completedAbruptly):w为当前worker 如果是任务执行失败，那么执行当前任务的线程退出,并且会无条件补充一个新的线程 如果是线程超时空闲,那么在不影响线程池的正常工作下会正常退出,并不会补充一个新的线程,反正也会补充
+* &#x20;processWorkerExit(w, completedAbruptly):w为当前worker 如果是任务执行失败，那么执行当前任务的线程退出,并且会无条件补充一个新的线程 如果是线程超时空闲,那么在不影响线程池的正常工作下会正常退出,并不会补充一个新的线程,反正也会补充
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZjkzNGMzYTA0MGVmYTQ3NGY2YWE1ODFkMjk1MDU4NWVfeWtVckh2UFJnVjA2aGJEM01oSnRiT05UR2pNNnY2anFfVG9rZW46SklvRGJEdzBKb1F0Q0V4WEZweWNScjhibnJmXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
-
+![](images/JIoDbDw0JoQtCExXFpycRr8bnrf.png)
 
 
-```plain
+
+```plain&#x20;text
 private void processWorkerExit(Worker w, boolean completedAbruptly) {
     /*
         如果completedAbruptly = true,那么代表是任务执行出现了异常,那么工作线程数是没有-1的
@@ -636,17 +610,15 @@ private void processWorkerExit(Worker w, boolean completedAbruptly) {
 
 线程池的核心工作原理就介绍到这里,下面在介绍一下线程池终止的逻辑
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OTQzODYxYzU5YjQ3ZTk4ZTIwM2RlY2ZmOWI2YjI3NGZfbmU2R3dyT0hUUG1TTW95djhoTjNoWGxCYVA5MEtlMVpfVG9rZW46UTVEWmJ0d3R4b3FJSGZ4OHlaaWNrWWxkbnFjXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/Q5DZbtwtxoqIHfx8yZickYldnqc.png)
 
 
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZjI4YWY0ZmNhM2JkNDUzOTRiMTA4MzI1MzZjOGZjMjVfRHlrTzR4NTh4clJhVW5JRkpBZ3dORVZHSnh2cnpzanlfVG9rZW46SlJwUGJQcm1Hb0tSOXN4TWRmU2N1U2owblBoXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/JRpPbPrmGoKR9sxMdfScuSj0nPh.png)
 
 
 
-```plain
+```plain&#x20;text
 public void shutdown() {
     final ReentrantLock mainLock = this.mainLock; // 只允许一个线程关闭线程池
     mainLock.lock(); // 上锁
@@ -674,19 +646,17 @@ private void advanceRunState(int targetState) {
 
 此时线程池的状态已经变为了shutdown，这会影响到正在工作的所有线程,比如在runWorker()和getTask()中都有相应的判断。
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZDJkMmE1YWFjZGVlMTc1NzVjMmQzNmNiN2QyZjExNzlfV3E3RThhdTFyb0F4ckhtamV2ZDc5YlAyNHYzaHFGUGdfVG9rZW46R2I4WGJ1enZlb3ppVGt4dkZrdGNCSElObjdlXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/Gb8XbuzveoziTkxvFktcBHINn7e.png)
 
 
 
 从代码中可以看到：在这里只是对那些没有执行任务的线程执行中断,而对于那些正在执行任务的线程是不会中断的，当没有任务执行时自然会退出
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YmNmMDFhYWIxYTY2NDUxODNkMmEwZjE3MWE1OTA1YmVfWFZ1bHFSblVyTWxQQU5xUmJRUkN2VktncFRYSHpTMHVfVG9rZW46TzlYaWJGbU5Bb05IeVF4a3hDS2MxRVhDbkJkXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/O9XibFmNAoNHyQxkxCKc1EXCnBd.png)
 
 
 
-```plain
+```plain&#x20;text
 // 这里默认传入的参数为false,也即不是只中断一个线程,而是中断所有线程
 private void interruptIdleWorkers(boolean onlyOne) {
     final ReentrantLock mainLock = this.mainLock; // 上锁,避免中断风暴
@@ -713,14 +683,13 @@ private void interruptIdleWorkers(boolean onlyOne) {
 
 继续看tryTerminate()方法：此时的tryTerminate()方法是外部线程调用的(尝试将线程池的状态转换为TERMINATED)
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MmViOTdlYjk3Yjg3ODI4YmZkYjUyMDRiZTEyN2U4MTZfNDB2OEdZdG5Qc1p2N0ROSXhONE5mMEppRW5CNm44NEFfVG9rZW46RUV4TmIxTVF3b1d0azd4bXhzQ2NSamd6blNFXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/EExNb1MQwoWtk7xmxsCcRjgznSE.png)
 
 
 
 这里有一点很重要，那就是调用shutdown()并不总是会立即停止线程池。 当调用shutdown()后,线程池的状态会变为shutdown状态,但是如果工作队列中还有任务，那么该方法会返回。 但是大部分线程已经被中断了,并且线程能够根据线程池的状态进行退出
 
-```plain
+```plain&#x20;text
 final void tryTerminate() {
     for (;;) {
         int c = ctl.get(); // 获取线程池最新的状态
@@ -738,7 +707,7 @@ final void tryTerminate() {
 
 这里的问题就是：是否会存在线程池处于shutdown状态并且依旧有线程阻塞在take()函数上呢？ 我认为一种场景下会出现：那就是线程在持有任务执行时,躲过了shutdown()中的中断，并且在任务执行完毕后在getTask()的第一个判断中判断出当前队列中还有剩余的任务，但是在take()之前,任务被其他线程拿走了,那么在真正take()的时候就会阻塞
 
-```plain
+```plain&#x20;text
 final void tryTerminate() {
     for (;;) {
         int c = ctl.get(); // 获取线程池最新的状态
@@ -775,17 +744,15 @@ final void tryTerminate() {
 }
 ```
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YzgzZWJhODczYjlmOTY0MzMxYzk1MjUwMTU5MzRlZGRfNlVVeWk4blBQWW5KeXVvNXY3ak1RR1YxRWhLZHJDb01fVG9rZW46UnNiSGI5V3J1b0xqN3N4ZDRUbmNtcVpNbnBkXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/RsbHb9WruoLj7sxd4TncmqZMnpd.png)
 
 
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZTQ0YTI1M2RjZmVlODU5MzEwMjJiYWE2NjVjM2IwODdfNnkwY0VxRElvcnVPbmVzUzZwWjNLaU1hWFJkZFlUY2lfVG9rZW46WVJHZWJKOFhhb3B5amp4YmNQdGNzSEpWbjJiXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/YRGebJ8XaopyjjxbcPtcsHJVn2b.png)
 
 
 
-```plain
+```plain&#x20;text
 public List<Runnable> shutdownNow() {
     List<Runnable> tasks;
     final ReentrantLock mainLock = this.mainLock; // 获取操作的锁
@@ -815,7 +782,7 @@ private void advanceRunState(int targetState) {
 
 下面看下中断线程的处理
 
-```plain
+```plain&#x20;text
 private void interruptWorkers() {
     for (Worker w : workers) // 遍历workers集合中的所有工作线程,进行中断
         w.interruptIfStarted(); 
@@ -837,7 +804,7 @@ void interruptIfStarted() {
 
 队列的处理：
 
-```plain
+```plain&#x20;text
 // 该方法的作用就是将还在工作队列中的任务返回,返回给shutdownNow()的调用者
 private List<Runnable> drainQueue() {
     BlockingQueue<Runnable> q = workQueue; // 当前工作队列
@@ -855,19 +822,17 @@ private List<Runnable> drainQueue() {
 
 拒绝策略：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NDNjYTA2YjExNzZjYjY2ODY2ZWEyOTgwYWFmY2MwMGVfaVpsSldZbDBzYTRhc1l6ejJqOEJMZHUwMGI3SFRodFZfVG9rZW46Tng5NWJkbGVrb3Uxa3Z4anliUWN4UXh2bkloXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/Nx95bdlekou1kvxjybQcxQxvnIh.png)
 
 
 
 线程池的状态流转：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NDIwYjhjZWViYTQwZGZmZmUxYmU0YTVjZmUzOWM3NTJfcE42aHpNZWlZTEZ0WG8wSHE4dVQ4cEpSRlBucHpGajNfVG9rZW46UDdpQ2JhM0lTbzFPSWx4eWtOZ2NlU1Z3bklkXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/P7iCba3ISo1OIlxykNgceSVwnId.png)
 
 
 
 到这里关于线程池的基本工作原理就讲解到这里。 关于线程池后续还有3个地方需要补充：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NWFmNTI0N2Y1NmMyMTM4NTZjOWRkN2M4YTQ2ZGRmOGFfZDRvcVg2dWJBYlFsVFdHaHdkQjR1N0hHSER6ZzVuOWtfVG9rZW46UHNRQmJWR0lpb2doVUV4ZEhxc2NUN2ZkbkJmXzE3Njg2NTU5NzY6MTc2ODY1OTU3Nl9WNA)
+![](images/PsQBbVGIioghUExdHqscT7fdnBf.png)
+

@@ -1,22 +1,21 @@
-# 线程池学习笔记（2）：Executors 工厂线程池
+![](images/diagram.png)
 
-> 官方文档：[https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/util/concurrent/Executors.html](https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/util/concurrent/Executors.html)
->
+> 官方文档：https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/util/concurrent/Executors.html
 
 该类是JDK官方提供的，其提供了多个工厂方法来创建不同类型的线程池(不需要传入过多的参数),本文章就介绍一下这些现有线程池的工作原理：不会在再详细的介绍线程池内部的工作原理了,而是介绍一下这些现有线程池的一些特性。
 
-## newCachedThreadPool()
+# newCachedThreadPool()
+
 从名字上来看：缓存线程池
 
 > 官方介绍：
->
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MTc3OTEzMmUyMWJjMjE3MWYzNWM2MzNkY2ZhYWExNDBfS2hHcEhNRHZFVmxMYjhPb29FZ2J4cG1kQkpFbFI2TmhfVG9rZW46Q0dEM2JPVWZwbzF1OFd4WmN2OWM0T0hqbnJiXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+![](images/Clipboard_Screenshot_1759582395.png)
 
-创建一个线程池,根据需要创建新线程，但在可用时将重用以前构造的线程，这种线程池通常会提高执行许&#x591A;**短期**&#x5F02;步任务程序的性能，但是如果没有现成可用的线程,那么将会创建一个新线程来工作，并且如果一个线程在60s内没有执行任务那么将会被回收。
+创建一个线程池,根据需要创建新线程，但在可用时将重用以前构造的线程，这种线程池通常会提高执行许&#x591A;**<span style="color: rgb(216,57,49); background-color: inherit">短期</span>**&#x5F02;步任务程序的性能，但是如果没有现成可用的线程,那么将会创建一个新线程来工作，并且如果一个线程在60s内没有执行任务那么将会被回收。
 
 ## 源码解析
+
 ```java
   public static ExecutorService newCachedThreadPool() {
         return new ThreadPoolExecutor(0, Integer.MAX_VALUE,
@@ -29,41 +28,37 @@
 
 这意味着在线程池工作时,工作线程池将永远不会小于核心线程数( 0 也不小于 0 )，那么在execute()方法中,第一个if分支将永远不会被执行「因为工作线程数 永远不会小于核心线程数」
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NGZiODI5YmYzZDY2YjFjODVhNmIxYmM3M2ExZmFkZGFfdVQxSllCN2FlcHJQSzJ6cmZXbGxzeWQwMFlyejFsR3ZfVG9rZW46V0J1d2JqRDZBb2F0Wkx4TENrS2NmdXhsblhsXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+![](images/image-5.png)
 
 这个时候就会直接尝试将任务"添加"到队列中,调用的是 workQueue.offer(command)方法，而对于SynchronousQueue队列来说,如果此时没有消费者在等待消费「也即没有工作线程阻塞在(或者正在调用)take()方法」，那么该方法会立即的返回false,此时第二个分支也不会执行了.而是会去执行第三个分支。
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ODM3NjJkOTUwNWE2MzBiNjBkYThiZGM2YzFkYzYzYzRfNUxick1IMWxpNFhNZkF3aTJNcVd6cHZjd25UU1NNeHNfVG9rZW46RU1pM2JhUFQ3b3lwZnh4S0FEVWNIZEZobjhnXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+![](images/image-2.png)
 
 第三个分支：添加一个新的线程来执行该任务
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ODEyYzcwOTFlMDMyNjllYTE0ZjNhNjRjNzcxZmUzZDJfcFV3a0ZRYXZWUTVjVGc1WGxyTVhiS0xYRW04RkpPMlNfVG9rZW46VjBWVWJFNE5jb0RVb2d4cUVpOGNRUGVqbmJkXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+![](images/image-3.png)
 
-所以介绍说,该线程池会复用之前创建的线程的含义是，如果有工作线程在等待take()任务「默认是60s」,那么就使用该工作线程来执行任务，否则会立即创建一个新的线程来执行此次任务。  
+所以介绍说,该线程池会复用之前创建的线程的含义是，如果有工作线程在等待take()任务「默认是60s」,那么就使用该工作线程来执行任务，否则会立即创建一个新的线程来执行此次任务。
 并且也可以看出,它确实只适合用来执行那些**短期**的任务,这样线程的利用率会比较高，否则如果有大量的任务是比较耗时的（在这里是大于60s），那么则会创建大量的线程，导致性能极速的下降。
 
 
 
-+ 在这里有另外一个问题：当工作线程数被设置为0后,线程池的工作流程数怎么样的呢？
+* 在这里有另外一个问题：当工作线程数被设置为0后,线程池的工作流程数怎么样的呢？
 
 这个问题,没有标准答案，因为需要根据线程池所使用的阻塞队列来做进一步判断，但是不管怎么样,只要掌握了execute()的工作原理就没什么问题。在这里总结一下execute()的工作原理：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YzFiMDAyMzE0NDBkZDliZGQ5YjMxODFlYTA5MzgwZGNfV0QyUjZoV3pJNTcyUFV5SExtUzBvdVJFb0JjNDZ1RUNfVG9rZW46VnFUTmJyVnBub28ydzl4d3EzTmNPN2U3bnBmXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+![](images/image-6.png)
 
-## newFixedThreadPool(int nthreads)
+# newFixedThreadPool(int nthreads)
+
 名字含义：固定大小的线程池「这里指的是线程的数量大小是固定的」
 
 > 官方介绍：
->
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZmJlMTc0OGExMzczNDg5ZDAxMzE2YzM0YTQ5NzdjYjFfaVI2VEdSUUhCWWdUMU02OTlOSkJEald3TVFqaHlJRGxfVG9rZW46QzVzdmJYcDZtb1loeVh4YzNQbWMxSmt1bkloXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+![](images/Clipboard_Screenshot_1759583829.png)
 
 ## 源码解析
+
 ```java
 public static ExecutorService newFixedThreadPool(int nThreads) {
     return new ThreadPoolExecutor(nThreads, nThreads,
@@ -76,10 +71,9 @@ public static ExecutorService newFixedThreadPool(int nThreads) {
 
 假设固定为10个线程,那么如果某一个时刻，这10个线程都在执行任务，那么新来的任务将会存储在阻塞队列中，等待被拉取执行「因为这里是LinkedBlockingQueue，所以offer(E e)是不会失败的，除非OOM了」
 
-+ 验证：
+* 验证：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YWZjN2I3MGEwMDI1NzAxMWRhMGNlY2Y3MmY0MTNiNGJfeEdsMG9XMGMzRncyVjZJQWdMT3pja2l0MnVLQ0tUYzZfVG9rZW46UzQ3TmJMSVBabzUxZlJ4WERRc2NCdnI5bk1mXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+![](images/image-4.png)
 
 ```java
 public static void main(String[] args) throws Exception{
@@ -110,18 +104,18 @@ public static void main(String[] args) throws Exception{
 }
 ```
 
-## newSingleThreadExecutor()
+# newSingleThreadExecutor()
+
 > 官方介绍
->
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Mzk1ZjM5M2Q2NDZiMGM0ZWQzOGIzNGM5MGM1NzY3MjRfUHcyTG5sRHZYNzliVnB3ZXNFdzlIMGpidXdGZVJCRnhfVG9rZW46RVRNcGJ2cVBEb0hIdnN4VmpxcmNRclNWbk5oXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+![](images/Clipboard_Screenshot_1759635915.png)
 
-创建一个使&#x7528;**单个工作线程**&#x7684;Executor，该线程基于无界队列进行操作。（但需注意：若此单个线程在执行过程中因故障终止，在执行后续任务时将根据需要创建新线程来替代。）**任务保证按顺序执行**，且在任一时刻最多只有一个任务处于活动状态。与功能相同但可重新配置为使用更多线程的newFixedThreadPool(1)不同，此处返回的executor确保不会被重新配置为使用额外线程。
+创建一个使&#x7528;**<span style="color: rgb(216,57,49); background-color: inherit">单个工作线程</span>**&#x7684;Executor，该线程基于无界队列进行操作。（但需注意：若此单个线程在执行过程中因故障终止，在执行后续任务时将根据需要创建新线程来替代。）**<span style="color: rgb(216,57,49); background-color: inherit">任务保证按顺序执行</span>**，且在任一时刻最多只有一个任务处于活动状态。与功能相同但可重新配置为使用更多线程的newFixedThreadPool(1)不同，此处返回的executor确保不会被重新配置为使用额外线程。
 
 关键点：单个工作线程，无界队列，任务保证按顺序执行，与newFixedThreadPool(1)不同
 
 ## 源码解析
+
 ```java
 public static ExecutorService newSingleThreadExecutor() {
     return new FinalizableDelegatedExecutorService
@@ -131,24 +125,27 @@ public static ExecutorService newSingleThreadExecutor() {
 }
 ```
 
-该方法的实现和其他现有线程池的实现有些不同,就是其使用了FinalizableDelegatedExecutorService类来包装线程池  
+该方法的实现和其他现有线程池的实现有些不同,就是其使用了FinalizableDelegatedExecutorService类来包装线程池
 这样做的目的是为了保证内部线程池只能只能有1个线程在工作「这与newFixedThreadPool()不同,虽然从名字上看来它是固定线程数,那么由于该方法返回的是一个ThreadPoolExecutor对象,其可以调用setCorePoolSize(int corePoolSize) 和 setMaximumPoolSize(int maximumPoolSize)来修改线程数配置，这样就违背了其FIX的初衷了」
 
 为了解决这个问题：在这里使用FinalizableDelegatedExecutorService类来包装,返回的是ExecutorService对象,其没有上述的两个方法,从而避免了线程数配置的修改，做到了真正的FIX
 
-由于只有一个线程在工作，所以某一时刻最多只能执行一个任务,其他任务必须在阻塞队列中等待，只适&#x5408;**任务必须严格的按照提交顺序来执行**&#x7684;场景
+由于只有一个线程在工作，所以某一时刻最多只能执行一个任务,其他任务必须在阻塞队列中等待，只适&#x5408;**<span style="color: rgb(216,57,49); background-color: inherit">任务必须严格的按照提交顺序来执行</span>**&#x7684;场景
 
 
 
-## newScheduledThreadPool()
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZWEwYjBlYzUwYmUxZjM3MjNmMjk0MjBhODgxMmQ0MzhfMWM2UEY1Wjh0R2pwZWlTMFhzVExOOTJZTXpyUjVTcnJfVG9rZW46Qm5kVGJrREFEb2h2Vnd4ekhhMmN5NU1SbmRkXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+# newScheduledThreadPool()
 
-创建一个可以调度任务&#x5728;**给定延迟**&#x540E;运行，&#x6216;**周期性执行**&#x7684;线程池。
+![](images/Clipboard_Screenshot_1759640805.png)
+
+创建一个可以调度任务&#x5728;**<span style="color: rgb(216,57,49); background-color: inherit">给定延迟</span>**&#x540E;运行，&#x6216;**<span style="color: rgb(216,57,49); background-color: inherit">周期性执行</span>**&#x7684;线程池。
 
 
 
 ## 源码解析
+
+![](images/diagram-1.png)
+
 ```java
 public static ScheduledExecutorService newScheduledThreadPool(int corePoolSize) {
     return new ScheduledThreadPoolExecutor(corePoolSize);
@@ -289,16 +286,14 @@ ScheduledFutureTask(Runnable r, V result, long triggerTime,
 }
 ```
 
-可以看到，三个调度方法其实内部调用的逻辑差不多,都会将任务包装为一个ScheduledFutureTask，不过Task的构造参数不同,在这里额外区分一下scheduleAtFixedRate()和scheduleWithFixedDelay()的区别：  
+可以看到，三个调度方法其实内部调用的逻辑差不多,都会将任务包装为一个ScheduledFutureTask，不过Task的构造参数不同,在这里额外区分一下scheduleAtFixedRate()和scheduleWithFixedDelay()的区别：
 在构造任务的时候,其传入的参数为：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NTBmMWRjY2FlYzQ4ZTNiNDI4OWNhZDZjZjY3NzYzMmFfTzRlaUdsY3haR0lWczk5d0RQNE1HYlgyNUVkMnRUbDFfVG9rZW46Q3lDOWI4a2J3b21HNkR4YzZhNWNzUUIzbk1mXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+![](images/image.png)
 
 关注点不同：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MDFiN2U2MjAzNzBhMTM1Y2ZlYmQ2MDBkYTU5NTk0OWZfOUJCTHQ3amg3bFE0cUdHSHBMSzBIWXhwMjM4b052M2pfVG9rZW46REl1M2JHZ2tLb3I2NVh4eWVoNmNaUVA1bkdkXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+![](images/Clipboard_Screenshot_1759650578.png)
 
 除此之外,schedule()方法是没有sft.outerTask = t;这行代码的，而后面的两个方法都有：这是因为schedule()方法是一次性的，任务只会在某个延迟后被执行,并不会重复执行,而后面两个方法是需要重复执行任务的。在这里使用outerTask字段来保存任务,用于后续重新入队
 
@@ -369,7 +364,9 @@ public void run() {
 
 继续看后续的代码：
 
-+ setNextRunTime() / reExecutePeriodic()
+![](images/diagram-2.png)
+
+* setNextRunTime() / reExecutePeriodic()
 
 ```java
 // ScheduledFutureTask
@@ -414,8 +411,7 @@ AtFix : 固定周期性执行任务，提交任务后不会立即执行，而是
 
 WithFix: 固定间隔周期性任务，提交任务后不会立即执行，而是过了N秒后再执行(初始延迟),这里是最大的不同，这里下一个任务的执行时间为：上一个任务执行完毕后,再等待M秒后重新执行该任务
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NGMyZGI5YWQ3OGE1NWExZjczZDY3OTU3ZTk0ZWU3OGNfZUwwamVVS1ZQUnBpeW9WZ3lZYkNuY0RDSkdpRzdQRmhfVG9rZW46T0dNbGJkTFdZb0RRQlp4bGlWSmNLenFQbnBkXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
+![](images/image-1.png)
 
 下面举个代码的例子：
 
@@ -470,3 +466,4 @@ Delay任务开始: 17:35:56.268974
 Delay任务结束: 17:35:59.269315
 Delay任务开始: 17:36:04.269708
 ```
+

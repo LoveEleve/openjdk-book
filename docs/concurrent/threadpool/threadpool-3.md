@@ -1,9 +1,9 @@
-# 线程池学习笔记（3）：Runnable、Callable 与 FutureTask
-
 > 在这篇文章中介绍一下callable和futureTask的相关内容，基于jdk11
->
 
-## runnable
+# runnable
+
+![](images/diagram.png)
+
 在这里首先先介绍一下runnable接口:特点就是没有返回值,并且也不会抛出异常
 
 (但是在run()方法中使用throw来抛出异常,并不会出现编译错误,也不会出现报错 - 这里提出一个问题:throw和throws的区别是什么？)
@@ -54,19 +54,19 @@ Runnable runnable = new Runnable() {
 
 但是确实是这样的,因为在run()方法中能够通过throw抛出的只有非受检异常,而对于受检异常则是无法通过throw来抛出的。如下：如果抛出了非受检异常,那么必须在方法内部显示的通过try-catch来处理
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NTk2MTU0MWEyNjFhNDA3ODcxOTllYWExZjE0YzFkZWJfTXZLdEMyOWc2QlpiOVFtNlBlcEJubGxZamVPczlibDVfVG9rZW46TDVISmJTaGk1b1R6VDF4OEdDdmNKVHFzbmxmXzE3Njg2NTYwMjE6MTc2ODY1OTYyMV9WNA)
+![](images/image.png)
 
 
 
----
+***
 
 下面继续来说下runnable的使用方式：
 
 任何想要由线程执行的实例都必须实现runnable接口，而这有两种方式：
 
 1. 继承Thread类(因为thread类实现了Runnable接口)
-2. 实现Runnable接口(推荐)
+
+2. 实现Runnable接口(<span style="color: rgb(216,57,49); background-color: inherit">推荐</span>)
 
 推荐第二种方式的主要原因是：职责分离(组合优于继承),Thread负责线程执行能力,而Runnable负责具体的任务逻辑
 
@@ -101,7 +101,8 @@ class Task implements Runnable {
 }
 ```
 
-## callable
+# callable
+
 而callable就解决了runnable的问题：
 
 ```java
@@ -112,12 +113,12 @@ public interface Callable<V> {
 
 但是前面说过:想要被线程执行,必须是一个runnable对象(实现Runnable接口)，而单纯的callable是无法被执行的。如下图所示：线程只会执行runnable类型的任务
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Njk3MDUyMmQ1NTYzMTdlYThiMDg3ZWVjMTM5MDk3ODJfeUNHbnZzSlBxZnh3NldTZDhkUG9vNzloRmh1VEZnTzJfVG9rZW46WUxJWmJkdDBSb2FoS3p4dFVEcGN2SDNvbk9nXzE3Njg2NTYwMjE6MTc2ODY1OTYyMV9WNA)
+![](images/image-1.png)
 
 所以要想callable被执行，那么必须把它包装为runnable - 在这里使用的就是FutureTask类，不过很明显,它还引入了另外一个接口:Future接口
 
-## Future
+# Future
+
 在上面提到过,callable已经解决了runnable不能抛出受检异常和没有返回值的问题了。其实只需要将callable包装一下即可。
 
 但是在平时使用中，所创建的任务一般都是提交给线程池来执行的,那么当外部提交任务的线程想要获取到任务的执行结果应该怎么办呢？
@@ -136,15 +137,17 @@ public interface Future<V> {
 }
 ```
 
-下面就进入到FutureTask的工作原理讲解：从isDone()可以提出一个问题：如何知道一个任务是否已经完成了呢？ -- **状态**「这一点在阅读源码之前就应该知道」
+下面就进入到FutureTask的工作原理讲解：从isDone()可以提出一个问题：如何知道一个任务是否已经完成了呢？ -- **<span style="color: rgb(216,57,49); background-color: inherit">状态</span>**「这一点在阅读源码之前就应该知道」
 
-+ 使用案例
+* 使用案例
 
 在介绍使用案例前,需要了解一个事情：execute() 和 submit()方法的区别是什么？
 
 从方法上可以看到一个很明显的区别：那就是execute()方法只能接受runnable类型的任务，而submit()方法还可以接受callcable类型的任务「当然最终是需要包装为runnable」，除此之外,execute()方法不会有任何返回值，而submit()方法则会返回一个Future对象,通过这个对象可以获得任务的执行结果「通过get()方法」
 
 还有另外一个最为重要的区别：那就是对异常的处理，这里在后面会再次讨论到,在这里先总结一下两者的区别
+
+![](images/diagram-1.png)
 
 ```java
 public void execute(Runnable command) {....}
@@ -212,16 +215,17 @@ protected <T> RunnableFuture<T> newTaskFor(Runnable runnable, T value) {
 }
 ```
 
-从上面的代码可以得出两个结论：  
-1.不管传入的任务是callable类型还是runnable类型,都会被包装为futureTask类型  
+从上面的代码可以得出两个结论：
+1.不管传入的任务是callable类型还是runnable类型,都会被包装为futureTask类型
 2.然后通过execute()来执行
 
 
 
 下面进入到FutureTask的源码：
 
-## FutureTask
-+ 构造函数
+# FutureTask
+
+* 构造函数
 
 ```java
 // @1 当提交的任务为runnable类型时,会通过callable()继续包装为callable
@@ -250,10 +254,9 @@ public FutureTask(Callable<V> callable) {
 
 此时的结构如下：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZGMxZjc2NjEyYjg0NjIzOTE4YjM2Y2Y4MWMyMDBjOTdfanhYekd4a0VqZnMzQzlJZ3czem1BekRJd0F1VDNlZUVfVG9rZW46RXFkZmJsNllZbzJGSHB4VjdZcmNKWHlHbnNkXzE3Njg2NTYwMjE6MTc2ODY1OTYyMV9WNA)
+![](images/image-4.png)
 
-+ FutureTask的状态
+* FutureTask的状态
 
 ```java
 private volatile int state;
@@ -269,8 +272,7 @@ private static final int INTERRUPTED  = 6;
 
 状态转化：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MWJhMzQ5YjllMDNkOWNjZmVjODMzODJkNDM4NWYwN2ZfQ09wYmNqZWdnWDF1bUdwZUxqd1BtOUtMZVc0UU9jTXVfVG9rZW46Vmc4aWJFVjI0b3V3M2N4SWEzZGMyMHllblFwXzE3Njg2NTYwMjE6MTc2ODY1OTYyMV9WNA)
+![](images/image-3.png)
 
 再看下futureTask的其他属性
 
@@ -339,7 +341,7 @@ private void handlePossibleCancellationInterrupt(int s) {
 }
 ```
 
-+ set(result)
+* set(result)
 
 ```java
 // 当任务正常的执行完毕
@@ -363,7 +365,7 @@ protected void set(V v) {
     }
 ```
 
-+ 异常处理
+* 异常处理
 
 ```java
 public void run() {
@@ -398,7 +400,7 @@ protected void setException(Throwable t) {
 
 这里可以看到一个重要的信息：不管任务是执行成功还是执行失败,最终都会将结果存放到返回值中,下面来看get()方法
 
-+ get()
+* get()
 
 ```java
 public V get() throws InterruptedException, ExecutionException {
@@ -460,24 +462,24 @@ private int awaitDone(boolean timed, long nanos)
 
 此时的结构如下：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NjJlYWRhZWViNGNhMjg0MWJjNGNhNTc4ZDAzMjg5ZDdfV2lmU1J6TUF4bGg4cnl3WjdRT3lkbUQycnBjaWdad3hfVG9rZW46UWhzMmJySlFGb2VPRHl4ZUdtR2N5M2x5bnJmXzE3Njg2NTYwMjE6MTc2ODY1OTYyMV9WNA)
+![](images/Clipboard_Screenshot_1759936062.png)
 
 到这里关于Future的相关知识就简单的介绍到这里，下面看下之前提到的execute()和submit()的异常处理
 
 总结一下FutureTask的工作原理：
 
-基本原理：对于futureTask任务来说，如果有线程想要获取这个任务的执行结果，那么可以通过get()来获取，  
-而futureTask内部有state,outcome和waiters属性，其中state用来标识任务的执行状态，outcome用来存放任务执行的返回值，  
-当任务没有完成时，但是有线程想要获取任务的执行结果，那么线程将会被包装为一个等待节点插入到waiter中，然后阻塞，  
-直到执行完任务的那个线程(通常是工作线程)来唤醒位于waiters上的所有阻塞线&#x7A0B;**「ps:这里是否可以优化?让被唤醒的线程去帮助唤醒,类似共享锁内部的机制,因为由线程池内部的工作线程来唤醒所有的线程,可能会降低线程池的吞吐量」**
+基本原理：对于futureTask任务来说，如果有线程想要获取这个任务的执行结果，那么可以通过get()来获取，
+而futureTask内部有state,outcome和waiters属性，其中state用来标识任务的执行状态，outcome用来存放任务执行的返回值，
+当任务没有完成时，但是有线程想要获取任务的执行结果，那么线程将会被包装为一个等待节点插入到waiter中，然后阻塞，
+直到执行完任务的那个线程(通常是工作线程)来唤醒位于waiters上的所有阻塞线&#x7A0B;**<span style="color: rgb(216,57,49); background-color: inherit">「ps:这里是否可以优化?让被唤醒的线程去帮助唤醒,类似共享锁内部的机制,因为由线程池内部的工作线程来唤醒所有的线程,可能会降低线程池的吞吐量」</span>**
 
 如果要实现的话：工作线程只需要唤醒首节点对应的线程即可,然后工作线程就完成了它的工作,而被唤醒的线程在get()中唤醒它的下一个线程(同样只是唤醒一个线程,下面以此类推.....)
 
-## 异常处理
+# 异常处理
+
 这里再讨论一下关于线程池的异常处理:
 
-通常来说：当执行任务时出现了异常,那么对应的工作线程会退出,然后再替换一个新的工作线程  
+通常来说：当执行任务时出现了异常,那么对应的工作线程会退出,然后再替换一个新的工作线程
 但是如果提交给线程池执行的run()方法在内部自己捕获了异常,并且没用再次throw出去,那么是不会替换工作线程的
 
 代码如下：
@@ -519,8 +521,7 @@ public static void exeTask(String name){
 
 执行结果：线程没有替换
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MmY3ODZiY2E4YzExOGI5YTNmOGFkYmEzMTViZTA3MDhfMnRUV3pNc0hmMzVtYUpidjBaUlRzS0tacTNXQjNGS1NfVG9rZW46RWdhbmIyc042b0VUMDh4a0ZvVWNsQWhqbnFnXzE3Njg2NTYwMjE6MTc2ODY1OTYyMV9WNA)
+![](images/Clipboard_Screenshot_1759973474.png)
 
 但是如果没有处理,或者处理了但是继续向外抛,那么就会替换新的线程
 
@@ -538,10 +539,9 @@ public static void exeTask(String name){
 
 执行结果：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MWE3YzY3YWM1YmYwMjNmZTkzN2U1MzIxZDFjZGE3M2VfNW1oT3hTaThKcWlkM2VSaWhwZlBEYUVnQmNzMnVTbUhfVG9rZW46WEk4ZWJ1VFoxb1VjTGh4bmJRSmNId2NFbmxnXzE3Njg2NTYwMjE6MTc2ODY1OTYyMV9WNA)
+![](images/image-5.png)
 
-+ 但是如果使用的是submit()来提交的话,那么不管是否在run()方法中处理了异常「抛出还是没抛出」,最终在控制台都不会看到异常信息
+* 但是如果使用的是submit()来提交的话,那么不管是否在run()方法中处理了异常「抛出还是没抛出」,最终在控制台都不会看到异常信息
 
 ```java
 // 只将execute()修改为submit()
@@ -558,10 +558,9 @@ public static void main(String[] args) {
 }
 ```
 
-+ 最终结果
+* 最终结果
 
-<!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NDZkMTBiNDM5ZmVkYTdlMzg2YWRmYzY3NGY5Zjk3OTZfU3JSM205eENndHVWSHI0bnZURFROR2t0SmhFejFYZzhfVG9rZW46TEYxYWIyV3lQb25WTmp4YnJGV2NvNkZNbnlnXzE3Njg2NTYwMjE6MTc2ODY1OTYyMV9WNA)
+![](images/image-2.png)
 
 这是为什么呢？
 
@@ -595,7 +594,7 @@ public void run() {
 
 ```
 
-+ 那么应该如何处理和线程池相关的异常呢?
+* 那么应该如何处理和线程池相关的异常呢?
 
 第一种方式：在我们提交的run()方法中使用try()catch{}来处理异常
 
@@ -663,7 +662,7 @@ ThreadFactory threadFactory = new ThreadFactory() {
 };
 ```
 
-+ 使用案例
+* 使用案例
 
 ```java
 public class exHandleTest {
@@ -728,7 +727,7 @@ try {
 }
 ```
 
-+ 使用案例
+* 使用案例
 
 ```java
 public static void main(String[] args) {
@@ -760,3 +759,5 @@ public static void main(String[] args) {
 afterExecute--->
 java.lang.RuntimeException: --custom error--
 ```
+
+![](images/diagram-2.png)
