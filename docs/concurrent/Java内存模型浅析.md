@@ -64,7 +64,7 @@ JMM定义了线程和主内存之间的抽象关系：线程之间的共享变�
 >
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片1](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZGNhZDJmZjliZDVhNTk3ODIxOWU3ZTZjMWRhNmY4ZmZfTm1PbXhSWmd6Zk56YlR3Q1RsWXExUVhXQmRwdDNpRG1fVG9rZW46RmVXQmJBYXJEb0tCTGR4MmpBeGNXQWE5bnh3XzE3Njg2NDM4NTI6MTc2ODY0NzQ1Ml9WNA "图片链接可能已过期，如无法显示请联系作者")
+![图片1](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片1 - 原图片链接已过期")
 
 + 屏障
 
@@ -104,7 +104,7 @@ JMM定义了线程和主内存之间的抽象关系：线程之间的共享变�
 >
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片2](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YWExNThiMTI0ZmZlMWNmYzk5OTMzMmI3MTdhYWQ5NTBfNElGMkNnalBabnAyRzNmM1U5NDhMTnlYcnEyOEh3ZktfVG9rZW46V2pLS2JnR0Nobzhxbzd4Y1lSb2NZRFBZbm5jXzE3Njg2NDM4NTI6MTc2ODY0NzQ1Ml9WNA "图片链接可能已过期，如无法显示请联系作者")
+![图片2](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片2 - 原图片链接已过期")
 
 + 单例模式
 
@@ -127,7 +127,7 @@ JMM定义了线程和主内存之间的抽象关系：线程之间的共享变�
 >
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片3](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZDlhZDdiZDRjYTBlMjcwZDk3YzA1MDBlNTNlZjA2YzNfMnEyNUl3b1NXWkdVT24zVVNSWDdpRjBVOHczaWJucklfVG9rZW46RGFQd2JLSjlxb0xwWFh4OUlXQWNEN0REbmlmXzE3Njg2NDM4NTI6MTc2ODY0NzQ1Ml9WNA "图片链接可能已过期，如无法显示请联系作者")
+![图片3](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片3 - 原图片链接已过期")
 
 多个线程调用，一个线程在写，另外的线程在读，并且没有使用正确的同步机制，存在数据安全，而这里就会和有序性挂钩了,在这里new操作并不是一个原子性的操作，在底层会被分解成更加细致的粒度：通常认为是
 
@@ -151,7 +151,7 @@ JMM定义了线程和主内存之间的抽象关系：线程之间的共享变�
 那么第一种写法存在这个问题吗？答案是不存在的
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片4](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZGYwZWIyYjY4Yzc5NWQzNGEzZmZjMGQxYmZmZmFlODRfYkxaTk5wU09DWUZKNlJCZDFRMGZsN1VuQ3VTT2ptNGNfVG9rZW46Um90UmJwOHVvb0JMaTB4TTFLbmNJYTdrblFjXzE3Njg2NDM4NTI6MTc2ODY0NzQ1Ml9WNA "图片链接可能已过期，如无法显示请联系作者")
+![图片4](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片4 - 原图片链接已过期")
 
 
 
@@ -165,7 +165,7 @@ JMM定义了线程和主内存之间的抽象关系：线程之间的共享变�
 >
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片5](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NWM4M2I5ZWFiNzg0OWY5YTQ3OGMyZmE2ZDMwY2VmYmVfcVF2eWVMdEw2VHBvQ21MemYzR2RXRVgzMHpCTW9QTjNfVG9rZW46Qzl2SWJNa2pKb1Q2TzZ4VDJvd2Nmdjc5bmloXzE3Njg2NDM4NTI6MTc2ODY0NzQ1Ml9WNA "图片链接可能已过期，如无法显示请联系作者")
+![图片5](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片5 - 原图片链接已过期")
 
 > 在这里并没有去关注JIT中(C1/C2)中的屏障实现,后面会简单的提一下
 >
@@ -236,7 +236,7 @@ JMM定义了线程和主内存之间的抽象关系：线程之间的共享变�
 + 读一个volatile变量,在读这个变量之前的其他操作其实和这里的读操作没关系，重点是在该读操作的后面的读写操作与该volatile读必须保证顺序一致性
 
 > <!-- 这是一张图片，ocr 内容为： -->
-![图片6](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MWMxNDBmOGEzMzQzZWQ5NTI0Mzg5ZDJkMzk4NjMwYmVfVU9mMm1UaUVsY2lEcU1NSFBqSFNlWFhZQjJ5dVY2MkhfVG9rZW46QWVNeGJETGowbzJqZ0Z4bWV0TGMyVmVvblZjXzE3Njg2NDM4NTI6MTc2ODY0NzQ1Ml9WNA "图片链接可能已过期，如无法显示请联系作者")
+![图片6](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片6 - 原图片链接已过期")
 >
 
 为什么不允许读写操作重排序到前面呢？对于写操作很好理解，代码如下：
@@ -283,7 +283,7 @@ final的内存语义：
 
 ### 2.3 synchronized
 <!-- 这是一张图片，ocr 内容为： -->
-![图片7](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ODA5NWVmMDA0YzJmNmIxYmM0YjM5ODRmYjYwZDhmNjRfNjR4ajZ2aUZVc1NTeXpjZ1Q2enRCZ1dyUWFtcnJrUEVfVG9rZW46TlczSWJYRThMb0pOb2J4M0Y3cGNZMW0zblhkXzE3Njg2NDM4NTI6MTc2ODY0NzQ1Ml9WNA "图片链接可能已过期，如无法显示请联系作者")
+![图片7](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片7 - 原图片链接已过期")
 
 可以看到synchronized需要保证：
 
@@ -292,5 +292,5 @@ final的内存语义：
 + 释放锁之后,在临界区的写操作需要对其他处理器可见
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片8](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZTRiMWFjOGIyNWE4ODNhODZjMDk0ZmU5MDcyZDBjNTJfVUUzZEZQeXVtVDdmUGtBYkxVN2hsQTZWeE8xTjV2Q1dfVG9rZW46UkNIUWJHZVdhb1ZWVFR4Z0ViQmNVVzVnbkxtXzE3Njg2NDM4NTI6MTc2ODY0NzQ1Ml9WNA "图片链接可能已过期，如无法显示请联系作者")
+![图片8](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片8 - 原图片链接已过期")
 
