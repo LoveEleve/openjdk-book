@@ -34,6 +34,14 @@
       display: none !important;
     }
 
+    /* 侧边栏：高并发容器是单文档，左侧不再重复展示页面目录（右侧已有目录） */
+    .sidebar-nav a[href^="#/concurrent/concurrent-container"] + ul {
+      display: none !important;
+    }
+    .sidebar-nav a[href^="#/concurrent/concurrent-container"]::after {
+      display: none !important;
+    }
+
     /* ---------------- 代码块：统一顶栏 + 行级折叠（直接在代码块内） ---------------- */
     pre[data-lang] {
       position: relative !important;
