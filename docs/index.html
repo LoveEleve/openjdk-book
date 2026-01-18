@@ -530,34 +530,63 @@
     }
 
     .toc-action {
-      width: 28px;
-      height: 28px;
+      width: 30px;
+      height: 30px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      border-radius: 10px;
+      border-radius: 12px;
       border: 1px solid rgba(0, 0, 0, 0.08);
-      background: rgba(255, 255, 255, 0.7);
+      background: rgba(255, 255, 255, 0.75);
       color: #57606a;
       cursor: pointer;
-      font-size: 14px;
       line-height: 1;
       user-select: none;
+      transition: transform 120ms ease, background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+    }
+
+    .toc-icon {
+      width: 16px;
+      height: 16px;
+      display: block;
     }
 
     .toc-action:hover {
+      transform: translateY(-1px);
       background: rgba(66, 185, 131, 0.10);
-      border-color: rgba(66, 185, 131, 0.22);
+      border-color: rgba(66, 185, 131, 0.26);
       color: #1f2328;
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.10);
+    }
+
+    .toc-action:active {
+      transform: translateY(0);
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
     }
 
     .toc-action.is-disabled {
-      opacity: 0.45;
+      opacity: 0.42;
+      filter: saturate(0.8);
       pointer-events: none;
+      box-shadow: none;
     }
 
     .toc-action.is-hidden {
       display: none;
+    }
+
+    html[data-theme="dark"] .toc-action,
+    html[data-theme="dark"] .toc-close {
+      background: rgba(22, 27, 34, 0.72);
+      border-color: rgba(255, 255, 255, 0.08);
+      color: rgba(230, 237, 243, 0.78);
+    }
+
+    html[data-theme="dark"] .toc-action:hover,
+    html[data-theme="dark"] .toc-close:hover {
+      background: rgba(66, 185, 131, 0.10);
+      border-color: rgba(66, 185, 131, 0.28);
+      color: rgba(230, 237, 243, 0.92);
     }
 
     .toc-close {
@@ -2144,8 +2173,18 @@
                 <div class="toc-head">
                   <div class="toc-title">目录</div>
                   <div class="toc-actions">
-                    <button type="button" class="toc-action toc-back is-disabled" aria-label="返回上次阅读位置" title="返回上次阅读位置">↩</button>
-                    <button type="button" class="toc-action toc-top" aria-label="回到顶部" title="回到顶部">↑</button>
+                    <button type="button" class="toc-action toc-back is-disabled" aria-label="返回上次阅读位置" title="返回上次阅读位置">
+                      <svg class="toc-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M9 14l-4-4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        <path d="M20 20v-6a4 4 0 0 0-4-4H5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                      </svg>
+                    </button>
+                    <button type="button" class="toc-action toc-top" aria-label="回到顶部" title="回到顶部">
+                      <svg class="toc-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M12 19V5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        <path d="M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                      </svg>
+                    </button>
                     <button type="button" class="toc-close" aria-label="关闭目录" title="关闭">×</button>
                   </div>
                 </div>
