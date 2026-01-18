@@ -666,6 +666,72 @@
       font-weight: 800;
     }
 
+    /* TOC 目录树：h2 分组 + 子项折叠 */
+    .toc-group {
+      margin: 2px 0 6px;
+    }
+
+    .toc-group-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .toc-group-toggle {
+      width: 22px;
+      height: 22px;
+      border-radius: 8px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      background: rgba(255, 255, 255, 0.6);
+      color: inherit;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+    }
+
+    .toc-group-toggle.is-hidden {
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .toc-caret {
+      width: 14px;
+      height: 14px;
+      display: block;
+      opacity: 0.8;
+      transition: transform 120ms ease;
+    }
+
+    .toc-group.is-collapsed .toc-caret {
+      transform: rotate(-90deg);
+    }
+
+    .toc-group-link {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .toc-children {
+      margin: 4px 0 0 11px;
+      padding-left: 8px;
+      border-left: 1px dashed rgba(0, 0, 0, 0.10);
+    }
+
+    .toc-group.is-collapsed .toc-children {
+      display: none;
+    }
+
+    html[data-theme="dark"] .toc-group-toggle {
+      background: rgba(22, 27, 34, 0.60);
+      border-color: rgba(255, 255, 255, 0.10);
+    }
+
+    html[data-theme="dark"] .toc-children {
+      border-left-color: rgba(255, 255, 255, 0.14);
+    }
+
     .toc-l1 { padding-left: 0; font-weight: 900; }
     .toc-l2 { padding-left: 0; }
     .toc-l3 { padding-left: 12px; }
@@ -2088,6 +2154,56 @@
                 return;
               }
 
+              const toggleBtn = t && t.closest ? t.closest('#toc-aside .toc-group-toggle') : null;
+              if (toggleBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const gid = (toggleBtn.getAttribute && toggleBtn.getAttribute('data-group-id')) ? (toggleBtn.getAttribute('data-group-id') || '') : '';
+                if (!gid) return;
+
+                const toc = ensureToc();
+                const body = toc ? toc.querySelector('#toc-body') : null;
+                const esc = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape : (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => `\\${c}`);
+                const group = body ? body.querySelector(`.toc-group[data-group-id="${esc(gid)}"]`) : null;
+                const children = group ? group.querySelector('.toc-children') : null;
+                if (!group || !children || !children.children || !children.children.length) return;
+
+                const willCollapse = !group.classList.contains('is-collapsed');
+                if (willCollapse) {
+                  group.classList.add('is-collapsed');
+                } else {
+                  // 展开当前章节，同时折叠其他章节
+                  try {
+                    body.querySelectorAll('.toc-group').forEach((el) => {
+                      if (el !== group) {
+                        const ch = el.querySelector('.toc-children');
+                        if (ch && ch.children && ch.children.length) el.classList.add('is-collapsed');
+                      }
+                    });
+                  } catch (e) { /* ignore */ }
+                  group.classList.remove('is-collapsed');
+                }
+
+                // 持久化折叠状态（按页面 routeKey 记）
+                try {
+                  const p = ((location.hash || '#/').split('?')[0] || '#/');
+                  const routeKey = String(p || '').replace(/^#/, '').split('?')[0] || '/';
+                  const key = `toc-tree:${routeKey}`;
+                  const raw = localStorage.getItem(key);
+                  const obj = raw ? JSON.parse(raw) : {};
+                  const collapsed = (obj && obj.collapsed && typeof obj.collapsed === 'object') ? obj.collapsed : {};
+                  if (group.classList.contains('is-collapsed')) collapsed[gid] = 1;
+                  else delete collapsed[gid];
+
+                  // 展开时记住 lastOpen（用于下次进入该页默认展开）
+                  const lastOpen = (!group.classList.contains('is-collapsed')) ? gid : ((obj && typeof obj.lastOpen === 'string') ? obj.lastOpen : '');
+                  localStorage.setItem(key, JSON.stringify({ v: 1, collapsed: collapsed, lastOpen: lastOpen }));
+                } catch (e) { /* ignore */ }
+
+                return;
+              }
+
               const closeBtn = t && t.closest ? t.closest('#toc-aside .toc-close') : null;
               if (closeBtn) {
                 e.preventDefault();
@@ -2278,14 +2394,149 @@
             ensureTocMobileDelegation();
             setTocFabState(true);
             try { setTocBackState(); } catch (e) { /* ignore */ }
-            body.innerHTML = items
-              .map((it) => {
-                const cls = it.level === 'h1' ? 'toc-l1' : it.level === 'h2' ? 'toc-l2' : it.level === 'h3' ? 'toc-l3' : 'toc-l4';
-                return `<a class="${cls}" href="#/${(vm && vm.route && vm.route.path ? vm.route.path : '').replace(/^\//, '')}?id=${encodeURIComponent(it.id)}" data-target="${it.id}">${escapeHtml(it.text)}</a>`;
+            const routePath = (vm && vm.route && vm.route.path ? vm.route.path : '').replace(/^\//, '');
+            const routeKey = (function () {
+              try {
+                const p = (vm && vm.route && vm.route.path) ? vm.route.path : ((location.hash || '#/').split('?')[0] || '#/');
+                return String(p || '').replace(/^#/, '').split('?')[0] || '/';
+              } catch (e) {
+                return '/';
+              }
+            })();
+
+            const treeState = (function () {
+              try {
+                const key = `toc-tree:${routeKey}`;
+                const raw = localStorage.getItem(key);
+                const obj = raw ? JSON.parse(raw) : null;
+                const collapsed = (obj && obj.collapsed && typeof obj.collapsed === 'object') ? obj.collapsed : {};
+                const lastOpen = (obj && typeof obj.lastOpen === 'string') ? obj.lastOpen : '';
+                return { key, collapsed, lastOpen };
+              } catch (e) {
+                return { key: '', collapsed: {}, lastOpen: '' };
+              }
+            })();
+
+            function persistTreeState(next) {
+              try {
+                if (!treeState.key) return;
+                const payload = {
+                  v: 1,
+                  collapsed: next && next.collapsed ? next.collapsed : treeState.collapsed,
+                  lastOpen: (next && typeof next.lastOpen === 'string') ? next.lastOpen : treeState.lastOpen
+                };
+                localStorage.setItem(treeState.key, JSON.stringify(payload));
+              } catch (e) { /* ignore */ }
+            }
+
+            function setCollapsed(groupId, collapsed) {
+              try {
+                if (!groupId) return;
+                if (collapsed) treeState.collapsed[groupId] = 1;
+                else delete treeState.collapsed[groupId];
+                persistTreeState({ collapsed: treeState.collapsed, lastOpen: treeState.lastOpen });
+              } catch (e) { /* ignore */ }
+            }
+
+            function setLastOpen(groupId) {
+              try {
+                if (!groupId) return;
+                treeState.lastOpen = groupId;
+                persistTreeState({ collapsed: treeState.collapsed, lastOpen: treeState.lastOpen });
+              } catch (e) { /* ignore */ }
+            }
+
+            // --- 构建目录树：按 h2 分组，h3/h4 作为子项 ---
+            const hasH2 = items.some((it) => it.level === 'h2');
+            const groupLevel = hasH2 ? 'h2' : (items.some((it) => it.level === 'h1') ? 'h1' : (items[0] ? items[0].level : 'h2'));
+            const groups = [];
+            let cur = null;
+            for (let i = 0; i < items.length; i++) {
+              const it = items[i];
+              if (it.level === groupLevel) {
+                cur = { id: it.id, text: it.text, level: it.level, children: [] };
+                groups.push(cur);
+              } else {
+                if (!cur) {
+                  cur = { id: it.id, text: it.text, level: groupLevel, children: [] };
+                  groups.push(cur);
+                }
+                // 仅把 h3/h4 当作子项（避免把 h2/h1 重复塞进去）
+                if (it.level === 'h3' || it.level === 'h4') cur.children.push(it);
+              }
+            }
+
+            const idToGroup = new Map();
+            const groupIds = [];
+
+            body.innerHTML = groups
+              .map((g, idx) => {
+                const gid = g.id || `tocg-${idx}`;
+                groupIds.push(gid);
+                idToGroup.set(g.id, gid);
+                const collapsed = !!treeState.collapsed[gid];
+                const groupCls = collapsed ? 'toc-group is-collapsed' : 'toc-group';
+                const toggleHidden = g.children && g.children.length ? '' : ' is-hidden';
+
+                const headCls = g.level === 'h1' ? 'toc-l1' : 'toc-l2';
+                const headLink = `<a class="toc-group-link ${headCls}" href="#/${routePath}?id=${encodeURIComponent(g.id)}" data-target="${g.id}" data-group="${gid}">${escapeHtml(g.text)}</a>`;
+
+                const childrenHtml = (g.children || [])
+                  .map((c) => {
+                    idToGroup.set(c.id, gid);
+                    const cls = c.level === 'h3' ? 'toc-l3' : 'toc-l4';
+                    return `<a class="toc-child ${cls}" href="#/${routePath}?id=${encodeURIComponent(c.id)}" data-target="${c.id}" data-group="${gid}">${escapeHtml(c.text)}</a>`;
+                  })
+                  .join('');
+
+                return `
+                  <div class="${groupCls}" data-group-id="${escapeHtml(gid)}">
+                    <div class="toc-group-head">
+                      <button type="button" class="toc-group-toggle${toggleHidden}" data-group-id="${escapeHtml(gid)}" aria-label="折叠/展开章节" title="折叠/展开">
+                        <svg class="toc-caret" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        </svg>
+                      </button>
+                      ${headLink}
+                    </div>
+                    <div class="toc-children">${childrenHtml}</div>
+                  </div>
+                `;
               })
               .join('');
 
             const links = Array.from(body.querySelectorAll('a[data-target]'));
+
+            function collapseAllExcept(groupId) {
+              try {
+                body.querySelectorAll('.toc-group').forEach((el) => {
+                  const gid = el.getAttribute('data-group-id') || '';
+                  if (!gid) return;
+                  if (gid === groupId) el.classList.remove('is-collapsed');
+                  else if (el.querySelector('.toc-children') && el.querySelector('.toc-children').children.length) el.classList.add('is-collapsed');
+                });
+              } catch (e) { /* ignore */ }
+            }
+
+            function syncTreeById(id, persist) {
+              const gid = idToGroup.get(id);
+              if (!gid) return;
+              collapseAllExcept(gid);
+              if (persist) {
+                setLastOpen(gid);
+                // 如果这个章节曾被手动折叠过，这里展开后同步清掉折叠记录
+                setCollapsed(gid, false);
+              }
+            }
+
+            // 初始展开：优先 URL 里的 id，其次用 lastOpen
+            try {
+              const hash = location.hash || '';
+              const q = hash.includes('?') ? hash.split('?')[1] : '';
+              const id = q ? (new URLSearchParams(q).get('id') || '') : '';
+              if (id && idToGroup.has(id)) syncTreeById(id, false);
+              else if (treeState.lastOpen && groupIds.includes(treeState.lastOpen)) collapseAllExcept(treeState.lastOpen);
+            } catch (e) { /* ignore */ }
 
             function setActive(id) {
               if (!id) return;
@@ -2312,6 +2563,7 @@
 
                   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   setActive(id);
+                  try { syncTreeById(id, true); } catch (e) { /* ignore */ }
                   replaceUrlId(id);
                   try {
                     if (window.innerWidth <= 1023) toc.classList.remove('is-open');
@@ -2355,6 +2607,7 @@
               if (picked && picked !== currentId) {
                 currentId = picked;
                 setActive(picked);
+                try { syncTreeById(picked, false); } catch (e) { /* ignore */ }
               }
             }
 
@@ -2376,6 +2629,7 @@
                   if (id && id !== currentId) {
                     currentId = id;
                     setActive(id);
+                    try { syncTreeById(id, false); } catch (e) { /* ignore */ }
                   }
                 }
               },
