@@ -43,7 +43,26 @@
     }
 
     /* 确保"高并发容器"与同级项目格式对齐：统一缩进、字号、行高 */
+    /* 二级菜单项的统一样式 */
+    .sidebar-nav > ul > li > ul > li > a {
+      font-size: inherit !important;
+      line-height: inherit !important;
+      padding-left: 20px !important;
+      margin-left: 0 !important;
+      font-weight: inherit !important;
+    }
+    
+    /* 特别针对"高并发容器"确保与"synchronized"、"线程池"标题对齐 */
     .sidebar-nav a[href^="#/concurrent/concurrent-container"] {
+      font-size: inherit !important;
+      line-height: inherit !important;
+      padding-left: 20px !important;
+      margin-left: 0 !important;
+      font-weight: inherit !important;
+    }
+    
+    /* 确保二级分组标题（synchronized、线程池）的样式一致 */
+    .sidebar-nav > ul > li > ul > li:not(:has(a)) {
       font-size: inherit !important;
       line-height: inherit !important;
       padding-left: 20px !important;
