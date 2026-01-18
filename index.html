@@ -1944,6 +1944,7 @@
 
           let tocMobileDelegationInited = false;
           let tocJumpStack = [];
+          let tocLastRoutePath = '';
 
           function getScrollTop() {
             const doc = document.documentElement;
@@ -1966,7 +1967,9 @@
             if (!btn) return;
 
             const canBack = tocJumpStack.length > 0;
-            btn.classList.toggle('is-hidden', !canBack);
+
+            // 保持按钮可见：无返回点时置灰（更符合用户预期，也方便发现功能）
+            try { btn.classList.remove('is-hidden'); } catch (e) { /* ignore */ }
             btn.classList.toggle('is-disabled', !canBack);
             try { btn.setAttribute('aria-disabled', canBack ? 'false' : 'true'); } catch (e) { /* ignore */ }
           }
@@ -2141,7 +2144,7 @@
                 <div class="toc-head">
                   <div class="toc-title">目录</div>
                   <div class="toc-actions">
-                    <button type="button" class="toc-action toc-back is-hidden" aria-label="返回上次阅读位置" title="返回上次阅读位置">↩</button>
+                    <button type="button" class="toc-action toc-back is-disabled" aria-label="返回上次阅读位置" title="返回上次阅读位置">↩</button>
                     <button type="button" class="toc-action toc-top" aria-label="回到顶部" title="回到顶部">↑</button>
                     <button type="button" class="toc-close" aria-label="关闭目录" title="关闭">×</button>
                   </div>
@@ -2235,6 +2238,7 @@
             try { document.body.classList.add(TOC_BODY_CLASS); } catch (e) { /* ignore */ }
             ensureTocMobileDelegation();
             setTocFabState(true);
+            try { setTocBackState(); } catch (e) { /* ignore */ }
             body.innerHTML = items
               .map((it) => {
                 const cls = it.level === 'h1' ? 'toc-l1' : it.level === 'h2' ? 'toc-l2' : it.level === 'h3' ? 'toc-l3' : 'toc-l4';
@@ -2728,8 +2732,15 @@
             try { ensureTocMobileDelegation(); } catch (e) { /* ignore */ }
             try { setTocFabState(false); } catch (e) { /* ignore */ }
 
-            // 目录跳转返回栈：每次路由切换都清空，避免跨页面“返回到错误位置”
-            try { tocJumpStack = []; } catch (e) { /* ignore */ }
+            // 目录跳转返回栈：仅在真正换页面（path 变化）时清空，避免同页更新导致“返回点”丢失
+            try {
+              const p = (vm && vm.route && vm.route.path) ? vm.route.path : ((location.hash || '#/').split('?')[0] || '#/');
+              const norm = String(p || '');
+              if (!tocLastRoutePath || norm !== tocLastRoutePath) {
+                tocJumpStack = [];
+                tocLastRoutePath = norm;
+              }
+            } catch (e) { /* ignore */ }
             try { setTocBackState(); } catch (e) { /* ignore */ }
 
             // 右侧目录：自动生成 + 当前小节高亮
