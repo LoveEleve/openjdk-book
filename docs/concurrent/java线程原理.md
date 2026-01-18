@@ -1,19 +1,18 @@
 从java的视角来看线程可以分为三个层次,java线程,jvm线程,linux内核线程,在本篇文章中就从下向上简要的分析一下线程的原理
 
 # 一：前置概念
+
 > 目标:需要搞清楚在Linux内核中(真实操作系统),线程和进程到底的真实面貌是什么？以及相关的Linux系统编程
->
 
 ## 1.为什么要有进程？
+
 进程的概念是随着操作系统的不断发展而引入的,这里比较关键的两个时期就是单道批处理系统和多道批处理系统
 
 > 这里的批处理系统指的是程序员将作业(早期是称为job的)按照顺序组织好,将整个批作业放在输入设备上,供监控程序(monitor，早期操作系统的雏形，常驻在内存中的一段程序)使用，每个程序完成后,控制权从程序返回到monitor，然后又monitor自动的加载下一个程序
->
 
-+ 单道批处理系统
+* 单道批处理系统
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片1](java线程原理/images/image-1.png)
+![](images/image-11.png)
 
 这种工作模式的特点就是一次只能运行一个JOB,这个JOB独占计算机的所有资源(CPU,内存...),直到它运行完毕,Monitor才会去加载下一个JOB将来。
 
@@ -21,12 +20,11 @@
 
 为了解决这个问题,引入了多道批处理系统.
 
-+ 多道批处理系统
+* 多道批处理系统
 
 该系统允许在内存中同时存放多个程序,当某个程序需要等待IO时,Monitor可以选择切换到另外一个程序中去执行,这样就能充分的利用CPU资源了
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片2](java线程原理/images/image-2.png)
+![](images/image-10.png)
 
 那么这就引入了新的问题(当然不止一个问题)，那就是如何管理和描述这些正在运行的程序呢？
 
@@ -36,258 +34,146 @@
 
 > 当然该阶段需要解决的问题绝不止提出进程的概念这么简单,比如：
 >
-> 1. 内存管理：当多个程序同时处于内存中时,如何防止一个程序只会访问自己的代码和数据呢？
-> 2. 定时器(调度)：当多个程序同时存在时，如果程序并没有执行IO操作呢？而是一直计算呢？那其他程序岂不是永远无法被执行了? 「所以这里不能依赖程序猿所写的代码来进行切换」
-> 3. 中断：当被切换的程序对应的IO事件执行完毕了，如何通知CPU呢？
-> 4. ....
+> 1. 内存管理：当多个程序同时处于内存中时,如何防止一个程序只会访问自己的代码和数据呢？&#x20;
 >
+> 2. 定时器(调度)：当多个程序同时存在时，如果程序并没有执行IO操作呢？而是一直计算呢？那其他程序岂不是永远无法被执行了? 「所以这里不能依赖程序猿所写的代码来进行切换」
+>
+> 3. 中断：当被切换的程序对应的IO事件执行完毕了，如何通知CPU呢？
+>
+> 4. ....
 
 总结一下：为什么要有进程？
 
-**本质上还是为了****<font style="color:rgb(216,57,49);">提升性能</font>****,在多道批处理系统中,为了能够尽量的榨干CPU,当某个程序在等待IO操作时,CPU可以去执行另外一个就绪的程序，而为了保证程序在被切换回来后能够正常的继续的往下执行，需要有一个实体来抽象和封装一个程序的执行现场，这个实体就是进程。**
+**本质上还是为了<span style="color: rgb(216,57,49); background-color: inherit">提升性能</span>,在多道批处理系统中,为了能够尽量的榨干CPU,当某个程序在等待IO操作时,CPU可以去执行另外一个就绪的程序，而为了保证程序在被切换回来后能够正常的继续的往下执行，需要有一个实体来抽象和封装一个程序的执行现场，这个实体就是进程。**
 
-> 体会到的哲学：**<font style="color:rgb(216,57,49);">为了解决一个问题而引入的方法，往往会带来新的问题</font>**
->
+> 体会到的哲学：**<span style="color: rgb(216,57,49); background-color: inherit">为了解决一个问题而引入的方法，往往会带来新的问题</span>**
 
 ## 2.可执行文件的出现
+
 目前出现了许许多多的高级语言，换句话说,我们可以使用Python,java,c++等语言来编写程序，而这些程序想要变成进程,那么就需要Monitor(也就是操作系统)来进行加载，这个就有个问题，那就是操作系统需要为不同的语言编写的程序来实现不同的加载代码吗？
 
 如果是这样,那么操作系统的代码将会变得十分臃肿并且难以维护。所以为了解决这个问题,就引入了可执行文件这个概念，所有的现代操作系统都定义了标准的可执行文件格式(**Linux中的ELF,**~~Windows上的PE~~等)。
 
 不管是什么编程语言,最终都必须编译或者转换为标准的格式,内核只看可执行文件，而不关心是什么编程语言编写的程序。内核只需要一个ELF加载器,就能处理不同语言生成的可执行文件
 
-> _"All problems in computer science can be solved by another level of indirection, except of course for the problem of too many indirections."_  
-计算机科学中的所有问题都可以通过增加一个间接层来解决,当然,除了间接层过多这个问题本身
->
+> *"All problems in computer science can be solved by another level of indirection, except of course for the problem of too many indirections."*
+> 计算机科学中的所有问题都可以通过增加一个间接层来解决,当然,除了间接层过多这个问题本身
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片3](java线程原理/images/image-3.png)
+![](images/image-9.png)
 
 > 那Java呢?Java文件的执行原理首先编译为.class文件啊,然后再由jvm加载.class文件,并没有看到什么可执行文件啊？关于这部分在介绍JVM的会单独出一篇文章来讲述JVM的启动
->
 
 ## 3.ELF简介
-```c
-// hello.c
-#include<stdio.h>
-int main()
-{
-    printf("hello,world!\n");
-    return 0;
-}
-```
 
 这个是我写的一个简单的c语言程序,从我写的hello.c到控制台输出hello,world!
 
 这中间到底都经历了些什么呢？
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片4](java线程原理/images/image-4.png)
+![](images/image-8.png)
 
 ### 3.1 可执行文件的生成
+
 从一个hello.c文件到真正可以被执行,中间需要经历许多步骤,在这里首先学习一下到从c源文件到目标文件的过程。
 
-也即：预处理 - 汇编 - **<font style="color:rgb(216,57,49);">编译</font>** -> 当编译之后生成的文件就是一个目标文件(xxx.o文件)
+也即：预处理 - 汇编 - **<span style="color: rgb(216,57,49); background-color: inherit">编译</span>** -> 当编译之后生成的文件就是一个目标文件(xxx.o文件)
 
-> 虽然xxx.o文件是ELF格式的,但是它是一个不可执行的文件(通过file命令可以知道这是一&#x4E2A;**<font style="color:rgb(216,57,49);">可重定位</font>**&#x7684;文件)
+> 虽然xxx.o文件是ELF格式的,但是它是一个不可执行的文件(通过file命令可以知道这是一&#x4E2A;**<span style="color: rgb(216,57,49); background-color: inherit">可重定位</span>**&#x7684;文件)
 >
-> 那么接下来就简要地分析一下这三个步骤(预处理 / **编译** / 汇编 都做了什么，以&#x53CA;**<font style="color:rgb(216,57,49);">xxx.o文件中都有什么(core)</font>**
->
+> 那么接下来就简要地分析一下这三个步骤(预处理 / **编译** / 汇编 都做了什么，以&#x53CA;**<span style="color: rgb(216,57,49); background-color: inherit">xxx.o文件中都有什么(core)</span>**
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片5](java线程原理/images/image-5.png)
+![](images/Clipboard_Screenshot_1764771231.png)
 
-+ 预处理
+* 预处理
 
 这一步骤的主要职责是处理.c文件中的预处理指令(以#开头)，然后生成一个.i文件
 
-+ 编译
+* 编译
 
 这一步骤的主要职责是将预处理后的文件翻译为汇编代码，这通常是通过编译器来完成的，编译的过程一般可以分为以下几步：**扫描，语法分析，语义分析，中间代码生成(**&#x751F;成与机器无关的代&#x7801;**)，源代码优化(**&#x5E38;量计算，循环优化....**)，目标代码生成**(生成与平台相关的汇编代码)
 
 到这一步结束后就生成了一个与平台相关的汇编文件了，如图所示(simple.s的不完整截图)：
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片6](java线程原理/images/image-6.png)
+![](images/Clipboard_Screenshot_1764850932.png)
 
 #### 3.1.1 汇编 (目标文件的生成)
-+ 汇编代码
 
-```java
-    .file   "simple.c"
-
-# ----------------------------------------------------------------------
-# Data Section (Global Initialized Variables)
-# ----------------------------------------------------------------------
-    .globl  global_init_var
-    .data
-    .align 4
-    .type   global_init_var, @object
-    .size   global_init_var, 4
-global_init_var:
-    .long   84
-    .comm   global_unInit_var,4,4
-
-# ----------------------------------------------------------------------
-# Read-Only Data Section (Constants)
-# ----------------------------------------------------------------------
-    .section .rodata
-.LC0:
-    .string "%d\n"
-
-# ----------------------------------------------------------------------
-# Text Section (Code)
-# ----------------------------------------------------------------------
-    .text
-
-# --- Function: func1 ---
-    .globl  func1
-    .type   func1, @function
-func1:
-.LFB0:
-    .cfi_startproc
-    pushq   %rbp
-    .cfi_def_cfa_offset 16
-    .cfi_offset 6, -16
-    movq    %rsp, %rbp
-    .cfi_def_cfa_register 6
-    subq    $16, %rsp
-    
-    # Body of func1
-    movl    %edi, -4(%rbp)      # Save argument i to stack
-    movl    -4(%rbp), %eax
-    movl    %eax, %esi          # Arg2: i
-    movl    $.LC0, %edi         # Arg1: "%d\n"
-    movl    $0, %eax            # Clear AL (varargs count)
-    call    printf
-    
-    leave
-    .cfi_def_cfa 7, 8
-    ret
-    .cfi_endproc
-.LFE0:
-    .size   func1, .-func1
-
-# --- Function: main ---
-    .globl  main
-    .type   main, @function
-main:
-.LFB1:
-    .cfi_startproc
-    pushq   %rbp
-    .cfi_def_cfa_offset 16
-    .cfi_offset 6, -16
-    movq    %rsp, %rbp
-    .cfi_def_cfa_register 6
-    subq    $16, %rsp
-    
-    # Body of main
-    movl    $1, -4(%rbp)                    # local_var = 1
-    movl    static_var.1730(%rip), %edx     # Load static_var (RIP-relative)
-    movl    static_var2.1731(%rip), %eax    # Load static_var2
-    addl    %eax, %edx                      # static_var + static_var2
-    movl    -4(%rbp), %eax                  # Load local_var
-    addl    %eax, %edx                      # ... + local_var
-    movl    -8(%rbp), %eax                  # Load uninitialized var (undefined behavior in C source logic?)
-    addl    %edx, %eax                      # Total sum
-    movl    %eax, %edi                      # Arg1: sum
-    call    func1
-    
-    movl    $0, %eax            # return 0
-    leave
-    .cfi_def_cfa 7, 8
-    ret
-    .cfi_endproc
-.LFE1:
-    .size   main, .-main
-
-# ----------------------------------------------------------------------
-# Data Section (Static Variables)
-# ----------------------------------------------------------------------
-    .data
-    .align 4
-    .type   static_var.1730, @object
-    .size   static_var.1730, 4
-static_var.1730:
-    .long   85
-    
-    .local  static_var2.1731
-    .comm   static_var2.1731,4,4
-
-# ----------------------------------------------------------------------
-# Metadata & Footer
-# ----------------------------------------------------------------------
-    .ident  "GCC: (GNU) 4.8.5 20150623 (Red Hat 4.8.5-44)"
-    .section    .note.GNU-stack,"",@progbits
-
-```
+* 汇编代码
 
 这一步就是将上面的simple.s文件转变为simple.o文件的过程了(**也即将汇编语言翻译为二进制目标文件**)，
 
 而目标文件(.o)就已经是ELF格式的文件了，**那么汇编器就承担着解析汇编文件并且最终生成一个ELF格式文件的职责**
 
 > 下面就简要的分析一下,汇编器是如何解析并且生成目标文件的
->
 
 其核心工作原理如下：
 
 1. 将汇编语言转换为二进制代码
-2. **<font style="color:rgb(216,57,49);">构建符号表,记录所有标签和变量的位置信息</font>**
-3. **<font style="color:rgb(216,57,49);">生成重定位信息,标记需要链接器修正的地址引用</font>**
-4. **<font style="color:rgb(216,57,49);">按照ELF格式组织输出文件(节的组织)</font>**
 
-从上面给出的汇编代码可以看出来,充斥着大量&#x7684;**<font style="color:rgb(216,57,49);">符号</font>**,而汇编器就会遍历并且处理这些符号，但是这里有个问题：
+2. **<span style="color: rgb(216,57,49); background-color: inherit">构建符号表,记录所有标签和变量的位置信息</span>**
+
+3. **<span style="color: rgb(216,57,49); background-color: inherit">生成重定位信息,标记需要链接器修正的地址引用</span>**
+
+4. **<span style="color: rgb(216,57,49); background-color: inherit">按照ELF格式组织输出文件(节的组织)</span>**
+
+从上面给出的汇编代码可以看出来,充斥着大量&#x7684;**<span style="color: rgb(216,57,49); background-color: inherit">符号</span>**,而汇编器就会遍历并且处理这些符号，但是这里有个问题：
 
 那就是此时文件(或者说程序)还只是在磁盘上呢,并不知道(同样也没有)虚拟地址，那下面这行代码应该怎么翻译呢？
-
-```java
-func1:
-    # ...
-    call    printf
-    # ...
-```
 
 此时根本就不知道printf函数的地址啊,根本翻译不了啊。
 
 这里就要涉及到目标文件的种类了,在Linux系统中，目标文件一般有4种形式：
 
 1. 可重定位目标文件(Relocatable File)「典型的后缀：xxx.o」
-    1. **特征**：包含代码和数据，但**不能直接运行**。其中的代码地址是从 0 开始的（相对地址），且包含未解析的符号（如调用了外部函数 `printf` ）
-    2. **用途**：它需要在**链接阶段**与其他目标文件或库合并，创建一个可执行文件或共享目标文件。
+
+   1. **特征**：包含代码和数据，但**不能直接运行**。其中的代码地址是从 0 开始的（相对地址），且包含未解析的符号（如调用了外部函数 `printf` ）
+
+   2. **用途**：它需要在**链接阶段**与其他目标文件或库合并，创建一个可执行文件或共享目标文件。
+
 2. 可执行目标文件(Executable File)「没有后缀,通常在终端上显示为绿色的文件」
-    1. **特征**：包含**完全链接好**的代码和数据，可以被操作系统直接加载到内存并**执行**。**<font style="color:rgb(216,57,49);">所有的符号引用都已被解析，或者标记为在运行时解析</font>**。
+
+   1. **特征**：包含**完全链接好**的代码和数据，可以被操作系统直接加载到内存并**执行**。**<span style="color: rgb(216,57,49); background-color: inherit">所有的符号引用都已被解析，或者标记为在运行时解析</span>**。
+
 3. 共享目标文件(Shared Object File) 「典型的后缀：xxx.so 」
-    1. **特征**：一种特殊的可重定位文件。它包含位置无关代码（PIC）。
-    2. **用途**
-        1. **动态链接**：在程序启动或运行时，由**动态链接器**（如 `ld-linux.so` ）加载到内存中，与其他程序共享。
-        2. **开发库**：作为动态链接库（Dynamic Library）提供给开发者使用。
+
+   1. **特征**：一种特殊的可重定位文件。它包含位置无关代码（PIC）。
+
+   2. **用途**
+
+      1. **动态链接**：在程序启动或运行时，由**动态链接器**（如 `ld-linux.so` ）加载到内存中，与其他程序共享。
+
+      2. **开发库**：作为动态链接库（Dynamic Library）提供给开发者使用。
+
 4. 核心转储文件(Core Dump File)「典型后缀：xxx.core/xxx.core.pid」
-    1. **特征：**&#x8FD9;是一种“尸体”文件。当进程意外终止（如段错误 Segmentation Fault）时，操作系统会将该进程在内存中的状态（寄存器、栈、堆等）原样“转储”到磁盘上。
-    2. **用途：**&#x7528;于调试。你可以用 GDB 加载它来查看程序崩溃时的具体状态，找出 BUG。
+
+   1. **特征：**&#x8FD9;是一种“尸体”文件。当进程意外终止（如段错误 Segmentation Fault）时，操作系统会将该进程在内存中的状态（寄存器、栈、堆等）原样“转储”到磁盘上。
+
+   2. **用途：**&#x7528;于调试。你可以用 GDB 加载它来查看程序崩溃时的具体状态，找出 BUG。
 
 而上面一直在讨论的simple.o文件就是一个可重定位文件
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片7](java线程原理/images/image-7.png)
+![](images/Clipboard_Screenshot_1764854163.png)
 
 通过它的特征应该就可以知道了,既然不知道具体的内存地址，那就不解析呗，使用0替代。
 
 但是又不能不放着不管(否则真到运行时访问0地址会导致错误),在这里就生成一个“标记”，告诉链接器,这个位置还有不确定的地址,记得修复
 
-> 这一段的核心内容想表达的就是:汇编器在遇到未知的符号(未定义的符号)时,会生成一个“标记”，等到链接的时候再进行修复「这里实际上就&#x662F;**<font style="color:rgb(216,57,49);">重定位记录</font>**」
->
+> 这一段的核心内容想表达的就是:汇编器在遇到未知的符号(未定义的符号)时,会生成一个“标记”，等到链接的时候再进行修复「这里实际上就&#x662F;**<span style="color: rgb(216,57,49); background-color: inherit">重定位记录</span>**」
 
 
 
-+ 汇编介绍
+* 汇编介绍
 
 汇编器会将汇编文件分为几种不同的Token(词法单元)
 
-+ 而伪指令又会再进行细分
-+ 下面就简要的分析一下汇编器是如何解析上面的simple.s文件的
+* 而伪指令又会再进行细分
+
+* 下面就简要的分析一下汇编器是如何解析上面的simple.s文件的
+
+![](images/diagram.png)
 
 ##### 1.第一遍扫描
-+ 解析
+
+* 解析
 
 第一遍扫描的主要目的就是为了知道当前汇编文件都有哪些符号(以及对符号的一些特殊处理)
 
@@ -295,18 +181,12 @@ func1:
 
 第一遍扫描后的结果如下：
 
-+ 各段LC最终值以及段的状态
+* 各段LC最终值以及段的状态
 
-```shell
-// 第一遍扫描完成后的LC状态
-LC[.text] = 0x0057 // 87字节 (func1:34 + main:53)
-LC[.data] = 0x0008 // 8字节 (global_init_var:4 + static_var.1:4)
-LC[.bss] = 0x0008 // 8字节 (global_unInit_var:4 + static_var2.0:4)
-LC[.rodata] = 0x0004 // 4字节 ("%d\n\0")
-```
+* 符号表(一共13个符号)
 
-+ 符号表(一共13个符号)
-+ 重定位类型分析
+* 重定位类型分析
+
 1. 为什么需要重定位呢？哪些操作需要重定位呢？
 
 在之前,我一直认为只有调用别的c文件中的函数时才需要重定位(比如printf)，但是在上面的simole.s中一共有5处是需要重定位的。
@@ -314,37 +194,38 @@ LC[.rodata] = 0x0004 // 4字节 ("%d\n\0")
 那么重定位主要解决什么问题呢？
 
 1. 汇编器在汇编时并不知道符号的最终内存地址
+
 2. 同一个文件内的段间引用：代码段(.text)需要引用数据段(.data/.rodata/.bss)中的符号
-    1. **movl $.LC0, %edi  -- .rodata段中的字符串 -- 字符串地址在编译时未知**
-    2. **call printf -- 外部函数printf -- 外部符号地址在链接时才能确定**
-    3. **movl static****_****var.1(%rip), %edx -- .data段中的静态变量 -- ****<font style="color:rgb(216,57,49);">RIP相对寻址</font>****需要知道段间距离**
-    4. **movl static****_****var2.0(%rip), %eax -- .bss段中的静态变量 -- ****<font style="color:rgb(216,57,49);">RIP相对寻址</font>****需要知道段间距离**
-    5. **call func1 -- 本地函数func1 -- 函数相对位置可能因链接器优化改变**
+
+   1. **movl $.LC0, %edi  -- .rodata段中的字符串 -- 字符串地址在编译时未知**
+
+   2. **call printf -- 外部函数printf -- 外部符号地址在链接时才能确定**
+
+   3. **movl static\_var.1(%rip), %edx -- .data段中的静态变量 -- <span style="color: rgb(216,57,49); background-color: inherit">RIP相对寻址</span>需要知道段间距离**
+
+   4. **movl static\_var2.0(%rip), %eax -- .bss段中的静态变量 -- <span style="color: rgb(216,57,49); background-color: inherit">RIP相对寻址</span>需要知道段间距离**
+
+   5. **call func1 -- 本地函数func1 -- 函数相对位置可能因链接器优化改变**
+
 3. 外部依赖：当前模块需要调用外部模块中的函数(printf)
 
 可以看到在simple.s中出现的重定位类型一共分为三种：
 
-+ 计算公式说明
-
-```shell
-S = 符号的实际地址 (Symbol address)
-A = 附加值 (Addend)，存储在重定位条目中
-P = 重定位位置地址 (Place being relocated)
-L = PLT表项地址 (PLT entry address)
-```
+* 计算公式说明
 
 
 
 ###### 总结
+
 总结一下：第一遍扫描的目的：符号表构建与地址分配(也即：汇编器如何确定每个符号的位置)
 
 > .text/.data/.rodata/.bss/符号表的构建/可重定位条目的构建
->
 
 
 
 ##### 2.第二遍扫描
-+ .text段<font style="color:rgb(216,57,49);"> (87字节)</font>
+
+* .text段<span style="color: rgb(216,57,49); background-color: inherit"> (87字节)</span>
 
 这一步就是将汇编代码翻译为机器码(二进制)，关于机器码的翻译在这里不再详细的介绍
 
@@ -352,308 +233,40 @@ L = PLT表项地址 (PLT entry address)
 
 当然最关键的一步就是还生成了一个重定位表，因为需要告诉链接器,有哪些地址是需要被重定位的「也就是.rela.text表」
 
-```c
-ctypedef struct { 
-    Elf64_Addr r_offset; // 重定位位置（相对段起始） 
-    Elf64_Xword r_info; // 符号索引(高32位) + 类型(低32位) 
-    Elf64_Sxword r_addend; // 加数 
-} Elf64_Rela;
-```
+* .rela.text表
 
-+ .rela.text表
+5条记录 \* 24B = 120B(0x78)
 
-5条记录 * 24B = 120B(0x78)
+* .data段（8字节）
 
-+ .data段（8字节）
+* .rodata段(4字节)
 
-```c
-偏移0x0000: 54 00 00 00 # global_init_var = 84 
-偏移0x0004: 55 00 00 00 # static_var.1 = 85
-```
-
-+ .rodata段(4字节)
-
-```c
-偏移0x0000: 25 64 0a 00 # "%d\n\0" # 25='%', 64='d', 0a='\n', 00='\0'
-```
-
-+ .bss段
-
-```c
-# .bss是NOBITS类型，不占用文件空间 # 只在节头表中记录大小 sh_size = 0x08 # 运行时由加载器清零
-```
+* .bss段
 
 
 
-+ 字符串表的构建
-+ <font style="color:rgb(46,161,33);">.strtab（符号字符串表）—— 89 字节</font>
+* 字符串表的构建
 
-```json
-偏移    内容（以 \0 分隔）────────────────────────────────────────────────────────────────
-0x00:   00                          (空字符串)
-0x01:   73 69 6d 70 6c 65 2e 63 00  "simple.c\0"
-0x0A:   73 74 61 74 69 63 5f 76 61 72 2e 31 00  "static_var.1\0"
-0x17:   73 74 61 74 69 63 5f 76 61 72 32 2e 30 00  "static_var2.0\0"
-0x25:   67 6c 6f 62 61 6c 5f 69 6e 69 74 5f 76 61 72 00  "global_init_var\0"
-0x35:   67 6c 6f 62 61 6c 5f 75 6e 49 6e 69 74 5f 76 61 72 00  "global_unInit_var\0"
-0x47:   66 75 6e 63 31 00            "func1\0"
-0x4D:   70 72 69 6e 74 66 00         "printf\0"
-0x54:   6d 61 69 6e 00               "main\0"
+* <span style="color: rgb(46,161,33); background-color: inherit">.strtab（符号字符串表）—— 89 字节</span>
 
-符号表引用示例：
-符号 func1 的 st_name = 0x47 (71)
-在 .strtab 偏移 71 处读取字符串，直到遇到 \0 → "func1"
-```
-
-+ <font style="color:rgb(46,161,33);">.shstrtab（节名字符串表）—— 116 字节</font>
-
-```yaml
-偏移    内容────────────────────────────────────────────────────────────────
-0x00:   00                          (空字符串)
-0x01:   ".symtab\0"
-0x09:   ".strtab\0"  
-0x11:   ".shstrtab\0"
-0x1B:   ".rela.text\0"
-0x26:   ".data\0"
-0x2C:   ".bss\0"
-0x31:   ".rodata\0"
-0x39:   ".comment\0"
-0x42:   ".note.GNU-stack\0"
-0x52:   ".note.gnu.property\0"
-0x65:   ".rela.eh_frame\0"
-```
+* <span style="color: rgb(46,161,33); background-color: inherit">.shstrtab（节名字符串表）—— 116 字节</span>
 
 
 
-+ ELF HEADER的生成
-
-```cpp
-typedef struct {
-    unsigned char e_ident[16];    // Magic number and other info
-    Elf64_Half    e_type;         // 2字节: 文件类型
-    Elf64_Half    e_machine;      // 2字节: 目标架构
-    Elf64_Word    e_version;      // 4字节: ELF版本
-    Elf64_Addr    e_entry;        // 8字节: 入口点地址
-    Elf64_Off     e_phoff;        // 8字节: 程序头表偏移
-    Elf64_Off     e_shoff;        // 8字节: 节头表偏移
-    Elf64_Word    e_flags;        // 4字节: 处理器特定标志
-    Elf64_Half    e_ehsize;       // 2字节: ELF头大小
-    Elf64_Half    e_phentsize;    // 2字节: 程序头条目大小
-    Elf64_Half    e_phnum;        // 2字节: 程序头条目数
-    Elf64_Half    e_shentsize;    // 2字节: 节头条目大小
-    Elf64_Half    e_shnum;        // 2字节: 节头条目数
-    Elf64_Half    e_shstrndx;     // 2字节: 节名字符串表索引
-} Elf64_Ehdr;                     // 总计 64 字节
-
-偏移    字节                         字段           值及含义────────────────────────────────────────────────────────────────────────────
-0x00:   7f 45 4c 46                  e_ident[0-3]   Magic: "\x7fELF"
-0x04:   02                           e_ident[4]     Class: ELFCLASS64 (64位)
-0x05:   01                           e_ident[5]     Data: ELFDATA2LSB (小端序)
-0x06:   01                           e_ident[6]     Version: EV_CURRENT (1)
-0x07:   00                           e_ident[7]     OS/ABI: ELFOSABI_NONE
-0x08:   00 00 00 00 00 00 00 00      e_ident[8-15]  Padding (保留)
-
-0x10:   01 00                        e_type         ET_REL (1) = 可重定位文件
-0x12:   3e 00                        e_machine      EM_X86_64 (62) = x86-64
-0x14:   01 00 00 00                  e_version      1 = 当前版本
-0x18:   00 00 00 00 00 00 00 00      e_entry        0 (目标文件无入口点)
-0x20:   00 00 00 00 00 00 00 00      e_phoff        0 (无程序头表)
-0x28:   30 04 00 00 00 00 00 00      e_shoff        0x430 (1072) = 节头表偏移
-0x30:   00 00 00 00                  e_flags        0 (无特殊标志)
-0x34:   40 00                        e_ehsize       64 = ELF头大小
-0x36:   00 00                        e_phentsize    0 (无程序头)
-0x38:   00 00                        e_phnum        0 (无程序头)
-0x3A:   40 00                        e_shentsize    64 = 节头条目大小
-0x3C:   0e 00                        e_shnum        14 = 节数量
-0x3E:   0d 00                        e_shstrndx     13 = .shstrtab 索引
-```
+* ELF HEADER的生成
 
 
 
-+ section header的生成
-
-```cpp
-typedef struct {
-    Elf64_Word    sh_name;       // 4字节: 节名在 .shstrtab 中的偏移
-    Elf64_Word    sh_type;       // 4字节: 节类型
-    Elf64_Xword   sh_flags;      // 8字节: 节标志
-    Elf64_Addr    sh_addr;       // 8字节: 运行时地址（目标文件为0）
-    Elf64_Off     sh_offset;     // 8字节: 文件中的偏移
-    Elf64_Xword   sh_size;       // 8字节: 节大小
-    Elf64_Word    sh_link;       // 4字节: 关联节索引
-    Elf64_Word    sh_info;       // 4字节: 附加信息
-    Elf64_Xword   sh_addralign;  // 8字节: 对齐要求
-    Elf64_Xword   sh_entsize;    // 8字节: 固定大小条目的大小
-} Elf64_Shdr;       
-
-节头表位于文件偏移 0x430，共 14 × 64 = 896 字节━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━节 0: NULL（保留）
-sh_name     = 0x00000000    (无名称)
-sh_type     = SHT_NULL (0)
-sh_flags    = 0
-sh_addr     = 0
-sh_offset   = 0
-sh_size     = 0
-sh_link     = 0
-sh_info     = 0
-sh_addralign = 0
-sh_entsize  = 0
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━节 1: .text（代码段）
-sh_name     = 0x00000020    → ".text"
-sh_type     = SHT_PROGBITS (1)
-sh_flags    = SHF_ALLOC | SHF_EXECINSTR (0x06) = AX
-sh_addr     = 0
-sh_offset   = 0x00000040    ← 代码从文件偏移 0x40 开始
-sh_size     = 0x00000057    (87 字节: func1=34 + main=53)
-sh_link     = 0
-sh_info     = 0
-sh_addralign = 1
-sh_entsize  = 0
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━节 2: .rela.text（代码段重定位）
-sh_name     = 0x0000001B    → ".rela.text"
-sh_type     = SHT_RELA (4)
-sh_flags    = SHF_INFO_LINK (0x40) = I
-sh_addr     = 0
-sh_offset   = 0x00000310    ← 重定位表的位置
-sh_size     = 0x00000078    (120 字节: 5 × 24)
-sh_link     = 11            ← 指向 .symtab（符号表）
-sh_info     = 1             ← 指向 .text（被重定位的节）
-sh_addralign = 8
-sh_entsize  = 24            ← 每个重定位条目 24 字节━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━节 3: .data（数据段）
-sh_name     = 0x00000026    → ".data"
-sh_type     = SHT_PROGBITS (1)
-sh_flags    = SHF_WRITE | SHF_ALLOC (0x03) = WA
-sh_addr     = 0
-sh_offset   = 0x00000098    ← 数据从文件偏移 0x98 开始
-sh_size     = 0x00000008    (8 字节: 两个 int)
-sh_link     = 0
-sh_info     = 0
-sh_addralign = 4            ← 4字节对齐（int类型）
-sh_entsize  = 0
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━节 4: .bss（未初始化数据）
-sh_name     = 0x0000002C    → ".bss"
-sh_type     = SHT_NOBITS (8)   ← 不占文件空间！
-sh_flags    = SHF_WRITE | SHF_ALLOC (0x03) = WA
-sh_addr     = 0
-sh_offset   = 0x000000A0    (紧接 .data，但不实际存储)
-sh_size     = 0x00000008    (8 字节: 两个未初始化 int)
-sh_link     = 0
-sh_info     = 0
-sh_addralign = 4
-sh_entsize  = 0
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━节 5: .rodata（只读数据）
-sh_name     = 0x00000031    → ".rodata"
-sh_type     = SHT_PROGBITS (1)
-sh_flags    = SHF_ALLOC (0x02) = A
-sh_addr     = 0
-sh_offset   = 0x000000A0    ← 字符串 "%d\n"
-sh_size     = 0x00000004    (4 字节)
-sh_link     = 0
-sh_info     = 0
-sh_addralign = 1
-sh_entsize  = 0
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━节 11: .symtab（符号表）
-sh_name     = 0x00000001    → ".symtab"
-sh_type     = SHT_SYMTAB (2)
-sh_flags    = 0
-sh_addr     = 0
-sh_offset   = 0x00000178    ← 符号表位置
-sh_size     = 0x00000138    (312 字节: 13 × 24)
-sh_link     = 12            ← 指向 .strtab
-sh_info     = 8             ← 第一个 GLOBAL 符号的索引
-sh_addralign = 8
-sh_entsize  = 24            ← 每个符号条目 24 字节━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━节 12: .strtab（符号字符串表）
-sh_name     = 0x00000009    → ".strtab"
-sh_type     = SHT_STRTAB (3)
-sh_flags    = 0
-sh_addr     = 0
-sh_offset   = 0x000002B0
-sh_size     = 0x00000059    (89 字节)
-sh_link     = 0
-sh_info     = 0
-sh_addralign = 1
-sh_entsize  = 0
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━节 13: .shstrtab（节名字符串表）
-sh_name     = 0x00000011    → ".shstrtab"
-sh_type     = SHT_STRTAB (3)
-sh_flags    = 0
-sh_addr     = 0
-sh_offset   = 0x000003B8
-sh_size     = 0x00000074    (116 字节)
-sh_link     = 0
-sh_info     = 0
-sh_addralign = 1
-sh_entsize  = 0
-```
+* section header的生成
 
 
 
-+ simple.o文件的完整布局
-
-```yaml
-┌────────────────────────────────────────────────────────────────────────────┐
-│                         simple.o 文件布局                                   │
-│                         总大小: 1720 字节 (0x6B8)                           │
-├─────────────┬──────────────────────────────────────────────────────────────┤
-│ 0x000-0x03F │ ELF Header (64 字节)                                      │
-│             │ Magic: 7f 45 4c 46 02 01 01 00 ...                           │
-│             │ Type: REL, Machine: x86-64, Sections: 14                     │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x040-0x096 │ .text (87 字节) - 代码段                                   │
-│             │ func1 (0x00-0x21): 55 48 89 e5 48 83 ec 10 ...              │
-│             │ main  (0x22-0x56): 55 48 89 e5 48 83 ec 10 ...              │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x097       │ (1 字节填充 - 4字节对齐)                                      │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x098-0x09F │ .data (8 字节) - 已初始化数据                               │
-│             │ global_init_var: 54 00 00 00 (84)                            │
-│             │ static_var.1:    55 00 00 00 (85)                            │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x0A0-0x0A3 │ .rodata (4 字节) - 只读数据                                 │
-│             │ .LC0: 25 64 0a 00 ("%d\n\0")                                 │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x0A4-0x0EC │ .comment (73 字节) - 编译器标识                              │
-│             │ "GCC: (Tencent Compiler 12.3.1.3) 12.3.1 ..."                │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x0ED       │ .note.GNU-stack (0 字节) - 空段                               │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x0F0-0x11F │ .note.gnu.property (48 字节)                                  │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x120-0x177 │ .eh_frame (88 字节) - 栈回溯信息                              │
-│             │ CIE + 2个 FDE (func1 和 main)                                │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x178-0x2AF │ .symtab (312 字节) - 符号表                                 │
-│             │ 13 个符号条目 × 24 字节                                       │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x2B0-0x308 │ .strtab (89 字节) - 符号字符串表                             │
-│             │ "simple.c\0static_var.1\0func1\0printf\0main\0..."          │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x309-0x30F │ (7 字节填充 - 8字节对齐)                                      │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x310-0x387 │ .rela.text (120 字节) - 代码重定位表                        │
-│             │ 5 个重定位条目 × 24 字节                                      │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x388-0x3B7 │ .rela.eh_frame (48 字节) - eh_frame重定位                   │
-│             │ 2 个重定位条目 × 24 字节                                      │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x3B8-0x42B │ .shstrtab (116 字节) - 节名字符串表                          │
-│             │ ".symtab\0.strtab\0.shstrtab\0.text\0.data\0..."            │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x42C-0x42F │ (4 字节填充 - 对齐到 8 字节边界)                               │
-├─────────────┼──────────────────────────────────────────────────────────────┤
-│ 0x430-0x6B7 │ Section Header Table (896 字节)                             │
-│             │ 14 个节头条目 × 64 字节                                       │
-└─────────────┴──────────────────────────────────────────────────────────────┘
-```
+* simple.o文件的完整布局
 
 
 
 #### 3.1.2 链接
+
 核心问题：
 
 在上面介绍过,汇编器的输出是生成一个目标文件(.o格式的),但是这通常是不可执行的,其还需要与其他的目标文件一起作为链接器的输入，最终才会变成一个可以被操作系统加载的可执行文件，那么这里就有一个问题：多个.o文件是如何变成一个可执行文件的呢？
@@ -661,359 +274,138 @@ sh_entsize  = 0
 > 多个.o文件中的各个SECTION如何存放呢？
 >
 > 1. 链接器将输入的多个.o文件(各个SECTION)按序叠加存放 「也即先放hello.o文件的各个section,然后再放world.o文件的各个section」
-> 2. 链接器将输入的多个.o文件的相似段(SECTION)合并到一起,也就是多个.o文件的section合成一个大的"SECTION"（在链接时这个大SECTION通常被称为**SEGMENT**）
 >
+> 2. 链接器将输入的多个.o文件的相似段(SECTION)合并到一起,也就是多个.o文件的section合成一个大的"SECTION"（在链接时这个大SECTION通常被称为**SEGMENT**）
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片8](java线程原理/images/image-8.png)
+![](images/image-7.png)
 
 ##### 1.静态链接
+
 在静态链接中,链接器的主要职责分为3个步骤：布局，符号解析，重定位
 
-1. **<font style="color:rgb(216,57,49);">布局：</font>****链接器将多个.o文件中相同类型的SECTION合并到一起(比如将多个.o文件中的.text段合成一个.text段,...「其他同理」)，然后一个很关键的步骤就是分配 ****<font style="color:rgb(216,57,49);">虚拟地址「!!!」</font>**
+1. **<span style="color: rgb(216,57,49); background-color: inherit">布局：</span>链接器将多个.o文件中相同类型的SECTION合并到一起(比如将多个.o文件中的.text段合成一个.text段,...「其他同理」)，然后一个很关键的步骤就是分配 <span style="color: rgb(216,57,49); background-color: inherit">虚拟地址「!!!」</span>**
 
 > 布局操作：是将构成可执行文件的目标代码里的各个SECTION在内存中安排位置摆放，因此每条指令和每个数据都将有唯一确定的地址(这里还会额外添加程序的启动代码和结束代码所对应的SECTION)
->
 
-+ **<font style="color:rgb(216,57,49);">符号解析</font>**
-+ **<font style="color:rgb(216,57,49);">重定位</font>**
+* **<span style="color: rgb(216,57,49); background-color: inherit">符号解析</span>**
+
+* **<span style="color: rgb(216,57,49); background-color: inherit">重定位</span>**
 
 在这里以一个简单的例子来简要的介绍一下静态链接的工作原理
 
-```c
-// main.c - 主程序
-// This file calls an external function 'add' defined in math.c
+* makefile
 
-int add(int a, int b);  // External function declaration
+* 验证脚本
 
-int main() {
-    int result = add(10, 20);  // Call external function
-    return result;
-}
-
-// math.c - Math library
-// This file defines the 'add' function
-
-int add(int a, int b) {
-    return a + b;
-}
-```
-
-+ makefile
-
-```makefile
-# Makefile - Static Linking Demo
-
-CC = gcc
-CFLAGS = -c -g
-
-all: program
-
-# Step 1: Compile to object files (.o)
-main.o: main.c
-    $(CC) $(CFLAGS) main.c -o main.o
-
-math.o: math.c
-    $(CC) $(CFLAGS) math.c -o math.o
-
-# Step 2: Static linking (combines .o files into executable)
-program: main.o math.o
-    $(CC) main.o math.o -o program
-
-clean:
-    rm -f *.o program
-
-.PHONY: all clean
-```
-
-+ 验证脚本
-
-```shell
-#!/bin/bash
-# verify.sh - Verify static linking process (3 steps)
-
-echo "=========================================="
-echo "    Static Linking Demo - 3 Steps"
-echo "=========================================="
-
-# Compile to object files
-echo ""
-echo "[Preparing] Compiling source files to object files..."
-gcc -c -g main.c -o main.o
-gcc -c -g math.c -o math.o
-echo "Generated: main.o, math.o"
-
-echo ""
-echo "=========================================="
-echo "Step 1: Memory Layout (Section Merge)"
-echo "=========================================="
-echo ""
-echo "--- main.o sections ---"
-objdump -h main.o | grep -E "Idx|\.text|\.data|\.bss"
-echo ""
-echo "--- math.o sections ---"
-objdump -h math.o | grep -E "Idx|\.text|\.data|\.bss"
-
-# Link
-echo ""
-echo "[Linking] gcc main.o math.o -o program"
-gcc main.o math.o -o program
-
-echo ""
-echo "--- program (after linking) sections ---"
-objdump -h program | grep -E "Idx|\.text|\.data|\.bss"
-echo ""
-echo "Key point: .text sections from main.o and math.o are merged into one .text section"
-
-echo ""
-echo "=========================================="
-echo "Step 2: Symbol Resolution"
-echo "=========================================="
-echo ""
-echo "--- main.o symbols (before linking) ---"
-nm main.o
-echo ""
-echo "  U = Undefined (needs to find definition)"
-echo "  T = Text (code, defined here)"
-echo ""
-echo "--- math.o symbols ---"
-nm math.o
-echo ""
-echo "Key point: 'add' is U(undefined) in main.o, T(defined) in math.o"
-echo "           Linker matches them together!"
-echo ""
-echo "--- program symbols (after linking) ---"
-nm program | grep -E "main|add"
-echo ""
-echo "Key point: All symbols now have addresses!"
-
-echo ""
-echo "=========================================="
-echo "Step 3: Relocation"
-echo "=========================================="
-echo ""
-echo "--- main.o relocation entries ---"
-objdump -r main.o
-echo ""
-echo "Key point: 'add' needs relocation (address unknown before linking)"
-echo ""
-echo "--- main.o disassembly (before linking) ---"
-objdump -d main.o | grep -A5 "call"
-echo ""
-echo "Note: call instruction shows '00 00 00 00' (placeholder address)"
-echo ""
-echo "--- program disassembly (after linking) ---"
-objdump -d program | grep -B2 -A2 "call.*add"
-echo ""
-echo "Key point: '00 00 00 00' is replaced with actual 'add' function address!"
-
-echo ""
-echo "=========================================="
-echo "Verification: Run the program"
-echo "=========================================="
-./program
-echo "Return value: $? (should be 30 = 10 + 20)"
-
-echo ""
-echo "=========================================="
-echo "Summary"
-echo "=========================================="
-echo "1. Memory Layout: Merged .text sections"
-echo "2. Symbol Resolution: Matched 'add' (U -> T)"
-echo "3. Relocation: Replaced 0x00000000 with real address"
-echo ""
-```
-
-+ 内存布局
-
-```markdown
-==========================================
-Step 1: Memory Layout (Section Merge)
-==========================================
-
---- main.o sections ---
-Idx Name          Size      VMA               LMA               File off  Algn
-  0 .text         0000001f  0000000000000000  0000000000000000  00000040  2**0
-  1 .data         00000000  0000000000000000  0000000000000000  0000005f  2**0
-  2 .bss          00000000  0000000000000000  0000000000000000  0000005f  2**0
-
---- math.o sections ---
-Idx Name          Size      VMA               LMA               File off  Algn
-  0 .text         00000014  0000000000000000  0000000000000000  00000040  2**0
-  1 .data         00000000  0000000000000000  0000000000000000  00000054  2**0
-  2 .bss          00000000  0000000000000000  0000000000000000  00000054  2**0
-
-[Linking] gcc main.o math.o -o program
-
---- program (after linking) sections ---
-Idx Name          Size      VMA               LMA               File off  Algn
- 11 .text         00000119  0000000000401020  0000000000401020  00001020  2**4
- 21 .data         00000010  0000000000404000  0000000000404000  00003000  2**3
- 22 .bss          00000008  0000000000404010  0000000000404010  00003010  2**0
-
-Key point: .text sections from main.o and math.o are merged into one .text section
-```
+* 内存布局
 
 可以看到,在链接之前,mian.o和math.o的.text段的VMA(虚拟内存地址)都是0
 
-在链接之后生成的.text的VMA = **<font style="color:rgb(216,57,49);">0000000000401020</font>**
+在链接之后生成的.text的VMA = **<span style="color: rgb(216,57,49); background-color: inherit">0000000000401020</span>**
 
 通过objdump -D -j .text program命令来看一下通过静态链接之后生成的可执行文件的.text段的反汇编
 
-```java
-Disassembly of section .text:
-0000000000401020 <_start>:
-    # _start的汇编
-# ------------ #
-0000000000401106 <main>:
-    # main的汇编
-0000000000401125 <add>:
-    # add的汇编
-# ------------ # 
-```
-
 main()被放到了虚拟地址为0000000000401106的位置，add()则在main()后面,虚拟地址为0000000000401125
 
-**<font style="color:rgb(216,57,49);">/—可执行文件的内存布局—/</font>**
+**<span style="color: rgb(216,57,49); background-color: inherit">/—可执行文件的内存布局—/</span>**
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片9](java线程原理/images/image-9.png)
+![](images/image-2.png)
 
-+ 符号解析与重定位
+* 符号解析与重定位
 
 经过布局之后,代码和数据都有了确定的地址了(虚拟地址)，这个时候在重定位表中记录的那些未定位的“引用”,在这个时候就可以重新填写地址了
 
-+ 符号解析：如果一个函数/数据不在本模块中实现，那么就必须找出在哪个模块中有实现「找到所引用的符号(函数/变量)在哪里定义的，以及所在的节和在节内的偏移，从而知道符号的地址」，这个过程称为对被引用函数/数据的符号解析(并且符号解析的对象是符号表中所有类型为UND的符号,当所有外部引用的符号完成解析后,就可以进入到重定位操作)
-+ 重定位：上一步已经找到了所有未定位符号的地址了(没有找到则会抛出异常),这一步只需要填写即可（不同的重定位符号地址的计算是不同的，在这里不展开细节）「比如add()是在.text段的偏移xxx处，而.text段的虚拟地址是：0000000000401020，那么add符号的地址就是 0000000000401020 + xxx = 0000000000401125 」
+* 符号解析：如果一个函数/数据不在本模块中实现，那么就必须找出在哪个模块中有实现「找到所引用的符号(函数/变量)在哪里定义的，以及所在的节和在节内的偏移，从而知道符号的地址」，这个过程称为对被引用函数/数据的符号解析(并且符号解析的对象是符号表中所有类型为UND的符号,当所有外部引用的符号完成解析后,就可以进入到重定位操作)
+
+* 重定位：上一步已经找到了所有未定位符号的地址了(没有找到则会抛出异常),这一步只需要填写即可（不同的重定位符号地址的计算是不同的，在这里不展开细节）「比如add()是在.text段的偏移xxx处，而.text段的虚拟地址是：0000000000401020，那么add符号的地址就是 0000000000401020 + xxx = 0000000000401125 」
 
 
 
-+ 总结(静态链接的特点)
+* 总结(静态链接的特点)
 
 从上面的介绍中可以看到 , program这个可执行文件包含了所有需要的代码，不依赖外部库文件,无运行时符号解析开销（所有地址在链接时已经确定）。
 
 缺点：
 
 1. **文件大，包含所有的库文件**
+
 2. **内存占用大(每个进程有独立的副本)：内存和磁盘的空间浪费，以printf()所在的库为例,只要使用到了printf()这个函数(在lib.o中),就需要包含这个lib.o(多个.c文件调用了，那么多个文件都需要包含！)**
+
 3. 更新维护发布麻烦：一旦某个xxx.o更新的时候,那么./program就需要重新链接
 
 
 
 ##### 2.动态链接
+
 为了解决静态链接的上述缺点,就引入了动态链接：
 
-1. 空间浪费(磁盘和内存)：**<font style="color:rgb(216,57,49);">代码共享</font>****思想**
-2. 启动缓慢(加载所有库)：**<font style="color:rgb(216,57,49);">延迟绑定</font>****思想**
+1. 空间浪费(磁盘和内存)：**<span style="color: rgb(216,57,49); background-color: inherit">代码共享</span>思想**
+
+2. 启动缓慢(加载所有库)：**<span style="color: rgb(216,57,49); background-color: inherit">延迟绑定</span>思想**
 
 /---/
 
-+ **<font style="color:rgb(216,57,49);">位置无关：通过PLT/GOT间接跳转，间接哲学「xxx.so可以被加载到内存的任何位置」</font>**
-+ 安全隔离：代码段只读共享，GOT可写私有
+* **<span style="color: rgb(216,57,49); background-color: inherit">位置无关：通过PLT/GOT间接跳转，间接哲学「xxx.so可以被加载到内存的任何位置」</span>**
 
-对于一个.c文件,通常可以使用如下命令将其变为一个动态库(共享库)：gcc **-fPIC -shared**xxx.c -o xxx.so
+* 安全隔离：代码段只读共享，GOT可写私有
+
+对于一个.c文件,通常可以使用如下命令将其变为一个动态库(共享库)：gcc **-fPIC -shared&#x20;**&#x20;xxx.c -o xxx.so
 
 -shared则代表生成的是一个动态库(共享对象),然后某个.c文件想要使用该共享库，可以通过 gcc -o xxx xxx.c ./xxx.so(这里是该共享库的地址)
-
-```shell
-# math.c main.c
-gcc -fPIC -shared  math.c -o libmath.so
-# gcc main.c math.c -o main
-gcc -o main main.c ./libmath.so 
-```
 
 从这里可以看到在链接的时候,动态库和静态链接是存在差别的，但是相同的是，动态库(共享库)同样也参与了链接的过程
 
 > 以main.c 和 math.c为例
 >
 > 在静态链接中,最终整个程序只有一个可执行文件，它是一个不可分割的整体(这个可执行文件包含了main.c和math.c的全部内容)，但是在动态链接下，一个程序被分为若干个文件 -- 有程序的主要部分(也即可执行文件：main) 和 程序所依赖的动态库(libmath.so)，不管是程序的主体部分还是动态库都可以看作是程序的一个模块
->
 
 这也是为什么链接的时候也需要动态库参与的原因,因为此时并不知道add()方法的地址,而动态库内部也有符号,在链接的时候需要标记,可执行文件中的add符号是一个定义在libmath.so中的动态符号，这样后续就能进行特殊处理了。
 
-+ 查看可执行文件的内存布局
+* 查看可执行文件的内存布局
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片10](java线程原理/images/image-10.png)
+![](images/image-5.png)
 
 可以看到,运行时,动态库也是在进程的虚拟空间中的,暂停后重启进程，然后再次查看：
 
 可以发现,动态库的虚拟地址发生变化了,这说明了动态库(共享库)的最终装载位置在编译时是不确定的，而是在进程装载时,装载器根据当前地址空间的空闲情况，动态的分配一块大小足够的虚拟地址空间给该动态库
 
-> 注意这里是装载的是虚拟地址，为什么不将共享对象在进程中装载的地址固定呢?
->
+> 注意这里是装载的是虚拟地址，为什么不将共享对象在进程中装载的地址固定呢?&#x20;
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片11](java线程原理/images/image-11.png)
+![](images/image-6.png)
 
-+ 装载时重定位
-
-```c
-// test.c
-int add(int a, int b);  // 声明，函数在libmath.so中 call add
-
-int main() {
-    int result = add(10, 20);  // 调用动态库函数
-    return result;
-}
-
-// libmath.c -- 最终会被打包为libmath.so
-int helper(int x) {
-    return x * 2;
-}
-
-int add(int a, int b) {
-    int temp = helper(a);  // 内部调用另一个函数 -- call code_0000...
-    return temp + b;
-}
-```
+* 装载时重定位
 
 如上图,在上面的libmath.c代码中，add()内部可能会调用别的函数,而这个函数在编译(或者在生成动态库)的时候是不知道的，call help(这里help的地址应该是为0的)，
 
-这个时候如果进程1(test.c)调用libmath.so中的add()方法，它首先会加载到某个地址(有地址了,符号的位置就能确定)，然后就会修正test.c中的call add 为 call add_addr,同样也要修正在libmath.so中的add()中的call helper 为 call helper_addr
+这个时候如果进程1(test.c)调用libmath.so中的add()方法，它首先会加载到某个地址(有地址了,符号的位置就能确定)，然后就会修正test.c中的call add 为 call add\_addr,同样也要修正在libmath.so中的add()中的call helper 为 call helper\_addr
 
 进程2(test.c)同理
 
 这会有什么问题呢？那就是libmath.so的代码段会被修改,上面也说过,libmath.so的加载位置,不同进程加载的位置是不确定的，那么每个进程修正的值也不一样，如果要正常的运行,那么最终就会导致libmath.so在内存中存在多份
 
 > 如果是这样的话，那动态链接不就失去意义了吗？说好的代码共享呢?
->
 
 但是如果是本来就不共享的呢？因为动态库其实是由.c文件构建的,那么就可能也有全局数据，那么当不同的进程访问某个共享库中定义的数据时,能否共享呢？
 
 答案肯定是不能的，因为进程之间默认是隔离的,这样会使得进程的隔离性大大下降。所以对于动态库中全局变量的访问，可以使用装载时重定位，也即每个进程都会有对应的副本
 
-> 当gcc~~<font style="color:rgb(216,57,49);"> </font>~~~~**<font style="color:rgb(216,57,49);">-fPIC</font>**~~** -shared**math.c -o libmath.so 没有-fPIC时,默认生成的.so就是装载时重定位
->
+> 当gcc~~<span style="color: rgb(216,57,49); background-color: inherit"> </span>~~**~~<span style="color: rgb(216,57,49); background-color: inherit">-fPIC</span>~~ -shared&#x20;**&#x20;math.c -o libmath.so 没有-fPIC时,默认生成的.so就是装载时重定位
 
-+ 地址无关
+* 地址无关
 
 在接受地址无关之前,需要先了解一下动态库(共享对象)内部可能存在的地址引用
 
-+ 动态库内部
-    - 数据访问：全局变量，静态变量(局部变量)
-    - 函数调用，跳转
-+ 动态库外部(其他.c或者.so中的)
-    - 数据访问：全局变量
-    - 函数调用，跳转
+* 动态库内部
 
-```c
-// libmath.c
-static int a;
-extern int b;
-extern void ext();
-void bar()
-{
-    a = 1; // 动态库内部的数据访问
-    b = 2; // 外部模块的数据访问
-}
+  * 数据访问：全局变量，静态变量(局部变量)
 
-void foo()
-{
-    bar(); // 动态库内部的函数调用 
-    ext(); // 外部模块的函数调用
-}
-```
+  * 函数调用，跳转
+
+* 动态库外部(其他.c或者.so中的)
+
+  * 数据访问：全局变量
+
+  * 函数调用，跳转
 
 1. 模块内部函数调用/跳转
 
@@ -1021,146 +413,71 @@ void foo()
 
 > call(E8)  xxxx() , 后面的xxxx是目的地址相对于下一条指令的偏移(也即bar函数地址 = xxxx + 下一条指令的地址)
 >
-> 也即这条指令&#x662F;**<font style="color:rgb(216,57,49);">地址无关</font>**&#x7684;，不管该动态库被哪个进程加载到哪个位置，这条指令都能正常的工作
+> 也即这条指令&#x662F;**<span style="color: rgb(216,57,49); background-color: inherit">地址无关</span>**&#x7684;，不管该动态库被哪个进程加载到哪个位置，这条指令都能正常的工作
 >
 > 「但是有另外一种情况：共享对象全局符号介入」，这种情况会更加的复杂一些，后面再介绍
->
 
-+ 模块内部数据访问
+* 模块内部数据访问
 
 要想实现地址无关，那么在指令中就不能使用数据的绝对地址，那就使用相对地址「指令地址 + 固定偏移量」，在模块内部的数据访问，这也能支持，因为同一模块内，数据段和代码段的之间的偏移也是确定的。
 
-~~但是，~~~~**<font style="color:rgb(216,57,49);">早期</font>**~~~~&#x7684;体系结构中,数据的相对寻址往往没有相对于PC的直接寻址方式，也即不支持 mov eax，~~~~[~~~~PC+offset]这样的指令，所以就需要先获取PC值,再进行计算。~~
+~~但是，**<span style="color: rgb(216,57,49); background-color: inherit">早期</span>**&#x7684;体系结构中,数据的相对寻址往往没有相对于PC的直接寻址方式，也即不支持 mov eax，\[PC+offset]这样的指令，所以就需要先获取PC值,再进行计算。~~
 
 不过现代的体系结构已经支持：mov 0xxx(%rip),%reg, rip(也就是ip寄存器，其存放的就是下一条指令的地址)，该条指令就能轻松的进行相对地址了
 
 > 但是其实即使是模块内的数据访问,也用到了**GOT**的概念,在下面会讲解
->
 
-+ 模块间数据访问
+* 模块间数据访问
 
 在这里首先需要解释动态库的文件格式(也是ELF格式)，这里先以模块内/间的数据访问为例子
 
 在下面主要关注4种场景：
 
 1. 动态库访问自己的(本.c文件或者同一个动态库中的其他.c文件「在这里以前者为例子」)全局变量（变量定义在动态库）
+
 2. 动态库直接访问主程序的全局变量（变量定义在主程序）
+
 3. 主程序直接访问动态库的全局变量(变量定义在动态库)
-+ 模块内数据访问
 
-```c
-// gg.c
-// 动态库访问自己的全局变量
-int lib_internal_data = 100;
+* 模块内数据访问
 
-void access_lib_internal() {
-    lib_internal_data = 10;  // 访问自己的全局变量
-}
+* 反汇编gg.so动态库,看一下access\_lib\_internal()是如何访问lib\_internal\_data变量的
 
-// 使用 gcc -fPIC -shared gg.c -o gg.so
-```
+![](images/image-3.png)
 
-+ 反汇编gg.so动态库,看一下access_lib_internal()是如何访问lib_internal_data变量的
-
-<!-- 这是一张图片，ocr 内容为： -->
-![图片12](java线程原理/images/image-12.png)
-
-```java
-10fd:       48 8b 05 c4 2e 00 00    mov    0x2ec4(%rip),%rax        # 3fc8 <lib_internal_data@@Base-0x48>
-1104:       c7 00 0a 00 00 00       movl   $0xa,(%rax)
-```
-
-这里的含义是：将 下一条指令的地址(0x1104) + 0x2ec4(这是offset) 的值（**0x3fc8**） 放入到rax寄存器中，然后将0xa(这个就是10)赋值给rax所指向的值(此时rax中存放的应该是lib_internal_data变量的地址)。
+这里的含义是：将 下一条指令的地址(0x1104) + 0x2ec4(这是offset) 的值（**0x3fc8**） 放入到rax寄存器中，然后将0xa(这个就是10)赋值给rax所指向的值(此时rax中存放的应该是lib\_internal\_data变量的地址)。
 
 可以看到，这就是相对寻址，那么 0x3fc8**存放的是什么呢？**
 
 > GOT表是一个数组，每一个元素都是一个GOT表项
->
-
-```java
-Contents of section .got:
- 3fc0 00000000 00000000 00000000 00000000  ................
- 3fd0 00000000 00000000 00000000 00000000  ................
- 3fe0 00000000 00000000                    ........
- 
- // readelf -r gg.so
- Offset          Info           Type           Sym. Value    Sym. Name + Addend
- 在got表中的地址                  类型           在原文件中的偏移
- 000000003fc8  000500000006 R_X86_64_GLOB_DAT 0000000000004010 lib_internal_data + 0
-```
 
 可以看到,0x3fc8所指向的GOT表项全部都为0，这是正确的，因为此时gg.so还处于编译阶段，并没有解析链接，所以在这里为0是正确的。
 
 那么当程序运行起来后,这个GOT表项的值会被填写为什么值呢？
 
-```c
-// test.c
-#include <stdio.h>
-#include <unistd.h>
-extern void access_lib_internal();
-extern int lib_internal_data;  
-int main() {
-   access_lib_internal();
-   sleep(-1);
-    return 0;
-}
-```
+这是一个简单的程序，通过access\_lib\_internal()方法来访问动态库中的全局变量，在这里重点关注GOT表项,这里test.c运行起来后会变为一个进程「使用sleep(-1)让程序不会退出」，其使用到了动态库，那么在运行时就会动态的加载gg.so，下面看下该进程的运行时内存：./test & 「这会输出进程号」，然后cat /proc/xxx/maps
 
-这是一个简单的程序，通过access_lib_internal()方法来访问动态库中的全局变量，在这里重点关注GOT表项,这里test.c运行起来后会变为一个进程「使用sleep(-1)让程序不会退出」，其使用到了动态库，那么在运行时就会动态的加载gg.so，下面看下该进程的运行时内存：./test & 「这会输出进程号」，然后cat /proc/xxx/maps
-
-<!-- 这是一张图片，ocr 内容为： -->
-![图片13](java线程原理/images/image-13.png)
+![](images/image-4.png)
 
 可以看到gg.so被加载的位置是：0x7fde03ad1000
 
-那么lib_internal_data变量所对应的GOT表项的地址应该是：0x7fde03ad1000 + 0x3fc8 = 0x7fde03ad4fc8
+那么lib\_internal\_data变量所对应的GOT表项的地址应该是：0x7fde03ad1000 + 0x3fc8 = 0x7fde03ad4fc8
 
-查看一下,这个地址的值「这个值现在应该已经被填写为lib_internal_data变量的真实地址了」
+查看一下,这个地址的值「这个值现在应该已经被填写为lib\_internal\_data变量的真实地址了」
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片14](java线程原理/images/image-14.png)
+![](images/image-1.png)
 
 不出意外的话，这个0x00007fde03ad5010地址，应该存放的就是10
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片15](java线程原理/images/image-15.png)
+![](images/image.png)
 
 
 
-+ 模块间数据访问
+* 模块间数据访问
 
 动态库访问主程序的全局变量,其实这种和上面是类似的，因为最终还是主程序通过访问动态库的函数，来进行数据访问，当然这里也会生成一个GOT表项
 
-```c
-// main.c
-// 主程序定义
-int main_global_data = 500;
-
-// kk.c
-extern int main_global_data;
-
-void access_main_global() {
-    main_global_data += 20;  // 访问主程序的全局变量
-}
-```
-
-+ 主程序直接访问动态库的全局数据
-
-```c
-// main.c
-extern int lib_internal_data;  // 声明动态库的变量
-
-int main() {
-   lib_internal_data = 20;  // 直接访问
-}
-
-// gg.c
-int lib_internal_data = 100;
-
-void access_lib_internal() {
-    lib_internal_data = 10;  
-}
-```
+* 主程序直接访问动态库的全局数据
 
 这里会有个问题，因为主程序并不是地址无关的，那么它访问变量时就是通过绝对地址的，这个时候就需要将动态库的变量拷贝一份到主程序的.data段或者.bss段，然后主程序访问自己的副本
 
@@ -1170,68 +487,41 @@ void access_lib_internal() {
 
 验证一下
 
-```c
-// main.c
-#include <unistd.h>
-extern int lib_internal_data;  // 声明动态库的变量
-
-int main() {
-   lib_internal_data = 20;  // 直接访问
-   sleep(-1);
-}
-
-// gg.c
-int lib_internal_data = 100;
-
-void access_lib_internal() {
-    lib_internal_data = 10;  
-}
-// gcc -fPIC -shared gg.c -o gg.so
-// gcc -o main main.c ./gg.so
-// ./main & 
-```
-
 可以看到gg.so被加载到main进程的这个位置：起始地址为7f65fe04b000
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片16](java线程原理/images/image-16.png)
+![](images/image-21.png)
 
-单独看下动态库：readelf -r gg.so | grep lib_internal_data
+单独看下动态库：readelf -r gg.so | grep lib\_internal\_data
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片17](java线程原理/images/image-17.png)
+![](images/image-20.png)
 
-可以看到,位于GOT表的0x3fc8偏移处,按照正常的逻辑「上面演示过的」,程序运行起来后, 该偏移对应的got表项应该要被填写为 lib_internal_data变量的地址，而这个地址是在gg.so的data段的「后面会再讲解一下进程的虚拟内存布局的，.so也有自己的代码段，数据段，got表，...」
+可以看到,位于GOT表的0x3fc8偏移处,按照正常的逻辑「上面演示过的」,程序运行起来后, 该偏移对应的got表项应该要被填写为 lib\_internal\_data变量的地址，而这个地址是在gg.so的data段的「后面会再讲解一下进程的虚拟内存布局的，.so也有自己的代码段，数据段，got表，...」
 
 如果按照上面给的结论,那么这里最终填写的应该是位于main进程.data段中的副本数据。
 
 下面单独看下main进程：readelf -r main | grep COPY
 
-可以看到main进程确实为lib_internal_data变量分配了一个副本「在地址0x000000404018处,这是data段」
+可以看到main进程确实为lib\_internal\_data变量分配了一个副本「在地址0x000000404018处,这是data段」
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片18](java线程原理/images/image-18.png)
+![](images/image-19.png)
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片19](java线程原理/images/image-19.png)
+![](images/image-16.png)
 
 下面再查看一下GOT表项的值：gg.so被加载的位置（0x7f65fe04b000） + 0x3fc8 = 0x7f65fe04efc8「如果该地址存放的值 = 0x000000404018，那么就说明没有问题，下面进行验证」
 
-gdb -p 1203952 -batch -ex "p &lib_internal_data"，这是查看lib_internal_data的地址的(希望是0x000000404018)
+gdb -p 1203952 -batch -ex "p \&lib\_internal\_data"，这是查看lib\_internal\_data的地址的(希望是0x000000404018)
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片20](java线程原理/images/image-20.png)
+![](images/image-17.png)
 
 gdb -p 1203952 -batch -ex "x/gx 0x7f65fe04efc8"，这是查看got表项的(希望是0x000000404018)
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片21](java线程原理/images/image-21.png)
+![](images/image-18.png)
 
 验证成功✅
 
 
 
-+ GOT表
+* GOT表
 
 那么到这里总结一下,针对动态库全局数据的访问，是如何做到(加载)地址无关的呢？
 
@@ -1240,296 +530,127 @@ xxx 暂时搁置，先掌握JVM线程和JAVA线程的原理吧（以及相关的
 
 
 ## 系统调用
+
+
+
 # 二：Linux线程
+
 后续补充上
 
 # 三：JVM线程
+
 ## 1. 线程的创建
+
 这里就看下start()方法的源码,到底是如何启动一个线程的
 
-```java
-/*
-    main线程和系统线程不会走这个方法,它们由jvm直接创建
-    threadStatus = 0 代表 NEW状态,这是唯一可以启动的状态
-*/ 
-public synchronized void start() {
-    /** 
-     * This method is not invoked for the main method thread or "system"
-     * group threads created/set up by the VM. Any new functionality added
-     * to this method in the future may have to also be added to the VM.
-     *
-     * A zero status value corresponds to state "NEW". 
-     */
-    if (threadStatus != 0)
-        throw new IllegalThreadStateException();
+* start0()
 
-    /* Notify the group that this thread is about to be started
-     * so that it can be added to the group's list of threads
-     * and the group's unstarted count can be decremented. */
-    group.add(this);
+![](images/diagram-1.png)
 
-    boolean started = false;
-    try {
-     //  private native void start0(); 这个start0()是一个本地方法,在jvm实现的
-        start0();
-        started = true;
-    } finally {
-        try {
-            if (!started) {
-                group.threadStartFailed(this);
-            }
-        } catch (Throwable ignore) {
-            /* do nothing. If start0 threw a Throwable then
-              it will be passed up the call stack */
-        }
-    }
-}
-```
+* 核心数据结构体
 
-+ start0()
-+ 核心数据结构体
-+ 状态转化图
+![](images/diagram-2.png)
 
-<!-- 这是一张图片，ocr 内容为： -->
-![图片22](java线程原理/images/image-3.png)
+* 状态转化图
+
+![](images/image-13.png)
 
 
 
 ## 2. 线程数据结构
-在这里阅读源码的时候会涉及到4个类：java.lang.Thread(这个类是位于java.lang包中的)，java_lang_Thread(这个类是位于jvm内部的 - jvmClasses.hpp文件中的)，JavaThread(jvm内部类)，OSThread(jvm内部类)
+
+在这里阅读源码的时候会涉及到4个类：java.lang.Thread(这个类是位于java.lang包中的)，java\_lang\_Thread(这个类是位于jvm内部的 - jvmClasses.hpp文件中的)，JavaThread(jvm内部类)，OSThread(jvm内部类)
 
 
+![](images/diagram-3.png)
 
 ## 3. 线程的状态
-<!-- 这是一张图片，ocr 内容为： -->
-![图片23](java线程原理/images/image-4.png)
+
+![](images/image-15.png)
 
 在4.2章节中也说过线程的状态,不过指的是java层面的状态,在这里一共有6种,而在jvm内部,和线程有关的状态枚举还有3种:
 
-+ java_lang_Thread(jvm工具类)
+* java\_lang\_Thread(jvm工具类)
 
-```cpp
-enum ThreadStatus {
-    NEW                      = 0,
-    RUNNABLE                 = JVMTI_THREAD_STATE_ALIVE +          // runnable / running
-                               JVMTI_THREAD_STATE_RUNNABLE,
-    SLEEPING                 = JVMTI_THREAD_STATE_ALIVE +          // Thread.sleep()
-                               JVMTI_THREAD_STATE_WAITING +
-                               JVMTI_THREAD_STATE_WAITING_WITH_TIMEOUT +
-                               JVMTI_THREAD_STATE_SLEEPING,
-    IN_OBJECT_WAIT           = JVMTI_THREAD_STATE_ALIVE +          // Object.wait()
-                               JVMTI_THREAD_STATE_WAITING +
-                               JVMTI_THREAD_STATE_WAITING_INDEFINITELY +
-                               JVMTI_THREAD_STATE_IN_OBJECT_WAIT,
-    IN_OBJECT_WAIT_TIMED     = JVMTI_THREAD_STATE_ALIVE +          // Object.wait(long)
-                               JVMTI_THREAD_STATE_WAITING +
-                               JVMTI_THREAD_STATE_WAITING_WITH_TIMEOUT +
-                               JVMTI_THREAD_STATE_IN_OBJECT_WAIT,
-    PARKED                   = JVMTI_THREAD_STATE_ALIVE +          // LockSupport.park()
-                               JVMTI_THREAD_STATE_WAITING +
-                               JVMTI_THREAD_STATE_WAITING_INDEFINITELY +
-                               JVMTI_THREAD_STATE_PARKED,
-    PARKED_TIMED             = JVMTI_THREAD_STATE_ALIVE +          // LockSupport.park(long)
-                               JVMTI_THREAD_STATE_WAITING +
-                               JVMTI_THREAD_STATE_WAITING_WITH_TIMEOUT +
-                               JVMTI_THREAD_STATE_PARKED,
-    BLOCKED_ON_MONITOR_ENTER = JVMTI_THREAD_STATE_ALIVE +          // (re-)entering a synchronization block
-                               JVMTI_THREAD_STATE_BLOCKED_ON_MONITOR_ENTER,
-    TERMINATED               = JVMTI_THREAD_STATE_TERMINATED
-  };
-```
+在这里需要详细的说明一下这个类的作用：java\_lang\_Thread是Java线程在VM中的“代言人”，负责将Java的线程抽象转化为VM能理解和操作的底层结构。
 
-在这里需要详细的说明一下这个类的作用：java_lang_Thread是Java线程在VM中的“代言人”，负责将Java的线程抽象转化为VM能理解和操作的底层结构。
-
-<!-- 这是一张图片，ocr 内容为： -->
-![图片24](java线程原理/images/image-5.png)
+![](images/image-12.png)
 
 
 
-+ JavaThread(jvm内部)
+* JavaThread(jvm内部)
 
-```cpp
-enum JavaThreadState {
-  _thread_uninitialized     =  0, // should never happen (missing initialization)
-  _thread_new               =  2, // just starting up, i.e., in process of being initialized
-  _thread_new_trans         =  3, // corresponding transition state (not used, included for completness)
-  _thread_in_native         =  4, // running in native code
-  _thread_in_native_trans   =  5, // corresponding transition state
-  _thread_in_vm             =  6, // running in VM
-  _thread_in_vm_trans       =  7, // corresponding transition state
-  _thread_in_Java           =  8, // running in Java or in stub code
-  _thread_in_Java_trans     =  9, // corresponding transition state (not used, included for completness)
-  _thread_blocked           = 10, // blocked in vm
-  _thread_blocked_trans     = 11, // corresponding transition state
-  _thread_max_state         = 12  // maximum thread state+1 - used for statistics allocation
-};
-```
-
-+ OSThread
-
-```cpp
-enum ThreadState {
-  ALLOCATED,                    // Memory has been allocated but not initialized
-  INITIALIZED,                  // The thread has been initialized but yet started
-  RUNNABLE,                     // Has been started and is runnable, but not necessarily running
-  MONITOR_WAIT,                 // Waiting on a contended monitor lock
-  CONDVAR_WAIT,                 // Waiting on a condition variable
-  OBJECT_WAIT,                  // Waiting on an Object.wait() call
-  BREAKPOINTED,                 // Suspended at breakpoint
-  SLEEPING,                     // Thread.sleep()
-  ZOMBIE                        // All done, but not reclaimed yet
-};
-```
+* OSThread
 
 
 
 # 四：JAVA线程
+
 ## 1. 线程的创建方式
+
 从一个简单的问题开始线程的学习：在Java中创建一个线程有几种方式呢？
 
 > 其实应该从什么是线程开始聊的,这个问题看似很简单,其实非常的复杂,这里将会放到Linux线程(章节)去讲解
->
 
 这个问题其实也是有点坑的,在这里应该从两个方面来回答：
 
-一是从底层的角度来说(线程模型,在Java中,线程模型是一对一的，也就是java中的一个线程对应着Linux中的一个线程,而对于底层来说，创建线程的方式只有一种,那就是通过pthread_create()库函数来创建，而在Java中,创建线程的方式也只有一种,那就是通过new Thread()创建一个Thread对象，然后调用这个对象的start()方法)
+一是从底层的角度来说(线程模型,在Java中,线程模型是一对一的，也就是java中的一个线程对应着Linux中的一个线程,而对于底层来说，创建线程的方式只有一种,那就是通过pthread\_create()库函数来创建，而在Java中,创建线程的方式也只有一种,那就是通过new Thread()创建一个Thread对象，然后调用这个对象的start()方法)
 
 **也即创建线程的方式只有一种,那就是调用thread对象的start()方法来真正的创建一个可以被CPU调度的线程**
 
-```java
-// java
-Thread thread = new Thread();
-thread.start()
-
-// c
-/*
-    参数:
-        - pthread_t *thread:创建线程成功后,该值为线程ID
-        - const pthread_attr_t *attr:用来设置(影响)线程的属性,常见的属性设置包括：栈大小,调度参数以及初始分离状态
-        - void *(*start_routine) (void *): 线程执行函数{接受void*参数,返回值也是void*}
-        - void *arg:传递给start_routine的
-*/
-int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
-                          void *(*start_routine) (void *), void *arg);
-```
-
-> 既然JVM与Linux内核的线程模式是一对一的，那么最终这里的start()方法一定会调用到pthread_create()「这个在JVM线程中会介绍」
+> 既然JVM与Linux内核的线程模式是一对一的，那么最终这里的start()方法一定会调用到pthread\_create()「这个在JVM线程中会介绍」
 >
-> **start() -> pthread****_****create()**
->
+> **start() -> pthread\_create()**
 
 二是从上层的角度来说,也就是线程执行的任务的创建方式,在这里有两种方式：一种是继承Thread类,然后重写其中的run()方法，另外一种则是实现Runnable接口,然后实现其中的run方法。
 
 但是通常推荐使用第二种方式来进行任务的实现，为什么呢？
 
 > 1. Java单继承的限制
-> 2. **设计原则 - 职责分离: 前者将线程本身与任务逻辑混合在一起**
-> 3. **任务共享：当多个线程需要执行相同的逻辑时，不需要每个线程单独实现,共享Runnable即可**
 >
+> 2. **设计原则 - 职责分离: 前者将线程本身与任务逻辑混合在一起**
+>
+> 3. **任务共享：当多个线程需要执行相同的逻辑时，不需要每个线程单独实现,共享Runnable即可**
 
 而针对这个问题通常会见到其他的答案：
 
-+ 比如通过线程池,ComputureFuture,Callable等方式,而CF内部使用的就是线程池，而线程池也是通过创建Thread对象,然后调用start()方法来启动一个线程，
-+ 而Callable就有些不对了，因为在java中，线程只能接受runnable类型的任务,而不支持callable
+* 比如通过线程池,ComputureFuture,Callable等方式,而CF内部使用的就是线程池，而线程池也是通过创建Thread对象,然后调用start()方法来启动一个线程，
+
+* 而Callable就有些不对了，因为在java中，线程只能接受runnable类型的任务,而不支持callable
 
 > 那callable和runnable的区别是什么呢？这里主要有两个区别：
 >
 > 1. callable支持返回值
+>
 > 2. callable支持抛出异常
 >
 > 而callable则通常和FutureTask来搭配使用,而FutureTask又实现了Runnable接口，所以这里兜兜转转还是回到了上面的第二种方式
->
 
 **所以在这里创建线程执行体的方式也只有两种**
 
-> _**也即在这里需要从两个层面来回答，一个是线程模型（也就是真正的线程创建，只有一种方法），另外一个是线程执行体的创建（本质上也只有一种，但是通常会说成两种），这里可以扩展一下目前市面上答案的误区：线程池，CF，ForkJoinPool,特别是Callable需要特别澄清**_
->
+> ***也即在这里需要从两个层面来回答，一个是线程模型（也就是真正的线程创建，只有一种方法），另外一个是线程执行体的创建（本质上也只有一种，但是通常会说成两种），这里可以扩展一下目前市面上答案的误区：线程池，CF，ForkJoinPool,特别是Callable需要特别澄清***
 
 ## 2. 线程的状态
+
 > 在这里目前只关注Java层面的线程状态,而在JVM和Linux内核中也有对应的线程状态,这里则放到上面来讲解
->
 
 在Thread.java类中有一个枚举类,定义java线程的状态
 
 6种状态,其中BLOCKED状态最容易和WAITING状态混淆,在这里再次强调一下：
 
-+ BLOCKED：这种状态代表线程正在等待某个monitor锁,触发场景有两种
-    - 线程进入synchronized方法或者代码块失败阻塞 -- 线程处于真的阻塞状态
-    - 线程调用object.wait()后被object.notify()唤醒，重新竞争monitor锁，此时线程处于运行状态
-+ WAITING：这种代表线程处于阻塞状态 - 真的阻塞
+* BLOCKED：这种状态代表线程正在等待某个monitor锁,触发场景有两种
 
-```java
-public enum State {
-        /**
-         * Thread state for a thread which has not yet started.
-         */
-        NEW,
+  * 线程进入synchronized方法或者代码块失败阻塞 -- 线程处于真的阻塞状态
 
-        /**
-         * Thread state for a runnable thread.  A thread in the runnable
-         * state is executing in the Java virtual machine but it may
-         * be waiting for other resources from the operating system
-         * such as processor.
-         */
-        RUNNABLE,
+  * 线程调用object.wait()后被object.notify()唤醒，重新竞争monitor锁，此时线程处于运行状态
 
-        /**
-         * Thread state for a thread blocked waiting for a monitor lock.
-         * A thread in the blocked state is waiting for a monitor lock
-         * to enter a synchronized block/method or
-         * reenter a synchronized block/method after calling
-         * {@link Object#wait() Object.wait}.
-         */
-        BLOCKED,
+* WAITING：这种代表线程处于阻塞状态 - 真的阻塞
 
-        /**
-         * Thread state for a waiting thread.
-         * A thread is in the waiting state due to calling one of the
-         * following methods:
-         * <ul>
-         *   <li>{@link Object#wait() Object.wait} with no timeout</li>
-         *   <li>{@link #join() Thread.join} with no timeout</li>
-         *   <li>{@link LockSupport#park() LockSupport.park}</li>
-         * </ul>
-         *
-         * <p>A thread in the waiting state is waiting for another thread to
-         * perform a particular action.
-         *
-         * For example, a thread that has called <tt>Object.wait()</tt>
-         * on an object is waiting for another thread to call
-         * <tt>Object.notify()</tt> or <tt>Object.notifyAll()</tt> on
-         * that object. A thread that has called <tt>Thread.join()</tt>
-         * is waiting for a specified thread to terminate.
-         */
-        WAITING,
-
-        /**
-         * Thread state for a waiting thread with a specified waiting time.
-         * A thread is in the timed waiting state due to calling one of
-         * the following methods with a specified positive waiting time:
-         * <ul>
-         *   <li>{@link #sleep Thread.sleep}</li>
-         *   <li>{@link Object#wait(long) Object.wait} with timeout</li>
-         *   <li>{@link #join(long) Thread.join} with timeout</li>
-         *   <li>{@link LockSupport#parkNanos LockSupport.parkNanos}</li>
-         *   <li>{@link LockSupport#parkUntil LockSupport.parkUntil}</li>
-         * </ul>
-         */
-        TIMED_WAITING,
-
-        /**
-         * Thread state for a terminated thread.
-         * The thread has completed execution.
-         */
-        TERMINATED;
-    }
-```
-
-<!-- 这是一张图片，ocr 内容为： -->
-![图片25](java线程原理/images/image-6.png)
+![](images/image-14.png)
 
 
 
 ## 3. 总结
-到这里关于线程的基本原理就讲解到这里,但是依旧只是冰山一角,后续会继续补充,后续将主要关注 **<font style="color:rgb(216,57,49);">线程和进程的内存空间</font>**** /  ****<font style="color:rgb(216,57,49);">性能优化</font>** / **<font style="color:rgb(216,57,49);">问题排查</font>**
+
+到这里关于线程的基本原理就讲解到这里,但是依旧只是冰山一角,后续会继续补充,后续将主要关注 **<span style="color: rgb(216,57,49); background-color: inherit">线程和进程的内存空间</span> /  <span style="color: rgb(216,57,49); background-color: inherit">性能优化</span>** / **<span style="color: rgb(216,57,49); background-color: inherit">问题排查</span>**
 
