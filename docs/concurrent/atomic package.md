@@ -4,7 +4,7 @@
 类分类
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片1](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片1 - 原图片链接已过期")
+![图片1](atomic_package/images/AghybooHNoFioYxXhBuc1QhLn6d.png)
 
 类介绍
 
@@ -14,21 +14,21 @@
 回忆：前面在介绍RWLock和StampedLock的时候提高过,StampedLock除了扩展了读写并发，同时还做了一个优化 -- 那就是使用cowaiters来优化CAS竞争。如下图： 其本质思想就是将竞争点从一个变为多个。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片2](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片2 - 原图片链接已过期")
+![图片2](atomic_package/images/Aq4WborNroKAxwx1TCZctr2jnFB.png)
 
 
 
 而LongAddr的本质也是这个思想,相比于传统的AtomicLong来说,在高并发场景下,所有的线程都对一个long变量(单个共享变量)进行CAS,而失败的则会不断的重试。在极端情况下可能会存在性能瓶颈。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片3](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片3 - 原图片链接已过期")
+![图片3](atomic_package/images/CNX3bdo6Kow7BFxLraZcQX6Pncd.png)
 
 
 
 所以为了解决竞争单一共享资源的问题,其基本思想为： LongAddr也将一个long变量,变为多个long变量 - - 使用数组来存储这些long变量「long[] 」，每个线程在cas之前,会被路由到某个数组槽位上「long[x]」,然后再去cas。这样就将原本对一个共享资源的竞争变为对多个共享资源的竞争。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片4](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片4 - 原图片链接已过期")
+![图片4](atomic_package/images/Gk8rbChGPoSFlQx2Fnqc4MGnnzb.png)
 
 LongAddr的基本思想
 
@@ -36,7 +36,7 @@ LongAddr的基本思想
 
 ### 类关系图
 <!-- 这是一张图片，ocr 内容为： -->
-![图片5](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片5 - 原图片链接已过期")
+![图片5](atomic_package/images/LMGFbcaAYoTpgVxjCECc5ikZnBb.png)
 
 类关系图
 
@@ -48,14 +48,14 @@ LongAdder类的功能和AtomicLong的功能一样,就是提供一个原子类来
 4个CPU,4个槽位,理论上可以通过比较**完美的路由策略**来将CPU上的执行线程路由到不同的槽位上,这样在不同的槽位上是没有竞争的。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片6](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片6 - 原图片链接已过期")
+![图片6](atomic_package/images/MIeabvTA0oMcUsxIkXIcBLxwn2b.png)
 
 
 
 假设有5个线程执行，那么由于只有4个CPU，那么调度算法会选择一个CPU(假设是CPU - 2),让线程5执行,但是同时执行的线程数只能是4个,所以也能满足条件。那么此时数组长度 > CPU个数,其实是没有意义的。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片7](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片7 - 原图片链接已过期")
+![图片7](atomic_package/images/Oza7bGWvjoyFQ8xqbOIcxYBYnof.png)
 
 
 
@@ -76,14 +76,14 @@ LongAdder类的功能和AtomicLong的功能一样,就是提供一个原子类来
 下面继续看当casBase失败后的代码「因为总要有一个线程来做这个初始化操作，除非线程没有竞争」,总结一下进入到longAccumulate()的场景
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片8](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片8 - 原图片链接已过期")
+![图片8](atomic_package/images/QtiPb6j8nozBmcxjKvhcz49dnkd.png)
 
 
 
 并且从这里的条件判断,可以大概可以猜测其工作原理：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片9](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片9 - 原图片链接已过期")
+![图片9](atomic_package/images/RhTYb4w7hotwEaxbkiecDY5BnVf.png)
 
 
 
@@ -98,7 +98,7 @@ LongAdder类的功能和AtomicLong的功能一样,就是提供一个原子类来
 继续看下面的代码逻辑：可以看到代码逻辑被分为了3个部分。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片10](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片10 - 原图片链接已过期")
+![图片10](atomic_package/images/UhgCbiv1So6eS0xVrXicRGwFnxx.png)
 
 
 
@@ -107,14 +107,14 @@ LongAdder类的功能和AtomicLong的功能一样,就是提供一个原子类来
 接下来就是初始化cells[]数组了： 可以看到cells[]默认的大小为2,当下面这段代码执行完毕后，当前线程的递增操作已经完成了「在初始化cell对象的时候完成的」,最终的结果入下图所示： 其中的h&1的作用是：h代表的是线程的"key"「probe」，&1的作用就是将其映射到cells[2]中的某一个
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片11](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片11 - 原图片链接已过期")
+![图片11](atomic_package/images/UtAdb64ZtooMdDxN6l1cNldHnZb.png)
 
 
 
 cells[]初始化的操作就介绍到这里了。下面继续分析当cells[]不为空时的操作：**这里的操作是最复杂的,**&#x5728;这个分支中又细化为多个小分支了,下面逐一介绍每个分支的场景，这里有一个重点：rehash操作 - h = advanceProbe(h) 一旦某个分支不满足,就会重新执行一次rehash
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片12](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片12 - 原图片链接已过期")
+![图片12](atomic_package/images/VT0GbcX3zoV4AEx0D9SceQfxn3g.png)
 
 
 
@@ -123,7 +123,7 @@ boolean collide = false; //该局部变量的作用是用来表明是否发生�
 下面这段代码执行的结果如下：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片13](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片13 - 原图片链接已过期")
+![图片13](atomic_package/images/VrYcbxNLUo2a4Fx8oxTchfqFn0c.png)
 
 
 
@@ -136,7 +136,7 @@ boolean collide = false; //该局部变量的作用是用来表明是否发生�
 --
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片14](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片14 - 原图片链接已过期")
+![图片14](atomic_package/images/WczpbFsHto7yqUxOpfscr9QLnya.png)
 
 扩容
 
@@ -149,7 +149,7 @@ boolean collide = false; //该局部变量的作用是用来表明是否发生�
 总结一下：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片15](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片15 - 原图片链接已过期")
+![图片15](atomic_package/images/Y1Afb1rbnogtulxm2lLcmEmxnje.png)
 
 
 
@@ -177,7 +177,7 @@ AtomicStampedReference和AtomicMarkableReference都是为了解决CAS的ABA问�
 ## AtomicStampedReference
 ### 类关系图
 <!-- 这是一张图片，ocr 内容为： -->
-![图片16](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片16 - 原图片链接已过期")
+![图片16](atomic_package/images/YIuObnIcfotjmDxcmNMc8XtYnZb.png)
 
 
 
@@ -185,21 +185,21 @@ AtomicStampedReference和AtomicMarkableReference都是为了解决CAS的ABA问�
 下面看下关键函数：compareAndSet()
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片17](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片17 - 原图片链接已过期")
+![图片17](atomic_package/images/Z6RVbqsS4ocrB1xFFf4cpMEunZQ.png)
 
 
 
 解决ABA问题
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片18](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片18 - 原图片链接已过期")
+![图片18](atomic_package/images/Z7aYbi4yGov9kGx5nQ0cTUITnqm.png)
 
 
 
 但是我觉得有一个很大的问题就是：该类将stamped的操作权限暴露给用户了。这就导致了其实该类并不能真正的解决ABA问题,如下图所示：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片19](https://via.placeholder.com/600x400/f0f0f0/666666?text=图片暂时无法显示 "图片19 - 原图片链接已过期")
+![图片19](atomic_package/images/ZDKtbZWjaohijBxy39VcPbsyneg.png)
 
 
 
