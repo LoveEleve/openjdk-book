@@ -43,19 +43,28 @@
     }
     
     /* 强制隐藏 docsify-sidebar-collapse 给"高并发容器"添加的折叠图标 */
-    .sidebar-nav a[href^="#/concurrent/concurrent-container"]::before {
+    /* 最直接的方案：完全禁用docsify-sidebar-collapse插件对单文档项的影响 */
+    .sidebar-nav li.collapse::before,
+    .sidebar-nav li.open::before {
       display: none !important;
     }
-    .sidebar-nav li:has(> a[href^="#/concurrent/concurrent-container"]) > .sidebar-nav-fold {
-      display: none !important;
+    /* 只对有子菜单的项目显示折叠图标 */
+    .sidebar-nav li:has(ul):not(.file).collapse::before,
+    .sidebar-nav li:has(ul):not(.file).open::before {
+      display: block !important;
+      content: "";
+      position: absolute;
+      left: 8px;
+      top: 50%;
+      transform: translateY(-50%) rotate(-45deg);
+      width: 6px;
+      height: 6px;
+      border-right: 2px solid #666;
+      border-bottom: 2px solid #666;
+      transition: transform .1s;
     }
-    .sidebar-nav li:has(> a[href^="#/concurrent/concurrent-container"]) .sidebar-nav-fold {
-      display: none !important;
-    }
-    /* 确保"高并发容器"的缩进与同级项目一致 */
-    .sidebar-nav a[href^="#/concurrent/concurrent-container"] {
-      padding-left: 20px !important;
-      margin-left: 0 !important;
+    .sidebar-nav li:has(ul):not(.file).open::before {
+      transform: translateY(-50%) rotate(45deg);
     }
 
     /* ---------------- 代码块：统一顶栏 + 行级折叠（直接在代码块内） ---------------- */
