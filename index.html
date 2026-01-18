@@ -34,34 +34,8 @@
       display: none !important;
     }
 
-    /* 侧边栏：高并发容器是单文档，左侧不再重复展示页面目录（右侧已有目录） */
-    .sidebar-nav a[href^="#/concurrent/concurrent-container"] + ul {
-      display: none !important;
-    }
-    .sidebar-nav a[href^="#/concurrent/concurrent-container"]::after {
-      display: none !important;
-    }
-
-    /* 确保"高并发容器"与同级项目格式对齐：统一缩进、字号、行高 */
-    /* 二级菜单项的统一样式 */
-    .sidebar-nav > ul > li > ul > li > a {
-      font-size: inherit !important;
-      line-height: inherit !important;
-      padding-left: 20px !important;
-      margin-left: 0 !important;
-      font-weight: inherit !important;
-    }
-    
-    /* 特别针对"高并发容器"确保与"synchronized"、"线程池"标题对齐 */
-    .sidebar-nav a[href^="#/concurrent/concurrent-container"] {
-      font-size: inherit !important;
-      line-height: inherit !important;
-      padding-left: 20px !important;
-      margin-left: 0 !important;
-      font-weight: inherit !important;
-    }
-    
-    /* 确保二级分组标题（synchronized、线程池）的样式一致 */
+    /* 侧边栏：统一二级菜单项的格式对齐 */
+    .sidebar-nav > ul > li > ul > li > a,
     .sidebar-nav > ul > li > ul > li:not(:has(a)) {
       font-size: inherit !important;
       line-height: inherit !important;
@@ -1539,7 +1513,7 @@
       repo: 'https://github.com/LoveEleve/LoveEleve.github.io',
       loadSidebar: true,
       basePath: 'docs/',
-      subMaxLevel: 0,
+      subMaxLevel: 3,
       sidebarDisplayLevel: 0,
       executeScript: true,
       requestHeaders: { 'cache-control': 'max-age=0' },
