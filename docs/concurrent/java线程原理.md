@@ -113,7 +113,7 @@ int main()
 #### 3.1.1 汇编 (目标文件的生成)
 + 汇编代码
 
-```plain
+```java
     .file   "simple.c"
 
 # ----------------------------------------------------------------------
@@ -240,7 +240,7 @@ static_var.1730:
 
 那就是此时文件(或者说程序)还只是在磁盘上呢,并不知道(同样也没有)虚拟地址，那下面这行代码应该怎么翻译呢？
 
-```plain
+```java
 func1:
     # ...
     call    printf
@@ -860,7 +860,7 @@ Key point: .text sections from main.o and math.o are merged into one .text secti
 
 通过objdump -D -j .text program命令来看一下通过静态链接之后生成的可执行文件的.text段的反汇编
 
-```plain
+```java
 Disassembly of section .text:
 0000000000401020 <_start>:
     # _start的汇编
@@ -1065,7 +1065,7 @@ void access_lib_internal() {
 <!-- 这是一张图片，ocr 内容为： -->
 ![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NmZmODAwMGE5NDkzZWVmYWZmZTc0ZGE5ODU2NDZlODBfRFdPQ1k1TGtEZWpiU0xSVU5HNWkyeXh3UTlvSzAxMlpfVG9rZW46VWY1SGJJNEZLb2l5YXl4QzRBSWMweFJkbjdlXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA)
 
-```plain
+```java
 10fd:       48 8b 05 c4 2e 00 00    mov    0x2ec4(%rip),%rax        # 3fc8 <lib_internal_data@@Base-0x48>
 1104:       c7 00 0a 00 00 00       movl   $0xa,(%rax)
 ```
@@ -1077,7 +1077,7 @@ void access_lib_internal() {
 > GOT表是一个数组，每一个元素都是一个GOT表项
 >
 
-```plain
+```java
 Contents of section .got:
  3fc0 00000000 00000000 00000000 00000000  ................
  3fd0 00000000 00000000 00000000 00000000  ................

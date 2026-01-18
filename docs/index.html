@@ -136,19 +136,6 @@
       gap: 10px;
     }
 
-    /* macOS 风格三色点 */
-    .code-tools-left .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      display: inline-block;
-      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
-    }
-
-    .code-tools-left .dot:nth-of-type(1) { background: #ff5f57; }
-    .code-tools-left .dot:nth-of-type(2) { background: #febc2e; }
-    .code-tools-left .dot:nth-of-type(3) { background: #28c840; }
-
     .code-tools-right {
       display: flex;
       align-items: center;
@@ -1844,9 +1831,6 @@
             tools.className = 'code-tools';
             tools.innerHTML = `
               <div class="code-tools-left">
-                <span class="dot"></span>
-                <span class="dot"></span>
-                <span class="dot"></span>
                 <span>${lang}</span>
               </div>
               <div class="code-tools-right">

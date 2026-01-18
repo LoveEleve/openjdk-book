@@ -9,7 +9,7 @@
 ## 2.设计与实现
 同步器背后的设计思想如下：
 
-```plain
+```java
 while (synchronization state does not allow acquire) { // 当同步状态不允许(线程)acquire「通俗点：线程获取锁失败」
     enqueue current thread if not already queued; // 如果(当前线程)没有在队列中,那么当前线程入队
     possibly block current thread; // 可能阻塞当前线程(这里有个关键的点,是可能阻塞)
@@ -20,7 +20,7 @@ dequeue current thread if it was queued; // 如果当前线程在队列中，则
 
 release():
 
-```plain
+```java
 update synchronization state; // 更新同步状态
 if (state may permit a blocked thread to acquire) // 如果同步状态允许一个blocked线程通过acquire()
     unblock one or more queued threads; //那么unblock一个或者多个已经入队的线程
@@ -32,7 +32,7 @@ if (state may permit a blocked thread to acquire) // 如果同步状态允许一
 + Blocking and unblocking threads -- 阻塞和唤醒线程
 + Maintaining queues -- 队列的管理
 
-```plain
+```java
 // 创建一个框架分别实现这三个组件是有可能的。但是，这会让整个框架既难用又没效率
 It might be possible to create a framework that allows each of these three pieces to vary independently. 
 However, this would neither be very efficient nor usable.
