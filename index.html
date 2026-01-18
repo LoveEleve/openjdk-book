@@ -1378,271 +1378,92 @@
       color: rgba(102, 219, 162, 0.95);
     }
 
-    /* ---------------- 首页动效（仅首页 #/ 生效） ---------------- */
-    body[data-home="1"] {
-      background:
-        radial-gradient(1200px 700px at 18% 8%, rgba(66, 185, 131, 0.18), rgba(66, 185, 131, 0) 60%),
-        radial-gradient(900px 600px at 84% 10%, rgba(99, 102, 241, 0.14), rgba(99, 102, 241, 0) 55%),
-        radial-gradient(900px 700px at 40% 92%, rgba(236, 72, 153, 0.10), rgba(236, 72, 153, 0) 55%),
-        linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(250, 250, 252, 1));
+    /* ---------------- 极简风格（全站） ---------------- */
+    :root {
+      --min-accent: #16a34a;
+      --min-text: rgba(15, 23, 42, 0.92);
+      --min-subtext: rgba(15, 23, 42, 0.62);
+      --min-border: rgba(15, 23, 42, 0.10);
+      --min-bg: #ffffff;
+      --min-surface: rgba(255, 255, 255, 0.78);
+      --min-code-bg: rgba(2, 6, 23, 0.03);
     }
 
-    body[data-home="1"]::before,
-    body[data-home="1"]::after {
-      content: "";
-      position: fixed;
-      inset: -20% -10% -20% -10%;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0.65;
-      filter: blur(40px);
-      transform: translate3d(0, 0, 0);
-      will-change: transform;
+    html[data-theme="dark"] {
+      --min-accent: #4ade80;
+      --min-text: rgba(226, 232, 240, 0.92);
+      --min-subtext: rgba(226, 232, 240, 0.65);
+      --min-border: rgba(226, 232, 240, 0.12);
+      --min-bg: #0b1020;
+      --min-surface: rgba(2, 6, 23, 0.62);
+      --min-code-bg: rgba(226, 232, 240, 0.06);
     }
 
-    body[data-home="1"]::before {
-      background:
-        radial-gradient(closest-side at 25% 30%, rgba(66, 185, 131, 0.35), rgba(66, 185, 131, 0) 60%),
-        radial-gradient(closest-side at 70% 35%, rgba(99, 102, 241, 0.28), rgba(99, 102, 241, 0) 62%),
-        radial-gradient(closest-side at 55% 80%, rgba(236, 72, 153, 0.22), rgba(236, 72, 153, 0) 62%);
-      animation: homeFloatA 18s ease-in-out infinite;
+    body {
+      background: var(--min-bg) !important;
     }
 
-    body[data-home="1"]::after {
-      opacity: 0.55;
-      background:
-        radial-gradient(closest-side at 35% 20%, rgba(34, 197, 94, 0.22), rgba(34, 197, 94, 0) 60%),
-        radial-gradient(closest-side at 80% 55%, rgba(56, 189, 248, 0.18), rgba(56, 189, 248, 0) 62%),
-        radial-gradient(closest-side at 45% 90%, rgba(168, 85, 247, 0.16), rgba(168, 85, 247, 0) 62%);
-      animation: homeFloatB 26s ease-in-out infinite;
+    .markdown-section {
+      color: var(--min-text) !important;
     }
 
-    @keyframes homeFloatA {
-      0%   { transform: translate3d(-1.5%, -1%, 0) scale(1.02); }
-      50%  { transform: translate3d(1.8%, 1.6%, 0) scale(1.05); }
-      100% { transform: translate3d(-1.5%, -1%, 0) scale(1.02); }
+    .markdown-section blockquote {
+      background: transparent !important;
+      border-left-color: var(--min-border) !important;
+      color: var(--min-subtext) !important;
     }
 
-    @keyframes homeFloatB {
-      0%   { transform: translate3d(1.2%, 1.4%, 0) scale(1.03); }
-      50%  { transform: translate3d(-1.6%, -1.2%, 0) scale(1.06); }
-      100% { transform: translate3d(1.2%, 1.4%, 0) scale(1.03); }
+    .markdown-section a {
+      color: var(--min-accent) !important;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
     }
 
-    /* 确保动效在内容后面，不遮挡侧边栏/正文 */
-    body[data-home="1"] #app {
-      position: relative;
-      z-index: 1;
+    .markdown-section a:hover {
+      text-decoration: underline;
     }
 
-    /* 首页首屏渐入：通过 JS 在渲染后短暂加上 .home-enter 再移除 */
-    body[data-home="1"] .markdown-section {
-      transition: opacity 0.65s ease, transform 0.65s ease;
-      will-change: opacity, transform;
+    /* 去掉“很重”的阴影，让整体更克制 */
+    .markdown-section .docsify-tabs,
+    .markdown-section .alert,
+    .markdown-section #giscus .giscus-card,
+    .toc-aside,
+    .page-nav a,
+    pre[data-lang] {
+      box-shadow: none !important;
+      border-color: var(--min-border) !important;
+      border-radius: 12px !important;
     }
 
-    body[data-home="1"].home-enter .markdown-section {
-      opacity: 0;
-      transform: translateY(10px);
+    pre[data-lang] {
+      background: var(--min-code-bg) !important;
     }
 
-    /* Canvas 粒子层 */
-    #home-canvas {
-      position: fixed;
-      inset: 0;
-      width: 100vw;
-      height: 100vh;
-      z-index: 0;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.35s ease;
+    .code-tools {
+      background: transparent !important;
+      border-bottom-color: var(--min-border) !important;
     }
 
-    body[data-home="1"] #home-canvas {
-      opacity: 0.85;
+    /* 悬浮按钮：极简化（去掉厚阴影/位移） */
+    .theme-toggle,
+    .search-toggle {
+      background: var(--min-surface) !important;
+      border-color: var(--min-border) !important;
+      color: var(--min-text) !important;
+      box-shadow: none !important;
+      transform: none !important;
     }
 
-    /* 首页 Hero：名字动效 */
-    .home-hero {
-      position: relative;
-      margin: 10px 0 18px;
-      padding: 20px 18px 16px;
-      border-radius: 16px;
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      background: rgba(255, 255, 255, 0.72);
-      box-shadow:
-        0 1px 0 rgba(0, 0, 0, 0.02),
-        0 22px 60px rgba(0, 0, 0, 0.10);
-      backdrop-filter: saturate(160%) blur(14px);
-      -webkit-backdrop-filter: saturate(160%) blur(14px);
-      overflow: hidden;
+    .theme-toggle:hover,
+    .search-toggle:hover,
+    .theme-toggle:active,
+    .search-toggle:active {
+      box-shadow: none !important;
+      transform: none !important;
     }
 
-    html[data-theme="dark"] .home-hero {
-      border-color: rgba(255, 255, 255, 0.10);
-      background: rgba(2, 6, 23, 0.58);
-      box-shadow:
-        0 1px 0 rgba(255, 255, 255, 0.02),
-        0 26px 70px rgba(0, 0, 0, 0.55);
-    }
-
-    .home-hero::before {
-      content: "";
-      position: absolute;
-      inset: -40% -30% -40% -30%;
-      background:
-        radial-gradient(closest-side at 25% 30%, rgba(66, 185, 131, 0.22), rgba(66, 185, 131, 0) 60%),
-        radial-gradient(closest-side at 70% 35%, rgba(99, 102, 241, 0.18), rgba(99, 102, 241, 0) 62%),
-        radial-gradient(closest-side at 55% 80%, rgba(236, 72, 153, 0.14), rgba(236, 72, 153, 0) 62%);
-      filter: blur(30px);
-      opacity: 0.9;
-      transform: translate3d(0, 0, 0);
-      animation: heroGlow 12s ease-in-out infinite;
-      pointer-events: none;
-    }
-
-    @keyframes heroGlow {
-      0% { transform: translate3d(-2%, -1%, 0) scale(1.02); }
-      50% { transform: translate3d(2%, 1.6%, 0) scale(1.05); }
-      100% { transform: translate3d(-2%, -1%, 0) scale(1.02); }
-    }
-
-    .home-hero .home-kicker {
-      position: relative;
-      z-index: 1;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 11px;
-      font-weight: 900;
-      letter-spacing: 1.2px;
-      text-transform: uppercase;
-      color: rgba(17, 24, 39, 0.78);
-    }
-
-    html[data-theme="dark"] .home-hero .home-kicker {
-      color: rgba(226, 232, 240, 0.78);
-    }
-
-    .home-hero .home-kicker .dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: rgba(66, 185, 131, 0.95);
-      box-shadow: 0 0 0 6px rgba(66, 185, 131, 0.10);
-    }
-
-    .home-hero .home-title {
-      position: relative;
-      z-index: 1;
-      margin-top: 10px;
-      font-size: 44px;
-      line-height: 1.08;
-      font-weight: 1000;
-      letter-spacing: -0.8px;
-      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-      user-select: none;
-      white-space: nowrap;
-    }
-
-    @media (max-width: 540px) {
-      .home-hero .home-title { font-size: 36px; }
-    }
-
-    .home-hero .home-title .ch {
-      display: inline-block;
-      opacity: 0;
-      transform: translateY(14px) scale(0.98);
-      filter: blur(1px);
-      background: linear-gradient(90deg, rgba(66, 185, 131, 1), rgba(96, 165, 250, 1), rgba(244, 114, 182, 1), rgba(66, 185, 131, 1));
-      background-size: 220% 100%;
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-      animation-name: titlePop, titleGradient;
-      animation-duration: 0.72s, 4.6s;
-      animation-timing-function: cubic-bezier(0.2, 0.9, 0.2, 1), linear;
-      animation-fill-mode: forwards, both;
-      animation-iteration-count: 1, infinite;
-      animation-delay: calc(var(--i) * 60ms + 140ms), 0ms;
-    }
-
-    @keyframes titlePop {
-      to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-        filter: blur(0);
-      }
-    }
-
-    @keyframes titleGradient {
-      0% { background-position: 0% 50%; }
-      100% { background-position: 100% 50%; }
-    }
-
-    .home-hero .home-cursor {
-      display: inline-block;
-      width: 10px;
-      height: 1.05em;
-      margin-left: 6px;
-      border-radius: 6px;
-      background: rgba(66, 185, 131, 0.85);
-      box-shadow: 0 0 0 8px rgba(66, 185, 131, 0.10);
-      transform: translateY(2px);
-      animation: cursorBlink 0.9s steps(1) infinite;
-    }
-
-    @keyframes cursorBlink {
-      0%, 49% { opacity: 1; }
-      50%, 100% { opacity: 0.25; }
-    }
-
-    .home-hero .home-subtitle {
-      position: relative;
-      z-index: 1;
-      margin-top: 10px;
-      font-size: 13px;
-      line-height: 1.65;
-      color: rgba(17, 24, 39, 0.70);
-      opacity: 0;
-      transform: translateY(8px);
-      animation: subtitleIn 0.7s ease forwards;
-      animation-delay: 720ms;
-    }
-
-    html[data-theme="dark"] .home-hero .home-subtitle {
-      color: rgba(226, 232, 240, 0.70);
-    }
-
-    @keyframes subtitleIn {
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    html[data-theme="dark"] body[data-home="1"] {
-      background:
-        radial-gradient(1200px 700px at 18% 8%, rgba(102, 219, 162, 0.12), rgba(102, 219, 162, 0) 60%),
-        radial-gradient(900px 600px at 84% 10%, rgba(129, 140, 248, 0.12), rgba(129, 140, 248, 0) 55%),
-        radial-gradient(900px 700px at 40% 92%, rgba(244, 114, 182, 0.10), rgba(244, 114, 182, 0) 55%),
-        linear-gradient(180deg, rgba(2, 6, 23, 1), rgba(3, 7, 18, 1));
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      body[data-home="1"]::before,
-      body[data-home="1"]::after {
-        animation: none !important;
-      }
-
-      body[data-home="1"] .markdown-section {
-        transition: none !important;
-      }
-
-      #home-canvas {
-        display: none !important;
-      }
-
-      .home-hero * {
-        animation: none !important;
-      }
+    .theme-toggle .theme-icon {
+      background: transparent !important;
     }
   </style>
 </head>
@@ -1775,295 +1596,6 @@
         getMode: getMode,
         apply: function (mode) { apply(mode || 'auto', true); },
         resolve: resolve
-      };
-    })();
-
-    /* ---------------- 首页 Hero + Canvas（仅首页启用） ---------------- */
-    (function () {
-      const prefersReduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-      const state = {
-        enabled: false,
-        raf: 0,
-        canvas: null,
-        ctx: null,
-        w: 0,
-        h: 0,
-        dpr: 1,
-        pts: [],
-        pointer: { x: 0, y: 0, active: false },
-        theme: 'light',
-        onResize: null,
-        onMove: null,
-        onLeave: null,
-        onTheme: null
-      };
-
-      function getTheme() {
-        return (document.documentElement.getAttribute('data-theme') === 'dark') ? 'dark' : 'light';
-      }
-
-      function palette(theme) {
-        if (theme === 'dark') {
-          return {
-            bgFade: 'rgba(2, 6, 23, 0.10)',
-            dot: 'rgba(102, 219, 162, 0.55)',
-            dot2: 'rgba(129, 140, 248, 0.45)',
-            line: 'rgba(102, 219, 162, 0.22)',
-            line2: 'rgba(129, 140, 248, 0.18)'
-          };
-        }
-        return {
-          bgFade: 'rgba(255, 255, 255, 0.05)',
-          dot: 'rgba(66, 185, 131, 0.55)',
-          dot2: 'rgba(99, 102, 241, 0.45)',
-          line: 'rgba(66, 185, 131, 0.20)',
-          line2: 'rgba(99, 102, 241, 0.16)'
-        };
-      }
-
-      function ensureCanvas() {
-        if (state.canvas && state.ctx) return;
-        const c = document.getElementById('home-canvas') || document.createElement('canvas');
-        c.id = 'home-canvas';
-        c.setAttribute('aria-hidden', 'true');
-        c.style.display = 'none';
-        if (!c.parentNode) document.body.appendChild(c);
-        const ctx = c.getContext('2d');
-        state.canvas = c;
-        state.ctx = ctx;
-      }
-
-      function resize() {
-        if (!state.canvas) return;
-        const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-        const w = Math.max(320, window.innerWidth || 0);
-        const h = Math.max(320, window.innerHeight || 0);
-        state.dpr = dpr;
-        state.w = w;
-        state.h = h;
-        state.canvas.width = Math.floor(w * dpr);
-        state.canvas.height = Math.floor(h * dpr);
-        state.canvas.style.width = w + 'px';
-        state.canvas.style.height = h + 'px';
-        if (state.ctx) state.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      }
-
-      function makePoints() {
-        const n = Math.max(48, Math.min(120, Math.round((state.w * state.h) / 24000)));
-        const pts = [];
-        for (let i = 0; i < n; i++) {
-          pts.push({
-            x: Math.random() * state.w,
-            y: Math.random() * state.h,
-            vx: (Math.random() * 2 - 1) * 0.28,
-            vy: (Math.random() * 2 - 1) * 0.28,
-            r: 1.1 + Math.random() * 1.6
-          });
-        }
-        state.pts = pts;
-      }
-
-      function draw(ts) {
-        if (!state.enabled || !state.ctx || !state.canvas) return;
-        if (document.hidden) {
-          state.raf = requestAnimationFrame(draw);
-          return;
-        }
-
-        const ctx = state.ctx;
-        const pal = palette(state.theme);
-        const w = state.w;
-        const h = state.h;
-
-        // 轻微残影
-        ctx.fillStyle = pal.bgFade;
-        ctx.fillRect(0, 0, w, h);
-
-        const pts = state.pts;
-        const linkDist = 125;
-        const linkDist2 = linkDist * linkDist;
-
-        // 更新点
-        for (let i = 0; i < pts.length; i++) {
-          const p = pts[i];
-          p.x += p.vx;
-          p.y += p.vy;
-          if (p.x < -30) p.x = w + 30;
-          if (p.x > w + 30) p.x = -30;
-          if (p.y < -30) p.y = h + 30;
-          if (p.y > h + 30) p.y = -30;
-        }
-
-        // 指针吸引（弱）
-        if (state.pointer.active) {
-          const px = state.pointer.x;
-          const py = state.pointer.y;
-          for (let i = 0; i < pts.length; i++) {
-            const p = pts[i];
-            const dx = px - p.x;
-            const dy = py - p.y;
-            const d2 = dx * dx + dy * dy;
-            if (d2 < 180 * 180) {
-              p.vx += dx * 0.000003;
-              p.vy += dy * 0.000003;
-            }
-          }
-        }
-
-        // 连线
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        for (let i = 0; i < pts.length; i++) {
-          const a = pts[i];
-          for (let j = i + 1; j < pts.length; j++) {
-            const b = pts[j];
-            const dx = a.x - b.x;
-            const dy = a.y - b.y;
-            const d2 = dx * dx + dy * dy;
-            if (d2 > linkDist2) continue;
-            const t = 1 - d2 / linkDist2;
-            ctx.strokeStyle = (j % 2 === 0) ? pal.line : pal.line2;
-            ctx.globalAlpha = 0.55 * t;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(a.x, a.y);
-            ctx.lineTo(b.x, b.y);
-            ctx.stroke();
-          }
-        }
-        ctx.restore();
-
-        // 点
-        for (let i = 0; i < pts.length; i++) {
-          const p = pts[i];
-          ctx.fillStyle = (i % 3 === 0) ? pal.dot2 : pal.dot;
-          ctx.globalAlpha = 0.9;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        ctx.globalAlpha = 1;
-        state.raf = requestAnimationFrame(draw);
-      }
-
-      function ensureHero() {
-        const section =
-          document.querySelector('.markdown-section') ||
-          document.querySelector('.cover-main') ||
-          document.querySelector('.content') ||
-          document.querySelector('#main');
-        if (!section) return;
-        if (section.querySelector('.home-hero[data-home-hero="1"]')) return;
-
-        const hero = document.createElement('div');
-        hero.className = 'home-hero';
-        hero.setAttribute('data-home-hero', '1');
-        hero.innerHTML = ''
-          + '<div class="home-kicker"><span class="dot" aria-hidden="true"></span><span>WELCOME</span></div>'
-          + '<div class="home-title" aria-label="LoveEleve"></div>'
-          + '<div class="home-subtitle">高并发 / Java / Netty / Spring · 随手笔记与踩坑记录</div>';
-
-        const title = hero.querySelector('.home-title');
-        const name = 'LoveEleve';
-        for (let i = 0; i < name.length; i++) {
-          const span = document.createElement('span');
-          span.className = 'ch';
-          span.style.setProperty('--i', String(i));
-          span.textContent = name[i];
-          title.appendChild(span);
-        }
-        const cursor = document.createElement('span');
-        cursor.className = 'home-cursor';
-        cursor.setAttribute('aria-hidden', 'true');
-        title.appendChild(cursor);
-
-        section.insertBefore(hero, section.firstChild);
-      }
-
-      function removeHero() {
-        const el = document.querySelector('.home-hero[data-home-hero="1"]');
-        if (el && el.parentNode) el.parentNode.removeChild(el);
-      }
-
-      function bind() {
-        if (state.onResize) return;
-        state.onResize = function () {
-          resize();
-          makePoints();
-        };
-        state.onMove = function (e) {
-          const evt = e && (e.touches && e.touches[0]) ? e.touches[0] : e;
-          if (!evt) return;
-          state.pointer.active = true;
-          state.pointer.x = evt.clientX || 0;
-          state.pointer.y = evt.clientY || 0;
-        };
-        state.onLeave = function () {
-          state.pointer.active = false;
-        };
-        state.onTheme = function () {
-          state.theme = getTheme();
-        };
-
-        window.addEventListener('resize', state.onResize, { passive: true });
-        window.addEventListener('mousemove', state.onMove, { passive: true });
-        window.addEventListener('touchmove', state.onMove, { passive: true });
-        document.addEventListener('mouseleave', state.onLeave, { passive: true });
-        window.addEventListener('docsify-theme-change', state.onTheme);
-      }
-
-      function unbind() {
-        if (!state.onResize) return;
-        window.removeEventListener('resize', state.onResize);
-        window.removeEventListener('mousemove', state.onMove);
-        window.removeEventListener('touchmove', state.onMove);
-        document.removeEventListener('mouseleave', state.onLeave);
-        window.removeEventListener('docsify-theme-change', state.onTheme);
-        state.onResize = null;
-        state.onMove = null;
-        state.onLeave = null;
-        state.onTheme = null;
-      }
-
-      function start() {
-        if (prefersReduced) return;
-        ensureCanvas();
-        if (!state.canvas || !state.ctx) return;
-        state.canvas.style.display = 'block';
-        state.theme = getTheme();
-        resize();
-        makePoints();
-        bind();
-        if (!state.raf) state.raf = requestAnimationFrame(draw);
-      }
-
-      function stop() {
-        if (state.raf) {
-          try { cancelAnimationFrame(state.raf); } catch (e) { /* ignore */ }
-        }
-        state.raf = 0;
-        unbind();
-        if (state.canvas) state.canvas.style.display = 'none';
-      }
-
-      function setEnabled(isHome) {
-        const want = !!isHome;
-        state.enabled = want;
-        if (!document.body) return;
-        document.body.classList.toggle('home-fx-on', want);
-
-        if (want) {
-          ensureHero();
-          start();
-        } else {
-          removeHero();
-          stop();
-        }
-      }
-
-      window.__homeFx = {
-        setEnabled: function (isHome) { setEnabled(isHome); }
       };
     })();
 
@@ -4395,45 +3927,6 @@
             // 阅读体验：进度条 / 面包屑 / 上一篇下一篇
             ensureProgressBar();
             renderBreadcrumbAndNav(vm);
-
-            // 首页动效：只在首页（#/ 或 #/README）开启
-            try {
-              const rawPath = (vm && vm.route && vm.route.path) ? String(vm.route.path) : '';
-              const hashPath = (location.hash || '#/').replace(/^#/, '');
-              const picked = rawPath || hashPath || '/';
-              const cleanPath = String(picked).split('?')[0].replace(/\/+$/, '') || '/';
-              const isHome = (
-                cleanPath === '/' ||
-                cleanPath === '/README' ||
-                cleanPath === '/README.md' ||
-                cleanPath === 'README' ||
-                cleanPath === 'README.md'
-              );
-
-              if (document.body) {
-                document.body.setAttribute('data-home', isHome ? '1' : '0');
-                document.body.setAttribute('data-home-path', cleanPath);
-
-                // 首屏渐入
-                if (isHome) {
-                  document.body.classList.add('home-enter');
-                  requestAnimationFrame(function () {
-                    requestAnimationFrame(function () {
-                      try { document.body.classList.remove('home-enter'); } catch (e) { /* ignore */ }
-                    });
-                  });
-                } else {
-                  document.body.classList.remove('home-enter');
-                }
-              }
-
-              // 更“牛”的：名字 Hero + Canvas 粒子（离开首页立刻停）
-              try {
-                if (window.__homeFx && typeof window.__homeFx.setEnabled === 'function') {
-                  window.__homeFx.setEnabled(isHome, vm);
-                }
-              } catch (e) { /* ignore */ }
-            } catch (e) { /* ignore */ }
 
             // 全文搜索（Ctrl/⌘+K）：绑定快捷键 + 懒加载索引
             ensureFullTextSearch(vm);
