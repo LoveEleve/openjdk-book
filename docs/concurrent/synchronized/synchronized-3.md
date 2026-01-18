@@ -585,7 +585,7 @@ void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
 
 核心工作原理：和JDK中的Condition是十分类似的
 
-**<font style="color:rgb(216,57,49);">检查当前线程是否持有锁 -> 检查中断 -> 创建等待节点 - > 添加到等待队列 -> 释放synchronized锁 -> 阻塞 </font>**
+**检查当前线程是否持有锁 -> 检查中断 -> 创建等待节点 - > 添加到等待队列 -> 释放synchronized锁 -> 阻塞**
 
 简易模型如下：
 
@@ -655,11 +655,11 @@ if (policy == 2) {
 
 在这里notify()会根据不同的策略来进行不同的处理
 
-也即：**<font style="color:rgb(216,57,49);">如果EntryList为空,那么放入到EntryList,否则EntryList不为空,那么CAS到_cxq的头部</font>**
+也即：**如果EntryList为空,那么放入到EntryList,否则EntryList不为空,那么CAS到_cxq的头部**
 
 那么锁释放的逻辑是如何处理呢？在这里也有策略
 
-逻辑为：**<font style="color:rgb(216,57,49);">如果_entryList不为空,那么首先尝试唤醒_entryList的head节点，否则检查_cxq,如果不为空,那么将_cxq中所有节点批量的移动到_entryList中,然后唤醒_entryList的头节点</font>**
+逻辑为：**如果_entryList不为空,那么首先尝试唤醒_entryList的head节点，否则检查_cxq,如果不为空,那么将_cxq中所有节点批量的移动到_entryList中,然后唤醒_entryList的头节点**
 
 ```cpp
 // 1. 先尝试从 EntryList 唤醒

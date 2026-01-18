@@ -14,7 +14,7 @@
 <!-- 这是一张图片，ocr 内容为： -->
 ![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MTc3OTEzMmUyMWJjMjE3MWYzNWM2MzNkY2ZhYWExNDBfS2hHcEhNRHZFVmxMYjhPb29FZ2J4cG1kQkpFbFI2TmhfVG9rZW46Q0dEM2JPVWZwbzF1OFd4WmN2OWM0T0hqbnJiXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
 
-创建一个线程池,根据需要创建新线程，但在可用时将重用以前构造的线程，这种线程池通常会提高执行许&#x591A;**<font style="color:rgb(216,57,49);">短期</font>**&#x5F02;步任务程序的性能，但是如果没有现成可用的线程,那么将会创建一个新线程来工作，并且如果一个线程在60s内没有执行任务那么将会被回收。
+创建一个线程池,根据需要创建新线程，但在可用时将重用以前构造的线程，这种线程池通常会提高执行许&#x591A;**短期**&#x5F02;步任务程序的性能，但是如果没有现成可用的线程,那么将会创建一个新线程来工作，并且如果一个线程在60s内没有执行任务那么将会被回收。
 
 ## 源码解析
 ```java
@@ -117,7 +117,7 @@ public static void main(String[] args) throws Exception{
 <!-- 这是一张图片，ocr 内容为： -->
 ![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Mzk1ZjM5M2Q2NDZiMGM0ZWQzOGIzNGM5MGM1NzY3MjRfUHcyTG5sRHZYNzliVnB3ZXNFdzlIMGpidXdGZVJCRnhfVG9rZW46RVRNcGJ2cVBEb0hIdnN4VmpxcmNRclNWbk5oXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
 
-创建一个使&#x7528;**<font style="color:rgb(216,57,49);">单个工作线程</font>**&#x7684;Executor，该线程基于无界队列进行操作。（但需注意：若此单个线程在执行过程中因故障终止，在执行后续任务时将根据需要创建新线程来替代。）**<font style="color:rgb(216,57,49);">任务保证按顺序执行</font>**，且在任一时刻最多只有一个任务处于活动状态。与功能相同但可重新配置为使用更多线程的newFixedThreadPool(1)不同，此处返回的executor确保不会被重新配置为使用额外线程。
+创建一个使&#x7528;**单个工作线程**&#x7684;Executor，该线程基于无界队列进行操作。（但需注意：若此单个线程在执行过程中因故障终止，在执行后续任务时将根据需要创建新线程来替代。）**任务保证按顺序执行**，且在任一时刻最多只有一个任务处于活动状态。与功能相同但可重新配置为使用更多线程的newFixedThreadPool(1)不同，此处返回的executor确保不会被重新配置为使用额外线程。
 
 关键点：单个工作线程，无界队列，任务保证按顺序执行，与newFixedThreadPool(1)不同
 
@@ -136,7 +136,7 @@ public static ExecutorService newSingleThreadExecutor() {
 
 为了解决这个问题：在这里使用FinalizableDelegatedExecutorService类来包装,返回的是ExecutorService对象,其没有上述的两个方法,从而避免了线程数配置的修改，做到了真正的FIX
 
-由于只有一个线程在工作，所以某一时刻最多只能执行一个任务,其他任务必须在阻塞队列中等待，只适&#x5408;**<font style="color:rgb(216,57,49);">任务必须严格的按照提交顺序来执行</font>**&#x7684;场景
+由于只有一个线程在工作，所以某一时刻最多只能执行一个任务,其他任务必须在阻塞队列中等待，只适&#x5408;**任务必须严格的按照提交顺序来执行**&#x7684;场景
 
 
 
@@ -144,7 +144,7 @@ public static ExecutorService newSingleThreadExecutor() {
 <!-- 这是一张图片，ocr 内容为： -->
 ![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZWEwYjBlYzUwYmUxZjM3MjNmMjk0MjBhODgxMmQ0MzhfMWM2UEY1Wjh0R2pwZWlTMFhzVExOOTJZTXpyUjVTcnJfVG9rZW46Qm5kVGJrREFEb2h2Vnd4ekhhMmN5NU1SbmRkXzE3Njg2NTYwMDM6MTc2ODY1OTYwM19WNA)
 
-创建一个可以调度任务&#x5728;**<font style="color:rgb(216,57,49);">给定延迟</font>**&#x540E;运行，&#x6216;**<font style="color:rgb(216,57,49);">周期性执行</font>**&#x7684;线程池。
+创建一个可以调度任务&#x5728;**给定延迟**&#x540E;运行，&#x6216;**周期性执行**&#x7684;线程池。
 
 
 
