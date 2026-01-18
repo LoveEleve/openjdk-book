@@ -41,6 +41,22 @@
     .sidebar-nav a[href^="#/concurrent/concurrent-container"]::after {
       display: none !important;
     }
+    
+    /* 强制隐藏 docsify-sidebar-collapse 给"高并发容器"添加的折叠图标 */
+    .sidebar-nav a[href^="#/concurrent/concurrent-container"]::before {
+      display: none !important;
+    }
+    .sidebar-nav li:has(> a[href^="#/concurrent/concurrent-container"]) > .sidebar-nav-fold {
+      display: none !important;
+    }
+    .sidebar-nav li:has(> a[href^="#/concurrent/concurrent-container"]) .sidebar-nav-fold {
+      display: none !important;
+    }
+    /* 确保"高并发容器"的缩进与同级项目一致 */
+    .sidebar-nav a[href^="#/concurrent/concurrent-container"] {
+      padding-left: 20px !important;
+      margin-left: 0 !important;
+    }
 
     /* ---------------- 代码块：统一顶栏 + 行级折叠（直接在代码块内） ---------------- */
     pre[data-lang] {
