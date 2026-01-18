@@ -1,6 +1,6 @@
 ## 1.继承体系
 <!-- 这是一张图片，ocr 内容为： -->
-![图片1](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片1](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NjE0N2JhMzBiMTEyNmQwYzBhNzJjNzlmYjQzYWNlNGNfMUNkZ3Q3SVI5VWNkcHlzMDVhTnI5NFlwOWI1emZvSGlfVG9rZW46WGZ2SGJtMnAzb3JHd1Z4QWZqemM1ZHdEblBmXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 AQS继承体系
 
@@ -11,7 +11,7 @@ AQS继承体系
 前面也讲过管程的概念,而高级语言所封装的锁对象就是管程的一种具体实现。这里再回顾一下管程的工作原理：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片2](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片2](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NThkNzMyNjVlMTI0M2QxMTRiY2FmMjRkMjFhMTJkYzlfd1FmQUNyaVdHaURpZFVDVnBKZVhDM0JjRXk0d01GUmhfVG9rZW46Rlh4ZGJETUZub2lDb0l4R0NFR2N0ZFh5bnplXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 管程
 
@@ -56,7 +56,7 @@ Node
 1.多个生产者和消费者想要操作线程安全的容器「生产者想put，消费者想take」- 最终的结果就是只能由一个对象成功,要么是生产者,要么是消费者 2.假设容器满了,但是生产者-A获取到了容器的访问权限，但是它发现容器满了,自己put不了,应该怎么办？ 3.一种很简单的实现方式是：生产者-A直接释放锁 , 这样做可以但是不合理，因为线程的调度和抢锁是不可预估的,当生产者-A释放锁后，下一个获取锁的线程可能还是生产者-A，那么这些动作岂不是在浪费时间？所以条件变量的作用就出来了：当某个线程获取锁后「_**这个前提很重要**_」,发现后续操作的条件不满足了,那么&#x4F1A;_**释放锁**_&#x5E76;且在条件队列中等待,直到条件满足了
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片3](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片3](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YjlhNTYwZDRhNDg0ZWZjZTc2OGViZTc2Y2FmZDhjYjFfUjhkR2dqV3dPeTQxcTNKNHhCOWVLYkdISnl5T0FPc1BfVG9rZW46V3FtT2JjVHlRb0VFNUh4VFE0TGNhVTdrbkVnXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 生产者消费者模型图
 
@@ -65,7 +65,7 @@ Node
 所以最终的数据结构图如下图所示：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片4](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片4](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YzM1MDQ0NzAyNWIwNWQ1ZDA0YTkxZGJiZTViYzEyYjhfRFVDYVFJeWNQRlRjNnZXU0RVMjRXQUNYU0RrM0M2cnlfVG9rZW46RHZPWWJDSUVJb05GOTh4bHdQOWNyeUZFbjljXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -83,7 +83,7 @@ Node
 首先需要明确的一点是：在大多数框架中采用的都是懒加载,这里也不例外 所以在线程节点准备入队列前可能会出现如下情况： 1.队列已经初始化完毕 2.队列正在初始化(被其他线程) 3.队列没有初始化
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片5](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片5](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Yjc1MTYzMTUzNjMxYTEyMTkzZmU3M2IzMTMyZjI4YWFfVzRnenR6UUF0ZnJVVXZOTkJiSVlYaGVQMlF4OExwMjRfVG9rZW46UG1iT2JCRklzb3AxSW14RUhwTGNva1pjblZkXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 需要注意的是：队列一旦初始化完毕后就不会为空了(因为存在伪节点),所以下面代码注释中的fast path，我的个人理解为：既然队列已经存在，那么直接原子性入队列就行了,不需要再重新判断(上面的1和2步骤了) 其实没有这一段代码也可以,因为enq(node)中具有完整的入队流程
 
@@ -94,7 +94,7 @@ _**小插曲：在阅读源码的时候，切记不要一行行去看「如果�
 1.当前节点处于首节点(位于第二个节点)：如左图所示 2.当前节点处于非首节点：如右图和下图所示(前面有节点被取消掉了) 并且需要知道：此时线程节点只是进入到了队列中,但是还没有阻塞
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片6](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片6](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=M2VmYzU5NjQ3MmI0MGYwYTZhOGU2N2Y4ZWRkNDgwZGZfcUpvcWw2bWFxQkdIcnU1ZGJqT0FnVUxTaUFaNzZTMDRfVG9rZW46V3RPN2JuUWVFb2U2b1F4S2h6N2NJQmY3bmRmXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -121,12 +121,12 @@ acquireQueued(final Node node, int arg):准备阻塞，node是当前线程节点
 基于这种特点，那么实现方式肯定是依赖前一个节点的状态 state = p.state 1.如果state = signal,那么直接返回，已经处于signal状态了,那么就不需要处理了 2.如果state == 0 ,那么设置为signal即可 3.但是不要忘记了,state还可以处于CANCEL状态，如下图所示：那么是不能简单的讲将p的状态由cancel设置为signal，而是需要将当前节点链接到它前面的第一个状态不为cancel的节点上「在这里是头节点」 上面这三个分支执行完任意一个分支后：都会退出这个shouldParkAfterFailedAcquire()方法，然后重新执行循环,这就是自旋的体现
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片7](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片7](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NjljY2ZjZjBkYzVhMzNiODY0NjdkZTdhNjlkMTYzYTBfWkptTnp5RmhLdHoyV3VmVWV1SmZpYmlsaVBKZzFoT2lfVG9rZW46VWVpTmJCM0tXbzRxYW54VXZXamNZb01ObjZiXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 前一个节点的状态可能处于cancel
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片8](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片8](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MTBiMTk4YmY5MmU4MDc3YzE0ZTI4ODVmZDhjNTQyZGVfaEtNb1V5c2dGV0JST1ptSVA5MUdsQkdDcDFVdFk3aWhfVG9rZW46VUhzT2I0ZzdHb1Q4TVl4aHNmNGM5eFdLblh5XzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 当前节点需要将自己链接到前面第一个状态不为cancel的节点后面「在这里是head节点」
 
@@ -135,7 +135,7 @@ shouldParkAfterFailedAcquire(Node pred, Node node): pred：当前节点的上一
 正常情况节点的状态如下:节点状态为signal则代表当前节点后续有需要被唤醒的节点,节点处于0不一定代表是初始化状态,也可能是阻塞状态
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片9](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片9](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZjdlZTcxZmU3ZjcxZTY3MWFiMGNmZDNmZTUxZDAyMjJfbWxjd2t4cG1CVUI0TzRna1JwWlR5bGVlVW1RUHlxbWdfVG9rZW46QzJRaGJpTWpwb1V1bVJ4V3ZMOWNZUnZobndmXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -146,7 +146,7 @@ shouldParkAfterFailedAcquire(Node pred, Node node): pred：当前节点的上一
 当首节点从代码2处阻塞后唤醒,会重新执行for循环下的代码1 -- 注意是tryAcquire() 从这里就可以看出来被唤醒的线程不一定能够再次获得锁,而是要与其他线程竞争「非公平的实现」 这会造成一个什么问题？ -- 饥饿问题 -- 首节点对应的线程在**极端条件**下会一直获取不到锁 「当然他后续的所有节点同样获取不到」 一种直观的解决办法就是当线程唤醒后如果抢不到锁,那么不要直接重新阻塞,而是多停留一会,多抢几次锁 -- 这就是自旋,并且在jdk21就是这么做的
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片10](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片10](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ODM0YjA1MDY5MzRmMTY3YzJlNDYwNWRlYzZkZGQwNDdfZHZmWnF6U1IwWGpZdU9hMGNGakZmR2Z0NTFPVklGcGJfVG9rZW46S0NwZmJuemZWb0FDQXB4c3A5UGNEckxwbk5mXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 jdk8的性能问题
 
@@ -157,7 +157,7 @@ jdk8的性能问题
 jdk21的自旋解决方案：当线程节点要阻塞时,会进行spin计数,然后在线程阻塞被唤醒后,如果首节点「这在前面解释过了」并且spin不为0,那么会重新自旋，并且随着被唤醒的次数越多，自旋的次数也越多「前提是每次唤醒后都拿不到锁」
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片11](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片11](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YWRjZjI3YTcxN2Y1N2FhZTM3NWQ0ZjJhOWEzOGU5OWVfeXd1VE1YT1dITWg0aFZua2dMSjVhSHUzaHBiWG5BUUxfVG9rZW46RFAzYWJzS2Fkb0lDanl4alRLeGM2cWhqbnNmXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 jdk21的自旋解决方案
 
@@ -171,7 +171,7 @@ jdk21的自旋解决方案
 1.首先需要判断head的状态是否为signal吧？如果不是,那么代表后面根本就没有需要被唤醒的线程,那么直接返回即可 2.head状态确实为signal,那么下一步就是调用LockSupport.unpark(head.next.thread)
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片12](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片12](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Mzg1OWM3MDZiMjE3OGNjYjQ1NTk0ZmFmMGFkMDdhZmNfb2FzQWI0NkpJNkVUcVFZdG1IaEFQbnlrVmpkUGdEVWRfVG9rZW46R3VMZ2JXUVpLb3lnMHh4Q1RXR2N4Rm10bktiXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -180,7 +180,7 @@ jdk21的自旋解决方案
 那么就不能单纯的执行LockSupport.unpark(head.next.thread)了,同样在这里释放锁的线程需要找到第一个状态不为cancel的线程节点,然后唤醒它
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片13](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片13](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OTI0YTBjNjYyNGRjNjljZDRiYzcwMGU5NDAwZWZkMTBfRGhRQzM5OGlNak5SclJUaVU5MVc3bTNWOVRNbHRJUXNfVG9rZW46R2V2SWJ3S2E4b1VEcEl4VkVIemNlZGVVbnloXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -189,7 +189,7 @@ jdk21的自旋解决方案
 其中对于1和2不难理解,但是这里的英文注释有点难以理解：为什么要将首节点的状态重新设置为0呢？ 首先这里应该不是针对于signal状态的处理的,因为如果在这里将首节点的状态从signal设置为了0,但是后续节点被唤醒后是不一定会拿到锁的,拿不到锁,又要重新设置为signal，然后再去阻塞,这不是多此一举吗？如下图所示 这里的做法：在后续讲共享锁时会再次提到
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片14](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片14](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MTk3ODJhYTdhZjEzOTYwNGEzZjc5ODMxMjk3ZjEzMTlfbzhhMGtkcGxXWU5RRWpndEhwZGRpSUhQVGRhMHY3YWlfVG9rZW46UFRYemJzUTJjb3REQ1Z4RGI1QmNkclFkbjlkXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -208,7 +208,7 @@ jdk21的自旋解决方案
 当这一步执行完毕后,只考虑正常情况,也即全部都是SHARED的线程节点「关于混合节点的在读写锁的时候会介绍」
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片15](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片15](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MjhiYmY4ZTljNGQ0M2I5OTFkMzMzN2Q5NmU3NGY0NjlfZU80TEY2OWN5SU5xZkhEdnNKNmYwSnl5VnJ3dXlXbUtfVG9rZW46SDRma2JoY0V5b2c1V0x4NnZqZGNxekY5bkdjXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 共享模式下的队列
 
@@ -225,7 +225,7 @@ jdk21的自旋解决方案
 同步队列状态可能处于下面这种状态：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片16](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片16](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZDFjNWEzZWIxNWRiMmIwNGRjZGViZDUwYzY4MDhkNDFfRDRCMXZSdkJYdVdzN3VFY1NYZWs1R3V0VlRLZlpWbnFfVG9rZW46TmxHVmJMdnEzbzQ3MUJ4RzhiTGNLR082bmxiXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -236,7 +236,7 @@ jdk21的自旋解决方案
 很明显,这种情况是不允许发生的,所以当首节点调用尝试获取锁的方法并且获取锁成功，并且返回值>0，那么就应该特殊处理 但是如果返回值是0的话,这代表当前线程获取锁资源成功,并且没有锁资源了,那么其实后续线程是可能拿不到锁资源的，所以这里我认为正常的处理方式应该和<0是一样的处理方式，但是doug lea 并没有这么做,**这是为什么呢？**&#x4E0B;面进入到代码中
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片17](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片17](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Y2JkNWQ5MDQ3NjhjMTFhOTQ2M2E2MmI0NjMzZDllYjRfVkx6YnI0RG95Y3M1UnNYcnhhbzh5d3pETmhhRDhGekFfVG9rZW46QU5vTmJWaWs4b2xyR214RWNPYmM3NjBsbnRZXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -249,7 +249,7 @@ jdk21的自旋解决方案
 1.首先应该确保确实有线程节点应该被唤醒 - head!=tail 2.**将head节点的状态从signal设置为0** 3.唤醒后续线程节点
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片18](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片18](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NjM4NGNmNDllMDc1NTliN2JiNDQyYWY3ZDM2MWYxZTNfSGpVV0xLUXBkYU04bmJCRmU4TE1MUUJvcU1QQklxOTJfVG9rZW46SGx2ZmIxenlmbzRLWm54R2pXemNVcWI3bmdiXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -258,7 +258,7 @@ jdk21的自旋解决方案
 我认为是从语义的角度考虑：因为当一个节点处于SIGNAL状态，那么就代表他的后继线程节点需要被唤醒, 在这里T-A负责唤醒T-2,那么在唤醒之前,应该要head的状态从SIGNAL重置为0,代表它没有需要唤醒的后继节点, 如果不这样做,那么违反了SIGNAL的语义,因为此时它的后继节点已经是处于唤醒状态 「在独占模式下,这里是不会存在重复唤醒的问题」
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片19](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片19](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OWFkMDZmZTgzMDJmNGEwZDc0YjI2MjQwODk2NWU4YThfYjNISkdpa1I4SHF6Rk0wTFltbWFUOUFZWTJNUTV3ZHRfVG9rZW46T2g3QWJoWml6bzdUNXp4YzRQd2NoVlI5bnZkXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -267,21 +267,21 @@ jdk21的自旋解决方案
 这里看下为什么要cas将head的状态从signal设置为0呢？使用cas的地方一定是存在并发的，而当前所说的场景则是处于共享模式，如下图所示：T-A和T-B同时释放锁资源 - 同时调用doReleaseShared(),就会产生并发安全问题
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片20](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片20](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MWYwYWQ3NTA4NGEzMTZkMzZkNzA0YTM3NWQzMDk3MDdfM0tCQURkOXVFVGhOZzNpcTdMZUtMUlJLM0FFSktXYXRfVG9rZW46TTBObWJuTTVnb1JPbFF4ZW94N2M3STBXbkJkXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 共享模式下并发释放
 
 既然这里产生了并发安全问题，那么doug lea用cas解决了,只能由其中一个线程将head节点的状态从SIGNAL变为0了，
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片21](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片21](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZTk5Y2IzOTI3NTljNzM2MzYyZTkyNjhlZDgxZWY3MjRfZndlbDNLdThOOUFKSkFCUXFyeXNjbmI0NjJHUHJFS0lfVG9rZW46RWpKZWJQdGVHb2REMW54UmtEaWNIb0tHbk1kXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
 还有另外一种情况：就是T-A释放锁资源后,唤醒T-1，此时锁资源数为1,然后T-1执行下面的代码，调用tryAcquireShared()获取锁资源成功,并且返回的r = 0 「因为只有T-A释放了锁资源」, r=0，也需要进入到if分支中执行setHeadAndPropagate(node, r)，此时的队列结构为：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片22](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片22](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NzkyNDc4NWY5NTQ0NzAwMjk5NGI0MjE1ZWUxMjI5YWFfTnUwT2UyalNoWGxhRVYwMkVMNllDTlN4eWRRd0E3c0JfVG9rZW46RDhjUWJKZE9kb3ZpUmZ4dDFOZmN5QjFkbnNHXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -297,7 +297,7 @@ jdk21的自旋解决方案
 这会造成什么样的现象？ -- 锁资源存在,但是t-2依旧阻塞在队列中
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片23](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片23](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YjFkNzA3ZTI3ZDcxMGRkNjNkYzFjNzJiYWU0MWM1ZThfSWU0RXJIZ3RZQmZ4M0NOTndBTWRxWk0yTk1ONmRzNENfVG9rZW46UjhpSGJlMUJDb2poZWp4ZXNGb2NuUnhKbkdkXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 

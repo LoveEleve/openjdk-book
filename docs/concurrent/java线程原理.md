@@ -13,7 +13,7 @@
 + 单道批处理系统
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片1](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片1](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MzYzYWY5YmY4MTFkZDI3ZTZjYzliZjFhMjc1NGFiZjNfWG9uSFNNbXJuQVZQRzV6dFB6QkI2STlRSXI2a0VrVURfVG9rZW46WHJZYmJjcTV4b0h5OTV4Q1NrTWNaRHgzbnBXXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 这种工作模式的特点就是一次只能运行一个JOB,这个JOB独占计算机的所有资源(CPU,内存...),直到它运行完毕,Monitor才会去加载下一个JOB将来。
 
@@ -26,7 +26,7 @@
 该系统允许在内存中同时存放多个程序,当某个程序需要等待IO时,Monitor可以选择切换到另外一个程序中去执行,这样就能充分的利用CPU资源了
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片2](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片2](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NjIyYWM1MmQ1MDM4NTVkM2I3ZTYyZjc1ZWJkYzFjMmNfY0tZMUNZQ003eVB4QUx4QTBZWlh2QUdNUktYcWQwQUdfVG9rZW46QzVzamJ2QTF2b2NSNml4YjA4WmMwYlRHbmVoXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 那么这就引入了新的问题(当然不止一个问题)，那就是如何管理和描述这些正在运行的程序呢？
 
@@ -61,7 +61,7 @@
 >
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片3](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片3](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MWUwODc2NDI0OTZmZDg1ZmJlYWM3MGU5NDlmZDgxOTlfWlFBTVpXcDRjVk1KUkVMUDR2UXVMeXdvUE9JU3JkN3FfVG9rZW46V1hTamJDRW1Sb2pPSDR4NmJmTmNNTEdjbnZmXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 > 那Java呢?Java文件的执行原理首先编译为.class文件啊,然后再由jvm加载.class文件,并没有看到什么可执行文件啊？关于这部分在介绍JVM的会单独出一篇文章来讲述JVM的启动
 >
@@ -82,7 +82,7 @@ int main()
 这中间到底都经历了些什么呢？
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片4](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片4](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MDYyNmFiYTJlM2I1OWI5ZTU4MDczYzU3MTA5NTA5YzBfTHhWWExDbENMUDZKTVBMN0MwMzE5Wmo1SU05MmFtTjlfVG9rZW46VE13bWJlWFhEb1hQWHh4bVJ1NmN1UXlCbmRmXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 ### 3.1 可执行文件的生成
 从一个hello.c文件到真正可以被执行,中间需要经历许多步骤,在这里首先学习一下到从c源文件到目标文件的过程。
@@ -95,7 +95,7 @@ int main()
 >
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片5](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片5](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MmYyNWY3OTJiMjYwOTg2NGUxMjliZTU0NzlmMWI4NjNfeHRzeFZhbTJidjZkeHJCVTVzT2REZEJ0R3FOT1dEZVhfVG9rZW46QUlNV2JlR2NTb2taMVV4bGVVT2NDbjRqbmhkXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 + 预处理
 
@@ -108,7 +108,7 @@ int main()
 到这一步结束后就生成了一个与平台相关的汇编文件了，如图所示(simple.s的不完整截图)：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片6](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片6](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NmYwYzRjNmRiYWQxYmI0N2EzNDUzNTdhMjg0ZjZiOTNfbW16WXJGbW9MQUp0UUJDMU5xa1pBckJuTjZyNzU4WG5fVG9rZW46UVhlY2JwUkZ5b1h0UDF4TldRRmNpc2pzbmFiXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 #### 3.1.1 汇编 (目标文件的生成)
 + 汇编代码
@@ -268,7 +268,7 @@ func1:
 而上面一直在讨论的simple.o文件就是一个可重定位文件
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片7](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片7](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MjQ3NGMwNTgxZjYxNjhhMTgzNzBmMmU0YjdhOWM5NGFfZ3hja3FIYjNhT3N0TlVNMFlPV0dZeGFNVHQyTlg2UDhfVG9rZW46TmZBcWI4Z3RSb2ZwTTJ4UWpXR2MxVU5CbnFNXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 通过它的特征应该就可以知道了,既然不知道具体的内存地址，那就不解析呗，使用0替代。
 
@@ -665,7 +665,7 @@ sh_entsize  = 0
 >
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片8](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片8](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NmUwMmFlN2UwMGM3MjJhMmNmZGFlYTIzZjJhOTVmMzJfU2FJb0VxdDZHM0lUNWRUQTI3MlU5dERFTURiVjBxUXVfVG9rZW46S1ZKYmJNOW5NbzZUR094UnQ5V2NpUjFDbmdjXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 ##### 1.静态链接
 在静态链接中,链接器的主要职责分为3个步骤：布局，符号解析，重定位
@@ -877,7 +877,7 @@ main()被放到了虚拟地址为0000000000401106的位置，add()则在main()�
 **<font style="color:rgb(216,57,49);">/—可执行文件的内存布局—/</font>**
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片9](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片9](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NmJmNGI1NDhiNjcxNDVjYzQxNjI0ZWJjZTViZWQ3ODFfVzh0N1JqZ3VVeHp0bDVtZW5OTXd6Q0kzWWNDZHZtSVRfVG9rZW46V29KOGJwejBub0tkTE54VzRTeGNCOG9ybjNkXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 + 符号解析与重定位
 
@@ -934,7 +934,7 @@ gcc -o main main.c ./libmath.so
 + 查看可执行文件的内存布局
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片10](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片10](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NjNiZmU3ZGMyMjZjNzhiNTQ5NzkyNDUxMDNiODk3ZTBfQ3FFUWFtQnY5V01xRnBKSmN0aHlObG9SdkozRW4zSDlfVG9rZW46RFRDUGIwbzlSb3E4UHp4NjJZWGNMdThZbmdlXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 可以看到,运行时,动态库也是在进程的虚拟空间中的,暂停后重启进程，然后再次查看：
 
@@ -944,7 +944,7 @@ gcc -o main main.c ./libmath.so
 >
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片11](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片11](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YjM2OTVmZjgyYmRkNDI5ZWQ3MTFjNzg3ZWE4N2U3NWRfN21zZjV3ODFCUGFFdWRhdE5OYXZIQ0c2eml4eVBkbFNfVG9rZW46R0lITWJndFFyb2JiVWh4SDBFUmNQekV6blV4XzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 + 装载时重定位
 
@@ -1063,7 +1063,7 @@ void access_lib_internal() {
 + 反汇编gg.so动态库,看一下access_lib_internal()是如何访问lib_internal_data变量的
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片12](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片12](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NmZmODAwMGE5NDkzZWVmYWZmZTc0ZGE5ODU2NDZlODBfRFdPQ1k1TGtEZWpiU0xSVU5HNWkyeXh3UTlvSzAxMlpfVG9rZW46VWY1SGJJNEZLb2l5YXl4QzRBSWMweFJkbjdlXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 ```java
 10fd:       48 8b 05 c4 2e 00 00    mov    0x2ec4(%rip),%rax        # 3fc8 <lib_internal_data@@Base-0x48>
@@ -1109,7 +1109,7 @@ int main() {
 这是一个简单的程序，通过access_lib_internal()方法来访问动态库中的全局变量，在这里重点关注GOT表项,这里test.c运行起来后会变为一个进程「使用sleep(-1)让程序不会退出」，其使用到了动态库，那么在运行时就会动态的加载gg.so，下面看下该进程的运行时内存：./test & 「这会输出进程号」，然后cat /proc/xxx/maps
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片13](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片13](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=N2VmOTk4Nzg1Mjg2M2M2MWM1ZmE0YmU1OWE4YjIyZjBfUkJYYjJBTmxUcWlYSFJRN2xkbE83V1dMQmQ2bW1uYkdfVG9rZW46Rm9yMmJhSDd6b0dUZ1N4b1hJTmNHaHRZbnplXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 可以看到gg.so被加载的位置是：0x7fde03ad1000
 
@@ -1118,12 +1118,12 @@ int main() {
 查看一下,这个地址的值「这个值现在应该已经被填写为lib_internal_data变量的真实地址了」
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片14](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片14](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Y2YyOWFkN2EwMjU3YTc0YzdkY2FmMWI5ZjJiY2M1YjVfV3Axem1pRTRqS1NGYjc2aGhydlhVaVR5Y3NpMHJPWnRfVG9rZW46U1lXYWIybGsyb1VjTk14dUpWUGNaUUZsbjdwXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 不出意外的话，这个0x00007fde03ad5010地址，应该存放的就是10
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片15](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片15](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MDFhZTBhZGFmMDM3ZTIwMWZlYjgxMGU2MTc4MWYzZTNfSTFIMVpnNFMySUV1S2xUeXhOazJIdXBENVBlQnJabnJfVG9rZW46WVpEemJ6Mk5Bb3NTc0t4TmZyaWNCbGRKbnNlXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -1194,12 +1194,12 @@ void access_lib_internal() {
 可以看到gg.so被加载到main进程的这个位置：起始地址为7f65fe04b000
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片16](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片16](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NWNmYjhmNTI5MTdhMDFhNDY4MjM0YTc1Nzc5MDAyYzlfeEtrdklxVmh4dTlNWWNoZHRhOGVBR2k5alJGSmlLNjFfVG9rZW46SndpQWJ0eXFLb1l0TGt4V0NrdWNGN1lWbnlmXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 单独看下动态库：readelf -r gg.so | grep lib_internal_data
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片17](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片17](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZTZiMzFiMTgzODEwZTg5YjBhNzI5OGE1YWFhYjYwYThfTFBYWE81d2lSVTIxek95TzBIYzhpN1FsM3NMeGl0N2lfVG9rZW46T3VPNGJXQXEzb1E2U2Z4QlplemN5ZVh2bm9oXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 可以看到,位于GOT表的0x3fc8偏移处,按照正常的逻辑「上面演示过的」,程序运行起来后, 该偏移对应的got表项应该要被填写为 lib_internal_data变量的地址，而这个地址是在gg.so的data段的「后面会再讲解一下进程的虚拟内存布局的，.so也有自己的代码段，数据段，got表，...」
 
@@ -1210,22 +1210,22 @@ void access_lib_internal() {
 可以看到main进程确实为lib_internal_data变量分配了一个副本「在地址0x000000404018处,这是data段」
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片18](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片18](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OTQ5N2M2YWNiMjg0MWM3YmUwODA3YTViZjE0MWMzMDdfOWVBcFNBU2dGQmJXSlpZdGtyVE1QeWJMdFk3V0t4MHNfVG9rZW46T2JiemI3emhnb3RjcEV4MTBtYWNBT1lSbk9nXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片19](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片19](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZjViZDA5MTk0MTY2ODc3OGE0NGFkYTE2MDFjNDEyMmRfdnVmZkJhREU5OHNHWXlEYU9DTnd6dVpONHpieW9xVXpfVG9rZW46Q0hZWWJ5Y0Mzb0ZLYTd4akU1SmNsYjkzbldoXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 下面再查看一下GOT表项的值：gg.so被加载的位置（0x7f65fe04b000） + 0x3fc8 = 0x7f65fe04efc8「如果该地址存放的值 = 0x000000404018，那么就说明没有问题，下面进行验证」
 
 gdb -p 1203952 -batch -ex "p &lib_internal_data"，这是查看lib_internal_data的地址的(希望是0x000000404018)
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片20](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片20](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZmNhY2UxNGU0Y2UzNjFkNzA0MTJkYWZmYzdjOTRmZjZfdG5TNENOeVNkVkpIUTQxejEwQXZhUnpxSWdqMUs3d09fVG9rZW46VklEY2I2YlNNbzN1VDN4NlF2TmNZTE1Zbmk3XzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 gdb -p 1203952 -batch -ex "x/gx 0x7f65fe04efc8"，这是查看got表项的(希望是0x000000404018)
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片21](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片21](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MGQ0MWIzMWUxOTI2M2U0ZjBmNGVmZmY4N2MzYWIzMzlfVWtZcVFRcFJCdnR0VHZCOEViQWNIcXJXZFh2V0l2d0lfVG9rZW46SDBGSmJhc3Vlb3FONER4RE1kSGNIWGVZbmNkXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 验证成功✅
 
@@ -1291,7 +1291,7 @@ public synchronized void start() {
 + 状态转化图
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片22](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片22](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NTY1ZTQ5YjI1Mzk3ZDNmMDVjNmQ3NTlmYzBlODYzMThfMjRQQ256aWRGRkdyTUhyeE10cm90TzRpQmxpRmJ3dGZfVG9rZW46Q094amJvZUpBb096Zmh4Q2V4cmN0aGR0blVoXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -1302,7 +1302,7 @@ public synchronized void start() {
 
 ## 3. 线程的状态
 <!-- 这是一张图片，ocr 内容为： -->
-![图片23](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片23](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Yjc5M2QzZDAxN2YzYjgyMWM1NWQxMWM4OWZkZDc5NmFfMWZtb3dQd1ZlTndEVERhdXg1NUJhZTgxMHAyUmRWRkVfVG9rZW46VzBZZGJFU0tGb1dXRkN4UnhsRWNEZEZ5bnBjXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 在4.2章节中也说过线程的状态,不过指的是java层面的状态,在这里一共有6种,而在jvm内部,和线程有关的状态枚举还有3种:
 
@@ -1342,7 +1342,7 @@ enum ThreadStatus {
 在这里需要详细的说明一下这个类的作用：java_lang_Thread是Java线程在VM中的“代言人”，负责将Java的线程抽象转化为VM能理解和操作的底层结构。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片24](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片24](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NmQ1NjE1OTQwNDU0N2Q0OGRlMzkzYjZmZmNjNGRmMWFfdUlSQmtrbWphRE5TREZUb0xuaHdETEdOVDJkOFRBS1lfVG9rZW46WEV1TGI0WVltb2JtQTF4cmE1N2NoZFNTbmtlXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
@@ -1526,7 +1526,7 @@ public enum State {
 ```
 
 <!-- 这是一张图片，ocr 内容为： -->
-![图片25](图片暂时无法显示 - 请联系作者获取图片资源)
+![图片25](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MDViZDY5MTI2ZmM2N2I2ZmY4MDlkNTAzMzE4N2I4MTFfY3lnSHRJakJiaXdNSG91dGhWRW1ra0pmb1JOR1V1b3NfVG9rZW46RzVrbmJkbjdMbzdGZVR4SEZTU2NKR3g5bmdmXzE3Njg2NDM2MTA6MTc2ODY0NzIxMF9WNA "图片链接可能已过期，如无法显示请联系作者")
 
 
 
