@@ -2735,7 +2735,7 @@
             // 目录跳转返回栈：仅在真正换页面（path 变化）时清空，避免同页更新导致“返回点”丢失
             try {
               const p = (vm && vm.route && vm.route.path) ? vm.route.path : ((location.hash || '#/').split('?')[0] || '#/');
-              const norm = String(p || '');
+              const norm = String(p || '').split('?')[0];
               if (!tocLastRoutePath || norm !== tocLastRoutePath) {
                 tocJumpStack = [];
                 tocLastRoutePath = norm;
