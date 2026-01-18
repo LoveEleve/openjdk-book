@@ -1398,25 +1398,78 @@
       color: rgba(102, 219, 162, 0.95);
     }
 
-    /* ---------------- 极简风格（全站） ---------------- */
+    /* ---------------- 极简风格（全站，可切换） ---------------- */
     :root {
-      --min-accent: #16a34a;
-      --min-text: rgba(15, 23, 42, 0.92);
-      --min-subtext: rgba(15, 23, 42, 0.62);
-      --min-border: rgba(15, 23, 42, 0.10);
-      --min-bg: #ffffff;
+      --min-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      --min-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --min-radius: 12px;
+
+      /* 默认：Soft（柔和） */
+      --min-accent: #7c3aed;
+      --min-text: rgba(17, 24, 39, 0.92);
+      --min-subtext: rgba(17, 24, 39, 0.62);
+      --min-border: rgba(30, 27, 75, 0.12);
+      --min-bg: #f8f7ff;
+      --min-surface: rgba(255, 255, 255, 0.82);
+      --min-code-bg: rgba(30, 27, 75, 0.045);
+    }
+
+    html[data-min-style="paper"] {
+      --min-accent: #b45309;
+      --min-bg: #fbfbf7;
       --min-surface: rgba(255, 255, 255, 0.78);
-      --min-code-bg: rgba(2, 6, 23, 0.03);
+      --min-border: rgba(120, 53, 15, 0.16);
+      --min-code-bg: rgba(120, 53, 15, 0.05);
+    }
+
+    html[data-min-style="mono"] {
+      --min-accent: #2563eb;
+      --min-bg: #fcfcfd;
+      --min-surface: rgba(255, 255, 255, 0.88);
+      --min-border: rgba(17, 24, 39, 0.12);
+      --min-code-bg: rgba(17, 24, 39, 0.045);
+    }
+
+    html[data-min-style="soft"] {
+      --min-accent: #7c3aed;
+      --min-bg: #f8f7ff;
+      --min-surface: rgba(255, 255, 255, 0.82);
+      --min-border: rgba(30, 27, 75, 0.12);
+      --min-code-bg: rgba(30, 27, 75, 0.045);
     }
 
     html[data-theme="dark"] {
-      --min-accent: #4ade80;
+      /* 默认暗色（随 style 进一步覆盖） */
       --min-text: rgba(226, 232, 240, 0.92);
-      --min-subtext: rgba(226, 232, 240, 0.65);
+      --min-subtext: rgba(226, 232, 240, 0.66);
       --min-border: rgba(226, 232, 240, 0.12);
       --min-bg: #0b1020;
       --min-surface: rgba(2, 6, 23, 0.62);
       --min-code-bg: rgba(226, 232, 240, 0.06);
+    }
+
+    html[data-theme="dark"][data-min-style="paper"] {
+      --min-accent: #f59e0b;
+      --min-bg: #0b0f16;
+      --min-surface: rgba(2, 6, 23, 0.62);
+      --min-border: rgba(251, 191, 36, 0.16);
+      --min-code-bg: rgba(251, 191, 36, 0.07);
+    }
+
+    html[data-theme="dark"][data-min-style="mono"] {
+      --min-accent: #60a5fa;
+      --min-bg: #0a0c10;
+      --min-surface: rgba(2, 6, 23, 0.62);
+      --min-border: rgba(226, 232, 240, 0.14);
+      --min-code-bg: rgba(226, 232, 240, 0.07);
+    }
+
+    html[data-theme="dark"][data-min-style="soft"] {
+      --min-accent: #c4b5fd;
+      --min-bg: #0b0a16;
+      --min-surface: rgba(2, 6, 23, 0.62);
+      --min-border: rgba(196, 181, 253, 0.16);
+      --min-code-bg: rgba(196, 181, 253, 0.08);
     }
 
     body {
@@ -1425,6 +1478,16 @@
 
     .markdown-section {
       color: var(--min-text) !important;
+      font-family: var(--min-font);
+      line-height: 1.78;
+      font-size: 15px;
+      letter-spacing: 0.01em;
+    }
+
+    .markdown-section h1,
+    .markdown-section h2,
+    .markdown-section h3 {
+      letter-spacing: -0.02em;
     }
 
     .markdown-section blockquote {
@@ -1443,7 +1506,22 @@
       text-decoration: underline;
     }
 
-    /* 去掉“很重”的阴影，让整体更克制 */
+    .markdown-section code {
+      font-family: var(--min-mono);
+      font-size: 0.92em;
+      background: var(--min-code-bg);
+      border: 1px solid var(--min-border);
+      border-radius: 7px;
+      padding: 0.12em 0.35em;
+    }
+
+    pre[data-lang] code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+
+    /* 去掉“很重”的阴影，让整体更克制（包含 hover 覆盖，避免暗色残留） */
     .markdown-section .docsify-tabs,
     .markdown-section .alert,
     .markdown-section #giscus .giscus-card,
@@ -1452,11 +1530,19 @@
     pre[data-lang] {
       box-shadow: none !important;
       border-color: var(--min-border) !important;
-      border-radius: 12px !important;
+      border-radius: var(--min-radius) !important;
     }
 
-    pre[data-lang] {
+    .page-nav a:hover,
+    html[data-theme="dark"] .page-nav a:hover {
+      box-shadow: none !important;
+    }
+
+    pre[data-lang],
+    html[data-theme="dark"] pre[data-lang] {
       background: var(--min-code-bg) !important;
+      border-color: var(--min-border) !important;
+      box-shadow: none !important;
     }
 
     .code-tools {
@@ -1464,9 +1550,53 @@
       border-bottom-color: var(--min-border) !important;
     }
 
-    /* 悬浮按钮：极简化（去掉厚阴影/位移） */
+    /* 悬浮按钮：极简化（去掉厚阴影/位移），并统一三按钮风格 */
+    .style-toggle {
+      position: fixed;
+      right: 18px;
+      bottom: 138px;
+      z-index: 1002;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(0, 0, 0, 0.10);
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      backdrop-filter: saturate(180%) blur(12px);
+      -webkit-backdrop-filter: saturate(180%) blur(12px);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+    }
+
+    @media (max-width: 900px) {
+      .style-toggle {
+        right: 12px;
+        bottom: 124px;
+      }
+    }
+
+    .style-toggle .style-icon {
+      width: 18px;
+      height: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .style-toggle .style-text {
+      opacity: 0.9;
+    }
+
     .theme-toggle,
-    .search-toggle {
+    .search-toggle,
+    .style-toggle {
       background: var(--min-surface) !important;
       border-color: var(--min-border) !important;
       color: var(--min-text) !important;
@@ -1476,13 +1606,16 @@
 
     .theme-toggle:hover,
     .search-toggle:hover,
+    .style-toggle:hover,
     .theme-toggle:active,
-    .search-toggle:active {
+    .search-toggle:active,
+    .style-toggle:active {
       box-shadow: none !important;
       transform: none !important;
     }
 
-    .theme-toggle .theme-icon {
+    .theme-toggle .theme-icon,
+    .style-toggle .style-icon {
       background: transparent !important;
     }
   </style>
@@ -1492,6 +1625,11 @@
   <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题" title="切换主题">
     <span class="theme-icon" aria-hidden="true">⭮</span>
     <span class="theme-text">跟随</span>
+  </button>
+
+  <button id="style-toggle" class="style-toggle" type="button" aria-label="切换风格" title="风格：柔和（点击切换）">
+    <span class="style-icon" aria-hidden="true">Aa</span>
+    <span class="style-text">柔和</span>
   </button>
 
   <button id="search-toggle" class="search-toggle" type="button" aria-label="全文搜索" title="全文搜索（Ctrl/⌘+K）">
@@ -1506,6 +1644,70 @@
   </button>
 
   <script>
+    /* ---------------- 极简风格：Paper / Mono / Soft（持久化） ---------------- */
+    (function () {
+      const KEY = 'docsify:min-style';
+      const STYLES = ['soft', 'mono', 'paper'];
+      const LABELS = { soft: '柔和', mono: '黑白', paper: '纸感' };
+
+      function getStyle() {
+        try {
+          return localStorage.getItem(KEY) || 'soft';
+        } catch (e) {
+          return 'soft';
+        }
+      }
+
+      function normalize(style) {
+        return STYLES.indexOf(style) >= 0 ? style : 'soft';
+      }
+
+      function render(style) {
+        const btn = document.getElementById('style-toggle');
+        if (!btn) return;
+        const text = btn.querySelector('.style-text');
+        btn.setAttribute('data-style', style);
+        if (text) text.textContent = LABELS[style] || style;
+        btn.title = '风格：' + (LABELS[style] || style) + '（点击切换）';
+      }
+
+      function apply(style, persist) {
+        const s = normalize(style);
+        document.documentElement.setAttribute('data-min-style', s);
+        if (persist) {
+          try {
+            localStorage.setItem(KEY, s);
+          } catch (e) {
+            // ignore
+          }
+        }
+        render(s);
+      }
+
+      function nextStyle(cur) {
+        const idx = STYLES.indexOf(cur);
+        return STYLES[(idx + 1 + STYLES.length) % STYLES.length] || 'soft';
+      }
+
+      // 首次：尽量早点应用，减少闪烁
+      apply(getStyle(), false);
+
+      document.addEventListener('click', function (e) {
+        const btn = e && e.target && e.target.closest ? e.target.closest('#style-toggle') : null;
+        if (!btn) return;
+        e.preventDefault();
+        const cur = btn.getAttribute('data-style') || getStyle();
+        const next = nextStyle(cur);
+        apply(next, true);
+      }, true);
+
+      window.__docsifyStyle = {
+        get: getStyle,
+        apply: function (style) { apply(style, true); },
+        list: function () { return STYLES.slice(); }
+      };
+    })();
+
     /* ---------------- 主题切换：跟随系统 / 暗色 / 亮色（持久化） ---------------- */
     (function () {
       const KEY = 'docsify:theme-mode';
