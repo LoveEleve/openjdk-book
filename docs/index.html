@@ -1006,6 +1006,260 @@
       }
     }
 
+    /* ---------------- 全文搜索（Ctrl/⌘+K） ---------------- */
+    .search-toggle {
+      position: fixed;
+      right: 18px;
+      bottom: 78px;
+      z-index: 1002;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(0, 0, 0, 0.10);
+      background: rgba(255, 255, 255, 0.86);
+      color: #111827;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.10);
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      backdrop-filter: saturate(180%) blur(12px);
+      -webkit-backdrop-filter: saturate(180%) blur(12px);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+    }
+
+    .search-toggle:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 38px rgba(0, 0, 0, 0.14);
+      border-color: rgba(66, 185, 131, 0.28);
+    }
+
+    .search-toggle:active {
+      transform: translateY(0);
+    }
+
+    .search-toggle .search-icon {
+      width: 18px;
+      height: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      background: rgba(66, 185, 131, 0.10);
+      color: var(--theme-color);
+    }
+
+    .search-toggle .search-icon svg {
+      width: 16px;
+      height: 16px;
+      display: block;
+    }
+
+    .search-toggle .search-hint {
+      opacity: 0.7;
+      font-weight: 800;
+      font-size: 11px;
+      letter-spacing: 0.3px;
+    }
+
+    @media (max-width: 900px) {
+      .search-toggle {
+        right: 12px;
+        bottom: 72px;
+      }
+      .search-toggle .search-hint {
+        display: none;
+      }
+    }
+
+    #fts-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      display: none;
+    }
+
+    #fts-modal.is-open {
+      display: block;
+    }
+
+    #fts-modal .fts-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    #fts-modal .fts-panel {
+      position: relative;
+      width: min(760px, calc(100vw - 24px));
+      margin: 92px auto 0;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid rgba(0, 0, 0, 0.10);
+      box-shadow: 0 30px 90px rgba(0, 0, 0, 0.30);
+      overflow: hidden;
+    }
+
+    #fts-modal .fts-head {
+      padding: 12px 12px 10px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    #fts-modal .fts-input {
+      flex: 1;
+      height: 40px;
+      border-radius: 10px;
+      border: 1px solid rgba(0, 0, 0, 0.12);
+      padding: 0 12px;
+      outline: none;
+      font-size: 14px;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.9);
+    }
+
+    #fts-modal .fts-input:focus {
+      border-color: rgba(66, 185, 131, 0.55);
+      box-shadow: 0 0 0 3px rgba(66, 185, 131, 0.18);
+    }
+
+    #fts-modal .fts-close {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      border: 1px solid rgba(0, 0, 0, 0.10);
+      background: rgba(66, 185, 131, 0.08);
+      color: var(--theme-color);
+      cursor: pointer;
+      font-weight: 900;
+      font-size: 16px;
+    }
+
+    #fts-modal .fts-close:hover {
+      background: rgba(66, 185, 131, 0.14);
+      border-color: rgba(66, 185, 131, 0.28);
+    }
+
+    #fts-modal .fts-meta {
+      padding: 8px 12px;
+      font-size: 12px;
+      color: rgba(17, 24, 39, 0.72);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    #fts-modal .fts-meta .fts-meta-right {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    #fts-modal .fts-link {
+      color: rgba(66, 185, 131, 0.95);
+      font-weight: 800;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    #fts-modal .fts-link:hover {
+      text-decoration: underline;
+    }
+
+    #fts-modal .fts-results {
+      max-height: min(62vh, 520px);
+      overflow: auto;
+      padding: 6px;
+    }
+
+    #fts-modal .fts-item {
+      display: block;
+      padding: 10px 10px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    #fts-modal .fts-item:hover {
+      background: rgba(66, 185, 131, 0.08);
+      border-color: rgba(66, 185, 131, 0.22);
+    }
+
+    #fts-modal .fts-title {
+      font-weight: 900;
+      font-size: 13px;
+      line-height: 1.35;
+      color: #0f172a;
+    }
+
+    #fts-modal .fts-snippet {
+      margin-top: 4px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: rgba(15, 23, 42, 0.78);
+    }
+
+    #fts-modal mark {
+      background: rgba(250, 204, 21, 0.45);
+      color: inherit;
+      padding: 0 2px;
+      border-radius: 4px;
+    }
+
+    /* 页面内高亮 */
+    .fts-mark {
+      background: rgba(250, 204, 21, 0.45);
+      border-radius: 4px;
+      padding: 0 2px;
+    }
+
+    html[data-theme="dark"] .search-toggle {
+      border-color: rgba(255, 255, 255, 0.10);
+      background: rgba(15, 23, 42, 0.72);
+      color: rgba(226, 232, 240, 0.92);
+    }
+
+    html[data-theme="dark"] #fts-modal .fts-panel {
+      background: rgba(15, 23, 42, 0.92);
+      border-color: rgba(255, 255, 255, 0.10);
+    }
+
+    html[data-theme="dark"] #fts-modal .fts-input {
+      background: rgba(2, 6, 23, 0.66);
+      border-color: rgba(255, 255, 255, 0.12);
+      color: rgba(226, 232, 240, 0.92);
+    }
+
+    html[data-theme="dark"] #fts-modal .fts-meta {
+      color: rgba(226, 232, 240, 0.70);
+      border-bottom-color: rgba(255, 255, 255, 0.10);
+    }
+
+    html[data-theme="dark"] #fts-modal .fts-title {
+      color: rgba(226, 232, 240, 0.96);
+    }
+
+    html[data-theme="dark"] #fts-modal .fts-snippet {
+      color: rgba(226, 232, 240, 0.72);
+    }
+
+    html[data-theme="dark"] #fts-modal .fts-close {
+      border-color: rgba(255, 255, 255, 0.10);
+      background: rgba(66, 185, 131, 0.12);
+      color: rgba(102, 219, 162, 0.95);
+    }
+
     /* ---------------- 暗色模式：仅覆盖必要区域，避免破坏现有代码块/工具栏 ---------------- */
     html[data-theme="dark"] {
       color-scheme: dark;
@@ -1117,6 +1371,17 @@
   <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题" title="切换主题">
     <span class="theme-icon" aria-hidden="true">⭮</span>
     <span class="theme-text">跟随</span>
+  </button>
+
+  <button id="search-toggle" class="search-toggle" type="button" aria-label="全文搜索" title="全文搜索（Ctrl/⌘+K）">
+    <span class="search-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+        <path d="M10 18a8 8 0 1 1 5.3-14.1A8 8 0 0 1 10 18Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M21 21l-4.35-4.35" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+    </span>
+    <span class="search-text">搜索</span>
+    <span class="search-hint">Ctrl/⌘+K</span>
   </button>
 
   <script>
@@ -1237,7 +1502,6 @@
       name: 'LoveEleve',
       repo: 'https://github.com/LoveEleve/LoveEleve.github.io',
       loadSidebar: true,
-      alias: { '/.*/_sidebar.md': '/_sidebar.md' },
       subMaxLevel: 3,
       sidebarDisplayLevel: 0,
       executeScript: true,
@@ -2889,6 +3153,525 @@
             `;
           }
 
+          /* ---------------- 全文搜索（Ctrl/⌘+K）：跨页面索引 + 结果高亮 + 跳转定位 ---------------- */
+          let ftsBound = false;
+          let ftsIndexBuilding = false;
+          let ftsIndex = null; // { v, key, linksHash, pages: [{path, href, title, text}] }
+          let ftsPendingJump = null; // { path, query, ts }
+
+          function getBaseDir() {
+            try {
+              const p = location.pathname || '/';
+              const siteDir = p.endsWith('/') ? p : p.replace(/\/[^\/]*$/, '/');
+              const bp = window.$docsify && window.$docsify.basePath;
+              if (bp) {
+                let b = String(bp);
+                // 支持 "docs/" 这类相对路径；也支持 "/docs/" 这类绝对路径
+                if (!b.startsWith('/')) b = siteDir + b;
+                // 规范化多余的 / 并确保以 / 结尾
+                b = b.replace(/\/+/g, '/');
+                if (!b.endsWith('/')) b += '/';
+                return b;
+              }
+              return siteDir;
+            } catch (e) {
+              return '/';
+            }
+          }
+
+          function getFtsStorageKey() {
+            const base = getBaseDir();
+            return `fts-index:${base}`;
+          }
+
+          function debounce(fn, wait) {
+            let t = null;
+            return function () {
+              const args = arguments;
+              if (t) {
+                try { clearTimeout(t); } catch (e) { /* ignore */ }
+              }
+              t = setTimeout(() => {
+                t = null;
+                fn.apply(null, args);
+              }, wait);
+            };
+          }
+
+          function safeJsonParse(str) {
+            try { return JSON.parse(str); } catch (e) { return null; }
+          }
+
+          function stripMarkdown(md) {
+            const s = String(md || '');
+            return s
+              .replace(/```[\s\S]*?```/g, ' ')
+              .replace(/`[^`]*`/g, ' ')
+              .replace(/!\[[^\]]*\]\([^\)]*\)/g, ' ')
+              .replace(/\[[^\]]*\]\([^\)]*\)/g, function (m) {
+                const t = m.replace(/^\[|\].*$/g, '');
+                return t || ' ';
+              })
+              .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+              .replace(/^\s{0,3}>\s?/gm, '')
+              .replace(/\*\*([^*]+)\*\*/g, '$1')
+              .replace(/\*([^*]+)\*/g, '$1')
+              .replace(/__([^_]+)__/g, '$1')
+              .replace(/_([^_]+)_/g, '$1')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/\r?\n/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
+
+          function pathToMdUrl(path) {
+            const p = normalizePath(path);
+            let md = '';
+            if (p === '/' || p === '/README') md = 'README.md';
+            else md = p.replace(/^\//, '') + '.md';
+            return getBaseDir() + md;
+          }
+
+          function getLinksHash(links) {
+            try {
+              return links.map((x) => x.path).join('|');
+            } catch (e) {
+              return '';
+            }
+          }
+
+          function ensureFtsModal() {
+            let modal = document.getElementById('fts-modal');
+            if (modal) return modal;
+
+            modal = document.createElement('div');
+            modal.id = 'fts-modal';
+            modal.setAttribute('role', 'dialog');
+            modal.setAttribute('aria-modal', 'true');
+            modal.setAttribute('aria-label', '全文搜索');
+            modal.innerHTML = `
+              <div class="fts-backdrop" data-fts-action="close"></div>
+              <div class="fts-panel" role="document">
+                <div class="fts-head">
+                  <input class="fts-input" id="fts-input" type="search" placeholder="全文搜索…" autocomplete="off" spellcheck="false" />
+                  <button type="button" class="fts-close" data-fts-action="close" aria-label="关闭" title="关闭">×</button>
+                </div>
+                <div class="fts-meta">
+                  <div class="fts-meta-left" id="fts-meta-left">输入关键词开始搜索</div>
+                  <div class="fts-meta-right">
+                    <a class="fts-link" href="#" data-fts-action="rebuild">重建索引</a>
+                    <span class="fts-hint">Esc 关闭</span>
+                  </div>
+                </div>
+                <div class="fts-results" id="fts-results" role="list"></div>
+              </div>
+            `;
+            document.body.appendChild(modal);
+            return modal;
+          }
+
+          function isTypingTarget(el) {
+            if (!el) return false;
+            const tag = (el.tagName || '').toUpperCase();
+            return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+          }
+
+          function openFts() {
+            const modal = ensureFtsModal();
+            modal.classList.add('is-open');
+            try {
+              const input = modal.querySelector('#fts-input');
+              if (input) {
+                input.focus();
+                input.select();
+              }
+            } catch (e) { /* ignore */ }
+
+            // 延迟触发一次索引构建（懒加载，避免首屏阻塞）
+            setTimeout(() => {
+              try { ensureFtsIndex(false); } catch (e) { /* ignore */ }
+            }, 0);
+          }
+
+          function closeFts() {
+            const modal = document.getElementById('fts-modal');
+            if (!modal) return;
+            modal.classList.remove('is-open');
+          }
+
+          function setFtsMeta(text) {
+            const el = document.getElementById('fts-meta-left');
+            if (el) el.textContent = text || '';
+          }
+
+          function escapeForRegExp(s) {
+            return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          }
+
+          function highlightHtml(text, terms) {
+            const safe = escapeHtml(String(text || ''));
+            const list = (terms || []).filter(Boolean);
+            if (!list.length) return safe;
+            const re = new RegExp('(' + list.map(escapeForRegExp).join('|') + ')', 'ig');
+            return safe.replace(re, '<mark>$1</mark>');
+          }
+
+          function buildSnippet(text, q) {
+            const t = String(text || '');
+            const needle = String(q || '').trim();
+            if (!needle) return '';
+            const lowerT = t.toLowerCase();
+            const lowerN = needle.toLowerCase();
+            const idx = lowerT.indexOf(lowerN);
+            if (idx < 0) return t.slice(0, 120);
+            const start = Math.max(0, idx - 48);
+            const end = Math.min(t.length, idx + lowerN.length + 72);
+            const prefix = start > 0 ? '…' : '';
+            const suffix = end < t.length ? '…' : '';
+            return prefix + t.slice(start, end) + suffix;
+          }
+
+          function scorePage(page, q, terms) {
+            const title = (page.title || '').toLowerCase();
+            const body = (page.text || '').toLowerCase();
+            const qq = String(q || '').toLowerCase();
+            let score = 0;
+            if (qq && title.includes(qq)) score += 30;
+            if (qq && body.includes(qq)) score += 8;
+
+            if (terms && terms.length) {
+              let hitAll = true;
+              terms.forEach((term) => {
+                const tt = String(term || '').toLowerCase();
+                if (!tt) return;
+                if (title.includes(tt)) score += 12;
+                if (body.includes(tt)) score += 3;
+                if (!title.includes(tt) && !body.includes(tt)) hitAll = false;
+              });
+              if (hitAll) score += 10;
+            }
+            return score;
+          }
+
+          function searchInIndex(q) {
+            const query = String(q || '').trim();
+            if (!query) return [];
+            if (!ftsIndex || !ftsIndex.pages || !ftsIndex.pages.length) return [];
+
+            const isCjk = /[\u3400-\u9FFF]/.test(query);
+            const terms = isCjk ? [query] : query.split(/\s+/).filter(Boolean).slice(0, 6);
+
+            const scored = [];
+            for (let i = 0; i < ftsIndex.pages.length; i++) {
+              const p = ftsIndex.pages[i];
+              const s = scorePage(p, query, terms);
+              if (s > 0) scored.push({ page: p, score: s });
+            }
+
+            scored.sort((a, b) => b.score - a.score);
+            return scored.slice(0, 24);
+          }
+
+          function renderFtsResults(q) {
+            const modal = ensureFtsModal();
+            const resultsEl = modal.querySelector('#fts-results');
+            if (!resultsEl) return;
+
+            const query = String(q || '').trim();
+            if (!query) {
+              resultsEl.innerHTML = '';
+              setFtsMeta('输入关键词开始搜索');
+              return;
+            }
+
+            if (ftsIndexBuilding) {
+              setFtsMeta('正在建立索引…（首次会稍慢，之后会缓存）');
+            }
+
+            const hits = searchInIndex(query);
+            const isCjk = /[\u3400-\u9FFF]/.test(query);
+            const terms = isCjk ? [query] : query.split(/\s+/).filter(Boolean).slice(0, 6);
+
+            setFtsMeta(hits.length ? `找到 ${hits.length} 条结果` : '未找到结果');
+
+            resultsEl.innerHTML = hits.map((h) => {
+              const p = h.page;
+              const titleHtml = highlightHtml(p.title || p.path, terms);
+              const snippet = buildSnippet(p.text || '', query);
+              const snippetHtml = highlightHtml(snippet, terms);
+              return `
+                <a class="fts-item" href="${escapeHtml(p.href || ('#' + p.path))}" data-fts-path="${escapeHtml(p.path)}" data-fts-query="${escapeHtml(query)}" role="listitem">
+                  <div class="fts-title">${titleHtml}</div>
+                  <div class="fts-snippet">${snippetHtml}</div>
+                </a>
+              `;
+            }).join('');
+          }
+
+          const onFtsInput = debounce(function (val) {
+            renderFtsResults(val);
+          }, 120);
+
+          function loadCachedIndex(linksHash) {
+            try {
+              const key = getFtsStorageKey();
+              const raw = localStorage.getItem(key);
+              const obj = raw ? safeJsonParse(raw) : null;
+              if (!obj || obj.v !== 1) return null;
+              if (obj.linksHash !== linksHash) return null;
+              if (!obj.pages || !Array.isArray(obj.pages)) return null;
+              return obj;
+            } catch (e) {
+              return null;
+            }
+          }
+
+          function saveCachedIndex(obj) {
+            try {
+              const key = getFtsStorageKey();
+              localStorage.setItem(key, JSON.stringify(obj));
+            } catch (e) {
+              // ignore
+            }
+          }
+
+          async function buildIndex(links, linksHash) {
+            const pages = [];
+            for (let i = 0; i < links.length; i++) {
+              const it = links[i];
+              const path = normalizePath(it.path);
+              const href = it.href;
+              const mdUrl = pathToMdUrl(path);
+              try {
+                const res = await fetch(mdUrl, { cache: 'no-store' });
+                const md = await res.text();
+                const text = stripMarkdown(md);
+                pages.push({ path, href, title: it.text || path, text });
+              } catch (e) {
+                pages.push({ path, href, title: it.text || path, text: '' });
+              }
+              setFtsMeta(`正在建立索引… ${i + 1}/${links.length}`);
+            }
+            return { v: 1, key: getFtsStorageKey(), linksHash, pages, ts: Date.now() };
+          }
+
+          function ensureFtsIndex(forceRebuild) {
+            if (ftsIndexBuilding) return;
+
+            const links = getSidebarLinks();
+            const linksHash = getLinksHash(links);
+            if (!forceRebuild) {
+              const cached = loadCachedIndex(linksHash);
+              if (cached) {
+                ftsIndex = cached;
+                return;
+              }
+            }
+
+            // 没拿到 sidebar 链接时：稍后再试（避免白屏期误判）
+            if (!links.length) {
+              setTimeout(() => {
+                try { ensureFtsIndex(forceRebuild); } catch (e) { /* ignore */ }
+              }, 260);
+              return;
+            }
+
+            ftsIndexBuilding = true;
+            setFtsMeta('正在建立索引…');
+
+            buildIndex(links, linksHash).then((obj) => {
+              ftsIndex = obj;
+              saveCachedIndex(obj);
+              ftsIndexBuilding = false;
+              // 如果此时输入框里已有内容，刷新一次结果
+              try {
+                const input = document.getElementById('fts-input');
+                if (input && input.value) renderFtsResults(input.value);
+              } catch (e) { /* ignore */ }
+            }).catch(() => {
+              ftsIndexBuilding = false;
+            });
+          }
+
+          function clearPageHighlights() {
+            try {
+              document.querySelectorAll('.fts-mark').forEach((el) => {
+                const parent = el.parentNode;
+                if (!parent) return;
+                parent.replaceChild(document.createTextNode(el.textContent || ''), el);
+                parent.normalize();
+              });
+            } catch (e) { /* ignore */ }
+          }
+
+          function highlightInPageExact(query) {
+            const q = String(query || '').trim();
+            if (!q) return false;
+
+            const section = document.querySelector('.markdown-section');
+            if (!section) return false;
+
+            clearPageHighlights();
+
+            const walker = document.createTreeWalker(section, NodeFilter.SHOW_TEXT, {
+              acceptNode: function (node) {
+                if (!node || !node.parentElement) return NodeFilter.FILTER_REJECT;
+                const text = (node.nodeValue || '').trim();
+                if (!text) return NodeFilter.FILTER_REJECT;
+
+                const p = node.parentElement;
+                if (p.closest('pre, code, #toc-aside, #page-meta, #giscus')) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+              }
+            });
+
+            const hits = [];
+            const lowerQ = q.toLowerCase();
+            while (walker.nextNode()) {
+              const node = walker.currentNode;
+              const v = node.nodeValue || '';
+              const idx = v.toLowerCase().indexOf(lowerQ);
+              if (idx < 0) continue;
+              hits.push({ node, idx });
+              if (hits.length >= 30) break;
+            }
+
+            hits.forEach((h) => {
+              const node = h.node;
+              const v = node.nodeValue || '';
+              const before = v.slice(0, h.idx);
+              const mid = v.slice(h.idx, h.idx + q.length);
+              const after = v.slice(h.idx + q.length);
+
+              const frag = document.createDocumentFragment();
+              if (before) frag.appendChild(document.createTextNode(before));
+              const mark = document.createElement('mark');
+              mark.className = 'fts-mark';
+              mark.textContent = mid;
+              frag.appendChild(mark);
+              if (after) frag.appendChild(document.createTextNode(after));
+
+              try {
+                node.parentNode.replaceChild(frag, node);
+              } catch (e) { /* ignore */ }
+            });
+
+            const first = document.querySelector('.fts-mark');
+            if (first && first.scrollIntoView) {
+              try { first.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { /* ignore */ }
+              return true;
+            }
+            return false;
+          }
+
+          function ensureFullTextSearch(vm) {
+            if (ftsBound) return;
+            ftsBound = true;
+
+            ensureFtsModal();
+
+            document.addEventListener('click', function (e) {
+              const t = e && e.target;
+              const toggle = t && t.closest ? t.closest('#search-toggle') : null;
+              if (toggle) {
+                e.preventDefault();
+                openFts();
+                return;
+              }
+
+              const action = t && t.getAttribute ? (t.getAttribute('data-fts-action') || '') : '';
+              if (action === 'close') {
+                e.preventDefault();
+                closeFts();
+                return;
+              }
+              if (action === 'rebuild') {
+                e.preventDefault();
+                try {
+                  ftsIndex = null;
+                  ensureFtsIndex(true);
+                } catch (err) { /* ignore */ }
+                return;
+              }
+
+              const item = t && t.closest ? t.closest('#fts-modal .fts-item') : null;
+              if (item) {
+                const path = item.getAttribute('data-fts-path') || '';
+                const q = item.getAttribute('data-fts-query') || '';
+                ftsPendingJump = { path: normalizePath(path), query: q, ts: Date.now() };
+                closeFts();
+                // 让 docsify 自己处理路由
+                return;
+              }
+            }, true);
+
+            document.addEventListener('keydown', function (e) {
+              const k = e && (e.key || '').toLowerCase();
+              const isK = k === 'k';
+              const isEsc = k === 'escape';
+
+              // Esc 关闭
+              if (isEsc) {
+                const modal = document.getElementById('fts-modal');
+                if (modal && modal.classList.contains('is-open')) {
+                  e.preventDefault();
+                  closeFts();
+                  return;
+                }
+              }
+
+              // Ctrl/⌘+K 打开
+              if (isK && (e.metaKey || e.ctrlKey)) {
+                // 避免影响输入框内快捷键
+                if (isTypingTarget(e.target)) return;
+                e.preventDefault();
+                openFts();
+                return;
+              }
+            }, true);
+
+            const modal = document.getElementById('fts-modal');
+            if (modal) {
+              const input = modal.querySelector('#fts-input');
+              if (input) {
+                input.addEventListener('input', function () {
+                  onFtsInput(input.value);
+                });
+                input.addEventListener('keydown', function (e) {
+                  const k = (e.key || '').toLowerCase();
+                  if (k === 'enter') {
+                    const first = modal.querySelector('.fts-item');
+                    if (first) {
+                      e.preventDefault();
+                      first.click();
+                    }
+                  }
+                });
+              }
+            }
+
+            // 首次提前尝试读缓存（不强制 rebuild）
+            try { ensureFtsIndex(false); } catch (e) { /* ignore */ }
+          }
+
+          function maybeApplyPendingHighlight(vm) {
+            if (!ftsPendingJump) return;
+            const now = Date.now();
+            if (now - (ftsPendingJump.ts || 0) > 15 * 1000) {
+              ftsPendingJump = null;
+              return;
+            }
+
+            const cur = normalizePath(vm && vm.route && vm.route.path ? vm.route.path : '/');
+            if (cur !== normalizePath(ftsPendingJump.path)) return;
+
+            const q = ftsPendingJump.query;
+            ftsPendingJump = null;
+
+            // 跳转后：在页面内做一次“精确串”高亮并滚到首个命中
+            try { highlightInPageExact(q); } catch (e) { /* ignore */ }
+          }
+
           function ensureGiscusHost() {
             const section = document.querySelector('.markdown-section');
             if (!section) return null;
@@ -3042,6 +3825,10 @@
             // 阅读体验：进度条 / 面包屑 / 上一篇下一篇
             ensureProgressBar();
             renderBreadcrumbAndNav(vm);
+
+            // 全文搜索（Ctrl/⌘+K）：绑定快捷键 + 懒加载索引
+            ensureFullTextSearch(vm);
+            maybeApplyPendingHighlight(vm);
 
             // 图片缩放：随路由切换重新绑定（只绑定正文图片）
             scheduleImageZoom();
