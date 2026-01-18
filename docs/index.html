@@ -1527,10 +1527,29 @@
       padding: 0.12em 0.35em;
     }
 
+    /* 代码块：更干净的“顶栏 + 代码区”分层（不加阴影/不加模糊） */
+    pre[data-lang] {
+      background: var(--min-surface) !important;
+      border: 1px solid var(--min-border) !important;
+      border-radius: var(--min-radius) !important;
+      box-shadow: none !important;
+      padding: 3.0em 0 0 !important; /* 顶部留工具栏（与现有 JS 工具栏高度匹配） */
+      overflow: hidden;
+    }
+
     pre[data-lang] code {
       background: transparent;
       border: 0;
       padding: 0;
+    }
+
+    /* 代码区域本体（含行号 gutter） */
+    .fold-wrap {
+      background: var(--min-code-bg) !important;
+    }
+
+    .fold-gutter {
+      border-right-color: var(--min-border) !important;
     }
 
     /* 极简：去掉阴影/位移/模糊，降低重绘与合成开销 */
@@ -1538,8 +1557,7 @@
     .markdown-section .alert,
     .markdown-section #giscus .giscus-card,
     .toc-aside,
-    .page-nav a,
-    pre[data-lang] {
+    .page-nav a {
       box-shadow: none !important;
       border-color: var(--min-border) !important;
       border-radius: var(--min-radius) !important;
@@ -1551,16 +1569,44 @@
       transform: none !important;
     }
 
-    pre[data-lang],
-    html[data-theme="dark"] pre[data-lang] {
-      background: var(--min-code-bg) !important;
-      border-color: var(--min-border) !important;
-      box-shadow: none !important;
+    .code-tools {
+      background: rgba(0, 0, 0, 0.02) !important;
+      border-bottom: 1px solid var(--min-border) !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
     }
 
-    .code-tools {
-      background: transparent !important;
-      border-bottom-color: var(--min-border) !important;
+    html[data-theme="dark"] .code-tools {
+      background: rgba(255, 255, 255, 0.04) !important;
+    }
+
+    .code-tools-left {
+      color: var(--min-subtext) !important;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: none;
+    }
+
+    .tool-btn {
+      color: var(--min-text);
+      border: 1px solid var(--min-border);
+      background: transparent;
+      border-radius: 8px;
+      padding: 4px 8px;
+      font-weight: 600;
+      transition: none !important;
+      transform: none !important;
+    }
+
+    .tool-btn:hover,
+    .tool-btn:active {
+      background: rgba(0, 0, 0, 0.04);
+      transform: none !important;
+    }
+
+    html[data-theme="dark"] .tool-btn:hover,
+    html[data-theme="dark"] .tool-btn:active {
+      background: rgba(255, 255, 255, 0.06);
     }
 
     /* 悬浮按钮：纯色、无模糊、无位移 */
