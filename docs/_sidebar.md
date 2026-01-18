@@ -2,6 +2,8 @@
 
 * 并发编程学习之路
   * [高并发容器](concurrent/concurrent-container.md)
+    * [ConcurrentHashMap](concurrent/concurrent-container.md#concurrenthashmap)
+    * [HashMap源码解析](concurrent/concurrent-container.md#hashmap源码解析)
   * [synchronized](#synchronized)
     * [Synchronized浅析（1）](concurrent/synchronized/synchronized-1.md)
     * [Synchronized浅析（2）](concurrent/synchronized/synchronized-2.md)

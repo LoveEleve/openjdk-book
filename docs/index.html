@@ -49,6 +49,37 @@
       font-weight: inherit !important;
     }
 
+    /* 隐藏所有原有的箭头和展开符号 */
+    .sidebar-nav .folder-button,
+    .sidebar-nav .folder-button::before,
+    .sidebar-nav .folder-button::after,
+    .sidebar-nav li::before,
+    .sidebar-nav li::after,
+    .sidebar-nav a::before,
+    .sidebar-nav a::after {
+      display: none !important;
+    }
+
+    /* 为所有有子项的二级项目添加统一的箭头 */
+    .sidebar-nav > ul > li:has(ul) > a,
+    .sidebar-nav > ul > li:has(ul):not(:has(a)) {
+      position: relative !important;
+      padding-left: 18px !important;
+    }
+
+    .sidebar-nav > ul > li:has(ul) > a::before,
+    .sidebar-nav > ul > li:has(ul):not(:has(a))::before {
+      content: "▶" !important;
+      position: absolute !important;
+      left: 0 !important;
+      top: 50% !important;
+      transform: translateY(-50%) !important;
+      font-size: 10px !important;
+      color: #666 !important;
+      width: 12px !important;
+      text-align: center !important;
+    }
+
     /* ---------------- 代码块：统一顶栏 + 行级折叠（直接在代码块内） ---------------- */
     pre[data-lang] {
       position: relative !important;
