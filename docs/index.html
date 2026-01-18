@@ -1848,6 +1848,23 @@
       requestHeaders: { 'cache-control': 'max-age=0' },
       auto2top: true,
 
+      // 代码块默认语言：无标记/纯文本 → Java（便于阅读与高亮）
+      markdown: {
+        renderer: {
+          code: function (code, lang) {
+            const raw = (lang == null ? '' : String(lang)).trim();
+            const first = raw ? raw.split(/\s+/)[0] : '';
+            const normalized = (first || '').toLowerCase();
+
+            // 常见“纯文本”标记：plain / text / plaintext / plain-text / plain&#x20;text
+            const fallback = (!normalized || normalized === 'text' || normalized === 'plaintext' || normalized === 'plain-text' || normalized.indexOf('plain') === 0);
+            const finalLang = fallback ? 'java' : normalized;
+
+            return this.origin.code(code, finalLang);
+          }
+        }
+      },
+
       tabs: {
         persist: true,
         sync: true,
