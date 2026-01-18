@@ -24,7 +24,12 @@
       --code-muted: #8b949e;
     }
 
-    /* 侧边栏：首页不展示“页面内目录” */
+    /* 侧边栏：简单的格式对齐修复 */
+    .sidebar-nav ul li a {
+      font-weight: normal !important;
+    }
+
+    /* 侧边栏：首页不展示"页面内目录" */
     .sidebar-nav a[href="#/"] + ul,
     .sidebar-nav a[href="#/README"] + ul {
       display: none !important;
@@ -304,7 +309,7 @@
       cursor: zoom-in !important;
     }
 
-    /* 关键：不要用 flex 渲染代码行，避免空白字符黏连导致“代码变形” */
+    /* 关键：不要用 flex 渲染代码行，避免空白字符黏连导致"代码变形" */
     .fold-code-row {
       display: block;
       padding: 0 14px;
@@ -1632,7 +1637,7 @@
             return blocks;
           }
 
-          // 性能兜底：超长代码块不要做“逐行 DOM 折叠”，避免页面卡顿
+          // 性能兜底：超长代码块不要做"逐行 DOM 折叠"，避免页面卡顿
           const INLINE_FOLD_MAX_LINES = 360;
 
           function initInlineFolding(pre) {
@@ -1642,7 +1647,7 @@
             const codeEl = pre.querySelector('code');
             if (!codeEl) return;
 
-            // 取“纯文本代码”，避免把 token span 再次解析
+            // 取"纯文本代码"，避免把 token span 再次解析
             const raw = (codeEl.textContent || '').replace(/\n$/, '');
             const lines = raw.split('\n');
 
@@ -1661,7 +1666,7 @@
               blocksByStart.get(b.start).push(b);
             });
 
-            // 清空原 code 内容，改为“同一个代码块内”的行级结构
+            // 清空原 code 内容，改为"同一个代码块内"的行级结构
             codeEl.innerHTML = '';
 
             const wrap = document.createElement('div');
@@ -1769,7 +1774,7 @@
             toggleByStart.forEach((toggle, start) => {
               const startBlocks = blocksByStart.get(start) || [];
 
-              // 同一行若有多个 block（极少见），优先折叠“最长的”更符合直觉
+              // 同一行若有多个 block（极少见），优先折叠"最长的"更符合直觉
               const pick = startBlocks.reduce((acc, cur) => {
                 const accLen = acc.end - acc.start;
                 const curLen = cur.end - cur.start;
@@ -1932,7 +1937,7 @@
           }
 
           // 重要：部分插件（如 tabs/alerts）可能在 doneEach 后继续改 DOM，
-          // 所以这里做“多次延迟重绑”，提高稳定性。
+          // 所以这里做"多次延迟重绑"，提高稳定性。
           function scheduleImageZoom() {
             if (zoomBindTimer) clearTimeout(zoomBindTimer);
             if (zoomBindTimer2) clearTimeout(zoomBindTimer2);
@@ -2294,7 +2299,7 @@
           let tocScrollUpdate = null;
 
           // TOC 有时会因为渲染时机（图片/插件二次渲染/异步 DOM 变化）在 doneEach 时还拿不到 heading
-          // 这里增加：延迟重算 + MutationObserver，自愈“某次误判 items=[] 导致目录永远不出来”的问题
+          // 这里增加：延迟重算 + MutationObserver，自愈"某次误判 items=[] 导致目录永远不出来"的问题
           let tocRenderObserver = null;
           let tocRenderTtlTimer = null;
           let tocLastVm = null;
@@ -2344,7 +2349,7 @@
           }
 
           function pushTocJumpPoint() {
-            // 只记录“目录跳转前”的阅读位置（支持多次跳转栈式返回）
+            // 只记录"目录跳转前"的阅读位置（支持多次跳转栈式返回）
             const y = getScrollTop();
             const max = 30;
             if (tocJumpStack.length >= max) tocJumpStack = tocJumpStack.slice(-Math.floor(max / 2));
@@ -2589,12 +2594,12 @@
             try {
               const clone = h.cloneNode(true);
 
-              // 我们自己追加的“复制链接”按钮，不应计入标题文本
+              // 我们自己追加的"复制链接"按钮，不应计入标题文本
               clone.querySelectorAll('.heading-link-btn').forEach((el) => el.remove());
 
               // docsify / 主题可能会注入 a.anchor：
               // - 有的只渲染一个 "#" 符号
-              // - 有的会把“标题文字本身”包在 a.anchor 里
+              // - 有的会把"标题文字本身"包在 a.anchor 里
               // 所以这里不能一刀切 remove，否则可能把标题文字也删没了。
               clone.querySelectorAll('a.anchor').forEach((a) => {
                 const t = (a.textContent || '').replace(/\s+/g, ' ').trim();
@@ -2832,7 +2837,7 @@
                 const id = a.getAttribute('data-target');
                 const target = section.querySelector(`#${CSS.escape(id)}`);
                 if (target) {
-                  // 记录“跳转前”的阅读位置，便于一键返回
+                  // 记录"跳转前"的阅读位置，便于一键返回
                   try { pushTocJumpPoint(); } catch (e) { /* ignore */ }
 
                   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -3678,7 +3683,7 @@
             const q = ftsPendingJump.query;
             ftsPendingJump = null;
 
-            // 跳转后：在页面内做一次“精确串”高亮并滚到首个命中
+            // 跳转后：在页面内做一次"精确串"高亮并滚到首个命中
             try { highlightInPageExact(q); } catch (e) { /* ignore */ }
           }
 
@@ -3818,7 +3823,7 @@
             try { ensureTocMobileDelegation(); } catch (e) { /* ignore */ }
             try { setTocFabState(false); } catch (e) { /* ignore */ }
 
-            // 目录跳转返回栈：仅在真正换页面（path 变化）时清空，避免同页更新导致“返回点”丢失
+            // 目录跳转返回栈：仅在真正换页面（path 变化）时清空，避免同页更新导致"返回点"丢失
             try {
               const p = (vm && vm.route && vm.route.path) ? vm.route.path : ((location.hash || '#/').split('?')[0] || '#/');
               const norm = String(p || '').split('?')[0];
