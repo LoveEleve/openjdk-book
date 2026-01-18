@@ -523,6 +523,43 @@
       color: #1f2328;
     }
 
+    .toc-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toc-action {
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      background: rgba(255, 255, 255, 0.7);
+      color: #57606a;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      user-select: none;
+    }
+
+    .toc-action:hover {
+      background: rgba(66, 185, 131, 0.10);
+      border-color: rgba(66, 185, 131, 0.22);
+      color: #1f2328;
+    }
+
+    .toc-action.is-disabled {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+
+    .toc-action.is-hidden {
+      display: none;
+    }
+
     .toc-close {
       width: 28px;
       height: 28px;
@@ -1906,6 +1943,42 @@
           }
 
           let tocMobileDelegationInited = false;
+          let tocJumpStack = [];
+
+          function getScrollTop() {
+            const doc = document.documentElement;
+            return (doc && typeof doc.scrollTop === 'number') ? doc.scrollTop : (document.body ? (document.body.scrollTop || 0) : 0);
+          }
+
+          function scrollToY(y) {
+            const top = Math.max(0, Math.floor(Number(y) || 0));
+            try {
+              window.scrollTo({ top: top, behavior: 'smooth' });
+            } catch (e) {
+              try { window.scrollTo(0, top); } catch (err) { /* ignore */ }
+            }
+          }
+
+          function setTocBackState() {
+            const toc = document.querySelector('#toc-aside');
+            if (!toc) return;
+            const btn = toc.querySelector('.toc-back');
+            if (!btn) return;
+
+            const canBack = tocJumpStack.length > 0;
+            btn.classList.toggle('is-hidden', !canBack);
+            btn.classList.toggle('is-disabled', !canBack);
+            try { btn.setAttribute('aria-disabled', canBack ? 'false' : 'true'); } catch (e) { /* ignore */ }
+          }
+
+          function pushTocJumpPoint() {
+            // 只记录“目录跳转前”的阅读位置（支持多次跳转栈式返回）
+            const y = getScrollTop();
+            const max = 30;
+            if (tocJumpStack.length >= max) tocJumpStack = tocJumpStack.slice(-Math.floor(max / 2));
+            tocJumpStack.push({ y: y, ts: Date.now() });
+            setTocBackState();
+          }
 
           function ensureTocFab() {
             let btn = document.querySelector('#toc-fab');
@@ -1962,6 +2035,24 @@
                 }
 
                 try { toc.classList.add('is-open'); } catch (err) { /* ignore */ }
+                return;
+              }
+
+              const topBtn = t && t.closest ? t.closest('#toc-aside .toc-top') : null;
+              if (topBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                scrollToY(0);
+                return;
+              }
+
+              const backBtn = t && t.closest ? t.closest('#toc-aside .toc-back') : null;
+              if (backBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const last = tocJumpStack.pop();
+                setTocBackState();
+                if (last && typeof last.y === 'number') scrollToY(last.y);
                 return;
               }
 
@@ -2049,7 +2140,11 @@
               toc.innerHTML = `
                 <div class="toc-head">
                   <div class="toc-title">目录</div>
-                  <button type="button" class="toc-close" aria-label="关闭目录">×</button>
+                  <div class="toc-actions">
+                    <button type="button" class="toc-action toc-back is-hidden" aria-label="返回上次阅读位置" title="返回上次阅读位置">↩</button>
+                    <button type="button" class="toc-action toc-top" aria-label="回到顶部" title="回到顶部">↑</button>
+                    <button type="button" class="toc-close" aria-label="关闭目录" title="关闭">×</button>
+                  </div>
                 </div>
                 <div class="toc-body" id="toc-body"></div>
               `;
@@ -2169,6 +2264,9 @@
                 const id = a.getAttribute('data-target');
                 const target = section.querySelector(`#${CSS.escape(id)}`);
                 if (target) {
+                  // 记录“跳转前”的阅读位置，便于一键返回
+                  try { pushTocJumpPoint(); } catch (e) { /* ignore */ }
+
                   target.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   setActive(id);
                   replaceUrlId(id);
@@ -2629,6 +2727,10 @@
             // 目录（小屏/兜底入口）：先确保按钮与点击绑定一定存在，再触发重算
             try { ensureTocMobileDelegation(); } catch (e) { /* ignore */ }
             try { setTocFabState(false); } catch (e) { /* ignore */ }
+
+            // 目录跳转返回栈：每次路由切换都清空，避免跨页面“返回到错误位置”
+            try { tocJumpStack = []; } catch (e) { /* ignore */ }
+            try { setTocBackState(); } catch (e) { /* ignore */ }
 
             // 右侧目录：自动生成 + 当前小节高亮
             scheduleTocRender(vm);
