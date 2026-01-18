@@ -4,7 +4,7 @@
 类分类
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NzZmYmJmNmJhNTZjZWZjNjkxMmZmOTZiMjMwYjkxOWRfQ1BBZVRjODV4UzZEN2UyWEZZdVdWd3pVZmVqZ0xTYnJfVG9rZW46R2s4cmJDaEdQb1NGbFF4MkZucWM0TUdubnpiXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片1](图片暂时无法显示 - 请联系作者获取图片资源)
 
 类介绍
 
@@ -14,21 +14,21 @@
 回忆：前面在介绍RWLock和StampedLock的时候提高过,StampedLock除了扩展了读写并发，同时还做了一个优化 -- 那就是使用cowaiters来优化CAS竞争。如下图： 其本质思想就是将竞争点从一个变为多个。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NTQwNDNjZjFjNjBlZDljZWZlM2QxMDk1NzNmODUyMTdfczRqOXNpaTlkaGt6OVdmZ1hXWk4xR2t1ZmxWaHhWYXJfVG9rZW46VXRBZGI2NFp0b29NZER4TjZsMWNObGRIblpiXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片2](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
 而LongAddr的本质也是这个思想,相比于传统的AtomicLong来说,在高并发场景下,所有的线程都对一个long变量(单个共享变量)进行CAS,而失败的则会不断的重试。在极端情况下可能会存在性能瓶颈。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YjFkNGM3ZWM2N2U0NmU4ZDJmM2RiYjgwYTllMjg5NjRfU2FtTHBQRVFHekFob0F0TjBxR2ZCUTR6M3FYRWlMUDJfVG9rZW46UXRpUGI2ajhub3pCbWN4akt2aGN6NDlkbmtkXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片3](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
 所以为了解决竞争单一共享资源的问题,其基本思想为： LongAddr也将一个long变量,变为多个long变量 - - 使用数组来存储这些long变量「long[] 」，每个线程在cas之前,会被路由到某个数组槽位上「long[x]」,然后再去cas。这样就将原本对一个共享资源的竞争变为对多个共享资源的竞争。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OGI2MzIyZTQ1OGI1OWMzNzdmNTFhMjVjYWJhNTFlMmRfR0pyQjUzanJ2R01KYnhDTVBuQm9LTFBVTTRtUDRiM0xfVG9rZW46VWhnQ2JpdjFTbzZlUzB4VnJYaWNSR3dGbnh4XzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片4](图片暂时无法显示 - 请联系作者获取图片资源)
 
 LongAddr的基本思想
 
@@ -36,7 +36,7 @@ LongAddr的基本思想
 
 ### 类关系图
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YmVkYWFkMDhhNzQxYjQ1N2VmNjliMGE3MTNiY2QyYzJfZ0lFUTJ5RTRaWU1pTXlwOWlza1owRWdnUXl5NDZuMXdfVG9rZW46QWdoeWJvb0hOb0Zpb1l4WGhCdWMxUWhMbjZkXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片5](图片暂时无法显示 - 请联系作者获取图片资源)
 
 类关系图
 
@@ -48,14 +48,14 @@ LongAdder类的功能和AtomicLong的功能一样,就是提供一个原子类来
 4个CPU,4个槽位,理论上可以通过比较**完美的路由策略**来将CPU上的执行线程路由到不同的槽位上,这样在不同的槽位上是没有竞争的。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YzMxYWNhMTkzMDZjMGUyOWRjMzg1OGJiZmVhYjk2MWZfOUZRVVlPcDBYYmZSV01KalYwbXZQOHFLQzhMNVNMTFdfVG9rZW46T3phN2JHV3Zqb3lGUTh4cWJPSWN4WUJZbm9mXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片6](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
 假设有5个线程执行，那么由于只有4个CPU，那么调度算法会选择一个CPU(假设是CPU - 2),让线程5执行,但是同时执行的线程数只能是4个,所以也能满足条件。那么此时数组长度 > CPU个数,其实是没有意义的。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YTBhZTMwZGRjZWI0ZWZmYTQxNWQzNjExMzc3NmZjMWJfOERINHdBUWhxZnRvNmEycTNIUjQzbkF2amVOaFFPcTNfVG9rZW46WTFBZmIxcmJub2d0dWx4bTJsTGNtRW14bmplXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片7](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
@@ -76,14 +76,14 @@ LongAdder类的功能和AtomicLong的功能一样,就是提供一个原子类来
 下面继续看当casBase失败后的代码「因为总要有一个线程来做这个初始化操作，除非线程没有竞争」,总结一下进入到longAccumulate()的场景
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OWQ5ZjliMGJhYTdkNjA5YWZhODRlMmQ5N2ExZDZlMDBfc0I1b2dmN05ERjF3WjJyRE9sNWlkYU9zNTZMMjdrcnpfVG9rZW46WUl1T2JuSWNmb3RqbUR4Y21OTWM4WHRZblpiXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片8](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
 并且从这里的条件判断,可以大概可以猜测其工作原理：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OWQ4Y2ZiMjUyN2FmOTAzMzllNmIxMTA5ZjMwODBhMDlfYzY4cFhsYkZjS0pJUVFheGtLZkhZTm1lZHVqS05LbFdfVG9rZW46WjZSVmJxc1M0b2NyQjF4RkZmNGNwTUV1blpRXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片9](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
@@ -98,7 +98,7 @@ LongAdder类的功能和AtomicLong的功能一样,就是提供一个原子类来
 继续看下面的代码逻辑：可以看到代码逻辑被分为了3个部分。
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OTc4ZjNlNDdmNzBjNTc2NmVmMTkzZjQwNDdjMjMzOGJfYTllZnBLNGVGZUZyRldWTlJYY1l3VTljcGFlTWZyc29fVG9rZW46TE1HRmJjYUFZb1RwZ1Z4akNFQ2M1aWtabkJiXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片10](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
@@ -107,14 +107,14 @@ LongAdder类的功能和AtomicLong的功能一样,就是提供一个原子类来
 接下来就是初始化cells[]数组了： 可以看到cells[]默认的大小为2,当下面这段代码执行完毕后，当前线程的递增操作已经完成了「在初始化cell对象的时候完成的」,最终的结果入下图所示： 其中的h&1的作用是：h代表的是线程的"key"「probe」，&1的作用就是将其映射到cells[2]中的某一个
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OGIxY2VlZDhlYjZjMzI2N2MxZTI1ZWY4ZWQ2YWUyMzlfam9Vcm90VDJoNVRmdEhMSGwwTnNGRVE4TWNWQkVOUkpfVG9rZW46WjdhWWJpNHlHb3Y5a0d4NW5RMGNUVUlUbnFtXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片11](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
 cells[]初始化的操作就介绍到这里了。下面继续分析当cells[]不为空时的操作：**这里的操作是最复杂的,**&#x5728;这个分支中又细化为多个小分支了,下面逐一介绍每个分支的场景，这里有一个重点：rehash操作 - h = advanceProbe(h) 一旦某个分支不满足,就会重新执行一次rehash
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MmJkOWMyNDZlYTNmNzU5NmM3NjA2OTgxOGQxN2UyMTVfanJRaGhuaGR4ekxidXFXUEtUVkozbHVEUU8yVXR6RzRfVG9rZW46TUllYWJ2VEEwb01jVXN4SWtYSWNCTHh3bjJiXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片12](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
@@ -123,7 +123,7 @@ boolean collide = false; //该局部变量的作用是用来表明是否发生�
 下面这段代码执行的结果如下：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YjEzODdmOWZjYzk3NTE3NWRiOWJiYjc4M2FlODQ5NWZfQkxGblhhY0dUTjdldE1jZmJ6b3JCSno0eTlWMmlZbVhfVG9rZW46Q05YM2JkbzZLb3c3QkZ4THJhWmNRWDZQbmNkXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片13](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
@@ -136,7 +136,7 @@ boolean collide = false; //该局部变量的作用是用来表明是否发生�
 --
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NTMwYTQ1ZDFiY2Y2NDNiMzY2OWY2OGEyMTIwMjMyNzhfNmxJejhDa0V0Vm12cmxRR1dJbjJVcjU5dUhxejNMUDVfVG9rZW46WkRLdGJaV2phb2hpakJ4eTM5VmNQYnN5bmVnXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片14](图片暂时无法显示 - 请联系作者获取图片资源)
 
 扩容
 
@@ -149,7 +149,7 @@ boolean collide = false; //该局部变量的作用是用来表明是否发生�
 总结一下：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Y2IwZmNhZDE3NzkwMGU5MWMzOWQxNjJkYTY0MjBiOGJfZkhuMGFPUHBxRWRFanZObTFZWUhCbFAxNmhPckNMeDZfVG9rZW46QXE0V2Jvck5yb0tBeHd4MVRDWmN0cjJqbkZCXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片15](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
@@ -177,7 +177,7 @@ AtomicStampedReference和AtomicMarkableReference都是为了解决CAS的ABA问�
 ## AtomicStampedReference
 ### 类关系图
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MWUzNjFmOWM1NzczYTJkYTM5NThjYzYwZWFlNzk5YWVfRzlLUWJkZjdkNXY5NmpVQUdMVHNNQThqVnVRYW8xM0dfVG9rZW46UmhUWWI0dzdob3R3RWF4YmtpZWNEWTVCblZmXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片16](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
@@ -185,21 +185,21 @@ AtomicStampedReference和AtomicMarkableReference都是为了解决CAS的ABA问�
 下面看下关键函数：compareAndSet()
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MTIwZDNiMDk4MmY0NGUyODY5MjgyZDRlMjk0MTc2YzZfaEE1R3kyTzk0bnRmZFE3SldjTloyVTc5TlBlb3JmNHRfVG9rZW46VlQwR2JjWDN6b1Y0QUV4MEQ5U2NlUWZ4bjNnXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片17](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
 解决ABA问题
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=M2Y1ZGRlOGVlYmU5YmEwMmM4ZjIwZjA5MzFkOTg3NDhfTGFzTmxPS1ZiN2g3QmdBU1FPc0NNeVhiallMdk4wN2lfVG9rZW46V2N6cGJGc0h0bzd5cVV4T3Bmc2NyOVFMbnlhXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片18](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 
 但是我觉得有一个很大的问题就是：该类将stamped的操作权限暴露给用户了。这就导致了其实该类并不能真正的解决ABA问题,如下图所示：
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OTgxNDk5MGY1MmNkYmFmZjE2ZDc4Y2E4MWMzMTk3MThfZzhoUHZSaW01VU1YSGp1MnFDdHByaXNkNE05WXd6eTBfVG9rZW46VnJZY2J4TkxVbzJhNEZ4OG94VGNoZnFGbjBjXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+![图片19](图片暂时无法显示 - 请联系作者获取图片资源)
 
 
 

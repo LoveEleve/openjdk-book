@@ -4,7 +4,7 @@
 同步器一般包含两种方法：acquire()和release() acquire:阻塞线程，除非或者直到同步状态运行线程通过 release:修改同步状态，可能运行一个或者多个阻塞线程变为非阻塞状态 但是juc并没有对同步器的API做一个统一的定义,因此上面所描述的两个方法并非具体的方法,比如ReentrantLock.lock()则对应上面的acquire()方法
 
 <!-- 这是一张图片，ocr 内容为： -->
-![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZTdhZjllNmMwOTkzYWI5YWVmMzI0ZTQxMmE1MGM0ZjhfeWRlUWlBazZJaDc1dERLa3UwS2VuVjFIM3RhcnZGYzNfVG9rZW46R2RmWGJpQ1hWb2NtbWV4MFlNbWNWaGxobkRjXzE3Njg2NTYxMjg6MTc2ODY1OTcyOF9WNA)
+![图片1](图片暂时无法显示 - 请联系作者获取图片资源)
 
 ## 2.设计与实现
 同步器背后的设计思想如下：
