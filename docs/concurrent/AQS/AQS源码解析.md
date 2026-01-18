@@ -1,0 +1,313 @@
+## 1.继承体系
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NjE0N2JhMzBiMTEyNmQwYzBhNzJjNzlmYjQzYWNlNGNfMUNkZ3Q3SVI5VWNkcHlzMDVhTnI5NFlwOWI1emZvSGlfVG9rZW46WGZ2SGJtMnAzb3JHd1Z4QWZqemM1ZHdEblBmXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+AQS继承体系
+
+对于面向对象编程来说：通常会将某一种功能(通常是公共的)单独抽出来封装成一个类
+
+也即将问题转化为需要使用哪一个对象来解决这个问题
+
+前面也讲过管程的概念,而高级语言所封装的锁对象就是管程的一种具体实现。这里再回顾一下管程的工作原理：
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NThkNzMyNjVlMTI0M2QxMTRiY2FmMjRkMjFhMTJkYzlfd1FmQUNyaVdHaURpZFVDVnBKZVhDM0JjRXk0d01GUmhfVG9rZW46Rlh4ZGJETUZub2lDb0l4R0NFR2N0ZFh5bnplXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+管程
+
+1.多个线程想要操作管程所保护的临界区,那么就需要通过「**条件判断」,**&#x901A;过判断的线程，则顺利的进入到临界区,相反，不通过的线程则需要进入到队列中等待
+
+总结一下：这里有两个步骤 1.条件判断,通过的进入到临界区 2.没通过的则进入到队列中
+
+由于不同的场景所使用的锁不同,所以相应的条件判断也会不同「比如：独占锁只允许一个线程通过，读写锁，信号量等等,他们的判断条件都有所不同」。
+
+但是只要是判断失败后,线程都是要进入到队列中进行等待的
+
+也即进入到队列中等待的这一步骤,不同的锁实现并没有差异,所以就可以将这个入队的功能单独抽出一个类来实现 -- **AbstractQueuedSynchronizer**
+
+在doug lea的论文中也提到了，对于队列，采用无锁队列是没异议的,所以在这里并不会采用java基本库中已有的基本队列 但是在并发库下面有对应的无锁队列(synchronizedQueue....)，能否直接使用呢？答案是不能的 因为现有的无锁队列将节点封装在内部,无法感知到节点的详细信息 而锁的操作是需要依赖线程节点的信息的:比如节点对于的线程(thread)，节点所处的状态「比如：线程在释放锁的时候,需要判断处于队列中的首节点的线程是否处于阻塞状态,如果是,才会选择唤醒」 所以这里还需要有另外一个类：Node类「并且在AQS中手动实现节点入队的无锁化(cas)」
+
+这里存在两个待学习的点： 1.为什么需要内部类？ 2.为什么内部类没有用staic修饰时,编译器会爆出一个warn?
+
+除了入队这一个功能是所有管程(锁)的公共功能外,还有另外一个功能 - 重入
+
+基本上所有的锁都是支持重入的,因为无法预料开发者在进入到临界区后会执行什么样的代码，如果开发者在临界区中再次调用的lock.lock()「这里的lock泛指锁对象」，如果不支持重入,那么就会因为锁已经被当前线程获取了而导致获取不到锁。从而发生死锁现象
+
+所以对于这一种公共的功能来说，可以抽出来单独形成一个类 - **AbstractOwnableSynchronizer**
+
+重入的一种简单实现就是保存当前获取锁的线程thread,然后在所有线程尝试获取锁时,判断一下thread == Thread.CurrentThread()即可
+
+这里又可以涉及到另外一个问题：组合还是继承？ -- 在这里是使用继承而不是组合
+
+## 字段分析
+AbstractOwnableSynchronizer
+
+AbstractQueuedSynchronizer
+
+1.具有管理队列的属性 -- head和tail 2.同步资源 -- state
+
+Node
+
+1.保存当前即将阻塞的线程对象 2.保存当前节点所处的状态
+
+## 条件队列
+在上面的介绍中AQS中已经出现了一个队列了,它的作用是用来保存因为获取锁失败的线程节点。但是考虑以下情景：生产者和消费者
+
+1.多个生产者和消费者想要操作线程安全的容器「生产者想put，消费者想take」- 最终的结果就是只能由一个对象成功,要么是生产者,要么是消费者 2.假设容器满了,但是生产者-A获取到了容器的访问权限，但是它发现容器满了,自己put不了,应该怎么办？ 3.一种很简单的实现方式是：生产者-A直接释放锁 , 这样做可以但是不合理，因为线程的调度和抢锁是不可预估的,当生产者-A释放锁后，下一个获取锁的线程可能还是生产者-A，那么这些动作岂不是在浪费时间？所以条件变量的作用就出来了：当某个线程获取锁后「_**这个前提很重要**_」,发现后续操作的条件不满足了,那么&#x4F1A;_**释放锁**_&#x5E76;且在条件队列中等待,直到条件满足了
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YjlhNTYwZDRhNDg0ZWZjZTc2OGViZTc2Y2FmZDhjYjFfUjhkR2dqV3dPeTQxcTNKNHhCOWVLYkdISnl5T0FPc1BfVG9rZW46V3FtT2JjVHlRb0VFNUh4VFE0TGNhVTdrbkVnXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+生产者消费者模型图
+
+条件变量对应的数据结构
+
+所以最终的数据结构图如下图所示：
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YzM1MDQ0NzAyNWIwNWQ1ZDA0YTkxZGJiZTViYzEyYjhfRFVDYVFJeWNQRlRjNnZXU0RVMjRXQUNYU0RrM0M2cnlfVG9rZW46RHZPWWJDSUVJb05GOTh4bHdQOWNyeUZFbjljXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+## 入队的源码分析
+这里的入队分为两种类型： 1.第一种是获取锁失败后存储线程节点的队列(等待队列) 2.第二种是获取锁成功后发现对应的条件不满足后存储线程节点的队列(条件队列)
+
+下面的源码未做说明默认为jdk8
+
+等待队列入队
+
+1.tryAcquire()：该方法为模版方法,预留给子类实现,方法作用为尝试获取锁(也即上述的条件判断),如果该方法返回false，也即没有通过条件判断，那么进入到AQS的入队流程 2.addWaiter(Node.EXCLUSIVE)：添加线程节点到队列中 3.准备阻塞
+
+添加线程节点到队列中
+
+首先需要明确的一点是：在大多数框架中采用的都是懒加载,这里也不例外 所以在线程节点准备入队列前可能会出现如下情况： 1.队列已经初始化完毕 2.队列正在初始化(被其他线程) 3.队列没有初始化
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Yjc1MTYzMTUzNjMxYTEyMTkzZmU3M2IzMTMyZjI4YWFfVzRnenR6UUF0ZnJVVXZOTkJiSVlYaGVQMlF4OExwMjRfVG9rZW46UG1iT2JCRklzb3AxSW14RUhwTGNva1pjblZkXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+需要注意的是：队列一旦初始化完毕后就不会为空了(因为存在伪节点),所以下面代码注释中的fast path，我的个人理解为：既然队列已经存在，那么直接原子性入队列就行了,不需要再重新判断(上面的1和2步骤了) 其实没有这一段代码也可以,因为enq(node)中具有完整的入队流程
+
+_**小插曲：在阅读源码的时候，切记不要一行行去看「如果你能看懂那也行」，要从问题本身出发,自己去思考,对于某个问题的解决办法(或者说实现应该是怎么样的?)，因为作者的思维很快速,也很严谨,如果没有到达那个水平，是很难与作者产生共鸣的 (也即很难理解作者是如何考虑这个问题的，反应到现实中就是：看不懂代码)-- ps:这段话是说给我自己听的,也算是我看源码的一个总结吧**_
+
+在上面入队流程,通常会有如下两种情况:
+
+1.当前节点处于首节点(位于第二个节点)：如左图所示 2.当前节点处于非首节点：如右图和下图所示(前面有节点被取消掉了) 并且需要知道：此时线程节点只是进入到了队列中,但是还没有阻塞
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=M2VmYzU5NjQ3MmI0MGYwYTZhOGU2N2Y4ZWRkNDgwZGZfcUpvcWw2bWFxQkdIcnU1ZGJqT0FnVUxTaUFaNzZTMDRfVG9rZW46V3RPN2JuUWVFb2U2b1F4S2h6N2NJQmY3bmRmXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+准备阻塞
+
+acquireQueued(final Node node, int arg):准备阻塞，node是当前线程节点,arg是要获取的资源数(在这里是为1) 前面说过：对于入队过程后,采用纯粹的自旋和直接阻塞都不是好的选择,而是采用自旋一定次数后再去阻塞的方式,而在这里自旋也并非采用传统的方式-spin计数,而是采用每完成一个操作后,就重新尝试获取锁的方式 总结一下：这里有两个关键点: _**1.自旋:不会直接阻塞,而是会自旋 - 可以采用spin计数的方式,但是对于首节点和非首节点需要区分处理,可以采用用代码来实现自旋「也即每完成一个操作就重新执行循环来代替自旋」 2.只有首节点在准备阻塞的过程中才会(准确的说:才需要,才有资格)去尝试重新获取锁(tryAcquire())**_ 另外还需要注意一点：只有上面处于左图的首节点才有重试尝试获取锁的必要,因为一旦入队后，就是按照顺序唤醒的 - 「通常锁都是采用非公平的「因为这有更高的吞吐量」，但是公平与非公平在不同的步骤是不同的,需要具体分析，比如只要线程节点入队后，那么唤醒就是公平的」
+
+源码分析：
+
+先看获取锁失败以及非首节点准备阻塞的代码
+
+一种很简单的实现：先不考虑上面的首节点重新尝试获取锁的代码,既然这里已经入队列了,那么下一步如果要直接阻塞了,应该是这样的代码：直接阻塞不就好了?
+
+但是前面说过：线程节点是可以被取消的,也即节点会是处于cancel状态的,那么释放锁的线程就需要具有识别节点状态的能力,同样在线程阻塞时也要设置节点的状态,也即在上面的阻塞代码之前,还需要做节点状态的设置 考虑一下：应该怎么做？
+
+一：一种很直接的想法 节点具有以下状态: WAITING 1 -- 当前节点处于阻塞等待状态 CANCEL -1 -- 当前节点处于被取消的状态 0 -- 默认状态 释放锁的线程可以通过这种设计来区分节点的状态
+
+二：另外一种想法 节点具有以下状态： SIGNAL：-1 ：当前节点存在需要被唤醒的后续节点,这可以认为是前一个节点负责保存当前节点的阻塞状态信息 CANCEL：1 : 当前节点处于被取消的状态 0 -- 默认状态 这样：释放锁的线程则需要通过找到第一个状态为signal的线程节点，然后再去唤醒其后续节点
+
+在jdk8中使用的则是第二种方式,下面看线程节点准备阻塞时的状态处理
+
+应该怎么做呢? 上面说过,在jdk8中,是前一个节点来保存当前节点的状态的,也即一个线程想要去阻塞,那么它需要将“前一个节点”的状态设置为SIGNAL，代表“我在你后面阻塞着呢，我需要被唤醒”
+
+基于这种特点，那么实现方式肯定是依赖前一个节点的状态 state = p.state 1.如果state = signal,那么直接返回，已经处于signal状态了,那么就不需要处理了 2.如果state == 0 ,那么设置为signal即可 3.但是不要忘记了,state还可以处于CANCEL状态，如下图所示：那么是不能简单的讲将p的状态由cancel设置为signal，而是需要将当前节点链接到它前面的第一个状态不为cancel的节点上「在这里是头节点」 上面这三个分支执行完任意一个分支后：都会退出这个shouldParkAfterFailedAcquire()方法，然后重新执行循环,这就是自旋的体现
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NjljY2ZjZjBkYzVhMzNiODY0NjdkZTdhNjlkMTYzYTBfWkptTnp5RmhLdHoyV3VmVWV1SmZpYmlsaVBKZzFoT2lfVG9rZW46VWVpTmJCM0tXbzRxYW54VXZXamNZb01ObjZiXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+前一个节点的状态可能处于cancel
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MTBiMTk4YmY5MmU4MDc3YzE0ZTI4ODVmZDhjNTQyZGVfaEtNb1V5c2dGV0JST1ptSVA5MUdsQkdDcDFVdFk3aWhfVG9rZW46VUhzT2I0ZzdHb1Q4TVl4aHNmNGM5eFdLblh5XzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+当前节点需要将自己链接到前面第一个状态不为cancel的节点后面「在这里是head节点」
+
+shouldParkAfterFailedAcquire(Node pred, Node node): pred：当前节点的上一个节点 node：当前节点
+
+正常情况节点的状态如下:节点状态为signal则代表当前节点后续有需要被唤醒的节点,节点处于0不一定代表是初始化状态,也可能是阻塞状态
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZjdlZTcxZmU3ZjcxZTY3MWFiMGNmZDNmZTUxZDAyMjJfbWxjd2t4cG1CVUI0TzRna1JwWlR5bGVlVW1RUHlxbWdfVG9rZW46QzJRaGJpTWpwb1V1bVJ4V3ZMOWNZUnZobndmXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+接下来看下阻塞的方法
+
+这里有个不太严重的性能问题：如下图所示：
+
+当首节点从代码2处阻塞后唤醒,会重新执行for循环下的代码1 -- 注意是tryAcquire() 从这里就可以看出来被唤醒的线程不一定能够再次获得锁,而是要与其他线程竞争「非公平的实现」 这会造成一个什么问题？ -- 饥饿问题 -- 首节点对应的线程在**极端条件**下会一直获取不到锁 「当然他后续的所有节点同样获取不到」 一种直观的解决办法就是当线程唤醒后如果抢不到锁,那么不要直接重新阻塞,而是多停留一会,多抢几次锁 -- 这就是自旋,并且在jdk21就是这么做的
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ODM0YjA1MDY5MzRmMTY3YzJlNDYwNWRlYzZkZGQwNDdfZHZmWnF6U1IwWGpZdU9hMGNGakZmR2Z0NTFPVklGcGJfVG9rZW46S0NwZmJuemZWb0FDQXB4c3A5UGNEckxwbk5mXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+jdk8的性能问题
+
+
+
+
+
+jdk21的自旋解决方案：当线程节点要阻塞时,会进行spin计数,然后在线程阻塞被唤醒后,如果首节点「这在前面解释过了」并且spin不为0,那么会重新自旋，并且随着被唤醒的次数越多，自旋的次数也越多「前提是每次唤醒后都拿不到锁」
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YWRjZjI3YTcxN2Y1N2FhZTM3NWQ0ZjJhOWEzOGU5OWVfeXd1VE1YT1dITWg0aFZua2dMSjVhSHUzaHBiWG5BUUxfVG9rZW46RFAzYWJzS2Fkb0lDanl4alRLeGM2cWhqbnNmXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+jdk21的自旋解决方案
+
+## 出队流程
+上面已经阅读了AQS的入队流程,总结一下： 1.线程抢锁失败,那么准备入队,在准备阻塞的前提下,从性能角度考虑,不会采用单纯的自旋和直接阻塞,而是采用每执行一个动作后都重试一边,直到阻塞 2.线程能够阻塞的条件是将前面的正常节点的状态设置为了SIGNAL 3.jdk8的入队实现存在一点性能问题 - 会导致阻塞的线程一直获取不到锁,在jdk21中采用自旋的方式&#x6765;_**缓解**_&#x8FD9;个问题
+
+出队列应该怎么实现呢？出队列需要依赖入队时的状态处理：通常队列的状态如下所示：
+
+那么释放锁的线程应该怎么做呢？
+
+1.首先需要判断head的状态是否为signal吧？如果不是,那么代表后面根本就没有需要被唤醒的线程,那么直接返回即可 2.head状态确实为signal,那么下一步就是调用LockSupport.unpark(head.next.thread)
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Mzg1OWM3MDZiMjE3OGNjYjQ1NTk0ZmFmMGFkMDdhZmNfb2FzQWI0NkpJNkVUcVFZdG1IaEFQbnlrVmpkUGdEVWRfVG9rZW46R3VMZ2JXUVpLb3lnMHh4Q1RXR2N4Rm10bktiXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+但是队列的状态也可能如下图所示：
+
+那么就不能单纯的执行LockSupport.unpark(head.next.thread)了,同样在这里释放锁的线程需要找到第一个状态不为cancel的线程节点,然后唤醒它
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OTI0YTBjNjYyNGRjNjljZDRiYzcwMGU5NDAwZWZkMTBfRGhRQzM5OGlNak5SclJUaVU5MVc3bTNWOVRNbHRJUXNfVG9rZW46R2V2SWJ3S2E4b1VEcEl4VkVIemNlZGVVbnloXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+代码如下：
+
+其中对于1和2不难理解,但是这里的英文注释有点难以理解：为什么要将首节点的状态重新设置为0呢？ 首先这里应该不是针对于signal状态的处理的,因为如果在这里将首节点的状态从signal设置为了0,但是后续节点被唤醒后是不一定会拿到锁的,拿不到锁,又要重新设置为signal，然后再去阻塞,这不是多此一举吗？如下图所示 这里的做法：在后续讲共享锁时会再次提到
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MTk3ODJhYTdhZjEzOTYwNGEzZjc5ODMxMjk3ZjEzMTlfbzhhMGtkcGxXWU5RRWpndEhwZGRpSUhQVGRhMHY3YWlfVG9rZW46UFRYemJzUTJjb3REQ1Z4RGI1QmNkclFkbjlkXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+然后就是线程从入队方法中的parkAndCheckInterrupt()中醒来,继续执行上述操作。
+
+上面讲述的是独占模式下的入队和出队,下面再浅析一下AQS中关于共享模式的入队和出队。
+
+何为AQS的共享模式 ? 也即同时允许多个线程都进入到临界区,比如经典的信号量
+
+接下来就看下共享模式下AQS的入队流程
+
+继续看入队流程
+
+第一步同样是将自己插入到队列中 -- 创建线程节点 然后cas插入到队列中
+
+当这一步执行完毕后,只考虑正常情况,也即全部都是SHARED的线程节点「关于混合节点的在读写锁的时候会介绍」
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MjhiYmY4ZTljNGQ0M2I5OTFkMzMzN2Q5NmU3NGY0NjlfZU80TEY2OWN5SU5xZkhEdnNKNmYwSnl5VnJ3dXlXbUtfVG9rZW46SDRma2JoY0V5b2c1V0x4NnZqZGNxekY5bkdjXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+共享模式下的队列
+
+上面这一步只是插入到同步队列中了,但是还没有阻塞,同样在这里和之前说的一样,不应该单纯的自旋等待,也不应该直接去阻塞,并且同样只有首节点(第二个节点)才有资格去再次尝试获取锁。
+
+前面独占模式下，如果首节点尝试拿到锁了,那么后续处理只是更新队列结构「更新head节点」，代码如下:
+
+但是共享模型能否也这样做呢？很显然是不能的,为什么？
+
+重点在于tryAcquireShared(arg)这个方法，该方法的作用是尝试获取锁, 在这里的背景是：首节点在准备阻塞的过程中,尝试获取锁成功了，下面应该怎么做呢？ 这依赖于该方法的返回值： 1. <0:代表当前线程没有获取到锁,那么进入到准备阻塞的阶段 2.=0:代表当前线程获取到了锁,但是没有锁资源了,后续线程**可能**获取不到锁了 3.>0:代表当前线程获取到了锁,并且还有锁资源剩余,后续线程可能可以获取到锁
+
+所以如果首节点调用该方法的返回值<0,那么进入到准备阻塞的阶段,前面说过,这里分为两个阶段：状态设置和阻塞
+
+同步队列状态可能处于下面这种状态：
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZDFjNWEzZWIxNWRiMmIwNGRjZGViZDUwYzY4MDhkNDFfRDRCMXZSdkJYdVdzN3VFY1NYZWs1R3V0VlRLZlpWbnFfVG9rZW46TmxHVmJMdnEzbzQ3MUJ4RzhiTGNLR082bmxiXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+也即首节点尝试获取锁,并且成功后,并且锁资源还有剩余，如果和独占状态一样的处理,那么就会出现下面这种情况：
+
+如蓝色箭头所示：如果只是和独占模式一样的处理方式，那么就会出现锁资源还有剩余,但是依旧有线程在等待的情况
+
+很明显,这种情况是不允许发生的,所以当首节点调用尝试获取锁的方法并且获取锁成功，并且返回值>0，那么就应该特殊处理 但是如果返回值是0的话,这代表当前线程获取锁资源成功,并且没有锁资源了,那么其实后续线程是可能拿不到锁资源的，所以这里我认为正常的处理方式应该和<0是一样的处理方式，但是doug lea 并没有这么做,**这是为什么呢？**&#x4E0B;面进入到代码中
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Y2JkNWQ5MDQ3NjhjMTFhOTQ2M2E2MmI0NjMzZDllYjRfVkx6YnI0RG95Y3M1UnNYcnhhbzh5d3pETmhhRDhGekFfVG9rZW46QU5vTmJWaWs4b2xyR214RWNPYmM3NjBsbnRZXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+这个额外的处理将r作为参数传入进去了,注意：这里的r只有两种情况：r == 0 / r > 0 ，继续看代码
+
+看下图中右图：
+
+唤醒操作应该如何操作呢？这里和独占是一样的
+
+1.首先应该确保确实有线程节点应该被唤醒 - head!=tail 2.**将head节点的状态从signal设置为0** 3.唤醒后续线程节点
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NjM4NGNmNDllMDc1NTliN2JiNDQyYWY3ZDM2MWYxZTNfSGpVV0xLUXBkYU04bmJCRmU4TE1MUUJvcU1QQklxOTJfVG9rZW46SGx2ZmIxenlmbzRLWm54R2pXemNVcWI3bmdiXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+上面的第二点,在独占释放的时候,也提到过,这里有个问题：为什么在唤醒后续节点前? 需要将head节点的状态设置为0呢？
+
+我认为是从语义的角度考虑：因为当一个节点处于SIGNAL状态，那么就代表他的后继线程节点需要被唤醒, 在这里T-A负责唤醒T-2,那么在唤醒之前,应该要head的状态从SIGNAL重置为0,代表它没有需要唤醒的后继节点, 如果不这样做,那么违反了SIGNAL的语义,因为此时它的后继节点已经是处于唤醒状态 「在独占模式下,这里是不会存在重复唤醒的问题」
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OWFkMDZmZTgzMDJmNGEwZDc0YjI2MjQwODk2NWU4YThfYjNISkdpa1I4SHF6Rk0wTFltbWFUOUFZWTJNUTV3ZHRfVG9rZW46T2g3QWJoWml6bzdUNXp4YzRQd2NoVlI5bnZkXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+继续看共享模式的代码：
+
+这里看下为什么要cas将head的状态从signal设置为0呢？使用cas的地方一定是存在并发的，而当前所说的场景则是处于共享模式，如下图所示：T-A和T-B同时释放锁资源 - 同时调用doReleaseShared(),就会产生并发安全问题
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MWYwYWQ3NTA4NGEzMTZkMzZkNzA0YTM3NWQzMDk3MDdfM0tCQURkOXVFVGhOZzNpcTdMZUtMUlJLM0FFSktXYXRfVG9rZW46TTBObWJuTTVnb1JPbFF4ZW94N2M3STBXbkJkXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+共享模式下并发释放
+
+既然这里产生了并发安全问题，那么doug lea用cas解决了,只能由其中一个线程将head节点的状态从SIGNAL变为0了，
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=ZTk5Y2IzOTI3NTljNzM2MzYyZTkyNjhlZDgxZWY3MjRfZndlbDNLdThOOUFKSkFCUXFyeXNjbmI0NjJHUHJFS0lfVG9rZW46RWpKZWJQdGVHb2REMW54UmtEaWNIb0tHbk1kXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+还有另外一种情况：就是T-A释放锁资源后,唤醒T-1，此时锁资源数为1,然后T-1执行下面的代码，调用tryAcquireShared()获取锁资源成功,并且返回的r = 0 「因为只有T-A释放了锁资源」, r=0，也需要进入到if分支中执行setHeadAndPropagate(node, r)，此时的队列结构为：
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NzkyNDc4NWY5NTQ0NzAwMjk5NGI0MjE1ZWUxMjI5YWFfTnUwT2UyalNoWGxhRVYwMkVMNllDTlN4eWRRd0E3c0JfVG9rZW46RDhjUWJKZE9kb3ZpUmZ4dDFOZmN5QjFkbnNHXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+这里有一个很关键的点：就是r作为参数传入到该方法中了,
+
+如果此时T-B也释放了锁资源「现在锁资源其实为1」,这里有两个点：
+
+1. T-1感知不到锁资源变化了,因为r作为参数传入到了propagate,这里的r为0，那么T-1也会返回
+2. T-B看到head节点的状态为0,代表后续没有需要唤醒的节点,那么就会直接返回「注意T-B执行到这里时，T1还没有修改head节点
+
+那么T-B执行到#1时失败，再次重试发现，head状态还是0，那么执行#2，直接break「此后T-1才修改head节点」
+
+这会造成什么样的现象？ -- 锁资源存在,但是t-2依旧阻塞在队列中
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YjFkNzA3ZTI3ZDcxMGRkNjNkYzFjNzJiYWU0MWM1ZThfSWU0RXJIZ3RZQmZ4M0NOTndBTWRxWk0yTk1ONmRzNENfVG9rZW46UjhpSGJlMUJDb2poZWp4ZXNGb2NuUnhKbkdkXzE3Njg2NTYxNDE6MTc2ODY1OTc0MV9WNA)
+
+
+
+所以为了解决这种现象：继续看位于doReleaseShared()和setHeadAndPropagate()的其他代码
+
+### doReleaseShared()
+### setHeadAndPropagate()
+到这里AQS的入队和出队就先讲到这里......，
+
+总结一下：
+
+1.需要知道管程的概念和设计理念 2.AQS的作用是什么？其父类的作用是什么？ 3.独占和共享在出队列的时候的区别是什么？ 4.jdk8中的AQS存在什么样的缺陷?
+

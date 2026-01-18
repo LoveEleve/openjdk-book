@@ -1,0 +1,220 @@
+## 1.介绍
+官方介绍： 一套支持无锁线程安全编程的单变量工具类。Atomic 类的实例维护的值通过方法访问和更新，这些方法通常用于使用相关原子操作的字段 更通俗的理解： 它提供了一组类，用于在多线程环境下，**无需使用synchronized关键字或Lock等重量级锁**，就可以实现单个变量的原子性（Atomic）和无锁（Lock-Free）线程安全编程
+
+类分类
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NzZmYmJmNmJhNTZjZWZjNjkxMmZmOTZiMjMwYjkxOWRfQ1BBZVRjODV4UzZEN2UyWEZZdVdWd3pVZmVqZ0xTYnJfVG9rZW46R2s4cmJDaEdQb1NGbFF4MkZucWM0TUdubnpiXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+类介绍
+
+关于这个包，就浅析一下LongAddr和AtomicStamped「Markedable」Reference这三个类的原理吧
+
+## LongAdder
+回忆：前面在介绍RWLock和StampedLock的时候提高过,StampedLock除了扩展了读写并发，同时还做了一个优化 -- 那就是使用cowaiters来优化CAS竞争。如下图： 其本质思想就是将竞争点从一个变为多个。
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NTQwNDNjZjFjNjBlZDljZWZlM2QxMDk1NzNmODUyMTdfczRqOXNpaTlkaGt6OVdmZ1hXWk4xR2t1ZmxWaHhWYXJfVG9rZW46VXRBZGI2NFp0b29NZER4TjZsMWNObGRIblpiXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+而LongAddr的本质也是这个思想,相比于传统的AtomicLong来说,在高并发场景下,所有的线程都对一个long变量(单个共享变量)进行CAS,而失败的则会不断的重试。在极端情况下可能会存在性能瓶颈。
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YjFkNGM3ZWM2N2U0NmU4ZDJmM2RiYjgwYTllMjg5NjRfU2FtTHBQRVFHekFob0F0TjBxR2ZCUTR6M3FYRWlMUDJfVG9rZW46UXRpUGI2ajhub3pCbWN4akt2aGN6NDlkbmtkXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+所以为了解决竞争单一共享资源的问题,其基本思想为： LongAddr也将一个long变量,变为多个long变量 - - 使用数组来存储这些long变量「long[] 」，每个线程在cas之前,会被路由到某个数组槽位上「long[x]」,然后再去cas。这样就将原本对一个共享资源的竞争变为对多个共享资源的竞争。
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OGI2MzIyZTQ1OGI1OWMzNzdmNTFhMjVjYWJhNTFlMmRfR0pyQjUzanJ2R01KYnhDTVBuQm9LTFBVTTRtUDRiM0xfVG9rZW46VWhnQ2JpdjFTbzZlUzB4VnJYaWNSR3dGbnh4XzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+LongAddr的基本思想
+
+下面来看下LongAddr类的源码
+
+### 类关系图
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YmVkYWFkMDhhNzQxYjQ1N2VmNjliMGE3MTNiY2QyYzJfZ0lFUTJ5RTRaWU1pTXlwOWlza1owRWdnUXl5NDZuMXdfVG9rZW46QWdoeWJvb0hOb0Zpb1l4WGhCdWMxUWhMbjZkXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+类关系图
+
+### 源码解析
+LongAdder类的功能和AtomicLong的功能一样,就是提供一个原子类来供我们使用,使得对long变量的递增是原子的。而这个功能AtomicLong已经有了,所以为了扩展AtomicLong的功能,又出现了Striped64类。下面分析这个类：
+
+这里需要额外说明一下：为什么cells数组的长度不能超过NCPU呢? 因为理论上来说:每个线程通常都只会在一个核心上运行，比如4个CPU(在这里不考虑什么超线程,什么虚拟核的技术,假设一个CPU就只有一个核心),那么同时能够执行的线程只有4个。那么数组的长度为8,为16有意义吗？
+
+4个CPU,4个槽位,理论上可以通过比较**完美的路由策略**来将CPU上的执行线程路由到不同的槽位上,这样在不同的槽位上是没有竞争的。
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YzMxYWNhMTkzMDZjMGUyOWRjMzg1OGJiZmVhYjk2MWZfOUZRVVlPcDBYYmZSV01KalYwbXZQOHFLQzhMNVNMTFdfVG9rZW46T3phN2JHV3Zqb3lGUTh4cWJPSWN4WUJZbm9mXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+假设有5个线程执行，那么由于只有4个CPU，那么调度算法会选择一个CPU(假设是CPU - 2),让线程5执行,但是同时执行的线程数只能是4个,所以也能满足条件。那么此时数组长度 > CPU个数,其实是没有意义的。
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YTBhZTMwZGRjZWI0ZWZmYTQxNWQzNjExMzc3NmZjMWJfOERINHdBUWhxZnRvNmEycTNIUjQzbkF2amVOaFFPcTNfVG9rZW46WTFBZmIxcmJub2d0dWx4bTJsTGNtRW14bmplXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+但是这只是在理论情况下,真实情况下存在以下限制: 1.线程不会只在一个CPU上运行,具体要看调度算法（也即线程是会迁移的） 2.最关键的一点是：**很难找到一个完美的路由策略(哈希算法),将4个线程分别路由到4个不同数组槽位上去(冲突是必然的)** 所以其实cell[]长度 > NCPU是可以的,但是doug lea并没有这么做？ 而是选择采用找到一个“完美的哈希”来将线程路由到对应的槽位上去。
+
+下面来解析一下具体的操作原理:在这里具体解析add()和sum()方法的原理
+
+**add(1)：**&#x9012;增 前&#x63D0;**：** 1.对于存储数据的容器来说（在这里是数组)，通常采用的都是懒加载方式，这里也不例外,所以cells数组是可能为空的
+
+这段代码的含义：如果cells已经存在了,那么就直接进入到if分支中，否则cells为空,那么直接尝试CAS增加base的量,如果cas成功了,那么就递增成功了,否则才需要进入到if分支中。
+
+这里提个问题：Linux内核的页表为什么通常是4/5/6级？为什么不能是10级呢？ 这里其中有一个核心的点就在于:时间，需要从1级到2级，从2级到3级，......，从9级到10级,这时间是耗费很大的。
+
+同理：虽然这里只需要一次路由就行,但是如果没有路由那不是更好?也即直接cas增加即可，不需要先路由到某个具体的数组槽后再cas。
+
+当然,一旦cells被初始化了，那么代表存在竞争了,这个时候就不能直接casBase了,因为竞争会很大，就需要通过路由到某个具体数组槽后再cas了。
+
+下面继续看当casBase失败后的代码「因为总要有一个线程来做这个初始化操作，除非线程没有竞争」,总结一下进入到longAccumulate()的场景
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OWQ5ZjliMGJhYTdkNjA5YWZhODRlMmQ5N2ExZDZlMDBfc0I1b2dmN05ERjF3WjJyRE9sNWlkYU9zNTZMMjdrcnpfVG9rZW46WUl1T2JuSWNmb3RqbUR4Y21OTWM4WHRZblpiXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+并且从这里的条件判断,可以大概可以猜测其工作原理：
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OWQ4Y2ZiMjUyN2FmOTAzMzllNmIxMTA5ZjMwODBhMDlfYzY4cFhsYkZjS0pJUVFheGtLZkhZTm1lZHVqS05LbFdfVG9rZW46WjZSVmJxc1M0b2NyQjF4RkZmNGNwTUV1blpRXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+下面就进入到longAccumulate()方法中
+
+这里只需要关注1和3这两个参数,接下来看具体的代码: 回忆一下：在hashMap()中也是存在映射操作的,其中的操作是通过key来映射的。那么在这里应该通过什么来映射呢?「因为在这里可没有传入key」。
+
+但是在这里又需要一个“key”来将不同的线程映射到对应的cells[]槽位上，在这里doug lea使用的是Thread类中的threadLocalRandomProbe属性「关于这个属性在这里暂时不继续扩展,只需要知道它相当于每个线程所对应的key就可以了」
+
+所以,一个新的线程,如果在add()方法中casCell()失败了(wasUncontended = false),只要它是第一次,那么在longAccumulate()方法中也会被重置为true.
+
+继续看下面的代码逻辑：可以看到代码逻辑被分为了3个部分。
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OTc4ZjNlNDdmNzBjNTc2NmVmMTkzZjQwNDdjMjMzOGJfYTllZnBLNGVGZUZyRldWTlJYY1l3VTljcGFlTWZyc29fVG9rZW46TE1HRmJjYUFZb1RwZ1Z4akNFQ2M1aWtabkJiXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+在这里首先分析初始化cells[]的代码逻辑：对应上面的第二个else if分支
+
+接下来就是初始化cells[]数组了： 可以看到cells[]默认的大小为2,当下面这段代码执行完毕后，当前线程的递增操作已经完成了「在初始化cell对象的时候完成的」,最终的结果入下图所示： 其中的h&1的作用是：h代表的是线程的"key"「probe」，&1的作用就是将其映射到cells[2]中的某一个
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OGIxY2VlZDhlYjZjMzI2N2MxZTI1ZWY4ZWQ2YWUyMzlfam9Vcm90VDJoNVRmdEhMSGwwTnNGRVE4TWNWQkVOUkpfVG9rZW46WjdhWWJpNHlHb3Y5a0d4NW5RMGNUVUlUbnFtXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+cells[]初始化的操作就介绍到这里了。下面继续分析当cells[]不为空时的操作：**这里的操作是最复杂的,**&#x5728;这个分支中又细化为多个小分支了,下面逐一介绍每个分支的场景，这里有一个重点：rehash操作 - h = advanceProbe(h) 一旦某个分支不满足,就会重新执行一次rehash
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MmJkOWMyNDZlYTNmNzU5NmM3NjA2OTgxOGQxN2UyMTVfanJRaGhuaGR4ekxidXFXUEtUVkozbHVEUU8yVXR6RzRfVG9rZW46TUllYWJ2VEEwb01jVXN4SWtYSWNCTHh3bjJiXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+boolean collide = false; //该局部变量的作用是用来表明是否发生了哈希冲突
+
+下面这段代码执行的结果如下：
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=YjEzODdmOWZjYzk3NTE3NWRiOWJiYjc4M2FlODQ5NWZfQkxGblhhY0dUTjdldE1jZmJ6b3JCSno0eTlWMmlZbVhfVG9rZW46Q05YM2JkbzZLb3c3QkZ4THJhWmNRWDZQbmNkXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+--
+
+--
+
+--
+
+--
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=NTMwYTQ1ZDFiY2Y2NDNiMzY2OWY2OGEyMTIwMjMyNzhfNmxJejhDa0V0Vm12cmxRR1dJbjJVcjU5dUhxejNMUDVfVG9rZW46WkRLdGJaV2phb2hpakJ4eTM5VmNQYnN5bmVnXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+扩容
+
+--
+
+到这里其中最复杂的一个分支就介绍完毕了,代码细节很多，在这里总结一下：这里的核心思想就是不断的rehash重试。
+
+下面看最后一个分支： 当cells[]为空,并且cells[]正在被初始化,由于cells数组只能被一个线程操作，那么当前线程应该怎么办呢？ 与其在自旋等待（因为数组没初始化好是没法操作的）,不如尝试cas操作base 注意：并非初始化cells数组时会进入到这里，在其他线程创建cell对象,并且插入到cells[]中时也是会进入到这里的
+
+总结一下：
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=Y2IwZmNhZDE3NzkwMGU5MWMzOWQxNjJkYTY0MjBiOGJfZkhuMGFPUHBxRWRFanZObTFZWUhCbFAxNmhPckNMeDZfVG9rZW46QXE0V2Jvck5yb0tBeHd4MVRDWmN0cjJqbkZCXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+下面来看下sum()函数: 代码很简单,就是base + cells[]中的每个cell中的value,并且很容易理解,这个sum返回的result是**不准确**的,因为在统计的时候没有对cells进行上锁操作
+
+到这里关于LongAdder的介绍就到这里了，**核心思想就是将竞争点由一个变为多个，提高性能**。 除此之外另外一个比较重要的点就是：_**使用不断rehash重试 来代替数组的不断扩容(这点在其他数组容器中好像还没看到过**_**)**
+
+下面再介绍一下另外两个类：AtomicStamped「Markedable」Reference
+
+## AtomicStamped「Markedable」Reference
+AtomicStampedReference和AtomicMarkableReference都是为了解决CAS的ABA问题的「理论上」 ABA问题： 1.T-1读取到的变量值为A,想要将其CAS设置为C 2.在T-1执行CAS之前,T-2将变量从A修改为B,再从B修改回A 3.T-1再次操作CAS,变量值依旧是A,所以能够成功
+
+那么如何判断存在别的线程操作过共享变量呢？ 在这里可以回忆一下StampedLock中,乐观读是如果判断在其操作过程中存在写线程操作的呢？ -- 是通过序列号(乐观读线程会先获取一个序列号,写线程获取写锁和释放写锁都会改变序列号,乐观读线程通过判断序列号是否不同就能知道是否有写线程操作过了)。
+
+所以在Atomicxxx中,是否也能这样做呢？维护一个Stamped，每次有线程操作,就对这个Stamped+1,这样就能判断出是否修改过了。
+
+但是这里有一个问题:那就是对值的修改和对Stamped的修改必须是原子的。 但是CAS只能针对单个内存地址(单个变量)的，如果想要同时修改多个变量是无法只使用一个CAS操作来完成的。
+
+解决办法：将多个变量包装为一个对象,然后通过更新对象引用来实现多变量的CAS操作
+
+
+
+
+
+## AtomicStampedReference
+### 类关系图
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MWUzNjFmOWM1NzczYTJkYTM5NThjYzYwZWFlNzk5YWVfRzlLUWJkZjdkNXY5NmpVQUdMVHNNQThqVnVRYW8xM0dfVG9rZW46UmhUWWI0dzdob3R3RWF4YmtpZWNEWTVCblZmXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+### 源码解析
+下面看下关键函数：compareAndSet()
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=MTIwZDNiMDk4MmY0NGUyODY5MjgyZDRlMjk0MTc2YzZfaEE1R3kyTzk0bnRmZFE3SldjTloyVTc5TlBlb3JmNHRfVG9rZW46VlQwR2JjWDN6b1Y0QUV4MEQ5U2NlUWZ4bjNnXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+解决ABA问题
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=M2Y1ZGRlOGVlYmU5YmEwMmM4ZjIwZjA5MzFkOTg3NDhfTGFzTmxPS1ZiN2g3QmdBU1FPc0NNeVhiallMdk4wN2lfVG9rZW46V2N6cGJGc0h0bzd5cVV4T3Bmc2NyOVFMbnlhXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+但是我觉得有一个很大的问题就是：该类将stamped的操作权限暴露给用户了。这就导致了其实该类并不能真正的解决ABA问题,如下图所示：
+
+<!-- 这是一张图片，ocr 内容为： -->
+![](https://scnjnj9snmp7.feishu.cn/space/api/box/stream/download/asynccode/?code=OTgxNDk5MGY1MmNkYmFmZjE2ZDc4Y2E4MWMzMTk3MThfZzhoUHZSaW01VU1YSGp1MnFDdHByaXNkNE05WXd6eTBfVG9rZW46VnJZY2J4TkxVbzJhNEZ4OG94VGNoZnFGbjBjXzE3Njg2NTU1NDY6MTc2ODY1OTE0Nl9WNA)
+
+
+
+## AtomicMarkableReference
+该类和AtomicStampedReference一样,只不过其将int stamped修改为了boolean mark，每次修改时,它都会判断对象是否被修改过,如果被修改过,那么就CAS失败。源码和AtomicStampedReference一样，就不在赘述了。
+
+对比一下两者： AtomicStampedReference:通过int Stamped（版本号）来记录对象的修改次数 AtomicMarkableReference:通过boolean mark（标记）来记录对象是否被操作，只关心对象的状态
+
+但是这两者最大的缺点就在于：将mark或者Stamped暴露给用户，所以依旧无法解决ABA问题。 我觉得有点奇怪,为什么要暴露出去？ -- 我仔细的想了一下,其中一个最大的问题,就是stamped的保存问题,AtomicStampedReference如何知道用户期待的stamped是多少呢？所以只能暴露出去,让用户传进来。
+
+我感觉这个类的设计可以再优化一下.....,看下是否能够不把stamped暴露出去呢？(在jdk21依旧是这样的设计...)
+
+
+
+
+
+到这里关于java.util.coucurrent.atomic包的介绍就到这里了,重点介绍了LongAdder类。 其核心思想就是将竞争点由一个变为多个。并且其中有一个比较新颖的地方就在于他趋于使用一个完美的哈希函数(实际上是通过不断的rehash来实现的)来代替数组的不断扩容
+
