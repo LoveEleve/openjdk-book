@@ -1551,12 +1551,40 @@
     .drawio-diagram {
       padding: 20px;
       text-align: center;
-      cursor: default;
+    }
+
+    .drawio-diagram svg {
+      cursor: zoom-in;
     }
 
     .drawio-diagram a {
-      cursor: default;
+      cursor: zoom-in;
       text-decoration: none;
+    }
+
+    .drawio-zoom-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+
+    .drawio-zoom-content {
+      background: rgba(255, 255, 255, 0.96);
+      border-radius: 12px;
+      padding: 10px;
+      max-width: 96vw;
+      max-height: 88vh;
+      overflow: auto;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    }
+
+    html[data-theme="dark"] .drawio-zoom-content {
+      background: rgba(15, 23, 42, 0.96);
     }
 
     .drawio-diagram svg {
@@ -4383,28 +4411,72 @@
 
               if (!xmlData || !xmlData.trim()) return;
 
-              // 禁止“点击图表本体就跳转/打开viewer”（图表仅展示，跳转只应由按钮触发）
+              // 图表本体：只做放大预览，不跳转 viewer（跳转只应由按钮触发）
               try {
                 const diagramNode = wrapper.querySelector('.drawio-diagram');
+
+                const openSvgPreview = function (svgEl) {
+                  try {
+                    const overlay = document.createElement('div');
+                    overlay.className = 'drawio-zoom-overlay';
+
+                    const content = document.createElement('div');
+                    content.className = 'drawio-zoom-content';
+
+                    const cloned = svgEl.cloneNode(true);
+                    cloned.removeAttribute('width');
+                    cloned.removeAttribute('height');
+                    cloned.style.width = '92vw';
+                    cloned.style.height = '82vh';
+                    cloned.style.maxWidth = '92vw';
+                    cloned.style.maxHeight = '82vh';
+
+                    content.appendChild(cloned);
+                    overlay.appendChild(content);
+
+                    const prevOverflow = document.documentElement.style.overflow;
+                    document.documentElement.style.overflow = 'hidden';
+
+                    const close = function () {
+                      try { overlay.remove(); } catch (e) { /* ignore */ }
+                      document.documentElement.style.overflow = prevOverflow;
+                    };
+
+                    overlay.addEventListener('click', function () { close(); }, true);
+                    document.addEventListener('keydown', function (e) {
+                      if (e && e.key === 'Escape') close();
+                    }, { once: true });
+
+                    document.body.appendChild(overlay);
+                  } catch (e) {
+                    // ignore
+                  }
+                };
+
                 if (diagramNode && diagramNode.dataset.drawioClickDisabled !== '1') {
                   diagramNode.dataset.drawioClickDisabled = '1';
 
-                  // 去掉可能存在的链接
+                  // 去掉可能存在的链接（避免点击后被插件带到 viewer）
                   diagramNode.querySelectorAll('a').forEach(function (a) {
                     try {
                       a.removeAttribute('href');
-                      a.style.cursor = 'default';
+                      a.style.cursor = 'zoom-in';
                     } catch (e) {
                       // ignore
                     }
                   });
 
-                  // 捕获阶段拦截点击
+                  // 捕获阶段拦截点击：阻止插件 click handler，然后我们自己做放大
                   diagramNode.addEventListener('click', function (ev) {
                     const t = ev && ev.target;
                     if (t && t.closest && t.closest('.drawio-edit-btn')) return;
-                    ev.preventDefault();
-                    ev.stopPropagation();
+
+                    if (ev && ev.preventDefault) ev.preventDefault();
+                    if (ev && ev.stopPropagation) ev.stopPropagation();
+                    if (ev && ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+
+                    const svg = diagramNode.querySelector('svg');
+                    if (svg) openSvgPreview(svg);
                   }, true);
                 }
               } catch (e) {
@@ -4427,7 +4499,7 @@
                   const xml = xmlData.trim();
 
                   // diagrams.net 的可编辑分享链接：#R + base64(deflateRaw(utf8(xml)))
-                  // 注意：base64 需要 URL-safe（避免 + / = 导致解析失败）
+                  // 注意：这里必须是标准 base64（diagrams.net 内部用 atob 解码）
                   if (window.pako) {
                     const toBinaryString = function (u8) {
                       let s = '';
