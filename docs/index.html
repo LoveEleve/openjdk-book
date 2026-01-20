@@ -1551,6 +1551,12 @@
     .drawio-diagram {
       padding: 20px;
       text-align: center;
+      cursor: default;
+    }
+
+    .drawio-diagram a {
+      cursor: default;
+      text-decoration: none;
     }
 
     .drawio-diagram svg {
@@ -4377,6 +4383,34 @@
 
               if (!xmlData || !xmlData.trim()) return;
 
+              // 禁止“点击图表本体就跳转/打开viewer”（图表仅展示，跳转只应由按钮触发）
+              try {
+                const diagramNode = wrapper.querySelector('.drawio-diagram');
+                if (diagramNode && diagramNode.dataset.drawioClickDisabled !== '1') {
+                  diagramNode.dataset.drawioClickDisabled = '1';
+
+                  // 去掉可能存在的链接
+                  diagramNode.querySelectorAll('a').forEach(function (a) {
+                    try {
+                      a.removeAttribute('href');
+                      a.style.cursor = 'default';
+                    } catch (e) {
+                      // ignore
+                    }
+                  });
+
+                  // 捕获阶段拦截点击
+                  diagramNode.addEventListener('click', function (ev) {
+                    const t = ev && ev.target;
+                    if (t && t.closest && t.closest('.drawio-edit-btn')) return;
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                  }, true);
+                }
+              } catch (e) {
+                // ignore
+              }
+
               const btnRow = document.createElement('div');
               btnRow.className = 'drawio-edit-row';
 
@@ -4392,10 +4426,34 @@
                 try {
                   const xml = xmlData.trim();
 
-                  // diagrams.net 的可编辑分享链接一般使用 #R + (deflateRaw(xml) -> base64)
+                  // diagrams.net 的可编辑分享链接：#R + base64(deflateRaw(utf8(xml)))
+                  // 注意：base64 需要 URL-safe（避免 + / = 导致解析失败）
                   if (window.pako) {
-                    const compressed = window.pako.deflateRaw(xml, { to: 'string' });
-                    const b64 = btoa(compressed);
+                    const toBinaryString = function (u8) {
+                      let s = '';
+                      const CHUNK = 0x8000;
+                      for (let i = 0; i < u8.length; i += CHUNK) {
+                        s += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+                      }
+                      return s;
+                    };
+
+                    let input;
+                    try {
+                      if (window.TextEncoder) {
+                        input = new TextEncoder().encode(xml);
+                      }
+                    } catch (e) {
+                      input = null;
+                    }
+
+                    const compressedBytes = window.pako.deflateRaw(input || xml);
+                    const bin = (compressedBytes && compressedBytes.subarray) ? toBinaryString(compressedBytes) : String(compressedBytes || '');
+
+                    let b64 = btoa(bin);
+                    // base64url
+                    b64 = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+
                     const url = `https://app.diagrams.net/?lightbox=1&edit=_blank#R${b64}`;
                     window.open(url, '_blank', 'noopener,noreferrer');
                     return;
