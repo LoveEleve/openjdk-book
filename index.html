@@ -1384,7 +1384,7 @@
       --min-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --min-radius: 10px;
 
-      /* 默认：Mono（黑白）——更简单、更“干净” */
+      /* 默认：Mono（黑白）——更简单、更"干净" */
       --min-accent: #2563eb;
       --min-text: rgba(17, 24, 39, 0.92);
       --min-subtext: rgba(17, 24, 39, 0.62);
@@ -1433,7 +1433,7 @@
       --min-surface: #0a0c10;
       --min-code-bg: rgba(226, 232, 240, 0.07);
 
-      /* 暗色也保持“无阴影” */
+      /* 暗色也保持"无阴影" */
       --min-shadow: none;
       --min-shadow-hover: none;
       --min-float-shadow: none;
@@ -1505,6 +1505,73 @@
       border: 1px solid var(--min-border);
       border-radius: 7px;
       padding: 0.12em 0.35em;
+    }
+
+    /* Draw.io 图表容器样式 */
+    .drawio-container {
+      position: relative;
+      margin: 1.5em 0;
+      border: 1px solid var(--min-border);
+      border-radius: 12px;
+      background: var(--min-surface);
+      overflow: hidden;
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.03),
+        0 14px 32px rgba(0, 0, 0, 0.10);
+    }
+
+    html[data-theme="dark"] .drawio-container {
+      background: rgba(15, 23, 42, 0.88);
+      border-color: rgba(255, 255, 255, 0.10);
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.22),
+        0 20px 48px rgba(0, 0, 0, 0.45);
+    }
+
+    .drawio-diagram {
+      padding: 20px;
+      text-align: center;
+    }
+
+    .drawio-diagram svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .drawio-edit-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--min-text);
+      background: rgba(255, 255, 255, 0.65);
+      border: 1px solid var(--min-border);
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      z-index: 10;
+    }
+
+    html[data-theme="dark"] .drawio-edit-btn {
+      color: rgba(226, 232, 240, 0.92);
+      background: rgba(15, 23, 42, 0.35);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+
+    .drawio-edit-btn:hover {
+      background: rgba(255, 255, 255, 0.92);
+      transform: translateY(-1px);
+    }
+
+    html[data-theme="dark"] .drawio-edit-btn:hover {
+      background: rgba(15, 23, 42, 0.55);
+    }
+
+    .drawio-edit-btn::before {
+      content: "📝 ";
+      margin-right: 4px;
     }
 
     /* 代码块：mac 窗口风（顶栏 + 三色点 + 代码区） */
@@ -1914,7 +1981,17 @@
             const first = raw ? raw.split(/\s+/)[0] : '';
             const normalized = (first || '').toLowerCase();
 
-            // 常见“纯文本”标记：plain / text / plaintext / plain-text / plain&#x20;text
+            // Draw.io 图表支持
+            if (normalized === 'drawio') {
+              if (window.drawioConverter) {
+                console.log('drawio 转化中');
+                return window.drawioConverter(code);
+              } else {
+                return `<div class='drawio-code'>${code}</div>`;
+              }
+            }
+
+            // 常见"纯文本"标记：plain / text / plaintext / plain-text / plain&#x20;text
             const fallback = (!normalized || normalized === 'text' || normalized === 'plaintext' || normalized === 'plain-text' || normalized.indexOf('plain') === 0);
             const finalLang = fallback ? 'java' : normalized;
 
@@ -4252,6 +4329,74 @@
             GISCUS_CFG.theme = (document.documentElement.getAttribute('data-theme') === 'dark') ? 'dark' : 'light';
             renderOrUpdateGiscus(getGiscusTerm(vm));
           });
+        },
+
+        // Draw.io 在线编辑按钮增强
+        function (hook, vm) {
+          // 为 draw.io 图表添加在线编辑按钮
+          function enhanceDrawioElements() {
+            const drawioElements = document.querySelectorAll('.drawio-diagram');
+            
+            drawioElements.forEach(function(element) {
+              // 避免重复添加按钮
+              if (element.parentElement.querySelector('.drawio-edit-btn')) return;
+              
+              // 查找对应的原始 XML 数据
+              let xmlData = '';
+              const container = element.closest('.drawio-container') || element.parentElement;
+              
+              // 尝试从多个可能的位置获取 XML 数据
+              const codeElement = container.querySelector('code, .drawio-code');
+              if (codeElement) {
+                xmlData = codeElement.textContent || codeElement.innerText || '';
+              }
+              
+              // 如果没有找到 XML 数据，尝试从 data 属性获取
+              if (!xmlData) {
+                xmlData = element.getAttribute('data-drawio-xml') || '';
+              }
+              
+              if (xmlData.trim()) {
+                // 创建编辑按钮
+                const editBtn = document.createElement('button');
+                editBtn.className = 'drawio-edit-btn';
+                editBtn.textContent = '用 Draw.io 打开';
+                editBtn.title = '在 Draw.io 在线编辑器中打开此图表';
+                
+                editBtn.onclick = function(e) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  
+                  try {
+                    // 构造 draw.io 在线编辑器 URL
+                    const encodedXml = encodeURIComponent(xmlData.trim());
+                    const editUrl = `https://app.diagrams.net/?lightbox=1&edit=_blank&xml=${encodedXml}`;
+                    
+                    // 在新窗口中打开
+                    window.open(editUrl, '_blank', 'noopener,noreferrer');
+                  } catch (error) {
+                    console.error('打开 Draw.io 编辑器失败:', error);
+                    alert('无法打开 Draw.io 编辑器，请检查图表数据格式');
+                  }
+                };
+                
+                // 将按钮添加到容器中
+                const wrapper = container.classList.contains('drawio-container') ? container : element.parentElement;
+                if (wrapper && !wrapper.querySelector('.drawio-edit-btn')) {
+                  // 确保容器有相对定位
+                  if (getComputedStyle(wrapper).position === 'static') {
+                    wrapper.style.position = 'relative';
+                  }
+                  wrapper.appendChild(editBtn);
+                }
+              }
+            });
+          }
+          
+          // 在每次页面渲染后增强 draw.io 元素
+          hook.doneEach(function() {
+            setTimeout(enhanceDrawioElements, 100); // 稍微延迟确保 draw.io 插件已渲染完成
+          });
         }
       ]
     };
@@ -4260,6 +4405,10 @@
   <script src="https://cdn.jsdelivr.net/npm/medium-zoom@1/dist/medium-zoom.min.js"></script>
   <script src="https://unpkg.com/docsify-tabs/dist/docsify-tabs.min.js"></script>
   <script src="https://unpkg.com/docsify-plugin-flexible-alerts"></script>
+  
+  <!-- Draw.io 支持 -->
+  <script src="https://cdn.jsdelivr.net/npm/docsify-drawio/viewer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify-drawio/drawio.js"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
