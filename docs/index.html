@@ -4379,7 +4379,7 @@
                 // 创建编辑按钮
                 const editBtn = document.createElement('button');
                 editBtn.className = 'drawio-edit-btn';
-                editBtn.textContent = '用 Draw.io 打开';
+                editBtn.textContent = '📝 用 Draw.io 打开';
                 editBtn.title = '在 Draw.io 在线编辑器中打开此图表';
                 
                 editBtn.onclick = function(e) {
@@ -4387,9 +4387,9 @@
                   e.stopPropagation();
                   
                   try {
-                    // 构造 draw.io 在线编辑器 URL
+                    // 构造 draw.io 在线编辑器 URL（修复为可编辑版本）
                     const encodedXml = encodeURIComponent(xmlData.trim());
-                    const editUrl = `https://app.diagrams.net/?lightbox=1&edit=_blank&xml=${encodedXml}`;
+                    const editUrl = `https://app.diagrams.net/#G${encodedXml}`;
                     
                     // 在新窗口中打开
                     window.open(editUrl, '_blank', 'noopener,noreferrer');
@@ -4402,11 +4402,13 @@
                 // 将按钮添加到容器中
                 const wrapper = container.classList.contains('drawio-container') ? container : element.parentElement;
                 if (wrapper && !wrapper.querySelector('.drawio-edit-btn')) {
-                  // 确保容器有相对定位
-                  if (getComputedStyle(wrapper).position === 'static') {
-                    wrapper.style.position = 'relative';
-                  }
-                  wrapper.appendChild(editBtn);
+                  // 创建按钮容器
+                  const btnContainer = document.createElement('div');
+                  btnContainer.style.cssText = 'text-align: center; margin: 10px 0; padding: 5px;';
+                  btnContainer.appendChild(editBtn);
+                  
+                  // 将按钮容器添加到图表后面
+                  wrapper.appendChild(btnContainer);
                 }
               }
             });
@@ -4414,7 +4416,12 @@
           
           // 在每次页面渲染后增强 draw.io 元素
           hook.doneEach(function() {
-            setTimeout(enhanceDrawioElements, 100); // 稍微延迟确保 draw.io 插件已渲染完成
+            setTimeout(enhanceDrawioElements, 500); // 增加延迟确保 draw.io 插件已完全渲染
+          });
+          
+          // 也在初始加载时运行
+          hook.ready(function() {
+            setTimeout(enhanceDrawioElements, 1000);
           });
         }
       ]
