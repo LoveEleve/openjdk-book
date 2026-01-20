@@ -1592,6 +1592,10 @@
       height: auto;
     }
 
+    .drawio-wrapper.drawio-only-btn {
+      margin: 10px 0 0;
+    }
+
     .drawio-edit-row {
       display: flex;
       justify-content: center;
@@ -2075,9 +2079,16 @@
             const normalized = (first || '').toLowerCase();
 
             // Draw.io 图表支持
-            if (normalized === 'drawio') {
+            // - drawio: 渲染图 + 按钮
+            // - drawio-btn: 不渲染图，只在当前位置生成“用 Draw.io 打开”按钮（适合配合 PNG 图片使用）
+            if (normalized === 'drawio' || normalized === 'drawio-btn' || normalized === 'drawio-button') {
               const xml = (code == null ? '' : String(code)).trim();
               const xmlEnc = encodeURIComponent(xml);
+              const onlyBtn = (normalized !== 'drawio');
+
+              if (onlyBtn) {
+                return `<div class="drawio-wrapper drawio-only-btn" data-drawio-xml-enc="${xmlEnc}"></div>`;
+              }
 
               if (window.drawioConverter) {
                 // 关键：把 XML 挂到 DOM 上，后续按钮才能稳定拿到原始数据
