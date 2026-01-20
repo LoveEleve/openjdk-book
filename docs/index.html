@@ -1558,10 +1558,17 @@
       height: auto;
     }
 
+    .drawio-edit-row {
+      text-align: center;
+      margin: 10px 0 14px;
+      padding: 0 10px;
+    }
+
     .drawio-edit-btn {
-      position: absolute;
-      top: 12px;
-      right: 12px;
+      position: static;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       padding: 6px 12px;
       font-size: 11px;
       font-weight: 700;
@@ -1571,7 +1578,6 @@
       border-radius: 999px;
       cursor: pointer;
       transition: all 0.2s ease;
-      z-index: 10;
     }
 
     html[data-theme="dark"] .drawio-edit-btn {
@@ -1587,11 +1593,6 @@
 
     html[data-theme="dark"] .drawio-edit-btn:hover {
       background: rgba(15, 23, 42, 0.55);
-    }
-
-    .drawio-edit-btn::before {
-      content: "📝 ";
-      margin-right: 4px;
     }
 
     /* 代码块：mac 窗口风（顶栏 + 三色点 + 代码区） */
@@ -2002,12 +2003,16 @@
 
             // Draw.io 图表支持
             if (normalized === 'drawio') {
+              const xml = (code == null ? '' : String(code)).trim();
+              const xmlEnc = encodeURIComponent(xml);
+
               if (window.drawioConverter) {
-                console.log('drawio 转化中');
-                return window.drawioConverter(code);
-              } else {
-                return `<div class='drawio-code'>${code}</div>`;
+                // 关键：把 XML 挂到 DOM 上，后续按钮才能稳定拿到原始数据
+                return `<div class="drawio-wrapper" data-drawio-xml-enc="${xmlEnc}">${window.drawioConverter(xml)}</div>`;
               }
+
+              // 兜底：至少把原始内容渲染出来（不影响其它图片/文章）
+              return `<pre data-lang="drawio"><code>${xml}</code></pre>`;
             }
 
             // 常见"纯文本"标记：plain / text / plaintext / plain-text / plain&#x20;text
@@ -4354,62 +4359,72 @@
         function (hook, vm) {
           // 为 draw.io 图表添加在线编辑按钮
           function enhanceDrawioElements() {
-            const drawioElements = document.querySelectorAll('.drawio-diagram');
-            
-            drawioElements.forEach(function(element) {
-              // 避免重复添加按钮
-              if (element.parentElement.querySelector('.drawio-edit-btn')) return;
-              
-              // 查找对应的原始 XML 数据
+            const wrappers = document.querySelectorAll('.drawio-wrapper[data-drawio-xml-enc]');
+
+            wrappers.forEach(function (wrapper) {
+              // 避免重复添加
+              if (wrapper.querySelector('.drawio-edit-btn')) return;
+
+              const xmlEnc = wrapper.getAttribute('data-drawio-xml-enc') || '';
+              if (!xmlEnc) return;
+
               let xmlData = '';
-              const container = element.closest('.drawio-container') || element.parentElement;
-              
-              // 尝试从多个可能的位置获取 XML 数据
-              const codeElement = container.querySelector('code, .drawio-code');
-              if (codeElement) {
-                xmlData = codeElement.textContent || codeElement.innerText || '';
+              try {
+                xmlData = decodeURIComponent(xmlEnc);
+              } catch (e) {
+                xmlData = '';
               }
-              
-              // 如果没有找到 XML 数据，尝试从 data 属性获取
-              if (!xmlData) {
-                xmlData = element.getAttribute('data-drawio-xml') || '';
-              }
-              
-              if (xmlData.trim()) {
-                // 创建编辑按钮
-                const editBtn = document.createElement('button');
-                editBtn.className = 'drawio-edit-btn';
-                editBtn.textContent = '📝 用 Draw.io 打开';
-                editBtn.title = '在 Draw.io 在线编辑器中打开此图表';
-                
-                editBtn.onclick = function(e) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  
-                  try {
-                    // 构造 draw.io 在线编辑器 URL（修复为可编辑版本）
-                    const encodedXml = encodeURIComponent(xmlData.trim());
-                    const editUrl = `https://app.diagrams.net/#G${encodedXml}`;
-                    
-                    // 在新窗口中打开
-                    window.open(editUrl, '_blank', 'noopener,noreferrer');
-                  } catch (error) {
-                    console.error('打开 Draw.io 编辑器失败:', error);
-                    alert('无法打开 Draw.io 编辑器，请检查图表数据格式');
+
+              if (!xmlData || !xmlData.trim()) return;
+
+              const btnRow = document.createElement('div');
+              btnRow.className = 'drawio-edit-row';
+
+              const editBtn = document.createElement('button');
+              editBtn.className = 'drawio-edit-btn';
+              editBtn.textContent = '📝 用 Draw.io 打开';
+              editBtn.title = '在 Draw.io 在线编辑器中打开此图表';
+
+              editBtn.onclick = function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                try {
+                  const xml = xmlData.trim();
+
+                  // diagrams.net 的可编辑分享链接一般使用 #R + (deflateRaw(xml) -> base64)
+                  if (window.pako) {
+                    const compressed = window.pako.deflateRaw(xml, { to: 'string' });
+                    const b64 = btoa(compressed);
+                    const url = `https://app.diagrams.net/?lightbox=1&edit=_blank#R${b64}`;
+                    window.open(url, '_blank', 'noopener,noreferrer');
+                    return;
                   }
-                };
-                
-                // 将按钮添加到容器中
-                const wrapper = container.classList.contains('drawio-container') ? container : element.parentElement;
-                if (wrapper && !wrapper.querySelector('.drawio-edit-btn')) {
-                  // 创建按钮容器
-                  const btnContainer = document.createElement('div');
-                  btnContainer.style.cssText = 'text-align: center; margin: 10px 0; padding: 5px;';
-                  btnContainer.appendChild(editBtn);
-                  
-                  // 将按钮容器添加到图表后面
-                  wrapper.appendChild(btnContainer);
+
+                  // 兜底：直接打开编辑器，并尝试把 XML 放进剪贴板
+                  window.open('https://app.diagrams.net/', '_blank', 'noopener,noreferrer');
+                  try {
+                    if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                      navigator.clipboard.writeText(xml);
+                    }
+                  } catch (err) {
+                    // ignore
+                  }
+                  alert('已打开 Draw.io（app.diagrams.net）。若未自动加载，请在编辑器中导入 XML（已尝试复制到剪贴板）。');
+                } catch (error) {
+                  console.error('打开 Draw.io 编辑器失败:', error);
+                  alert('无法打开 Draw.io 编辑器，请检查图表数据格式');
                 }
+              };
+
+              btnRow.appendChild(editBtn);
+
+              // 尽量插到图表后面
+              const diagram = wrapper.querySelector('.drawio-diagram');
+              if (diagram && diagram.parentNode) {
+                diagram.parentNode.insertBefore(btnRow, diagram.nextSibling);
+              } else {
+                wrapper.appendChild(btnRow);
               }
             });
           }
@@ -4433,6 +4448,7 @@
   <script src="https://unpkg.com/docsify-plugin-flexible-alerts"></script>
   
   <!-- Draw.io 支持 -->
+  <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-drawio/viewer.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-drawio/drawio.js"></script>
 
