@@ -1,5 +1,4 @@
 * [首页](README.md)
-* [Draw.io 功能测试](drawio-test.md)
 
 * 并发编程学习之路
   * [Java内存模型浅析](concurrent/Java内存模型浅析/Java内存模型浅析.md)
