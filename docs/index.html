@@ -4450,10 +4450,9 @@
                     const compressedBytes = window.pako.deflateRaw(input || xml);
                     const bin = (compressedBytes && compressedBytes.subarray) ? toBinaryString(compressedBytes) : String(compressedBytes || '');
 
-                    let b64 = btoa(bin);
-                    // base64url
-                    b64 = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+                    const b64 = btoa(bin);
 
+                    // diagrams.net 这里用的是浏览器的 atob() 解码，所以必须是“标准 base64”（包含 + / 和必要的 = padding）
                     const url = `https://app.diagrams.net/?lightbox=1&edit=_blank#R${b64}`;
                     window.open(url, '_blank', 'noopener,noreferrer');
                     return;
