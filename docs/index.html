@@ -4453,13 +4453,14 @@
                     const b64 = btoa(bin);
 
                     // diagrams.net 这里用的是浏览器的 atob() 解码，所以必须是“标准 base64”（包含 + / 和必要的 = padding）
-                    const url = `https://app.diagrams.net/?lightbox=1&edit=_blank#R${b64}`;
+                    // 直接进入编辑器（不走 lightbox/viewer 中间层）
+                    const url = `https://app.diagrams.net/#R${b64}`;
                     window.open(url, '_blank', 'noopener,noreferrer');
                     return;
                   }
 
                   // 兜底：直接打开编辑器，并尝试把 XML 放进剪贴板
-                  window.open('https://app.diagrams.net/', '_blank', 'noopener,noreferrer');
+                  window.open('https://app.diagrams.net/#', '_blank', 'noopener,noreferrer');
                   try {
                     if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
                       navigator.clipboard.writeText(xml);
