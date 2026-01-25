@@ -4930,39 +4930,41 @@
               editBtn.textContent = '用 Excalidraw 打开';
               editBtn.title = '在 Excalidraw 在线编辑器中打开此图表';
 
-              editBtn.onclick = function (e) {
+              editBtn.onclick = async function (e) {
                 e.preventDefault();
                 e.stopPropagation();
 
+                const jsonStr = jsonData.trim();
+                
                 try {
-                  // 方案：下载 .excalidraw 文件，用户可直接拖入 excalidraw.com 打开
-                  const jsonStr = jsonData.trim();
-                  const blob = new Blob([jsonStr], { type: 'application/json' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = 'diagram.excalidraw';
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(url);
+                  // 复制 JSON 到剪贴板
+                  await navigator.clipboard.writeText(jsonStr);
                   
-                  // 打开 Excalidraw 并提示用户
+                  // 打开 Excalidraw
                   window.open('https://excalidraw.com/', '_blank', 'noopener,noreferrer');
-                  alert('文件已下载！请将 diagram.excalidraw 文件拖入 Excalidraw 窗口，或点击左上角菜单 → Open 打开文件。');
+                  
+                  // 友好提示
+                  alert('图表数据已复制到剪贴板！\\n\\n请在 Excalidraw 中按 Ctrl+V (Mac: Cmd+V) 粘贴即可加载图表。');
                 } catch (error) {
-                  console.error('打开 Excalidraw 编辑器失败:', error);
+                  console.error('复制失败:', error);
                   
-                  // 兜底方案：复制到剪贴板
+                  // 兜底：下载文件
                   try {
-                    if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
-                      navigator.clipboard.writeText(jsonData);
-                      alert('JSON 已复制到剪贴板！请打开 excalidraw.com，点击菜单 → Open → Import from clipboard');
-                    }
+                    const blob = new Blob([jsonStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'diagram.excalidraw';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    window.open('https://excalidraw.com/', '_blank', 'noopener,noreferrer');
+                    alert('文件已下载！请将 diagram.excalidraw 拖入 Excalidraw 窗口打开。');
                   } catch (err) {
-                    alert('操作失败，请手动复制 JSON 数据');
+                    alert('操作失败，请联系站长');
                   }
-                  window.open('https://excalidraw.com/', '_blank', 'noopener,noreferrer');
                 }
               };
 
