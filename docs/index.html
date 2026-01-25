@@ -4935,28 +4935,34 @@
                 e.stopPropagation();
 
                 try {
-                  // Excalidraw 支持通过 URL hash 加载数据
-                  // 格式: https://excalidraw.com/#json=<base64-encoded-json>
+                  // 方案：下载 .excalidraw 文件，用户可直接拖入 excalidraw.com 打开
                   const jsonStr = jsonData.trim();
+                  const blob = new Blob([jsonStr], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'diagram.excalidraw';
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
                   
-                  // 使用 base64 编码
-                  const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
-                  const url = 'https://excalidraw.com/#json=' + base64;
-                  
-                  window.open(url, '_blank', 'noopener,noreferrer');
+                  // 打开 Excalidraw 并提示用户
+                  window.open('https://excalidraw.com/', '_blank', 'noopener,noreferrer');
+                  alert('文件已下载！请将 diagram.excalidraw 文件拖入 Excalidraw 窗口，或点击左上角菜单 → Open 打开文件。');
                 } catch (error) {
                   console.error('打开 Excalidraw 编辑器失败:', error);
                   
-                  // 兜底方案：复制到剪贴板并打开空白编辑器
+                  // 兜底方案：复制到剪贴板
                   try {
                     if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
                       navigator.clipboard.writeText(jsonData);
+                      alert('JSON 已复制到剪贴板！请打开 excalidraw.com，点击菜单 → Open → Import from clipboard');
                     }
                   } catch (err) {
-                    // ignore
+                    alert('操作失败，请手动复制 JSON 数据');
                   }
                   window.open('https://excalidraw.com/', '_blank', 'noopener,noreferrer');
-                  alert('已打开 Excalidraw。JSON 数据已复制到剪贴板，请在编辑器中通过 "Open" > "Load from clipboard" 导入。');
                 }
               };
 
