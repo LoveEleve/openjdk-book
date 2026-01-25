@@ -1672,6 +1672,154 @@
       background: linear-gradient(180deg, rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.62));
     }
 
+    /* Excalidraw 支持样式 */
+    .excalidraw-wrapper {
+      margin: 16px 0;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fff;
+      border: 1px solid var(--min-border);
+    }
+
+    .excalidraw-wrapper.excalidraw-only-btn {
+      margin: 10px 0 0;
+      background: transparent;
+      border: none;
+    }
+
+    .excalidraw-preview {
+      width: 100%;
+      min-height: 300px;
+      max-height: 600px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-in;
+      background: #fff;
+    }
+
+    .excalidraw-preview svg {
+      max-width: 100%;
+      max-height: 100%;
+      height: auto;
+    }
+
+    html[data-theme="dark"] .excalidraw-wrapper {
+      background: rgba(30, 41, 59, 0.5);
+    }
+
+    html[data-theme="dark"] .excalidraw-preview {
+      background: rgba(30, 41, 59, 0.5);
+    }
+
+    .excalidraw-edit-row {
+      display: flex;
+      justify-content: center;
+      padding: 0 12px 14px;
+      gap: 10px;
+    }
+
+    .excalidraw-edit-btn {
+      position: static;
+      appearance: none;
+      -webkit-appearance: none;
+      border: 1px solid rgba(0, 0, 0, 0.10);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      color: rgba(17, 24, 39, 0.92);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.88));
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.03),
+        0 10px 22px rgba(0, 0, 0, 0.08);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+      transition: transform .15s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease;
+    }
+
+    .excalidraw-edit-btn::before {
+      content: "";
+      width: 16px;
+      height: 16px;
+      display: inline-block;
+      background: linear-gradient(135deg, #6965db, #a855f7);
+      -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25Zm2.92 2.83H5v-.92l9.06-9.06.92.92L5.92 20.08ZM20.71 7.04a1.003 1.003 0 0 0 0-1.42L18.37 3.29a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.83Z"/></svg>') center / contain no-repeat;
+      mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25Zm2.92 2.83H5v-.92l9.06-9.06.92.92L5.92 20.08ZM20.71 7.04a1.003 1.003 0 0 0 0-1.42L18.37 3.29a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.83Z"/></svg>') center / contain no-repeat;
+    }
+
+    .excalidraw-edit-btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(0, 0, 0, 0.16);
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.04),
+        0 14px 30px rgba(0, 0, 0, 0.10);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.92));
+    }
+
+    .excalidraw-edit-btn:active {
+      transform: translateY(0);
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.03),
+        0 8px 18px rgba(0, 0, 0, 0.08);
+    }
+
+    .excalidraw-edit-btn:focus-visible {
+      outline: none;
+      box-shadow:
+        0 0 0 3px rgba(105, 101, 219, 0.25),
+        0 12px 28px rgba(0, 0, 0, 0.10);
+    }
+
+    html[data-theme="dark"] .excalidraw-edit-btn {
+      color: rgba(226, 232, 240, 0.92);
+      border-color: rgba(255, 255, 255, 0.12);
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.70), rgba(15, 23, 42, 0.55));
+      box-shadow:
+        0 1px 0 rgba(0, 0, 0, 0.22),
+        0 18px 38px rgba(0, 0, 0, 0.45);
+    }
+
+    html[data-theme="dark"] .excalidraw-edit-btn:hover {
+      border-color: rgba(255, 255, 255, 0.18);
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.62));
+    }
+
+    .excalidraw-zoom-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.85);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+    }
+
+    .excalidraw-zoom-content {
+      background: #fff;
+      padding: 24px;
+      border-radius: 16px;
+      max-width: 96vw;
+      max-height: 88vh;
+      overflow: auto;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    }
+
+    html[data-theme="dark"] .excalidraw-zoom-content {
+      background: rgba(30, 41, 59, 0.96);
+    }
+
     /* 代码块：mac 窗口风（顶栏 + 三色点 + 代码区） */
     pre[data-lang] {
       background: var(--min-surface) !important;
@@ -2080,7 +2228,7 @@
 
             // Draw.io 图表支持
             // - drawio: 渲染图 + 按钮
-            // - drawio-btn: 不渲染图，只在当前位置生成“用 Draw.io 打开”按钮（适合配合 PNG 图片使用）
+            // - drawio-btn: 不渲染图，只在当前位置生成"用 Draw.io 打开"按钮（适合配合 PNG 图片使用）
             if (normalized === 'drawio' || normalized === 'drawio-btn' || normalized === 'drawio-button') {
               const xml = (code == null ? '' : String(code)).trim();
               const xmlEnc = encodeURIComponent(xml);
@@ -2097,6 +2245,22 @@
 
               // 兜底：至少把原始内容渲染出来（不影响其它图片/文章）
               return `<pre data-lang="drawio"><code>${xml}</code></pre>`;
+            }
+
+            // Excalidraw 图表支持
+            // - excalidraw: 渲染预览 + 按钮
+            // - excalidraw-btn: 不渲染预览，只生成"用 Excalidraw 打开"按钮
+            if (normalized === 'excalidraw' || normalized === 'excalidraw-btn' || normalized === 'excalidraw-button') {
+              const jsonStr = (code == null ? '' : String(code)).trim();
+              const jsonEnc = encodeURIComponent(jsonStr);
+              const onlyBtn = (normalized !== 'excalidraw');
+
+              if (onlyBtn) {
+                return `<div class="excalidraw-wrapper excalidraw-only-btn" data-excalidraw-json-enc="${jsonEnc}"></div>`;
+              }
+
+              // 渲染预览 + 按钮
+              return `<div class="excalidraw-wrapper" data-excalidraw-json-enc="${jsonEnc}"><div class="excalidraw-preview" data-excalidraw-loading="true"><span style="color:#888;font-size:13px;">加载 Excalidraw 预览中...</span></div></div>`;
             }
 
             // 常见"纯文本"标记：plain / text / plaintext / plain-text / plain&#x20;text
@@ -4574,7 +4738,7 @@
 
                     const b64 = btoa(bin);
 
-                    // diagrams.net 这里用的是浏览器的 atob() 解码，所以必须是“标准 base64”（包含 + / 和必要的 = padding）
+                    // diagrams.net 这里用的是浏览器的 atob() 解码，所以必须是"标准 base64"（包含 + / 和必要的 = padding）
                     // 直接进入编辑器（不走 lightbox/viewer 中间层）
                     const url = `https://app.diagrams.net/#R${b64}`;
                     window.open(url, '_blank', 'noopener,noreferrer');
@@ -4617,6 +4781,205 @@
           // 也在初始加载时运行
           hook.ready(function() {
             setTimeout(enhanceDrawioElements, 1000);
+          });
+        },
+
+        // Excalidraw 在线编辑按钮增强
+        function (hook, vm) {
+          // 为 Excalidraw 图表添加预览和编辑按钮
+          function enhanceExcalidrawElements() {
+            const wrappers = document.querySelectorAll('.excalidraw-wrapper[data-excalidraw-json-enc]');
+
+            wrappers.forEach(function (wrapper) {
+              // 避免重复添加
+              if (wrapper.querySelector('.excalidraw-edit-btn')) return;
+
+              const jsonEnc = wrapper.getAttribute('data-excalidraw-json-enc') || '';
+              if (!jsonEnc) return;
+
+              let jsonData = '';
+              try {
+                jsonData = decodeURIComponent(jsonEnc);
+              } catch (e) {
+                jsonData = '';
+              }
+
+              if (!jsonData || !jsonData.trim()) return;
+
+              // 解析 JSON 数据
+              let excalidrawData = null;
+              try {
+                excalidrawData = JSON.parse(jsonData);
+              } catch (e) {
+                console.error('Excalidraw JSON 解析失败:', e);
+                return;
+              }
+
+              // 渲染预览（使用 Excalidraw 的导出 SVG API）
+              const previewEl = wrapper.querySelector('.excalidraw-preview');
+              if (previewEl && previewEl.dataset.excalidrawLoading === 'true') {
+                previewEl.dataset.excalidrawLoading = 'false';
+                
+                // 使用 @excalidraw/excalidraw 的 exportToSvg 来渲染预览
+                // 由于这需要加载完整的 Excalidraw 库，我们改用简化方案：显示占位符
+                const elements = excalidrawData.elements || [];
+                const hasContent = elements.length > 0;
+                
+                if (hasContent) {
+                  // 计算边界框
+                  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                  elements.forEach(function(el) {
+                    if (el.isDeleted) return;
+                    const x = el.x || 0;
+                    const y = el.y || 0;
+                    const w = el.width || 0;
+                    const h = el.height || 0;
+                    minX = Math.min(minX, x);
+                    minY = Math.min(minY, y);
+                    maxX = Math.max(maxX, x + w);
+                    maxY = Math.max(maxY, y + h);
+                  });
+                  
+                  const width = maxX - minX + 40;
+                  const height = maxY - minY + 40;
+                  
+                  // 创建简化的 SVG 预览
+                  let svgContent = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + (minX - 20) + ' ' + (minY - 20) + ' ' + width + ' ' + height + '" style="background:#fff;border-radius:8px;">';
+                  
+                  elements.forEach(function(el) {
+                    if (el.isDeleted) return;
+                    const stroke = el.strokeColor || '#000';
+                    const fill = el.backgroundColor || 'transparent';
+                    const strokeWidth = el.strokeWidth || 1;
+                    
+                    if (el.type === 'rectangle') {
+                      svgContent += '<rect x="' + el.x + '" y="' + el.y + '" width="' + el.width + '" height="' + el.height + '" stroke="' + stroke + '" fill="' + fill + '" stroke-width="' + strokeWidth + '" rx="' + (el.roundness ? 8 : 0) + '"/>';
+                    } else if (el.type === 'ellipse') {
+                      const cx = el.x + el.width / 2;
+                      const cy = el.y + el.height / 2;
+                      svgContent += '<ellipse cx="' + cx + '" cy="' + cy + '" rx="' + (el.width / 2) + '" ry="' + (el.height / 2) + '" stroke="' + stroke + '" fill="' + fill + '" stroke-width="' + strokeWidth + '"/>';
+                    } else if (el.type === 'diamond') {
+                      const cx = el.x + el.width / 2;
+                      const cy = el.y + el.height / 2;
+                      const points = (el.x + el.width / 2) + ',' + el.y + ' ' + (el.x + el.width) + ',' + cy + ' ' + (el.x + el.width / 2) + ',' + (el.y + el.height) + ' ' + el.x + ',' + cy;
+                      svgContent += '<polygon points="' + points + '" stroke="' + stroke + '" fill="' + fill + '" stroke-width="' + strokeWidth + '"/>';
+                    } else if (el.type === 'line' || el.type === 'arrow') {
+                      const points = el.points || [[0, 0], [el.width || 0, el.height || 0]];
+                      let d = 'M ' + (el.x + points[0][0]) + ' ' + (el.y + points[0][1]);
+                      for (let i = 1; i < points.length; i++) {
+                        d += ' L ' + (el.x + points[i][0]) + ' ' + (el.y + points[i][1]);
+                      }
+                      svgContent += '<path d="' + d + '" stroke="' + stroke + '" fill="none" stroke-width="' + strokeWidth + '"';
+                      if (el.type === 'arrow') {
+                        svgContent += ' marker-end="url(#arrowhead)"';
+                      }
+                      svgContent += '/>';
+                    } else if (el.type === 'text') {
+                      const fontSize = el.fontSize || 16;
+                      const textColor = el.strokeColor || '#000';
+                      svgContent += '<text x="' + el.x + '" y="' + (el.y + fontSize) + '" font-size="' + fontSize + '" fill="' + textColor + '" font-family="Virgil, Segoe UI Emoji">' + (el.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</text>';
+                    }
+                  });
+                  
+                  // 添加箭头标记定义
+                  svgContent = '<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#000"/></marker></defs>' + svgContent.slice(svgContent.indexOf('>') + 1);
+                  svgContent = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + (minX - 20) + ' ' + (minY - 20) + ' ' + width + ' ' + height + '" style="background:#fff;border-radius:8px;">' + svgContent + '</svg>';
+                  
+                  previewEl.innerHTML = svgContent;
+                  
+                  // 添加点击放大功能
+                  previewEl.onclick = function() {
+                    const overlay = document.createElement('div');
+                    overlay.className = 'excalidraw-zoom-overlay';
+                    
+                    const content = document.createElement('div');
+                    content.className = 'excalidraw-zoom-content';
+                    content.innerHTML = svgContent;
+                    
+                    const svg = content.querySelector('svg');
+                    if (svg) {
+                      svg.style.width = '92vw';
+                      svg.style.height = '82vh';
+                      svg.style.maxWidth = '92vw';
+                      svg.style.maxHeight = '82vh';
+                    }
+                    
+                    overlay.appendChild(content);
+                    
+                    const close = function() {
+                      overlay.remove();
+                    };
+                    
+                    overlay.onclick = close;
+                    document.addEventListener('keydown', function(e) {
+                      if (e.key === 'Escape') close();
+                    }, { once: true });
+                    
+                    document.body.appendChild(overlay);
+                  };
+                } else {
+                  previewEl.innerHTML = '<span style="color:#888;font-size:13px;">空白画布</span>';
+                }
+              }
+
+              const btnRow = document.createElement('div');
+              btnRow.className = 'excalidraw-edit-row';
+
+              const editBtn = document.createElement('button');
+              editBtn.className = 'excalidraw-edit-btn';
+              editBtn.textContent = '用 Excalidraw 打开';
+              editBtn.title = '在 Excalidraw 在线编辑器中打开此图表';
+
+              editBtn.onclick = function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                try {
+                  // Excalidraw 支持通过 URL hash 加载数据
+                  // 格式: https://excalidraw.com/#json=<base64-encoded-json>
+                  const jsonStr = jsonData.trim();
+                  
+                  // 使用 base64 编码
+                  const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
+                  const url = 'https://excalidraw.com/#json=' + base64;
+                  
+                  window.open(url, '_blank', 'noopener,noreferrer');
+                } catch (error) {
+                  console.error('打开 Excalidraw 编辑器失败:', error);
+                  
+                  // 兜底方案：复制到剪贴板并打开空白编辑器
+                  try {
+                    if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                      navigator.clipboard.writeText(jsonData);
+                    }
+                  } catch (err) {
+                    // ignore
+                  }
+                  window.open('https://excalidraw.com/', '_blank', 'noopener,noreferrer');
+                  alert('已打开 Excalidraw。JSON 数据已复制到剪贴板，请在编辑器中通过 "Open" > "Load from clipboard" 导入。');
+                }
+              };
+
+              btnRow.appendChild(editBtn);
+
+              // 尽量插到预览后面
+              const preview = wrapper.querySelector('.excalidraw-preview');
+              if (preview && preview.parentNode) {
+                preview.parentNode.insertBefore(btnRow, preview.nextSibling);
+              } else {
+                wrapper.appendChild(btnRow);
+              }
+            });
+          }
+          
+          // 在每次页面渲染后增强 Excalidraw 元素
+          hook.doneEach(function() {
+            setTimeout(enhanceExcalidrawElements, 500);
+          });
+          
+          // 也在初始加载时运行
+          hook.ready(function() {
+            setTimeout(enhanceExcalidrawElements, 1000);
           });
         }
       ]
