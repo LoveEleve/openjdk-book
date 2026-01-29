@@ -16,12 +16,22 @@
       --sidebar-width: 250px;
       --content-max-width: 850px;
       --base-font-size: 13px;
+      --base-font-family: "Comic Sans MS", "Comic Sans", cursive, sans-serif;
+      --code-font-family: "Comic Sans MS", "Comic Sans", cursive, monospace;
 
       --code-border: rgba(0, 0, 0, 0.06);
       --code-toolbar-bg: #f6f8fa;
       --code-gutter-bg: #f6f8fa;
       --code-text: #24292f;
       --code-muted: #8b949e;
+    }
+
+    body {
+      font-family: var(--base-font-family) !important;
+    }
+
+    code, pre, .token {
+      font-family: var(--code-font-family) !important;
     }
 
     /* 侧边栏：简单的格式对齐修复 */
