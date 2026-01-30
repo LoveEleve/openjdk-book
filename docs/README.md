@@ -79,6 +79,7 @@
 
 </div>
 
----
-
-*持续更新中...*
+<div class="update-badge">
+  <span class="update-icon">✨</span>
+  <span class="update-text">持续更新中，敬请期待更多内容</span>
+</div>

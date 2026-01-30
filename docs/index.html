@@ -1616,6 +1616,35 @@
       background: rgba(255, 255, 255, 0.15);
     }
 
+    /* 持续更新徽章样式 */
+    .update-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+      border: 1px solid rgba(102, 126, 234, 0.2);
+      border-radius: 999px;
+      font-size: 13px;
+      color: #667eea;
+      margin: 16px 0;
+    }
+
+    html[data-theme="dark"] .update-badge {
+      background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15));
+      border-color: rgba(102, 126, 234, 0.3);
+      color: #8b9dc3;
+    }
+
+    .update-badge .update-icon {
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
     /* 首页专栏折叠列表样式 */
     .home-sections {
       margin: 24px 0;
@@ -4092,30 +4121,34 @@
 
             bc.innerHTML = crumbHtml;
 
-            // 上一篇 / 下一篇
+            // 上一篇 / 下一篇（首页不显示）
             let nav = section.querySelector('#page-nav');
-            if (!nav) {
-              nav = document.createElement('div');
-              nav.id = 'page-nav';
-              nav.className = 'page-nav';
-              const g = section.querySelector('#giscus');
-              if (g) section.insertBefore(nav, g);
-              else section.appendChild(nav);
+            if (currentPath === '#/' || currentPath === '#/README') {
+              if (nav) nav.remove();
+            } else {
+              if (!nav) {
+                nav = document.createElement('div');
+                nav.id = 'page-nav';
+                nav.className = 'page-nav';
+                const g = section.querySelector('#giscus');
+                if (g) section.insertBefore(nav, g);
+                else section.appendChild(nav);
+              }
+
+              const prev = idx > 0 ? links[idx - 1] : null;
+              const next = idx >= 0 && idx < links.length - 1 ? links[idx + 1] : null;
+
+              nav.innerHTML = `
+                <a class="${prev ? '' : 'is-disabled'}" href="${prev ? prev.href : '#'}" aria-disabled="${prev ? 'false' : 'true'}">
+                  <div class="nav-kicker">← 上一篇</div>
+                  <div class="nav-title">${prev ? escapeHtml(prev.text) : '没有了'}</div>
+                </a>
+                <a class="${next ? '' : 'is-disabled'}" href="${next ? next.href : '#'}" aria-disabled="${next ? 'false' : 'true'}">
+                  <div class="nav-kicker">下一篇 →</div>
+                  <div class="nav-title">${next ? escapeHtml(next.text) : '没有了'}</div>
+                </a>
+              `;
             }
-
-            const prev = idx > 0 ? links[idx - 1] : null;
-            const next = idx >= 0 && idx < links.length - 1 ? links[idx + 1] : null;
-
-            nav.innerHTML = `
-              <a class="${prev ? '' : 'is-disabled'}" href="${prev ? prev.href : '#'}" aria-disabled="${prev ? 'false' : 'true'}">
-                <div class="nav-kicker">← 上一篇</div>
-                <div class="nav-title">${prev ? escapeHtml(prev.text) : '没有了'}</div>
-              </a>
-              <a class="${next ? '' : 'is-disabled'}" href="${next ? next.href : '#'}" aria-disabled="${next ? 'false' : 'true'}">
-                <div class="nav-kicker">下一篇 →</div>
-                <div class="nav-title">${next ? escapeHtml(next.text) : '没有了'}</div>
-              </a>
-            `;
           }
 
           /* ---------------- 全文搜索（Ctrl/⌘+K）：跨页面索引 + 结果高亮 + 跳转定位 ---------------- */
