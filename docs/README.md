@@ -2,7 +2,15 @@
 
 欢迎来到我的技术博客。这里主要记录并发编程、分布式系统、JVM 等后端技术深度解析。
 
-## 并发编程学习之路
+<!-- 首页专栏列表：可折叠 -->
+<div class="home-sections">
+
+<details class="home-section" open>
+  <summary>
+    <span class="section-title">并发编程学习之路</span>
+    <span class="section-count">8 篇文章</span>
+  </summary>
+  <div class="section-content">
 
 * [高并发容器](concurrent/高并发容器/高并发容器.md) - 深入解析 ConcurrentHashMap、CopyOnWrite 等线程安全容器。
 * [Synchronized浅析（1）](concurrent/synchronized/Synchronized浅析-1/Synchronized浅析-1.md) - 管程、synchronized 与对象监视器。
@@ -12,6 +20,23 @@
 * [线程池学习笔记（2）](concurrent/线程池相关/线程池-2/线程池-2.md) - Executors 工厂线程池特性。
 * [线程池学习笔记（3）](concurrent/线程池相关/线程池-3/线程池-3.md) - Runnable/Callable/FutureTask。
 
+  </div>
+</details>
+
+<details class="home-section">
+  <summary>
+    <span class="section-title">JVM 源码解析</span>
+    <span class="section-count">即将上线</span>
+  </summary>
+  <div class="section-content">
+
+* 更多内容正在整理中...
+
+  </div>
+</details>
+
+</div>
+
 ---
 
-*更多内容正在整理中...*
+*持续更新中...*
