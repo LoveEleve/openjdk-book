@@ -1616,9 +1616,11 @@
       background: rgba(255, 255, 255, 0.15);
     }
 
-    /* 首页隐藏右侧目录 */
-    body[data-page="home"] .toc-aside,
-    body[data-page="home"] .toc-fab {
+    /* 首页隐藏右侧目录 - 通过URL判断 */
+    html:has(body .markdown-section h1#welcome, body .markdown-section h1:first-of-type) .toc-aside,
+    html:has(body .markdown-section h1#welcome, body .markdown-section h1:first-of-type) .toc-fab,
+    body:has(.hero-section) .toc-aside,
+    body:has(.hero-section) .toc-fab {
       display: none !important;
     }
 
