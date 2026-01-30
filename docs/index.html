@@ -904,7 +904,8 @@
     }
 
     .page-breadcrumb {
-      margin: 10px 0 12px;
+      margin: 0 0 16px;
+      padding: 8px 0;
       font-size: 12px;
       line-height: 1.5;
       color: var(--code-muted);
@@ -912,6 +913,7 @@
       flex-wrap: wrap;
       align-items: center;
       gap: 6px;
+      border-bottom: 1px solid var(--min-border);
     }
 
     .page-breadcrumb a {
@@ -4049,6 +4051,14 @@
               // fallback：按 href 前缀匹配
               const cand = links.find((it) => it.href && normalizeHrefToPath(it.href) === currentPath);
               currentEl = cand ? cand.el : null;
+            }
+
+            // 首页不显示面包屑
+            if (currentPath === '#/' || currentPath === '#/README') {
+              bc.style.display = 'none';
+              return;
+            } else {
+              bc.style.display = '';
             }
 
             const crumbs = [{ text: '首页', href: '#/' }];
