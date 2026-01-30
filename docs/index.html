@@ -1542,6 +1542,78 @@
       padding: 0.12em 0.35em;
     }
 
+    /* Hero 区域样式 */
+    .hero-section {
+      margin: -20px -24px 32px;
+      padding: 48px 24px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      text-align: center;
+      color: #fff;
+    }
+
+    html[data-theme="dark"] .hero-section {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    }
+
+    .hero-content {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .hero-title {
+      font-size: 36px;
+      font-weight: 800;
+      margin: 0 0 12px;
+      letter-spacing: -0.02em;
+      color: #fff;
+    }
+
+    .hero-slogan {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 0 0 8px;
+      opacity: 0.95;
+      color: #fff;
+    }
+
+    .hero-desc {
+      font-size: 14px;
+      margin: 0 0 24px;
+      opacity: 0.8;
+      color: #fff;
+    }
+
+    .hero-social {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+    }
+
+    .social-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+      transition: all 0.2s ease;
+    }
+
+    .social-link:hover {
+      background: rgba(255, 255, 255, 0.25);
+      transform: translateY(-2px);
+    }
+
+    html[data-theme="dark"] .social-link {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    html[data-theme="dark"] .social-link:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+
     /* 首页专栏折叠列表样式 */
     .home-sections {
       margin: 24px 0;
