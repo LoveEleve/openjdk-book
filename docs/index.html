@@ -1616,11 +1616,9 @@
       background: rgba(255, 255, 255, 0.15);
     }
 
-    /* 首页隐藏右侧目录 - 通过URL判断 */
-    html:has(body .markdown-section h1#welcome, body .markdown-section h1:first-of-type) .toc-aside,
-    html:has(body .markdown-section h1#welcome, body .markdown-section h1:first-of-type) .toc-fab,
-    body:has(.hero-section) .toc-aside,
-    body:has(.hero-section) .toc-fab {
+    /* 首页隐藏右侧目录 - 通过body的data-page属性判断 */
+    body[data-page="home"] .toc-aside,
+    body[data-page="home"] .toc-fab {
       display: none !important;
     }
 
@@ -4803,7 +4801,7 @@
 
           bindThemeChangeForGiscus();
 
-          hook.doneEach(function () {
+          hook.doneEach(function (vm) {
             // 标记首页（处理 #/README?id=xxx 的情况）
             const currentPath = (vm && vm.route && vm.route.path) || (location.hash || '#/').split('?')[0];
             const basePath = currentPath.split('?')[0].split('#')[0];
