@@ -3489,13 +3489,20 @@
             // 首页不显示目录（处理 #/README?id=xxx 的情况）
             const currentPath = (vm && vm.route && vm.route.path) || (location.hash || '#/').split('?')[0];
             const basePath = currentPath.split('?')[0].split('#')[0];
-            if (basePath === '#/' || basePath === '#/README' || basePath === '/README') {
-              const toc = document.querySelector('#toc-aside');
+            const isHome = basePath === '#/' || basePath === '#/README' || basePath === '/README';
+            
+            const toc = document.querySelector('#toc-aside');
+            const fab = document.querySelector('#toc-fab');
+            
+            if (isHome) {
               if (toc) toc.style.display = 'none';
-              const fab = document.querySelector('#toc-fab');
               if (fab) fab.style.display = 'none';
               document.body.classList.remove('has-toc-aside');
               return;
+            } else {
+              // 文章页面：确保目录显示
+              if (toc) toc.style.display = '';
+              if (fab) fab.style.display = '';
             }
 
             const tryOnce = () => {
