@@ -17,6 +17,7 @@
       --sidebar-width: 250px;
       --content-max-width: 850px;
       --base-font-size: 13px;
+      --mono-font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
       --code-border: rgba(0, 0, 0, 0.06);
       --code-toolbar-bg: #f6f8fa;
@@ -313,14 +314,16 @@
       display: block;
       padding: 0 14px;
       white-space: pre;
-      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
       font-size: 13px;
       line-height: 1.55em;
       color: var(--code-text);
     }
 
     /* 强制所有代码块使用 JetBrains Mono */
-    code, pre, .token {
+    code, pre, .token, 
+    .markdown-section pre[data-lang] code,
+    .markdown-section pre[data-lang] .token {
       font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
     }
 
@@ -1387,7 +1390,7 @@
     /* ---------------- 极简风格（全站，可切换） ---------------- */
     :root {
       --min-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans", Arial, "Apple Color Emoji", "Segoe UI Emoji";
-      --min-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --min-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --min-radius: 10px;
 
       /* 默认：Mono（黑白）——更简单、更"干净" */
