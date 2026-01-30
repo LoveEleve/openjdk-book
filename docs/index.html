@@ -1616,6 +1616,12 @@
       background: rgba(255, 255, 255, 0.15);
     }
 
+    /* 首页隐藏右侧目录 */
+    body[data-page="home"] .toc-aside,
+    body[data-page="home"] .toc-fab {
+      display: none !important;
+    }
+
     /* 持续更新徽章样式 */
     .update-badge {
       display: inline-flex;
@@ -4795,6 +4801,14 @@
           bindThemeChangeForGiscus();
 
           hook.doneEach(function () {
+            // 标记首页
+            const currentPath = (vm && vm.route && vm.route.path) || (location.hash || '#/').split('?')[0];
+            if (currentPath === '#/' || currentPath === '#/README') {
+              document.body.setAttribute('data-page', 'home');
+            } else {
+              document.body.removeAttribute('data-page');
+            }
+
             document.querySelectorAll('pre[data-lang]').forEach(function (pre) {
               // 避免重复初始化
               if (pre.dataset.inlineFoldInited === '1') return;
