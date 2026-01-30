@@ -42,21 +42,21 @@
 * [AQS 源码解析](concurrent/AQS/AQS源码解析/AQS源码解析.md) - 深入解析 AQS 源码实现。
 
 **线程本地变量**
-* [线程本地变量（1）](concurrent/线程本地变量/线程本地变量-1/线程本地变量-1.md) - ThreadLocal 基础原理。
-* [线程本地变量（2）](concurrent/线程本地变量/线程本地变量-2/线程本地变量-2.md) - ThreadLocal 内存泄漏分析。
-* [线程本地变量（3）](concurrent/线程本地变量/线程本地变量-3/线程本地变量-3.md) - FastThreadLocal 优化实现。
+* [线程本地变量（1）](concurrent/线程本地变量/线程本地变量-1/线程本地变量-1.md) - ThreadLocal 核心原理与线程隔离机制。
+* [线程本地变量（2）](concurrent/线程本地变量/线程本地变量-2/线程本地变量-2.md) - InheritableThreadLocal 与父子线程值传递。
+* [线程本地变量（3）](concurrent/线程本地变量/线程本地变量-3/线程本地变量-3.md) - Netty FastThreadLocal 优化实现。
 
 **同步器**
-* [同步器](concurrent/同步器/同步器.md) - CountDownLatch、CyclicBarrier、Semaphore 详解。
+* [同步器](concurrent/同步器/同步器.md) - Semaphore、CountDownLatch、CyclicBarrier 等 JUC 同步器详解。
 
 **管程实现**
-* [管程实现](concurrent/管程实现/管程实现.md) - 自己动手实现一个简单的管程。
+* [管程实现](concurrent/管程实现/管程实现.md) - ReentrantLock、ReentrantReadWriteLock、StampedLock 三把锁的实现原理。
 
 **条件变量**
-* [条件变量](concurrent/条件变量/条件变量.md) - Condition 接口与条件队列实现。
+* [条件变量](concurrent/条件变量/条件变量.md) - Condition 条件变量与生产者消费者模型。
 
 **Atomic Package**
-* [atomic package](concurrent/atomic%20package/atomic%20package.md) - 原子类与 CAS 操作详解。
+* [atomic package](concurrent/atomic%20package/atomic%20package.md) - LongAdder、AtomicStampedReference 等原子类与无锁编程。
 
   </div>
 </details>
