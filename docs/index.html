@@ -3486,9 +3486,10 @@
           function scheduleTocRender(vm) {
             tocLastVm = vm;
 
-            // 首页不显示目录
+            // 首页不显示目录（处理 #/README?id=xxx 的情况）
             const currentPath = (vm && vm.route && vm.route.path) || (location.hash || '#/').split('?')[0];
-            if (currentPath === '#/' || currentPath === '#/README') {
+            const basePath = currentPath.split('?')[0].split('#')[0];
+            if (basePath === '#/' || basePath === '#/README' || basePath === '/README') {
               const toc = document.querySelector('#toc-aside');
               if (toc) toc.style.display = 'none';
               const fab = document.querySelector('#toc-fab');
@@ -4801,9 +4802,10 @@
           bindThemeChangeForGiscus();
 
           hook.doneEach(function () {
-            // 标记首页
+            // 标记首页（处理 #/README?id=xxx 的情况）
             const currentPath = (vm && vm.route && vm.route.path) || (location.hash || '#/').split('?')[0];
-            if (currentPath === '#/' || currentPath === '#/README') {
+            const basePath = currentPath.split('?')[0].split('#')[0];
+            if (basePath === '#/' || basePath === '#/README' || basePath === '/README') {
               document.body.setAttribute('data-page', 'home');
             } else {
               document.body.removeAttribute('data-page');
