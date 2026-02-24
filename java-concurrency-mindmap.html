@@ -16,32 +16,11 @@
       width: 100%;
       height: 100%;
     }
-    /* 返回按钮 */
-    .back-btn {
-      position: fixed;
-      top: 20px;
-      left: 20px;
-      z-index: 1000;
-      padding: 10px 20px;
-      background: #42b983;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-      text-decoration: none;
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .back-btn:hover {
-      background: #3aa876;
-    }
     /* 工具栏 */
     .toolbar {
       position: fixed;
-      top: 20px;
-      right: 20px;
+      top: 10px;
+      right: 10px;
       z-index: 1000;
       display: flex;
       gap: 10px;
@@ -70,12 +49,6 @@
   </style>
 </head>
 <body>
-  <a href="/" class="back-btn">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M19 12H5M12 19l-7-7 7-7"/>
-    </svg>
-    返回首页
-  </a>
   <div class="toolbar">
     <button onclick="fit()">适应屏幕</button>
     <button onclick="toggleAll(true)">全部展开</button>
@@ -125,7 +98,7 @@
     // 加载并渲染思维导图
     async function loadMindmap() {
       try {
-        const response = await fetch('java-concurrency-mindmap-complete.md');
+        const response = await fetch('/java-concurrency-mindmap-complete.md');
         let content = await response.text();
         
         // 转换格式
