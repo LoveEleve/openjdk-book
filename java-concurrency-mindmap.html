@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Java并发编程思维导图</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      height: 100%;
+    }
+    #mindmap {
+      width: 100%;
+      height: 100%;
+    }
+    /* 返回按钮 */
+    .back-btn {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 1000;
+      padding: 10px 20px;
+      background: #42b983;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .back-btn:hover {
+      background: #3aa876;
+    }
+    /* 工具栏 */
+    .toolbar {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+      display: flex;
+      gap: 10px;
+    }
+    .toolbar button {
+      padding: 10px 15px;
+      background: #42b983;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .toolbar button:hover {
+      background: #3aa876;
+    }
+    /* 加载提示 */
+    .loading {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 18px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <a href="/" class="back-btn">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M19 12H5M12 19l-7-7 7-7"/>
+    </svg>
+    返回首页
+  </a>
+  <div class="toolbar">
+    <button onclick="fit()">适应屏幕</button>
+    <button onclick="toggleAll(true)">全部展开</button>
+    <button onclick="toggleAll(false)">全部折叠</button>
+  </div>
+  <div class="loading" id="loading">正在加载思维导图...</div>
+  <svg id="mindmap"></svg>
+
+  <!-- Markmap -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/markmap-view@0.15.4/dist/browser/index.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/markmap-lib@0.15.4/dist/browser/index.js"></script>
+
+  <script>
+    const { Transformer, Markmap } = markmap;
+
+    // 转换原始 Markdown 为 Markmap 兼容格式
+    function convertToMarkmapFormat(content) {
+      let lines = content.split('\n');
+      let result = [];
+      
+      for (let line of lines) {
+        // 跳过空行
+        if (line.trim() === '') {
+          continue;
+        }
+        
+        // 跳过代码块
+        if (line.trim().startsWith('```')) {
+          continue;
+        }
+        
+        // 转换 |- 为 - （处理缩进）
+        if (line.match(/^(\s*)\|-/)) {
+          line = line.replace(/^(\s*)\|-/, '$1-');
+        } else if (line.match(/^(\s*)\|\s*-\s*/)) {
+          // 处理 | - 格式（子列表）
+          line = line.replace(/^(\s*)\|\s*-\s*/, '$1  - ');
+        }
+        
+        result.push(line);
+      }
+      
+      return result.join('\n');
+    }
+
+    // 加载并渲染思维导图
+    async function loadMindmap() {
+      try {
+        const response = await fetch('java-concurrency-mindmap-complete.md');
+        let content = await response.text();
+        
+        // 转换格式
+        content = convertToMarkmapFormat(content);
+        
+        document.getElementById('loading').style.display = 'none';
+        
+        const transformer = new Transformer();
+        const { root } = transformer.transform(content);
+        
+        const mm = new Markmap('#mindmap', null, {
+          duration: 500,
+          maxWidth: 300,
+          color: (node) => {
+            const colors = ['#42b983', '#ff9f43', '#54a0ff', '#5f27cd', '#00d2d3', '#ff6b6b'];
+            return colors[node.state.path.length % colors.length];
+          }
+        });
+        
+        mm.setData(root);
+        mm.fit();
+        
+        window.markmapInstance = mm;
+      } catch (error) {
+        document.getElementById('loading').textContent = '加载失败: ' + error.message;
+        console.error(error);
+      }
+    }
+
+    // 适应屏幕
+    function fit() {
+      if (window.markmapInstance) {
+        window.markmapInstance.fit();
+      }
+    }
+
+    // 展开/折叠全部
+    function toggleAll(expand) {
+      if (window.markmapInstance) {
+        const { state } = window.markmapInstance;
+        if (state) {
+          function toggle(node) {
+            node.payload = node.payload || {};
+            node.payload.fold = expand ? 0 : 1;
+            if (node.children) {
+              node.children.forEach(toggle);
+            }
+          }
+          toggle(state.data);
+          window.markmapInstance.setData(state.data);
+        }
+      }
+    }
+
+    // 页面加载完成后执行
+    loadMindmap();
+  </script>
+</body>
+</html>
