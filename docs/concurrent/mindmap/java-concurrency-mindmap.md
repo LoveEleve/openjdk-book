@@ -24,7 +24,7 @@
     var Transformer = markmap.Transformer;
     var Markmap = markmap.Markmap;
 
-    fetch('concurrent/mindmap/java-concurrency-mindmap-data.md')
+    fetch('/docs/concurrent/mindmap/java-concurrency-mindmap-data.md')
       .then(function(r) { return r.text(); })
       .then(function(content) {
         var transformer = new Transformer();
