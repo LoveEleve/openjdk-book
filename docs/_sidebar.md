@@ -1,5 +1,8 @@
 * [首页](README.md)
 
+* 思维导图
+  * [Java并发编程思维导图](concurrent/mindmap/java-concurrency-mindmap.md)
+
 * 并发编程学习之路
   * [Java内存模型浅析](concurrent/Java内存模型浅析/Java内存模型浅析.md)
   * [java线程原理](concurrent/java线程原理/java线程原理.md)
