@@ -1,5 +1,9 @@
 * [首页](README.md)
 
+* **思维导图**
+  * [Java并发编程思维导图](java-concurrency-mindmap.html)
+  * [Java并发编程文档](java-concurrency-mindmap-complete.md)
+
 * 并发编程学习之路
   * [高并发容器](docs/concurrent/高并发容器/高并发容器.md)
   * [synchronized](#synchronized)
