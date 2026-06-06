@@ -1,0 +1,19 @@
+分析当前项目 /data/workspace/LoveEleve.github.io 的完整现状，重点：
+
+## 任务1：项目现状梳理
+输出当前项目结构清单（哪些文件在、各自作用）。表格形式。
+
+## 任务2：修复搜索功能 BUG 以及其他可能潜在的BUG
+右下角全文搜索（Ctrl+K）无法使用。分析 docs/assets/common.js 中的搜索相关代码：
+- loadSearchIndex / buildSearchIndex 函数的路径解析逻辑
+- 检查是否正确读取 _sidebar.md 中的链接来构建索引
+- 检查 fetch 请求的路径是否正确（特别关注 basePath 是否参与路径拼接）
+- 修复问题并提交
+
+## 任务3：模版化评估
+给出模版化的修改清单：如果要基于此项目搭建另一个技术博客，需要改哪些文件、哪些行。
+
+## 任务4：优化建议
+给出当前项目可以优化的地方，你是一个有洁癖的技术人员,不管什么建议都可以提出
+
+只分析问题，不要随意删除功能代码。输出文档到/data/workspace/LoveEleve.github.io/txt中
