@@ -30,6 +30,7 @@
     code, pre, .token { font-family: var(--code-font) !important; }
 
     /* ===== 侧边栏箭头统一 ===== */
+    /* 隐藏插件原生 folder-button 和 a 的伪元素 */
     .sidebar-nav .folder-button,
     .sidebar-nav .folder-button::before,
     .sidebar-nav .folder-button::after,
@@ -42,24 +43,35 @@
       background: none !important;
     }
 
-    /* 改造 sidebar-collapse 插件的箭头：border 三角 → 文字 ▶ */
-    .sidebar-nav ul:not(.app-sub-sidebar) > li:not(.file)::before {
-      display: block !important;
-      content: "▶" !important;
-      position: absolute !important;
-      left: -20px !important;
-      top: 10px !important;
-      width: auto !important;
-      height: auto !important;
-      border: none !important;
-      font-size: 8px !important;
-      color: #666 !important;
-      transform: rotate(0deg) !important;
-      transition: transform 0.15s ease !important;
-      line-height: 1 !important;
+    /* 给有子菜单的 li 加上 ▶（不依赖 sidebar-collapse 插件的 .file 类） */
+    .sidebar-nav li:has(> ul) {
+      position: relative !important;
     }
-    .sidebar-nav ul:not(.app-sub-sidebar) > li.open::before {
+    .sidebar-nav li:has(> ul)::before {
+      content: "▸" !important;
+      position: absolute !important;
+      left: 2px !important;
+      top: 10px !important;
+      font-size: 10px !important;
+      color: #999 !important;
+      line-height: 1 !important;
+      transition: transform 0.15s ease !important;
+      pointer-events: none !important;
+    }
+    .sidebar-nav li.open::before {
       transform: rotate(90deg) !important;
+    }
+
+    /* 子项缩进留出箭头空间 */
+    .sidebar-nav li:has(> ul) > a,
+    .sidebar-nav li:has(> ul) > strong {
+      padding-left: 18px !important;
+    }
+
+    /* 阻止 sidebar-collapse 插件把子菜单缩起来（保持 sidebarDisplayLevel: 0 的语义） */
+    .sidebar-nav li.collapse > .app-sub-sidebar,
+    .sidebar-nav li.collapse > ul {
+      display: block !important;
     }
 
     /* ===== Hero 区域 ===== */
