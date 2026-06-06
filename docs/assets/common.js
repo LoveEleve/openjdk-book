@@ -4,10 +4,7 @@
    包含：主题切换 / 极简风格 / docsify 配置 / 插件系统
    
    页面特有功能通过 window.__blogHooks 注册：
-   - __blogHooks.drawioRenderer : 自定义 drawio 处理器
-   - __blogHooks.afterDoneEach  : doneEach 后的附加处理
-   - __blogHooks.afterReady     : ready 后的附加处理
-   - __blogHooks.pageConfig     : 页面专属配置覆盖
+   - __blogHooks.pageConfig : 页面专属配置覆盖
    ============================================================ */
 
 (function () {
@@ -161,20 +158,6 @@
           var raw = (lang == null ? '' : String(lang)).trim();
           var first = raw ? raw.split(/\s+/)[0] : '';
           var normalized = (first || '').toLowerCase();
-
-          // Draw.io 基础支持（docs 可扩展更多模式）
-          if (normalized === 'drawio') {
-            if (window.drawioConverter) {
-              return window.drawioConverter(code);
-            }
-            return '<div class="drawio-code">' + code + '</div>';
-          }
-
-          // 委托给页面自定义渲染器（如 drawio-btn / excalidraw）
-          if (hooks.drawioRenderer) {
-            var custom = hooks.drawioRenderer(code, lang, normalized);
-            if (custom !== undefined) return custom;
-          }
 
           var fallback = (!normalized || normalized === 'text' || normalized === 'plaintext'
             || normalized === 'plain-text' || normalized.indexOf('plain') === 0);
@@ -471,29 +454,6 @@
           try { zoomInstance.detach(); } catch (e) {}
           if (imgs.length) zoomInstance.attach(imgs);
           ensureImageZoomDelegation();
-        }
-
-        /* ---------- Draw.io 图表增强（基础版） ---------- */
-        function enhanceDrawioElements() {
-          document.querySelectorAll('.drawio-diagram svg').forEach(function (svg) {
-            var container = svg.closest('.drawio-container');
-            if (!container) return;
-            if (container.querySelector('.drawio-edit-btn')) return;
-            var xmlEncoded = container.getAttribute('data-drawio-xml-enc') || '';
-            if (!xmlEncoded) return;
-            var editBtn = document.createElement('button');
-            editBtn.className = 'drawio-edit-btn';
-            editBtn.textContent = '用 Draw.io 编辑';
-            editBtn.onclick = function (e) {
-              e.stopPropagation();
-              var xml = decodeURIComponent(xmlEncoded);
-              var blob = new Blob([xml], { type: 'application/xml' });
-              var url = URL.createObjectURL(blob);
-              window.open('https://app.diagrams.net/?data=' + encodeURIComponent(blob), '_blank');
-              setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
-            };
-            container.appendChild(editBtn);
-          });
         }
 
         /* ---------- 页面元信息卡片 ---------- */
@@ -1249,23 +1209,12 @@
             renderOrUpdateGiscus(getGiscusTerm(vm));
           }
 
-          // Draw.io 画图增强
-          setTimeout(function () { enhanceDrawioElements(); }, 100);
-
           // 图片缩放：延迟重绑（某些插件在 doneEach 后改 DOM）
           if (zoomBindTimer) clearTimeout(zoomBindTimer);
           zoomBindTimer = setTimeout(function () { bindZoomToImages(); }, 200);
           if (zoomBindTimer2) clearTimeout(zoomBindTimer2);
           zoomBindTimer2 = setTimeout(function () { bindZoomToImages(); }, 800);
-
-          // 页面专属扩展点
-          if (hooks.afterDoneEach) hooks.afterDoneEach(vm, hook);
         });
-
-        // 页面专属扩展点
-        if (hooks.afterReady) {
-          hook.ready(function () { hooks.afterReady(vm, hook); });
-        }
       }
     ]
   }, pageConfig);
