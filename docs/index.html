@@ -36,6 +36,12 @@
     .sidebar-nav a::before,
     .sidebar-nav a::after { display: none !important; }
 
+    /* 干掉 docsify-themeable 的 background-image 渐变双箭头 */
+    .sidebar-nav li > a[href^="/"]:not([href*="?id="]),
+    .sidebar-nav li > a[href^="#/"]:not([href*="?id="]) {
+      background: none !important;
+    }
+
     /* 改造 sidebar-collapse 插件的箭头：border 三角 → 文字 ▶ */
     .sidebar-nav ul:not(.app-sub-sidebar) > li:not(.file)::before {
       display: block !important;
