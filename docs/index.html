@@ -30,48 +30,30 @@
     code, pre, .token { font-family: var(--code-font) !important; }
 
     /* ===== 侧边栏箭头统一 ===== */
-    /* 隐藏插件原生 folder-button 和 a 的伪元素 */
     .sidebar-nav .folder-button,
     .sidebar-nav .folder-button::before,
     .sidebar-nav .folder-button::after,
+    .sidebar-nav li::before,
+    .sidebar-nav li::after,
     .sidebar-nav a::before,
     .sidebar-nav a::after { display: none !important; }
 
-    /* 干掉 docsify-themeable 的 background-image 渐变双箭头 */
-    .sidebar-nav li > a[href^="/"]:not([href*="?id="]),
-    .sidebar-nav li > a[href^="#/"]:not([href*="?id="]) {
-      background: none !important;
-    }
-
-    /* 给有子菜单的 li 加上 ▶（不依赖 sidebar-collapse 插件的 .file 类） */
-    .sidebar-nav li:has(> ul) {
+    .sidebar-nav > ul > li:has(ul) > a,
+    .sidebar-nav > ul > li:has(ul):not(:has(a)) {
       position: relative !important;
-    }
-    .sidebar-nav li:has(> ul)::before {
-      content: "▸" !important;
-      position: absolute !important;
-      left: 2px !important;
-      top: 10px !important;
-      font-size: 10px !important;
-      color: #999 !important;
-      line-height: 1 !important;
-      transition: transform 0.15s ease !important;
-      pointer-events: none !important;
-    }
-    .sidebar-nav li.open::before {
-      transform: rotate(90deg) !important;
-    }
-
-    /* 子项缩进留出箭头空间 */
-    .sidebar-nav li:has(> ul) > a,
-    .sidebar-nav li:has(> ul) > strong {
       padding-left: 18px !important;
     }
-
-    /* 阻止 sidebar-collapse 插件把子菜单缩起来（保持 sidebarDisplayLevel: 0 的语义） */
-    .sidebar-nav li.collapse > .app-sub-sidebar,
-    .sidebar-nav li.collapse > ul {
-      display: block !important;
+    .sidebar-nav > ul > li:has(ul) > a::before,
+    .sidebar-nav > ul > li:has(ul):not(:has(a))::before {
+      content: "▶" !important;
+      position: absolute !important;
+      left: 0 !important;
+      top: 50% !important;
+      transform: translateY(-50%) !important;
+      font-size: 10px !important;
+      color: #666 !important;
+      width: 12px !important;
+      text-align: center !important;
     }
 
     /* ===== Hero 区域 ===== */
