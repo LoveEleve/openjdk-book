@@ -712,9 +712,20 @@
             var id = href.slice(1);
             var el = document.getElementById(id);
             if (el) {
+              var prevId = null;
+              var prevTop = Infinity;
+              links.forEach(function (lk) {
+                var lid = lk.getAttribute('href').slice(1);
+                var lel = document.getElementById(lid);
+                if (!lel) return;
+                var rect = lel.getBoundingClientRect();
+                if (rect.top >= 0 && rect.top < prevTop) { prevId = lid; prevTop = rect.top; }
+              });
+              if (prevId && prevId !== id) {
+                tocJumpStack.push(prevId);
+                setTocBackState();
+              }
               el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              tocJumpStack.push(id);
-              setTocBackState();
             }
           };
           body.addEventListener('click', tocLinkClickHandler);
