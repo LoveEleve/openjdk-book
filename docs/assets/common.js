@@ -142,7 +142,7 @@
   var pageConfig = hooks.pageConfig || {};
 
   window.$docsify = Object.assign({
-    name: 'LoveEleve',
+    name: '',
     repo: 'https://github.com/LoveEleve/LoveEleve.github.io',
     loadSidebar: false,
     subMaxLevel: 3,
@@ -809,6 +809,8 @@
         }
 
         function scheduleTocRender(vm) {
+          var path = (vm && vm.route && vm.route.path) ? vm.route.path : ((location.hash || '#/').split('?')[0] || '#/');
+          if (path === '#/' || path === '#/README') return;
           if (tocRenderTimer) clearTimeout(tocRenderTimer);
           tocRenderTimer = setTimeout(function () {
             tocRenderTimer = null;
