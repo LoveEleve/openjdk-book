@@ -33,28 +33,27 @@
     .sidebar-nav .folder-button,
     .sidebar-nav .folder-button::before,
     .sidebar-nav .folder-button::after,
-    .sidebar-nav li::before,
-    .sidebar-nav li::after,
     .sidebar-nav a::before,
     .sidebar-nav a::after { display: none !important; }
 
-    .sidebar-nav > ul > li:has(ul) > a,
-    .sidebar-nav > ul > li:has(ul):not(:has(a)) {
-      position: relative !important;
-      padding-left: 18px !important;
-    }
-    .sidebar-nav > ul > li:has(ul) > a::before,
-    .sidebar-nav > ul > li:has(ul):not(:has(a))::before {
-      display: inline !important;
+    /* 改造 sidebar-collapse 插件的箭头：border 三角 → 文字 ▶ */
+    .sidebar-nav ul:not(.app-sub-sidebar) > li:not(.file)::before {
+      display: block !important;
       content: "▶" !important;
       position: absolute !important;
-      left: 0 !important;
-      top: 50% !important;
-      transform: translateY(-50%) !important;
-      font-size: 10px !important;
+      left: -20px !important;
+      top: 10px !important;
+      width: auto !important;
+      height: auto !important;
+      border: none !important;
+      font-size: 8px !important;
       color: #666 !important;
-      width: 12px !important;
-      text-align: center !important;
+      transform: rotate(0deg) !important;
+      transition: transform 0.15s ease !important;
+      line-height: 1 !important;
+    }
+    .sidebar-nav ul:not(.app-sub-sidebar) > li.open::before {
+      transform: rotate(90deg) !important;
     }
 
     /* ===== Hero 区域 ===== */
