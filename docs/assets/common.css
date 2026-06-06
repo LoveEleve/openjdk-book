@@ -643,21 +643,22 @@ code, pre, .token,
   display: block;
   opacity: 0.8;
   transition: transform 120ms ease;
+  transform: rotate(90deg);
 }
-.toc-group.is-collapsed .toc-caret { transform: rotate(-90deg); }
+.toc-group.is-collapsed .toc-caret { transform: none; }
 .toc-group-link { flex: 1; min-width: 0; }
 
 .toc-children {
-  margin: 4px 0 0 11px;
-  padding-left: 8px;
+  margin: 2px 0 0 4px;
+  padding-left: 6px;
   border-left: 1px dashed rgba(0, 0, 0, 0.10);
 }
 .toc-group.is-collapsed .toc-children { display: none; }
 
 .toc-l1 { padding-left: 0; font-weight: 900; }
-.toc-l2 { padding-left: 0; }
-.toc-l3 { padding-left: 12px; }
-.toc-l4 { padding-left: 22px; opacity: 0.95; }
+.toc-l2 { padding-left: 0; font-weight: 600; }
+.toc-l3 { padding-left: 6px; }
+.toc-l4 { padding-left: 14px; opacity: 0.92; }
 
 @media (min-width: 1024px) {
   .toc-aside { display: block; }

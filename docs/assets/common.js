@@ -577,6 +577,7 @@
         var tocObs = null;
         var scrollTimer = null;
         var tocMobileBound = false;
+        var tocLinkClickHandler = null;
         var TOC_BODY_CLASS = 'has-toc-aside';
 
         function buildTocItems(section) {
@@ -677,6 +678,8 @@
                 '<div class="toc-children">';
             } else if (currentGroup) {
               html += '<a class="toc-body-a toc-l' + item.level + '" href="#' + item.id + '">' + item.text + '</a>';
+            } else {
+              html += '<a class="toc-body-a toc-l' + item.level + '" href="#' + item.id + '">' + item.text + '</a>';
             }
           });
           if (currentGroup) html += '</div></div>';
@@ -697,6 +700,24 @@
               if (group) group.classList.toggle('is-collapsed');
             };
           });
+
+          // 绑定 TOC 链接点击 —— 阻止 hash 路由导航，改用 scrollIntoView 平滑滚动
+          if (tocLinkClickHandler) body.removeEventListener('click', tocLinkClickHandler);
+          tocLinkClickHandler = function (e) {
+            var a = e.target.closest ? e.target.closest('.toc-body-a') : null;
+            if (!a || !body.contains(a)) return;
+            var href = a.getAttribute('href');
+            if (!href || href.charAt(0) !== '#') return;
+            e.preventDefault();
+            var id = href.slice(1);
+            var el = document.getElementById(id);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              tocJumpStack.push(id);
+              setTocBackState();
+            }
+          };
+          body.addEventListener('click', tocLinkClickHandler);
 
           // 滚动高亮（节流）
           var activeLink = null;
