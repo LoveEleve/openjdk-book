@@ -89,48 +89,88 @@
     .home-section .section-content li { margin: 8px 0; padding-left: 16px; position: relative; }
     .home-section .section-content li::before { content: "•"; position: absolute; left: 0; color: var(--theme-color); }
 
-    /* ===== Docs 特有代码块风格（扁平化，无三色点） ===== */
+    /* ===== Code Blocks — GitHub / Vercel / Tailwind inspired ===== */
     pre[data-lang] {
-      background: #fafafa !important;
-      border: 1px solid #e8e8e8 !important;
-      border-left: 4px solid var(--theme-color, #42b983) !important;
-      border-radius: 6px !important;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.04) !important;
-      padding: 2.8em 0 0 !important;
+      background: #f6f8fa !important;
+      border: 1px solid #d0d7de !important;
+      border-radius: 8px !important;
+      box-shadow: none !important;
+      padding: 2.5em 0 0 !important;
       overflow: hidden;
       margin: 1.5em 0 !important;
+      transition: box-shadow 0.2s ease;
+    }
+    pre[data-lang]:hover {
+      box-shadow: 0 3px 12px rgba(0,0,0,0.07) !important;
     }
     html[data-theme="dark"] pre[data-lang] {
-      background: #1a1a2e !important;
-      border-color: #2d2d44 !important;
-      border-left-color: var(--theme-color, #42b983) !important;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.3) !important;
+      background: #0d1117 !important;
+      border-color: #30363d !important;
+    }
+    html[data-theme="dark"] pre[data-lang]:hover {
+      box-shadow: 0 3px 16px rgba(0,0,0,0.4) !important;
     }
     pre[data-lang] code { background: transparent; border: 0; padding: 0; }
     .fold-wrap { background: transparent !important; }
-    .fold-gutter { border-right-color: rgba(0,0,0,0.06) !important; background: rgba(0,0,0,0.02) !important; }
-    html[data-theme="dark"] .fold-gutter { border-right-color: rgba(255,255,255,0.08) !important; background: rgba(255,255,255,0.02) !important; }
+    .fold-gutter { border-right-color: rgba(0,0,0,0.05) !important; background: rgba(0,0,0,0.01) !important; }
+    html[data-theme="dark"] .fold-gutter { border-right-color: rgba(255,255,255,0.06) !important; background: rgba(255,255,255,0.01) !important; }
 
-    /* 代码工具栏：扁平化 */
+    /* Code toolbar — distinct header with macOS dots */
     .code-tools {
-      background: transparent !important;
-      border-bottom: 1px solid rgba(0,0,0,0.06) !important;
+      background: #e9ecf1 !important;
+      border-bottom: 1px solid #d0d7de !important;
       backdrop-filter: none !important;
       -webkit-backdrop-filter: none !important;
-      height: 2.6em !important;
-      padding: 0 12px !important;
+      height: 2.5em !important;
+      padding: 0 14px !important;
+      border-radius: 8px 8px 0 0 !important;
     }
-    html[data-theme="dark"] .code-tools { background: transparent !important; border-bottom-color: rgba(255,255,255,0.08) !important; }
-    .code-tools-left { color: #666 !important; font-weight: 600; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; font-family: var(--code-font); }
-    html[data-theme="dark"] .code-tools-left { color: #888 !important; }
-    .code-tools-left .dot { display: none !important; }
+    html[data-theme="dark"] .code-tools {
+      background: #161b22 !important;
+      border-bottom-color: #30363d !important;
+    }
+    .code-tools-left {
+      color: #57606a !important;
+      font-weight: 600;
+      font-size: 11.5px;
+      letter-spacing: 0.3px;
+      text-transform: lowercase !important;
+      font-family: var(--code-font);
+    }
+    html[data-theme="dark"] .code-tools-left { color: #8b949e !important; }
+    .code-tools-left .dot {
+      display: inline-block !important;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1);
+    }
+    html[data-theme="dark"] .code-tools-left .dot {
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3);
+    }
     .tool-btn {
-      color: #555; border: 1px solid #ddd; background: #fff;
-      border-radius: 4px; padding: 3px 10px; font-size: 11px; font-weight: 500; transition: all 0.15s ease;
+      color: #57606a;
+      border: 1px solid #d0d7de;
+      background: #fff;
+      border-radius: 6px;
+      padding: 3px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      transition: all 0.15s ease;
     }
-    html[data-theme="dark"] .tool-btn { color: #aaa; border-color: #444; background: #2a2a3e; }
-    .tool-btn:hover { background: #f0f0f0; border-color: #ccc; }
-    html[data-theme="dark"] .tool-btn:hover { background: #33334a; border-color: #555; }
+    html[data-theme="dark"] .tool-btn {
+      color: #c9d1d9;
+      border-color: #30363d;
+      background: #21262d;
+    }
+    .tool-btn:hover {
+      background: #f3f4f6;
+      border-color: #afb8c1;
+    }
+    html[data-theme="dark"] .tool-btn:hover {
+      background: #30363d;
+      border-color: #6e7681;
+    }
 
 
   </style>
