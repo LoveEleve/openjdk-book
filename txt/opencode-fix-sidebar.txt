@@ -1,23 +1,21 @@
-两个任务：
+继续完善项目，三个任务按顺序执行，每完成一个提交一次：
 
-## 任务1: 继续修复搜索 — 目前仍不可用
+## 任务1: 验证搜索 + 修复残留问题
+- 确认搜索功能完全可用：Ctrl+K 打开面板、点击按钮打开、输入关键词有结果、点击结果可跳转
+- 检查去掉侧边栏后是否有 JS 运行时错误（getElementById 返回 null 等）
+- 修复上一篇/下一篇导航——当前从 .markdown-section 的链接获取，但首页和文章页的链接来源不同，需要保证准确性
+- 检查首页 Hero 区域在去掉 sidebar 后宽度是否正常
 
-先检查当前线上 common.js 的实际搜索逻辑：
-- Ctrl+K 能否打开搜索面板
-- 点击右下角搜索按钮能否打开搜索面板
-- 输入关键字后是否有结果
+## 任务2: 侧边栏内容回归
+侧边栏虽然隐藏了，但 _sidebar.md 作为搜索索引的链接来源仍然重要。把 _sidebar.md 恢复为完整的文章树（之前删成了只有首页）。根目录和 docs/ 下的 _sidebar.md 都要改。
 
-如果还有问题，深入排查 buildSearchIndex / loadSearchIndex / performSearch 完整流程。需要让搜索真正可用。
+搜索的 buildSearchIndex 会 fetch _sidebar.md 来获取导航链接，所以 _sidebar.md 里的文章链接决定了搜索能搜到多少内容。
 
-## 任务2: 去掉左边侧边栏
+## 任务3: 模板化清理
+作为技术博客模板，清理掉当前博客的具体内容痕迹：
+- README.md 中的 Hero 区域个人信息
+- index.html / docs/index.html 中的 title
+- common.js 中的 giscus repo 配置（改成占位符）
+- sitemap.xml 改为只保留首页
 
-既然侧边栏只剩"首页"一个链接，直接关掉让内容区全宽展示更好。
-
-具体改动:
-1. docs/index.html 和 index.html 中设置 `loadSidebar: false`
-2. 检查 common.js 中依赖侧边栏 .sidebar-nav 的代码（renderBreadcrumbAndNav 的上一篇/下一篇、buildSearchIndex 的链接扫描等），改为从 .markdown-section 或 _sidebar.md 文件内容中获取链接
-3. docs/index.html 和 common.css 中删除侧边栏相关 CSS 样式（sidebar-width、sidebar 背景色等）
-4. common.css 中 content-max-width 从小宽度改为更舒适的全宽值（如 900px 或 max-width: 100%）
-5. 暗色模式下也不再需要 sidebar 样式
-
-改完验证搜索功能，然后提交推送。
+每个任务完成立即 git commit + push。
