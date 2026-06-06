@@ -1,9 +1,5 @@
 # 一：深入理解Java内存模型
 
-<iframe src="https://www.processon.com/embed/69f5a73ac740e82a3221ef56"
-        width="100%" height="500" frameborder="0" scrolling="no">
-</iframe>
-
 ## 1. 前置知识
 
 * 并发编程模型
