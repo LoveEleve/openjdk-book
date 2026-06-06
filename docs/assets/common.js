@@ -457,40 +457,6 @@
           ensureImageZoomDelegation();
         }
 
-        /* ---------- 页面元信息卡片 ---------- */
-        function renderPageMeta(vm) {
-          try {
-            var section = document.querySelector('.markdown-section');
-            if (!section) return;
-            var meta = section.querySelector('#page-meta');
-            if (!meta) {
-              meta = document.createElement('div');
-              meta.id = 'page-meta';
-              meta.className = 'page-meta-card';
-              meta.innerHTML =
-                '<div class="page-meta-head"><div class="page-meta-title">本文信息</div></div>' +
-                '<div class="page-meta-body"></div>' +
-                '<div class="page-tip"><b>💡 提示</b>：本文内容仅供学习交流，如有错误欢迎指正。</div>';
-              var h1 = section.querySelector('h1');
-              if (h1 && h1.nextSibling) { section.insertBefore(meta, h1.nextSibling); }
-              else { section.insertBefore(meta, section.firstChild); }
-            }
-            var body = meta.querySelector('.page-meta-body');
-            if (!body) return;
-            var content = section.cloneNode(true);
-            content.querySelectorAll('#page-meta, #giscus, pre, code, .code-tools').forEach(function (el) { el.remove(); });
-            var text = (content.textContent || '').replace(/\s+/g, ' ').trim();
-            var charCount = text.length;
-            var wordCount = charCount ? charCount / 2 : 0;
-            var readTime = Math.max(1, Math.ceil(wordCount / 300));
-            body.innerHTML =
-              '<b>📝 字数</b> ' + charCount.toLocaleString() +
-              ' <span class="page-meta-sep">·</span>' +
-              ' <b>⏱ 阅读</b> ~' + readTime + ' 分钟' +
-              ' <span class="page-meta-sep">·</span>' +
-              ' <b>🕐 更新</b> ' + new Date().toISOString().split('T')[0];
-          } catch (e) {}
-        }
 
         /* ---------- 搜索索引系统 ---------- */
         var SEARCH_INDEX_KEY = 'docsify:search-index';
