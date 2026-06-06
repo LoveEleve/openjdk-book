@@ -519,15 +519,29 @@
         function buildSearchIndex(vm) {
           if (searchIndexPromises._building) return searchIndexPromises._building;
           var sidebarEl = document.querySelector('.sidebar-nav');
-          if (!sidebarEl) return Promise.resolve({});
-          var links = Array.from(sidebarEl.querySelectorAll('a[href]'));
+          var contentEl = document.querySelector('.markdown-section');
+          var seen = {};
+          var linkEls = [];
+          [sidebarEl, contentEl].forEach(function (root) {
+            if (!root) return;
+            Array.from(root.querySelectorAll('a[href]')).forEach(function (a) {
+              var h = a.getAttribute('href') || '';
+              if (!h || seen[h]) return;
+              seen[h] = true;
+              linkEls.push(a);
+            });
+          });
+          if (!linkEls.length) return Promise.resolve({});
           var bp = window.$docsify && window.$docsify.basePath;
           var base = (typeof bp === 'string') ? bp : '';
 
-          var fetches = links.map(function (a) {
+          var fetches = linkEls.map(function (a) {
             var rawHref = a.getAttribute('href') || '';
-            if (rawHref.indexOf('#') > -1) return null;
-            var path = normalizeSlug(rawHref);
+            if (!rawHref || rawHref === '#') return null;
+            if (rawHref.indexOf('#') === 0 && rawHref.indexOf('#/') !== 0) return null;
+            var cleaned = rawHref.replace(/^#\//, '');
+            if (!cleaned || /^(https?:)?\/\//.test(cleaned)) return null;
+            var path = normalizeSlug(cleaned);
             var url = base + path.replace(/^\//, '');
             return fetch(url, { headers: { 'cache-control': 'max-age=0' } })
               .then(function (r) {
@@ -911,7 +925,7 @@
             '<div class="fts-panel">' +
               '<div class="fts-head">' +
                 '<input class="fts-input" id="fts-input" type="search" placeholder="全文搜索…" autocomplete="off" spellcheck="false" />' +
-                '<button class="fts-close" aria-label="关闭">×</button>' +
+                '<button id="fts-close" class="fts-close" aria-label="关闭">×</button>' +
               '</div>' +
               '<div class="fts-meta"><span id="fts-count"></span><div class="fts-meta-right"><span class="fts-link" id="fts-rebuild">重新索引</span></div></div>' +
               '<div class="fts-results" id="fts-results"></div>' +
@@ -1038,6 +1052,13 @@
           if (ftsBound) return;
           ftsBound = true;
           ensureFtsModal();
+
+          var searchBtn = document.getElementById('search-toggle');
+          if (searchBtn) searchBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            ftsVisible ? closeFts() : (openFts(), loadSearchIndex(vm));
+          });
+
           var input = document.getElementById('fts-input');
           if (input) input.addEventListener('input', function () { performSearch(input.value); });
           document.getElementById('fts-close').addEventListener('click', closeFts);
