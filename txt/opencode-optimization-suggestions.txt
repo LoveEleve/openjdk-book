@@ -1,0 +1,165 @@
+================================================================================
+  任务4：优化建议 — 洁癖级代码审查
+================================================================================
+
+一、架构层面
+────────────────────────────────────────────────────────────────────────────
+
+1. 【高】双入口导致的维护分裂
+   问题：index.html (根) 和 docs/index.html 分别维护两套内联脚本和样式。
+        功能差异：根有书签+分析系统，docs/ 有 Hero 区域。
+        修改任何功能需同步两个文件。
+   建议：统一为单入口 + 单模板。将差异逻辑移到 common.js 中按条件执行
+         (如根据 document.location.pathname 判断)。
+
+2. 【高】_sidebar.md 仅含首页链接，内容导航完全依赖 README.md 的硬编码链接
+   问题：侧边栏功能形同虚设。用户进入文章页后侧边栏仅显示"首页"一项，
+         无法在侧边栏浏览其他文章。文章导航完全依赖"上一篇/下一篇"。
+   建议：将完整文章树写入 _sidebar.md，让 docsify 自动生成可导航侧边栏。
+         之后 README.md 可以只保留 Hero 区域 + 最新文章摘要。
+
+3. 【中】搜索索引依赖页面 DOM
+   问题：buildSearchIndex 通过扫描 .sidebar-nav + .markdown-section 获取链接。
+         这意味着用户必须先在首页加载一次，侧边栏/内容中包含所有链接，
+         搜索才能建立完整索引。如果用户直接访问某篇文章 URL（非首页），
+         页面中可能只有该文章的链接，索引不完整。
+   建议：在 _sidebar.md 中写入完整文章树后，搜索改为从 _sidebar.md 读取索引
+         树，或者使用独立的 links.json 文件。(更优雅的方案：预生成搜索索引
+         的 JSON 文件，页面加载时直接 fetch 该 JSON)
+
+4. 【中】Giscus 主题切换强制重建 iframe
+   问题：common.js:1162-1171 在主题切换时调用 rerenderGiscus，删除 iframe 重建。
+         这导致用户切换主题后评论重新加载，滚动位置丢失。
+   建议：使用 giscus 的 postMessage API 发送 setConfig 更新 theme 即可，
+         无需重建 iframe（现有代码在 renderOrUpdateGiscus 中已有 postMessage
+         逻辑但仅当 iframe 存在时触发，而 rerenderGiscus 删除了 iframe）。
+
+5. 【中】无构建工具，手动维护一个 1232 行 JS 和 1432 行 CSS 文件
+   问题：所有功能混在一个 IIFE 中，迭代困难。
+   建议：引入构建工具（如 Rollup/ESBuild）将代码拆分为模块文件，
+         构建后合并输出。CSS 可拆分为独立层文件，构建时合并。
+
+二、代码质量层面
+────────────────────────────────────────────────────────────────────────────
+
+6. 【高】全局命名污染风险
+   问题：主题系统使用 window.__docsifyTheme 和 window.__docsifyStyle，
+         根页面脚本使用了 window.bookmarks 和 window.readingAnalytics。
+         如果未来引入第三方库可能冲突。
+   建议：将所有自定义 API 集中到一个命名空间下，如 window.__blog = {}。
+
+7. 【中】大量 try/catch 捕获了所有异常但无日志
+   问题：代码中有 12+ 处 `try { ... } catch (e) {}` 空捕获。
+        例如 renderPageMeta (line 492)、renderBreadcrumbAndNav (line 868)、
+        renderHeadingLinks (line 895)、scheduleTocRender (line 764) 等。
+   建议：开发环境暴露错误便于调试，生产环境静默。可在 common.js 开头判断
+         location.hostname === 'localhost' 控制是否输出错误日志。
+
+8. 【中】Prism 语言包使用 defer 加载，存在竞态
+   问题：index.html:208-212 的 prism-*.min.js 使用 defer 属性。
+        common.js:197 的 safeHighlight 检查 `window.Prism && Prism.languages[lang]`，
+        如果 Prism 语言包尚未加载，代码高亮降级为 escapeHtml。
+        代码块首次渲染后语言包才加载，不会自动重新高亮。
+   建议：移除 defer，或改用 Promises 等待 Prism 就绪后重新高亮。
+
+9. 【中】localStorage 无大小检查
+   问题：搜索索引全量存入 localStorage (key: docsify:search-index:v1)。
+        如果文章数量大（如 100+ 篇），可能突破 localStorage 5MB 限制。
+   建议：添加 try-catch 检查存储容量，失败时降级为不缓存。
+
+10. 【低】函数命名不一致
+    问题：有 renderPageMeta、renderToc、renderBreadcrumbAndNav、
+          renderHeadingLinks、renderOrUpdateGiscus。
+         也有 initInlineFolding、initToolbar。
+         还有 ensureProgressBar、ensureFtsModal、ensureBreadcrumb、ensureTocDom。
+   建议：统一命名规范。renderXxx() 用于渲染函数，initXxx() 用于初始化，
+         ensureXxx() 用于懒加载创建 DOM。
+
+11. 【低】CSS 使用 !important 过多
+    问题：common.css 中有 30+ 处 !important，破坏了样式层叠。
+   建议：通过提高选择器特异性替代 !important。
+
+12. 【低】魔法数字散落
+    问题：代码中硬编码了大量数字，如 setTimeout 延迟值 (50/100/200/350/600/800/1200ms)、
+         INLINE_FOLD_MAX_LINES = 360、搜索结果 limit = 30 等。
+   建议：集中定义为常量对象。
+
+三、功能完善层面
+────────────────────────────────────────────────────────────────────────────
+
+13. 【中】阅读分析系统仅使用 localStorage，用户换设备/浏览器数据丢失
+    建议：如果有后端服务，可对接简单的统计 API（如 Cloudflare Analytics）。
+
+14. 【低】搜索不支持模糊匹配和拼音搜索
+    建议：可集成 lunr.js 或 fuse.js 实现模糊匹配。
+
+15. 【低】代码块行级折叠仅支持 Java/C 风格括号 `{}`
+    问题：Python (缩进)、HTML (标签) 等语言无法正确折叠。
+    建议：按语言类型选择不同的折叠策略，或仅提供手动折叠按钮。
+
+16. 【低】TOC 在小屏上占据底部 FAB 位置，与主题/风格/搜索按钮重叠
+    问题：移动端（<1024px）时，底部同时存在 TOC FAB (bottom:16px)、
+         搜索按钮 (bottom:72px)、主题按钮 (bottom:12px)、风格按钮 (bottom:124px)，
+         可能重叠。
+    建议：合并为单个浮动菜单按钮（...）展开，或使用更好的间距布局。
+
+17. 【低】sitemap.xml 中文章 URL 缺少 .md 后缀
+    问题：sitemap.xml 中 URL 为 `https://loveeleve.github.io/docs/concurrent/.../文章名`
+         缺少 `.md` 或 `.html` 后缀。虽然 docsify 可以通过 hash 路由解析，
+         但不利于 SEO。
+    建议：sitemap.xml 使用完整 hash 路由 URL 或确保服务器正确重定向。
+
+18. 【低】文章更新日期显示当前日期（见 BUG-5）
+    建议：在每篇文章顶部添加 YAML front matter 的 `date` 字段，
+         或从 Git 提交记录中提取修改日期写入模板。
+
+四、安全层面
+────────────────────────────────────────────────────────────────────────────
+
+19. 【中】innerHTML 使用未做严格过滤
+    问题：TOC 构建 (buildTocItems / renderToc) 使用 heading.textContent 拼接
+         innerHTML (line 668-681)，理论上 textContent 已转义。但搜索结果中
+         (line 964-969) 使用了 escapeHtml 函数，说明有安全意识但不够全面。
+    建议：统一所有 innerHTML 拼接点使用 escapeHtml 或 DOM API。
+
+20. 【低】giscus 配置中 repoId/categoryId 硬编码
+    问题：虽然不是敏感信息，但这些 ID 是公开仓库的属性。
+        但如果仓库变私有或删除，这些值失效。
+    建议：可接受，此为 giscus 的标准做法。
+
+五、性能层面
+────────────────────────────────────────────────────────────────────────────
+
+21. 【中】medium-zoom 双重 delayed binding
+    问题：common.js:1214-1216 在 doneEach 中设置两个延迟 (200ms + 800ms)
+         重新绑定图片缩放，因为"某些插件在 doneEach 后改 DOM"。
+         如果插件不在 800ms 内完成，图片无法缩放。
+    建议：使用 MutationObserver 监听 .markdown-section 的图片插入，
+         代替固定延迟。
+
+22. 【低】所有 MD 文件全量 fetch 构建搜索索引
+    问题：25 篇文章的搜索索引构建需要 25 个并发 fetch 请求。
+         未来文章数量增加会线性增长首屏加载时间。
+    建议：预生成 search-index.json，一次 fetch 即可获取全量索引。
+
+23. 【低】代码块行级折叠超过 360 行跳过
+    问题：INLINE_FOLD_MAX_LINES = 360，超过此行数的代码块不使用 inline folding，
+         降级为原始 <code> 渲染（但仍保留 rawCode 用于复制）。
+    建议：可接受，大型代码块的行级折叠意义有限。
+
+六、SEO 层面
+────────────────────────────────────────────────────────────────────────────
+
+24. 【中】SPA 站点 SEO 天然不利
+    问题：docsify 是客户端渲染，搜索引擎爬虫可能无法获取完整的文章内容。
+   建议：使用 docsify-server-renderer 进行服务端渲染，或使用 SSG。
+        至少确保每个文章 URL 可以被直接访问（当前可以）。
+
+25. 【低】缺少 Open Graph / Twitter Card meta 标签
+    问题：index.html 和 docs/index.html 都没有 og:title/og:description 等标签，
+         分享到社交媒体会显示不完整信息。
+    建议：添加基本的 OG meta 标签。
+
+26. 【低】缺少 favicon
+    问题：项目没有 favicon.ico 或任何图标文件。
+    建议：添加 favicon。

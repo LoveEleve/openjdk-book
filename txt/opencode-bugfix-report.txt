@@ -1,0 +1,132 @@
+================================================================================
+  任务2：搜索功能 BUG 修复报告 + 其他潜在 BUG
+  文件：docs/assets/common.js
+  修复日期：2026-06-06
+================================================================================
+
+一、搜索功能 BUG 根因分析
+────────────────────────────────────────────────────────────────────────────
+
+【BUG-1 (致命)】buildSearchIndex 跳过所有链接 → 搜索索引永远为空
+  位置：common.js:519-562 (buildSearchIndex 函数，原第 529 行)
+  原代码：
+    if (rawHref.indexOf('#') > -1) return null;
+
+  问题：docsify 的侧边栏/内容链接全部使用 hash 路由格式 `#/path/to/file.md`。
+        `indexOf('#') > -1` 无条件过滤所有含 # 的链接，导致所有页面链接被跳过。
+        => 搜索索引为 {}，用户永远搜不到任何结果。
+
+  修复：
+    if (!rawHref || rawHref === '#') return null;
+    if (rawHref.indexOf('#') === 0 && rawHref.indexOf('#/') !== 0) return null;
+    var cleaned = rawHref.replace(/^#\//, '');
+
+  说明：hash 路由 (`#/path`) 保留并清洗路径；纯锚链接 (`#section`) 正确跳过。
+
+【BUG-2 (致命)】buildSearchIndex 仅扫描侧边栏 → 找不到文章链接
+  位置：common.js:521 (buildSearchIndex 函数)
+  原代码：
+    var sidebarEl = document.querySelector('.sidebar-nav');
+    if (!sidebarEl) return Promise.resolve({});
+    var links = Array.from(sidebarEl.querySelectorAll('a[href]'));
+
+  问题：_sidebar.md 只包含一个链接 `[首页](README.md)`，docsify 生成的侧边栏
+        仅有"首页"一项。25篇文章链接在 README.md 内容 (<details> 区域) 中，
+        而非侧边栏。因此 buildSearchIndex 仅能索引首页内容。
+
+  修复：同时扫描 .sidebar-nav 和 .markdown-section，去重后构建索引。
+        var sidebarEl = document.querySelector('.sidebar-nav');
+        var contentEl = document.querySelector('.markdown-section');
+        var seen = {};
+        var linkEls = [];
+        [sidebarEl, contentEl].forEach(function (root) {
+          if (!root) return;
+          Array.from(root.querySelectorAll('a[href]')).forEach(function (a) {
+            var h = a.getAttribute('href') || '';
+            if (!h || seen[h]) return;
+            seen[h] = true;
+            linkEls.push(a);
+          });
+        });
+
+【BUG-3 (中等)】搜索按钮 #search-toggle 无点击事件，仅 Ctrl+K 可用
+  位置：common.js:1043-1056 (ensureFullTextSearch 函数)
+  问题：页面右下角的搜索按钮 `#search-toggle` 仅在 HTML 中定义，JS 中未注册
+        click 事件监听器。用户点击按钮无任何反应。
+
+  修复：在 ensureFullTextSearch 中添加：
+        var searchBtn = document.getElementById('search-toggle');
+        if (searchBtn) searchBtn.addEventListener('click', function (e) {
+          e.preventDefault();
+          ftsVisible ? closeFts() : (openFts(), loadSearchIndex(vm));
+        });
+
+【BUG-4 (中等)】搜索弹窗关闭按钮无法点击
+  位置：common.js:920 (ensureFtsModal) 和 1056 (ensureFullTextSearch)
+  原代码：
+    // ensureFtsModal 中:
+    '<button class="fts-close" aria-label="关闭">×</button>'
+    // ensureFullTextSearch 中:
+    document.getElementById('fts-close').addEventListener('click', closeFts);
+
+  问题：关闭按钮只有 class="fts-close"，没有 id="fts-close"。
+        getElementById('fts-close') 返回 null，事件监听器注册失败。
+        用户点击关闭按钮无反应（只能通过点击遮罩层关闭）。
+
+  修复：在 HTML 模板中添加 id 属性：
+    '<button id="fts-close" class="fts-close" aria-label="关闭">×</button>'
+
+
+二、其他发现的潜在 BUG
+────────────────────────────────────────────────────────────────────────────
+
+【BUG-5 (低)】renderPageMeta 显示当前日期而非文章实际更新日期
+  位置：common.js:490
+  原代码：
+    ' <b>🕐 更新</b> ' + new Date().toISOString().split('T')[0];
+
+  问题：每次渲染都显示当天的日期（如 2026-06-06），而非文章的实际修改日期。
+        对于历史文章这是一个误导。静态站点无法直接获取 .md 文件的 mtime。
+
+  建议：删除这行，或从构建索引阶段缓存 Last-Modified 响应头。
+        （本次未修复，因为需要额外的 HEAD 请求或修改索引数据结构）
+
+【BUG-6 (低)】renderBreadcrumbAndNav 的上一篇/下一篇导航可能失效
+  位置：common.js:843-854
+  原代码：
+    var sidebarEl = document.querySelector('.sidebar-nav');
+    if (!sidebarEl) { nav.innerHTML = ''; return; }
+    var allLinks = Array.from(sidebarEl.querySelectorAll('a[href]'))
+      .map(...)
+      .filter(function (l) { return l.href && l.href.indexOf('#') !== 0; });
+
+  问题：(1) 与搜索索引相同——仅扫描侧边栏，侧边栏只有首页链接，导致导航缺失。
+        (2) 链接比较逻辑：sidebar href 为 `#/concurrent/...`，经 `split('#')[0]`
+            处理后变为空字符串，与 currentPath 无法匹配。
+
+  状态：未修复（非搜索相关，可作为后续优化项）
+
+
+三、修复后的搜索流程
+────────────────────────────────────────────────────────────────────────────
+1. 用户点击搜索按钮 或 按 Ctrl/⌘+K
+2. loadSearchIndex(vm) → 检查 localStorage 缓存
+3. 缓存 miss → buildSearchIndex(vm):
+   a. 扫描 .sidebar-nav + .markdown-section 收集所有 a[href]
+   b. 过滤：跳过空链接、纯锚链接(#section)、外部链接(http...)
+   c. 保留 hash 路由(#/path/to/file.md) 并清洗为 path/to/file.md
+   d. normalizeSlug 确保路径以 .md 结尾
+   e. 拼接 basePath + 路径，fetch 获取原始 Markdown
+   f. 提取 h1 标题 + 清洗文本内容（去代码块/格式符号）
+   g. 存入 localStorage (key: docsify:search-index:v1)
+4. 用户输入查询词 → 对索引中所有文档进行大小写不敏感匹配
+5. 评分：标题匹配 +100，正文每出现一次 +1
+6. 渲染结果列表 + <mark> 高亮
+7. 点击结果 → 记录高亮词 → 导航到目标页面 → 在页面中高亮匹配文本
+
+
+四、已修改的代码行
+────────────────────────────────────────────────────────────────────────────
+  common.js:519-528    buildSearchIndex — 改为双重扫描 + 正确过滤 hash 路由
+  common.js:920         ensureFtsModal — 添加 id="fts-close"
+  common.js:1048-1052   ensureFullTextSearch — 添加 #search-toggle 点击事件
