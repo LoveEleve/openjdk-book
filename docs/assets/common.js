@@ -144,7 +144,7 @@
   window.$docsify = Object.assign({
     name: 'LoveEleve',
     repo: 'https://github.com/LoveEleve/LoveEleve.github.io',
-    loadSidebar: true,
+    loadSidebar: false,
     subMaxLevel: 3,
     sidebarDisplayLevel: 0,
     executeScript: true,
@@ -518,22 +518,46 @@
 
         function buildSearchIndex(vm) {
           if (searchIndexPromises._building) return searchIndexPromises._building;
-          var sidebarEl = document.querySelector('.sidebar-nav');
-          var contentEl = document.querySelector('.markdown-section');
           var seen = {};
           var linkEls = [];
-          [sidebarEl, contentEl].forEach(function (root) {
-            if (!root) return;
-            Array.from(root.querySelectorAll('a[href]')).forEach(function (a) {
+
+          var contentEl = document.querySelector('.markdown-section');
+          if (contentEl) {
+            Array.from(contentEl.querySelectorAll('a[href]')).forEach(function (a) {
               var h = a.getAttribute('href') || '';
               if (!h || seen[h]) return;
               seen[h] = true;
               linkEls.push(a);
             });
-          });
-          if (!linkEls.length) return Promise.resolve({});
+          }
+
           var bp = window.$docsify && window.$docsify.basePath;
           var base = (typeof bp === 'string') ? bp : '';
+
+          var sidebarPromise = fetch(base + '_sidebar.md', { headers: { 'cache-control': 'max-age=0' } })
+            .then(function (r) { return r.ok ? r.text() : ''; })
+            .catch(function () { return ''; })
+            .then(function (text) {
+              if (!text) return;
+              var regex = /\[([^\]]+)\]\(([^)]+)\)/g;
+              var m;
+              while ((m = regex.exec(text)) !== null) {
+                var rawHref = m[2].trim();
+                if (!rawHref || rawHref === '#') continue;
+                if (/^(https?:)?\/\//.test(rawHref)) continue;
+                if (rawHref.indexOf('#') === 0 && rawHref.indexOf('#/') !== 0) continue;
+                if (rawHref.indexOf('#/') !== 0) rawHref = '#/' + rawHref;
+                if (seen[rawHref]) continue;
+                seen[rawHref] = true;
+                linkEls.push({ getAttribute: function (attr) { return attr === 'href' ? rawHref : null; } });
+              }
+            });
+
+          if (!linkEls.length) {
+            var emptyP = sidebarPromise.then(function () { return {}; });
+            searchIndexPromises._building = emptyP;
+            return emptyP;
+          }
 
           var fetches = linkEls.map(function (a) {
             var rawHref = a.getAttribute('href') || '';
@@ -550,14 +574,16 @@
                   var title = '';
                   var m = text.match(/^#\s+(.+)$/m);
                   if (m) title = m[1].trim();
-                  var cleaned = text.replace(/```[\s\S]*?```/g, ' ').replace(/[#*[\]()>`\-|~]/g, ' ');
-                  return { url: rawHref, title: title, text: cleaned.toLowerCase(), rawLen: cleaned.length };
+                  var cleanedText = text.replace(/```[\s\S]*?```/g, ' ').replace(/[#*[\]()>`\-|~]/g, ' ');
+                  return { url: rawHref, title: title, text: cleanedText.toLowerCase(), rawLen: cleanedText.length };
                 });
               })
               .catch(function () { return null; });
           });
 
-          var p = Promise.all(fetches).then(function (results) {
+          var p = sidebarPromise.then(function () {
+            return Promise.all(fetches);
+          }).then(function (results) {
             var idx = {};
             results.forEach(function (doc) {
               if (!doc) return;
@@ -843,7 +869,7 @@
               '<span class="crumb-sep"> / </span>' +
               '<span>' + title + '</span>';
 
-            // 上一篇 / 下一篇
+            // 上一篇 / 下一篇 — 从 markdown-section 链接获取
             var nav = section.querySelector('#page-nav');
             if (!nav) {
               nav = document.createElement('div');
@@ -854,15 +880,15 @@
               else { section.appendChild(nav); }
             }
 
-            var sidebarEl = document.querySelector('.sidebar-nav');
-            if (!sidebarEl) { nav.innerHTML = ''; return; }
-            var allLinks = Array.from(sidebarEl.querySelectorAll('a[href]'))
+            var allLinks = Array.from(document.querySelectorAll('.markdown-section a[href^="#/"]'))
               .map(function (a) { return { href: a.getAttribute('href') || '', text: (a.textContent || '').trim() }; })
-              .filter(function (l) { return l.href && l.href.indexOf('#') !== 0; });
+              .filter(function (l) { return l.href && l.href.indexOf('#') === 0 && l.href.indexOf('#/') === 0; });
+
+            if (!allLinks.length) { nav.innerHTML = ''; return; }
 
             var currentIdx = -1;
             var normPath = currentPath.replace(/^#/, '');
-            allLinks.forEach(function (link, i) {
+            [].concat(allLinks).forEach(function (link, i) {
               var ln = (link.href || '').split('#')[0].split('?')[0];
               if (ln === normPath || ln === normPath.replace(/^\/docs/, '')) currentIdx = i;
             });
@@ -1226,7 +1252,9 @@
 
           // 评论：首页不加载
           var cPath = (vm && vm.route && vm.route.path) ? vm.route.path : '#/';
-          if (cPath !== '#/' && cPath !== '#/README') {
+          if (cPath === '#/' || cPath === '#/README') {
+            loadSearchIndex(vm);
+          } else {
             renderOrUpdateGiscus(getGiscusTerm(vm));
           }
 

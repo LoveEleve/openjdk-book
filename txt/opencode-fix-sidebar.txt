@@ -1,22 +1,23 @@
-两个任务:
+两个任务：
 
-## 任务1: 修复侧边栏箭头
+## 任务1: 继续修复搜索 — 目前仍不可用
 
-docs/index.html 第32行起有一段"侧边栏箭头统一"的CSS块，把原生 sidebar 箭头全藏了又试图自己画▶，结果是箭头不显示但有残留样式。
+先检查当前线上 common.js 的实际搜索逻辑：
+- Ctrl+K 能否打开搜索面板
+- 点击右下角搜索按钮能否打开搜索面板
+- 输入关键字后是否有结果
 
-把这个CSS块彻底删掉（从注释"侧边栏箭头统一"开始到暗色模式箭头结束），只保留一句:
-```
-.sidebar { font-family: var(--body-font) !important; }
-```
+如果还有问题，深入排查 buildSearchIndex / loadSearchIndex / performSearch 完整流程。需要让搜索真正可用。
 
-让 sidebar-collapse 插件的原生样式正常工作，不要再有任何自定义箭头CSS。
+## 任务2: 去掉左边侧边栏
 
-## 任务2: 删除 Excalidraw 和 Draw.io 代码
+既然侧边栏只剩"首页"一个链接，直接关掉让内容区全宽展示更好。
 
-从以下四个文件中删除所有 excalidraw / drawio 相关代码:
-- docs/index.html: CSS样式块 + CDN脚本(pako,docsify-drawio) + JS中的drawioRenderer/enhanceDrawioElements/enhanceExcalidrawElements
-- docs/assets/common.css: drawio-container相关
-- docs/assets/common.js: markdown renderer中的drawio分支 + enhanceDrawioElements + doneEach调用
-- index.html: CDN脚本 docsify-drawio
+具体改动:
+1. docs/index.html 和 index.html 中设置 `loadSidebar: false`
+2. 检查 common.js 中依赖侧边栏 .sidebar-nav 的代码（renderBreadcrumbAndNav 的上一篇/下一篇、buildSearchIndex 的链接扫描等），改为从 .markdown-section 或 _sidebar.md 文件内容中获取链接
+3. docs/index.html 和 common.css 中删除侧边栏相关 CSS 样式（sidebar-width、sidebar 背景色等）
+4. common.css 中 content-max-width 从小宽度改为更舒适的全宽值（如 900px 或 max-width: 100%）
+5. 暗色模式下也不再需要 sidebar 样式
 
-改完提交推送。
+改完验证搜索功能，然后提交推送。

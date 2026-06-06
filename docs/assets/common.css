@@ -18,8 +18,7 @@
   --theme-color-dark: rgba(102, 219, 162, 0.95);
 
   /* ----- 布局 ----- */
-  --sidebar-width: 250px;
-  --content-max-width: 850px;
+  --content-max-width: 900px;
   --base-font-size: 13px;
 
   /* ----- 正文字体（页面可覆盖） ----- */
@@ -76,40 +75,8 @@
 }
 
 /* ============================================================
-   第 2 层：侧边栏样式
-   ============================================================ */
-.sidebar-nav ul li a {
-  font-weight: normal !important;
-}
-
-.sidebar-nav a[href="#/"] + ul,
-.sidebar-nav a[href="#/README"] + ul {
-  display: none !important;
-}
-
-.sidebar-nav a[href="#/"]::after,
-.sidebar-nav a[href="#/README"]::after {
-  display: none !important;
-}
-
-.sidebar-nav > ul > li > ul > li > a,
-.sidebar-nav > ul > li > ul > li:not(:has(a)) {
-  font-size: inherit !important;
-  line-height: inherit !important;
-  padding-left: 20px !important;
-  margin-left: 0 !important;
-  font-weight: inherit !important;
-}
-
-.sidebar-nav > ul > li {
-  margin: 10px 0;
-  font-weight: bold;
-  font-size: 14px;
-}
-
-/* ============================================================
-   第 3 层：代码块（顶部工具栏 + 行级折叠）
-   ============================================================ */
+    第 2 层：代码块（顶部工具栏 + 行级折叠）
+    ============================================================ */
 pre[data-lang] {
   position: relative !important;
   margin: 1.5em 0 !important;
@@ -1116,14 +1083,6 @@ html[data-theme="dark"] body {
   background: #0b1220;
   color: rgba(226, 232, 240, 0.92);
 }
-
-html[data-theme="dark"] .sidebar {
-  background: #0f172a;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-}
-html[data-theme="dark"] .sidebar-nav a { color: rgba(226, 232, 240, 0.78); }
-html[data-theme="dark"] .sidebar-nav a:hover,
-html[data-theme="dark"] .sidebar-nav li.active > a { color: rgba(226, 232, 240, 0.96); }
 
 html[data-theme="dark"] .markdown-section { color: rgba(226, 232, 240, 0.92); }
 html[data-theme="dark"] .markdown-section a { color: var(--theme-color-dark); }
