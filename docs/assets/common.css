@@ -1307,8 +1307,15 @@ pre[data-lang] code { background: transparent; border: 0; padding: 0; }
 .style-toggle .style-icon { background: transparent; }
 
 /* ============================================================
-   第 14 层：极简风格切换按钮
-   ============================================================ */
+    第 14 层：隐藏 docsify-themeable app-name（防止 name 回退到 document.title）
+    ============================================================ */
+.app-name,
+.app-name-link,
+.app-sub-sidebar { display: none !important; }
+
+/* ============================================================
+    第 15 层：极简风格切换按钮
+    ============================================================ */
 .style-toggle {
   position: fixed;
   right: 18px;
@@ -1342,8 +1349,8 @@ pre[data-lang] code { background: transparent; border: 0; padding: 0; }
 .style-toggle .style-text { opacity: 0.9; }
 
 /* ============================================================
-   第 15 层：极简代码工具栏
-   ============================================================ */
+    第 16 层：极简代码工具栏
+    ============================================================ */
 html[data-min-style] .code-tools {
   background: linear-gradient(180deg, rgba(250, 250, 250, 0.98), rgba(245, 245, 245, 0.92));
   border-bottom: 1px solid var(--min-border);

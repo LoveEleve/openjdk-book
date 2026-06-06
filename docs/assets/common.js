@@ -142,7 +142,8 @@
   var pageConfig = hooks.pageConfig || {};
 
   window.$docsify = Object.assign({
-    name: '',
+    name: ' ',
+    nameLink: '#/',
     repo: 'https://github.com/LoveEleve/LoveEleve.github.io',
     loadSidebar: false,
     subMaxLevel: 3,
@@ -810,7 +811,16 @@
 
         function scheduleTocRender(vm) {
           var path = (vm && vm.route && vm.route.path) ? vm.route.path : ((location.hash || '#/').split('?')[0] || '#/');
-          if (path === '#/' || path === '#/README') return;
+          if (path === '#/' || path === '#/README') {
+            var toc = document.querySelector('#toc-aside');
+            if (toc) {
+              toc.setAttribute('data-has-items', '0');
+              var body = toc.querySelector('.toc-body');
+              if (body) body.innerHTML = '';
+            }
+            setTocFabState(false);
+            return;
+          }
           if (tocRenderTimer) clearTimeout(tocRenderTimer);
           tocRenderTimer = setTimeout(function () {
             tocRenderTimer = null;
