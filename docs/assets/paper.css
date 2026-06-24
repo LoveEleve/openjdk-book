@@ -27,15 +27,14 @@ body { background: #fdfbf7; }
   color: #b7410e;
 }
 
-/* 代码块：和正文底色几乎一样，只靠缩进区分 */
+/* 代码块：比纸底微微深一点，无边线 */
 pre[data-lang] {
   border: none !important;
-  border-left: 2px solid #e8e4dc !important;
   border-radius: 0 !important;
   box-shadow: none !important;
   padding: 0.8em 1em !important;
   margin: 1.2em 0 !important;
-  background: #f9f6f0 !important;
+  background: #f7f2e7 !important;
   font-size: 14px;
   line-height: 1.6;
 }
