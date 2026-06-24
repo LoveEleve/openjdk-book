@@ -59,5 +59,23 @@
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-java.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-makefile.min.js" defer></script>
 
+  <!-- 代码块最终清理：拆掉行号区和折叠包裹 -->
+  <script>
+  function cleanCodeBlocks() {
+    document.querySelectorAll('.fold-gutter').forEach(function(el) { el.remove(); });
+    document.querySelectorAll('.fold-wrap').forEach(function(wrap) {
+      var scroll = wrap.querySelector('.fold-code-scroll');
+      if (scroll && wrap.parentNode) {
+        while (scroll.firstChild) {
+          wrap.parentNode.insertBefore(scroll.firstChild, wrap);
+        }
+        wrap.parentNode.removeChild(wrap);
+      }
+    });
+  }
+  setTimeout(cleanCodeBlocks, 200);
+  setTimeout(cleanCodeBlocks, 800);
+  </script>
+
 </body>
 </html>
