@@ -1,0 +1,66 @@
+# Ch0.1 java 命令到底是什么
+
+## java 到底是个啥
+
+你天天敲 `java -version`。想过没——`java` 这个命令本身，到底是个什么东西？
+
+先看你肯定认识的一个 C 程序：
+
+```c
+#include <stdio.h>
+
+int main() {
+    printf("hello world\n");
+    return 0;
+}
+```
+
+编译，换个名字，跑起来：
+
+```
+$ gcc hello.c -o myjava
+$ ./myjava
+hello world
+```
+
+叫 `myjava` 还是 `java` 还是 `abc`，无所谓。它就是 `gcc` 从一个 `.c` 文件编译出来的可执行文件。
+
+你机器上的 `java` 也一样：
+
+```
+$ file build/jdk/bin/java
+build/jdk/bin/java: ELF 64-bit LSB executable, x86-64, dynamically linked, ...
+```
+
+和你刚编译的 `myjava`，`file` 命令输出是一样的格式——ELF 可执行文件。不是魔法，就是 gcc 的产物。
+
+当然，真正的 `java` 命令比你写的 `myjava` 复杂得多。它的 `main()` 在 `src/java.base/share/native/launcher/main.c`，最后一行调用的是 `JLI_Launch()`，把活交给了一个叫 `libjli.so` 的共享库。编译也不是手动敲 `gcc`，而是 Makefile 驱动的——在 `make/launcher/Launcher-java.base.gmk` 里定义了几个编译宏和链接库，最终输出到 `build/.../jdk/bin/java`。
+
+但骨架没变：一个 `.c` 文件，gcc 编译，得到可执行文件。这个认知是后面所有章节的基础——JVM 不是从天上掉下来的运行时，它就是从 C 代码编译出来的东西，你能读它，能改它，能用 GDB 停住它。
+
+---
+
+## clone 下来的代码和解压即用的 JDK 有什么区别
+
+你可能见过这种方式装 JDK：
+
+```
+$ wget https://.../openjdk-11.0.17_linux-x64_bin.tar.gz
+$ tar xzf openjdk-11.0.17_linux-x64_bin.tar.gz
+$ ./jdk-11.0.17/bin/java -version
+openjdk version "11.0.17" ...
+```
+
+解压就能用——里面已经有一个编译好的 `java` 可执行文件。
+
+而 `git clone` 下来的东西是这样：
+
+```
+$ git clone git@github.com:openjdk/jdk11u.git
+$ ls jdk11u/
+src/   make/   configure   ...
+```
+
+只有源码。想跑起来？先 `bash configure`，再 `make`，等几分钟编译完了才能用。
+
+一个是成品，一个是原材料。本书用的是后者——我们要读的就是这些原材料，看它是怎么一步一步变成可以跑的 JDK 的。
