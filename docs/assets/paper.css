@@ -122,3 +122,14 @@ body { background: #fdfbf7; }
 .home-section .section-title { color: #1a1a1a; font-weight: 600; }
 .home-section .section-content { border-top: none !important; }
 .home-section .section-content li::before { color: #bbb; }
+
+/* 表格：去掉斑马纹 */
+.markdown-section table tr:nth-child(odd),
+.markdown-section table tr:nth-child(even) {
+  background: none !important;
+}
+.markdown-section table th,
+.markdown-section table td {
+  background: none !important;
+  border-color: #e8e4dc !important;
+}
