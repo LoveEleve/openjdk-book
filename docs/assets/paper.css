@@ -38,6 +38,21 @@ pre[data-lang] {
   font-size: 14px;
   line-height: 1.6;
 }
+
+/* 无语言标记的块：和正文一样 */
+pre:not([data-lang]) {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 0 0 1em !important;
+  margin: 0.8em 0 !important;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #555;
+}
+pre:not([data-lang]) code {
+  color: #555;
+}
 .code-tools, .code-tools-left, .code-tools-right { display: none !important; }
 pre[data-lang]::after { display: none !important; }
 
