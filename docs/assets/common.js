@@ -72,8 +72,8 @@
       catch (e) { return 'auto'; }
     }
     function resolve(mode) {
-      if (mode === 'dark' || mode === 'light') return mode;
-      return media && media.matches ? 'dark' : 'light';
+      // 站点固定纸感浅色，不跟随系统暗色
+      return 'light';
     }
     function renderButton(mode, resolved) {
       var btn = document.getElementById('theme-toggle');
