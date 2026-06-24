@@ -37,14 +37,14 @@ pre, pre[data-lang], .fold-wrap, .fold-gutter, .fold-code-scroll {
   color: #b7410e;
 }
 
-/* 代码块：比纸底微微深一点，无边线 */
+/* 代码块：比纸底微微深一丁点，无边线 */
 pre[data-lang] {
   border: none !important;
   border-radius: 0 !important;
   box-shadow: none !important;
   padding: 0.8em 1em !important;
   margin: 1.2em 0 !important;
-  background: #faf5ed !important;
+  background: #fdf9f3 !important;
   font-size: 14px;
   line-height: 1.6;
 }
@@ -66,21 +66,10 @@ pre:not([data-lang]) code {
 .code-tools, .code-tools-left, .code-tools-right { display: none !important; }
 pre[data-lang]::after { display: none !important; }
 
-/* 折叠系统：干掉所有边线和背景，行号调小避免侵入代码区 */
-.fold-wrap { background: transparent !important; }
-.fold-gutter {
-  border: none !important;
-  border-right: none !important;
-  background: transparent !important;
-  flex: 0 0 18px !important;
-}
-.fold-gutter-row {
-  border: none !important;
-  font-size: 10px !important;
-  padding-left: 2px !important;
-}
+/* 折叠系统：隐藏行号区 */
+.fold-wrap { display: block !important; background: transparent !important; }
+.fold-gutter { display: none !important; }
 .fold-code-scroll { background: transparent !important; }
-.fold-toggle { display: none !important; }
 
 /* 侧边栏隐藏 */
 .sidebar, .sidebar-toggle { display: none !important; }
