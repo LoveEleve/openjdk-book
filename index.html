@@ -50,6 +50,26 @@
   <!-- ========== 公共脚本 ========== -->
   <script src="docs/assets/common.js"></script>
 
+  <!-- ========== 代码块清理插件（必须在 docsify 之前注册） ========== -->
+  <script>
+  window.$docsify = window.$docsify || {};
+  window.$docsify.plugins = window.$docsify.plugins || [];
+  window.$docsify.plugins.push(function (hook) {
+    hook.doneEach(function () {
+      document.querySelectorAll('.fold-gutter').forEach(function(el) { el.remove(); });
+      document.querySelectorAll('.fold-wrap').forEach(function(wrap) {
+        var scroll = wrap.querySelector('.fold-code-scroll');
+        if (scroll && wrap.parentNode) {
+          while (scroll.firstChild) {
+            wrap.parentNode.insertBefore(scroll.firstChild, wrap);
+          }
+          wrap.parentNode.removeChild(wrap);
+        }
+      });
+    });
+  });
+  </script>
+
   <!-- ========== CDN JS 依赖 ========== -->
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
@@ -59,22 +79,24 @@
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-java.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-makefile.min.js" defer></script>
 
-  <!-- 代码块最终清理：拆掉行号区和折叠包裹 -->
+  <!-- 代码块最终清理：挂到 docsify 渲染钩子 -->
   <script>
-  function cleanCodeBlocks() {
-    document.querySelectorAll('.fold-gutter').forEach(function(el) { el.remove(); });
-    document.querySelectorAll('.fold-wrap').forEach(function(wrap) {
-      var scroll = wrap.querySelector('.fold-code-scroll');
-      if (scroll && wrap.parentNode) {
-        while (scroll.firstChild) {
-          wrap.parentNode.insertBefore(scroll.firstChild, wrap);
+  window.$docsify = window.$docsify || {};
+  window.$docsify.plugins = window.$docsify.plugins || [];
+  window.$docsify.plugins.push(function (hook) {
+    hook.doneEach(function () {
+      document.querySelectorAll('.fold-gutter').forEach(function(el) { el.remove(); });
+      document.querySelectorAll('.fold-wrap').forEach(function(wrap) {
+        var scroll = wrap.querySelector('.fold-code-scroll');
+        if (scroll && wrap.parentNode) {
+          while (scroll.firstChild) {
+            wrap.parentNode.insertBefore(scroll.firstChild, wrap);
+          }
+          wrap.parentNode.removeChild(wrap);
         }
-        wrap.parentNode.removeChild(wrap);
-      }
+      });
     });
-  }
-  setTimeout(cleanCodeBlocks, 200);
-  setTimeout(cleanCodeBlocks, 800);
+  });
   </script>
 
 </body>
