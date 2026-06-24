@@ -377,7 +377,6 @@
           tools.className = 'code-tools';
           tools.innerHTML =
             '<div class="code-tools-left">' +
-              '<span class="dot"></span><span class="dot"></span><span class="dot"></span>' +
               '<span>' + lang + '</span>' +
             '</div>' +
             '<div class="code-tools-right">' +

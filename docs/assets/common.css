@@ -103,8 +103,8 @@ pre[data-lang].is-collapsed {
 .code-tools {
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 34px;
-  padding: 0 12px;
+  height: 32px;
+  padding: 0 14px;
   background: var(--card-head-bg);
   border-bottom: 1px solid var(--card-head-border);
   display: flex;
@@ -112,32 +112,16 @@ pre[data-lang].is-collapsed {
   align-items: center;
   z-index: 10;
   user-select: none;
-  backdrop-filter: saturate(180%) blur(10px);
-  -webkit-backdrop-filter: saturate(180%) blur(10px);
 }
 
 .code-tools-left {
   font-size: 11px;
   color: var(--code-muted);
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.7px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
   display: flex;
   align-items: center;
-  gap: 10px;
 }
-
-/* macOS 风格三色点 */
-.code-tools-left .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
-}
-.code-tools-left .dot:nth-of-type(1) { background: #ff5f57; }
-.code-tools-left .dot:nth-of-type(2) { background: #febc2e; }
-.code-tools-left .dot:nth-of-type(3) { background: #28c840; }
 
 .code-tools-right {
   display: flex;
@@ -1364,16 +1348,6 @@ html[data-theme="dark"][data-min-style] .code-tools {
 }
 html[data-min-style] .code-tools-left {
   color: var(--min-subtext);
-  font-weight: 800;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
-}
-html[data-min-style] .code-tools-left .dot {
-  width: 10px; height: 10px;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.10);
-}
-html[data-theme="dark"][data-min-style] .code-tools-left .dot {
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 html[data-min-style] .tool-btn {
   color: var(--min-text);
