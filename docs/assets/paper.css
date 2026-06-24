@@ -124,12 +124,24 @@ body { background: #fdfbf7; }
 .home-section .section-content li::before { color: #bbb; }
 
 /* 表格：去掉斑马纹 */
-.markdown-section table tr:nth-child(odd),
-.markdown-section table tr:nth-child(even) {
+.markdown-section table,
+.markdown-section table thead,
+.markdown-section table tbody,
+.markdown-section table tr,
+.markdown-section table th,
+.markdown-section table td,
+.markdown-section thead tr,
+.markdown-section tbody tr,
+.markdown-section tr:nth-child(odd),
+.markdown-section tr:nth-child(even),
+.markdown-section table tr:nth-child(1),
+.markdown-section table tr:nth-child(2),
+.markdown-section table tr:nth-child(3),
+.markdown-section table tr:nth-child(4) {
   background: none !important;
+  background-color: transparent !important;
 }
 .markdown-section table th,
 .markdown-section table td {
-  background: none !important;
   border-color: #e8e4dc !important;
 }
