@@ -22,7 +22,7 @@
   <div class="section-content">
 
 * [第一章 — java 命令到底是什么](openjdk/vol-00/ch01.md) - 一个 C 编译出来的可执行文件
-* [第二章 — 第一次 GDB 断点](openjdk/vol-00/ch02.md) - 停住 JVM，看它的调用栈
+* [第二章 — 编译你自己的 JDK](openjdk/vol-00/ch02.md) - configure → make → 你的第一个 JDK
 * [第三章 — OpenJDK 源码全景](openjdk/vol-00/ch03.md) - 39 个模块，22 个 .so
 * [第四章 — 搭建编译环境](openjdk/vol-00/ch04.md) - 用 configure + make 编译你的第一个 JDK
 * [第五章 — configure 在做什么](openjdk/vol-00/ch05.md) - 检测 GCC/头文件/系统调用
