@@ -28,16 +28,18 @@ body { background: #fdfbf7; }
   color: inherit !important;
 }
 
-/* 代码块容器：1 号规则 — pre[data-lang] 自身 */
+/* 代码块：细线框 + 微上浮 */
 .markdown-section pre[data-lang] {
   position: static !important;
   margin: 1.2em 0 !important;
-  padding: 0 !important;
+  padding: 0.8em 1em !important;
   background: transparent !important;
-  border: none !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  overflow: visible !important;
+  border: 1px solid #e8e4dc !important;
+  border-radius: 2px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
+  overflow: auto !important;
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 /* 代码块容器：2 号规则 — fold-wrap 包裹层 */
