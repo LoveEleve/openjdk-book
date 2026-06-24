@@ -11,9 +11,9 @@ body { background: #fdfbf7; }
   line-height: 1.75;
   color: #2c2c2c;
 }
-.markdown-section h1 { font-size: 1.5em; margin: 1.8em 0 0.6em; font-weight: 600; }
-.markdown-section h2 { font-size: 1.2em; margin: 1.5em 0 0.4em; font-weight: 600; }
-.markdown-section h3 { font-size: 1.05em; margin: 1.2em 0 0.3em; font-weight: 600; }
+.markdown-section h1 { font-size: 1.5em; margin: 1.2em 0 0.6em; font-weight: 600; }
+.markdown-section h2 { font-size: 1.2em; margin: 1em 0 0.5em; font-weight: 600; }
+.markdown-section h3 { font-size: 1.05em; margin: 0.8em 0 0.4em; font-weight: 600; }
 .markdown-section p { margin: 0 0 0.8em; }
 .markdown-section a { color: #1a56db; }
 
