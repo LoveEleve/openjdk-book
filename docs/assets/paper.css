@@ -6,15 +6,15 @@ body { background: #fdfbf7; }
 .markdown-section {
   max-width: 860px;
   margin: 0 auto;
-  padding: 2.5em 2em 6em;
-  font-size: 16px;
-  line-height: 1.9;
+  padding: 2em 2em 4em;
+  font-size: 15px;
+  line-height: 1.75;
   color: #2c2c2c;
 }
-.markdown-section h1 { font-size: 1.7em; margin: 2em 0 0.7em; font-weight: 600; }
-.markdown-section h2 { font-size: 1.3em; margin: 1.8em 0 0.5em; font-weight: 600; }
-.markdown-section h3 { font-size: 1.1em; margin: 1.5em 0 0.4em; font-weight: 600; }
-.markdown-section p { margin: 0 0 1em; }
+.markdown-section h1 { font-size: 1.5em; margin: 1.8em 0 0.6em; font-weight: 600; }
+.markdown-section h2 { font-size: 1.2em; margin: 1.5em 0 0.4em; font-weight: 600; }
+.markdown-section h3 { font-size: 1.05em; margin: 1.2em 0 0.3em; font-weight: 600; }
+.markdown-section p { margin: 0 0 0.8em; }
 .markdown-section a { color: #1a56db; }
 
 /* 内联代码：和正文一样 */
@@ -123,25 +123,16 @@ body { background: #fdfbf7; }
 .home-section .section-content { border-top: none !important; }
 .home-section .section-content li::before { color: #bbb; }
 
-/* 表格：去掉斑马纹 */
-.markdown-section table,
-.markdown-section table thead,
-.markdown-section table tbody,
-.markdown-section table tr,
-.markdown-section table th,
-.markdown-section table td,
-.markdown-section thead tr,
-.markdown-section tbody tr,
-.markdown-section tr:nth-child(odd),
-.markdown-section tr:nth-child(even),
-.markdown-section table tr:nth-child(1),
-.markdown-section table tr:nth-child(2),
-.markdown-section table tr:nth-child(3),
-.markdown-section table tr:nth-child(4) {
-  background: none !important;
-  background-color: transparent !important;
+/* 表格 */
+.markdown-section table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+  font-size: 14px;
 }
 .markdown-section table th,
 .markdown-section table td {
-  border-color: #e8e4dc !important;
+  padding: 0.4em 0.8em;
+  border: 1px solid #e8e4dc;
+  text-align: left;
 }
