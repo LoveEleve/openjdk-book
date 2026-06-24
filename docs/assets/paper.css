@@ -44,7 +44,7 @@ pre[data-lang] {
   box-shadow: none !important;
   padding: 0.8em 1em !important;
   margin: 1.2em 0 !important;
-  background: #f7f2e7 !important;
+  background: #faf5ed !important;
   font-size: 14px;
   line-height: 1.6;
 }
@@ -66,15 +66,21 @@ pre:not([data-lang]) code {
 .code-tools, .code-tools-left, .code-tools-right { display: none !important; }
 pre[data-lang]::after { display: none !important; }
 
-/* 折叠系统：干掉所有边线和背景 */
+/* 折叠系统：干掉所有边线和背景，行号调小避免侵入代码区 */
 .fold-wrap { background: transparent !important; }
 .fold-gutter {
   border: none !important;
   border-right: none !important;
   background: transparent !important;
+  flex: 0 0 18px !important;
 }
-.fold-gutter-row { border: none !important; }
+.fold-gutter-row {
+  border: none !important;
+  font-size: 10px !important;
+  padding-left: 2px !important;
+}
 .fold-code-scroll { background: transparent !important; }
+.fold-toggle { display: none !important; }
 
 /* 侧边栏隐藏 */
 .sidebar, .sidebar-toggle { display: none !important; }
