@@ -1,86 +1,84 @@
-/* 纸感覆盖：只留白天浅色，去掉卡片/阴影/暗色 */
+/* 纸感 */
 html { color-scheme: light only; }
-html[data-theme="dark"] { --theme-color: #42b983; }
-body { background: #fefefc; }
+body { background: #fdfbf7; }
 
 /* 正文 */
 .markdown-section {
-  max-width: 720px;
+  max-width: 700px;
   margin: 0 auto;
-  padding: 2em 1em 4em;
+  padding: 2.5em 1.2em 6em;
   font-size: 16px;
-  line-height: 1.85;
-  color: #333;
+  line-height: 1.9;
+  color: #2c2c2c;
 }
-.markdown-section h1 { font-size: 1.6em; margin: 1.5em 0 0.6em; }
-.markdown-section h2 { font-size: 1.3em; margin: 1.4em 0 0.5em; }
-.markdown-section h3 { font-size: 1.1em; margin: 1.2em 0 0.4em; }
-.markdown-section p { margin: 0 0 0.8em; }
-.markdown-section a { color: #2563eb; }
+.markdown-section h1 { font-size: 1.7em; margin: 2em 0 0.7em; font-weight: 600; }
+.markdown-section h2 { font-size: 1.3em; margin: 1.8em 0 0.5em; font-weight: 600; }
+.markdown-section h3 { font-size: 1.1em; margin: 1.5em 0 0.4em; font-weight: 600; }
+.markdown-section p { margin: 0 0 1em; }
+.markdown-section a { color: #1a56db; }
 
 /* 内联代码 */
 .markdown-section code {
-  background: none !important;
-  border: none !important;
-  border-radius: 0 !important;
-  padding: 0 !important;
-  font-size: 0.9em;
-  color: #c7254e;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: 0.92em;
+  color: #b7410e;
 }
 
-/* 代码块 */
+/* 代码块：和正文底色几乎一样，只靠缩进区分 */
 pre[data-lang] {
   border: none !important;
+  border-left: 2px solid #e8e4dc !important;
   border-radius: 0 !important;
   box-shadow: none !important;
-  padding: 1em !important;
-  margin: 1em 0 !important;
-  background: #f6f7f6 !important;
+  padding: 0.8em 1em !important;
+  margin: 1.2em 0 !important;
+  background: #f9f6f0 !important;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
-.code-tools,
-.code-tools-left,
-.code-tools-right { display: none !important; }
+.code-tools, .code-tools-left, .code-tools-right { display: none !important; }
 pre[data-lang]::after { display: none !important; }
 
-/* 侧边栏 */
+/* 侧边栏隐藏 */
 .sidebar, .sidebar-toggle { display: none !important; }
 .content { margin-left: 0 !important; }
 
-/* Hero 覆盖 */
+/* Hero */
 .hero-section {
   background: none !important;
-  padding: 3em 1em 1em !important;
-  color: #333 !important;
+  padding: 4em 1.2em 2em !important;
+  color: #2c2c2c !important;
   text-align: left !important;
   margin: 0 !important;
 }
-.hero-title { color: #1a1a1a !important; font-size: 1.8em !important; }
-.hero-slogan { color: #666 !important; font-size: 1em !important; opacity: 1 !important; }
+.hero-title { color: #1a1a1a !important; font-size: 1.9em !important; }
+.hero-slogan { color: #888 !important; font-size: 1em !important; opacity: 1 !important; }
 
-/* 专栏折叠 */
+/* 首页目录 */
 .home-section {
   border: none !important;
   background: none !important;
-  border-bottom: 1px solid #eee !important;
+  border-bottom: 1px solid #e8e4dc !important;
   border-radius: 0 !important;
 }
-.home-section summary::before { color: #999; }
-.home-section .section-title { color: #1a1a1a; }
+.home-section summary::before { color: #bbb; }
+.home-section .section-title { color: #1a1a1a; font-weight: 600; }
 .home-section .section-content { border-top: none !important; }
-.home-section .section-content li::before { color: #999; }
+.home-section .section-content li::before { color: #bbb; }
 
 /* 徽章 */
 .update-badge {
   background: none !important;
-  border: 1px solid #eee !important;
-  color: #666 !important;
+  border: 1px solid #e8e4dc !important;
+  color: #888 !important;
 }
 
-/* 暗色强制覆盖 */
+/* 强刷暗色 */
 html[data-theme="dark"] .markdown-section,
-html[data-theme="dark"] body { background: #fefefc !important; color: #333 !important; }
+html[data-theme="dark"] body { background: #fdfbf7 !important; color: #2c2c2c !important; }
 html[data-theme="dark"] .hero-section,
 html[data-theme="dark"] .home-section { background: none !important; }
-html[data-theme="dark"] .home-section { border-bottom-color: #eee !important; }
+html[data-theme="dark"] .home-section { border-bottom-color: #e8e4dc !important; }
