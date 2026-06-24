@@ -15,7 +15,7 @@ body { background: #fdfbf7; }
 .markdown-section h2 { font-size: 1.2em; margin: 1em 0 0.5em; font-weight: 600; }
 .markdown-section h3 { font-size: 1.05em; margin: 0.8em 0 0.4em; font-weight: 600; }
 .markdown-section p { margin: 0 0 0.8em; }
-.markdown-section strong { font-weight: 700; font-style: italic; color: #1a1a1a; }
+.markdown-section strong { font-weight: 700; color: #1a1a1a; border-bottom: 1px solid #d0c8b8; }
 .markdown-section a { color: #1a56db; }
 
 /* 内联代码：和正文一样 */
