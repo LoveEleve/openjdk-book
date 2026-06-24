@@ -2,6 +2,16 @@
 html { color-scheme: light only; }
 body { background: #fdfbf7; }
 
+/* 全局：抹掉所有 pre/code 的边框和圆角 */
+pre, pre *, code, .fold-wrap *, .fold-gutter *, .fold-code-scroll * {
+  border-color: transparent !important;
+}
+pre, pre[data-lang], .fold-wrap, .fold-gutter, .fold-code-scroll {
+  outline: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
 /* 正文 */
 .markdown-section {
   max-width: 700px;
@@ -55,6 +65,16 @@ pre:not([data-lang]) code {
 }
 .code-tools, .code-tools-left, .code-tools-right { display: none !important; }
 pre[data-lang]::after { display: none !important; }
+
+/* 折叠系统：干掉所有边线和背景 */
+.fold-wrap { background: transparent !important; }
+.fold-gutter {
+  border: none !important;
+  border-right: none !important;
+  background: transparent !important;
+}
+.fold-gutter-row { border: none !important; }
+.fold-code-scroll { background: transparent !important; }
 
 /* 侧边栏隐藏 */
 .sidebar, .sidebar-toggle { display: none !important; }
