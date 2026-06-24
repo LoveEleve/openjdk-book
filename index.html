@@ -48,19 +48,13 @@
     .sidebar { display: none !important; }
     .sidebar-toggle { display: none !important; }
     .content { margin-left: 0 !important; }
+
+    /* 纸感：只留浅色，锁死白天 */
+    html { color-scheme: light only; }
   </style>
 </head>
 <body>
   <div id="app">正在加载...</div>
-  <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题" title="切换主题">
-    <span class="theme-icon" aria-hidden="true">⭮</span>
-    <span class="theme-text">跟随</span>
-  </button>
-
-  <button id="style-toggle" class="style-toggle" type="button" aria-label="切换风格" title="风格：黑白（点击切换）">
-    <span class="style-icon" aria-hidden="true">Aa</span>
-    <span class="style-text">黑白</span>
-  </button>
 
   <button id="search-toggle" class="search-toggle" type="button" aria-label="全文搜索" title="全文搜索（Ctrl/⌘+K）">
     <span class="search-icon" aria-hidden="true">
@@ -84,160 +78,14 @@
   <!-- ========== 公共脚本 ========== -->
   <script src="docs/assets/common.js"></script>
 
-  <!-- ========== 根页面专属脚本 ========== -->
-  <script>
-
-    /* ---- 书签管理 ---- */
-    (function () {
-      var STORAGE_KEY = 'docsify:bookmarks';
-      function getBookmarks() {
-        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-        catch (e) { return []; }
-      }
-      function saveBookmarks(list) {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); }
-        catch (e) {}
-      }
-      function isBookmarked(path) {
-        return getBookmarks().some(function (b) { return b.path === path; });
-      }
-      function toggleBookmark() {
-        var currentPath = location.hash || '#/';
-        var bookmarks = getBookmarks();
-        var idx = bookmarks.findIndex(function (b) { return b.path === currentPath; });
-        if (idx >= 0) {
-          bookmarks.splice(idx, 1);
-        } else {
-          var title = '';
-          var h1 = document.querySelector('.markdown-section h1');
-          if (h1) title = (h1.textContent || '').trim();
-          bookmarks.push({ path: currentPath, title: title, time: Date.now() });
-        }
-        saveBookmarks(bookmarks);
-        updateBookmarkIcon(!idx);
-      }
-      function updateBookmarkIcon(bookmarked) {
-        var icon = document.querySelector('.bookmark-icon');
-        if (icon) {
-          icon.textContent = bookmarked ? '📌' : '🔖';
-          icon.parentElement.title = bookmarked ? '取消收藏' : '收藏此页';
-        }
-      }
-      document.addEventListener('DOMContentLoaded', function () {
-        var toggle = document.getElementById('bookmark-toggle');
-        if (toggle) toggle.addEventListener('click', toggleBookmark);
-        updateBookmarkIcon(isBookmarked(location.hash || '#/'));
-      });
-      window.addEventListener('hashchange', function () {
-        updateBookmarkIcon(isBookmarked(location.hash || '#/'));
-      });
-      window.bookmarks = {
-        getAll: getBookmarks,
-        toggle: toggleBookmark,
-        isBookmarked: isBookmarked
-      };
-    })();
-
-    /* ---- 阅读分析 ---- */
-    (function () {
-      var KEY = 'docsify-analytics';
-      var startTime = Date.now();
-      var currentPage = '';
-      function getData() {
-        try { return JSON.parse(localStorage.getItem(KEY) || '{}'); }
-        catch (e) { return {}; }
-      }
-      function saveData(d) { localStorage.setItem(KEY, JSON.stringify(d)); }
-      function trackPageView(path) {
-        var data = getData();
-        var page = path || location.hash;
-        if (!data.pages) data.pages = {};
-        if (!data.pages[page]) data.pages[page] = { views: 0, totalTime: 0, lastVisit: null };
-        data.pages[page].views++;
-        data.pages[page].lastVisit = new Date().toISOString();
-        saveData(data);
-        currentPage = page;
-        startTime = Date.now();
-      }
-      function trackReadingTime() {
-        if (!currentPage) return;
-        var data = getData();
-        if (data.pages && data.pages[currentPage]) {
-          data.pages[currentPage].totalTime += Date.now() - startTime;
-          saveData(data);
-        }
-      }
-      function getPopularDocs(limit) {
-        limit = limit || 5;
-        var data = getData();
-        if (!data.pages) return [];
-        return Object.entries(data.pages)
-          .sort(function (a, b) { return b[1].views - a[1].views; })
-          .slice(0, limit)
-          .map(function (entry) {
-            return {
-              path: entry[0],
-              views: entry[1].views,
-              totalTime: Math.round(entry[1].totalTime / 1000 / 60),
-              title: (entry[0].split('/').pop() || '').replace('.md', '') || entry[0]
-            };
-          });
-      }
-      window.addEventListener('hashchange', function () {
-        trackReadingTime();
-        trackPageView();
-      });
-      window.addEventListener('beforeunload', trackReadingTime);
-      window.addEventListener('visibilitychange', function () {
-        if (document.visibilityState === 'hidden') { trackReadingTime(); }
-        else { startTime = Date.now(); }
-      });
-      trackPageView();
-      window.readingAnalytics = {
-        getStats: function () {
-          var data = getData();
-          var pages = data.pages || {};
-          var totalPages = Object.keys(pages).length;
-          var totalViews = Object.values(pages).reduce(function (s, p) { return s + p.views; }, 0);
-          var popular = getPopularDocs();
-          console.log('📊 阅读统计:', { totalPages: totalPages, totalViews: totalViews, popular: popular });
-          return { totalPages: totalPages, totalViews: totalViews, popular: popular };
-        },
-        getPopular: getPopularDocs,
-        showDashboard: function () {
-          var stats = this.getStats();
-          var html = '<div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;background:var(--card-bg,#fff);border-radius:16px;padding:24px;max-width:500px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);font-family:var(--body-font);">' +
-            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h2 style="margin:0;font-size:18px;">📊 阅读统计</h2><span style="cursor:pointer;font-size:20px;" onclick="this.closest(\'div\').parentElement.remove()">×</span></div>' +
-            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">' +
-              '<div style="padding:12px;background:var(--accent-btn-bg, rgba(66,185,131,0.08));border-radius:10px;text-align:center;"><div style="font-size:24px;font-weight:800;">' + stats.totalPages + '</div><div style="font-size:12px;color:var(--code-muted);">篇文档</div></div>' +
-              '<div style="padding:12px;background:var(--accent-btn-bg, rgba(66,185,131,0.08));border-radius:10px;text-align:center;"><div style="font-size:24px;font-weight:800;">' + stats.totalViews + '</div><div style="font-size:12px;color:var(--code-muted);">次阅读</div></div>' +
-            '</div>' +
-            '<div style="font-size:13px;font-weight:800;margin-bottom:8px;">🔥 热门文档</div>' +
-            (stats.popular.length ? stats.popular.map(function (d) {
-              return '<div style="padding:8px 10px;margin:4px 0;border-radius:8px;background:var(--min-code-bg, rgba(0,0,0,0.04));display:flex;justify-content:space-between;font-size:12px;"><span>' + d.title + '</span><span style="color:var(--code-muted);">' + d.views + '次 · ' + d.totalTime + '分</span></div>';
-            }).join('') : '<div style="color:var(--code-muted);font-size:12px;">暂无数据</div>') +
-            '<div style="margin-top:12px;font-size:11px;color:var(--code-muted);text-align:center;">数据存储在浏览器 localStorage 中</div>' +
-          '</div>';
-          var el = document.createElement('div');
-          el.innerHTML = html;
-          document.body.appendChild(el);
-        }
-      };
-    })();
-  </script>
-
   <!-- ========== CDN JS 依赖 ========== -->
-  <script src="https://cdn.jsdelivr.net/npm/medium-zoom@1/dist/medium-zoom.min.js"></script>
-  <script src="https://unpkg.com/docsify-tabs/dist/docsify-tabs.min.js"></script>
-  <script src="https://unpkg.com/docsify-plugin-flexible-alerts"></script>
-
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-markup.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-java.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-go.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-python.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-c.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-cpp.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-java.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-makefile.min.js" defer></script>
 
 </body>
 </html>
