@@ -1,0 +1,86 @@
+/* 纸感覆盖：只留白天浅色，去掉卡片/阴影/暗色 */
+html { color-scheme: light only; }
+html[data-theme="dark"] { --theme-color: #42b983; }
+body { background: #fefefc; }
+
+/* 正文 */
+.markdown-section {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2em 1em 4em;
+  font-size: 16px;
+  line-height: 1.85;
+  color: #333;
+}
+.markdown-section h1 { font-size: 1.6em; margin: 1.5em 0 0.6em; }
+.markdown-section h2 { font-size: 1.3em; margin: 1.4em 0 0.5em; }
+.markdown-section h3 { font-size: 1.1em; margin: 1.2em 0 0.4em; }
+.markdown-section p { margin: 0 0 0.8em; }
+.markdown-section a { color: #2563eb; }
+
+/* 内联代码 */
+.markdown-section code {
+  background: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  font-size: 0.9em;
+  color: #c7254e;
+}
+
+/* 代码块 */
+pre[data-lang] {
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 1em !important;
+  margin: 1em 0 !important;
+  background: #f6f7f6 !important;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.code-tools,
+.code-tools-left,
+.code-tools-right { display: none !important; }
+pre[data-lang]::after { display: none !important; }
+
+/* 侧边栏 */
+.sidebar, .sidebar-toggle { display: none !important; }
+.content { margin-left: 0 !important; }
+
+/* Hero 覆盖 */
+.hero-section {
+  background: none !important;
+  padding: 3em 1em 1em !important;
+  color: #333 !important;
+  text-align: left !important;
+  margin: 0 !important;
+}
+.hero-title { color: #1a1a1a !important; font-size: 1.8em !important; }
+.hero-slogan { color: #666 !important; font-size: 1em !important; opacity: 1 !important; }
+
+/* 专栏折叠 */
+.home-section {
+  border: none !important;
+  background: none !important;
+  border-bottom: 1px solid #eee !important;
+  border-radius: 0 !important;
+}
+.home-section summary::before { color: #999; }
+.home-section .section-title { color: #1a1a1a; }
+.home-section .section-content { border-top: none !important; }
+.home-section .section-content li::before { color: #999; }
+
+/* 徽章 */
+.update-badge {
+  background: none !important;
+  border: 1px solid #eee !important;
+  color: #666 !important;
+}
+
+/* 暗色强制覆盖 */
+html[data-theme="dark"] .markdown-section,
+html[data-theme="dark"] body { background: #fefefc !important; color: #333 !important; }
+html[data-theme="dark"] .hero-section,
+html[data-theme="dark"] .home-section { background: none !important; }
+html[data-theme="dark"] .home-section { border-bottom-color: #eee !important; }
