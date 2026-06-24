@@ -16,8 +16,7 @@
 
 <details class="home-section" open>
   <summary>
-    <span class="section-title">卷 0 · 地基 — 编译你的第一个 HotSpot JVM</span>
-    <span class="section-count">L1 · 10 章</span>
+    <span class="section-title">卷 0 · 地基</span>
   </summary>
   <div class="section-content">
 
@@ -37,8 +36,7 @@
 
 <details class="home-section">
   <summary>
-    <span class="section-title">卷 1 · 启动 — JVM 从零到一</span>
-    <span class="section-count">L1-L2 · 12 章</span>
+    <span class="section-title">卷 1 · 启动</span>
   </summary>
   <div class="section-content">
     <em>从 java 命令到 Threads::create_vm 的 78 步初始化全景</em>
@@ -48,7 +46,7 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 2 · 对象 — Java 的 C++ 真身</span>
-    <span class="section-count">L2-L3 · 14 章</span>
+    
   </summary>
   <div class="section-content">
     <em>oop / Klass / markOop / 压缩指针 — 每个 Java 对象在 C++ 里的精确映射</em>
@@ -58,7 +56,7 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 3 · 类加载 — .class 到 Klass</span>
-    <span class="section-count">L2-L3 · 17 章</span>
+    
   </summary>
   <div class="section-content">
     <em>ClassFileParser / SystemDictionary / CDS — 类是怎么进入 JVM 的</em>
@@ -68,7 +66,7 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 4 · 解释器 — 字节码执行</span>
-    <span class="section-count">L3-L4 · 20 章</span>
+    
   </summary>
   <div class="section-content">
     <em>TemplateInterpreter / codelet / 256 字节码 — 解释执行的全路径</em>
@@ -78,7 +76,7 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 5 · C1 编译器 — 快速执行路径</span>
-    <span class="section-count">L3-L4 · 12 章</span>
+    
   </summary>
   <div class="section-content">
     <em>8 Phase 快速编译管线 — HIR 构建 → LinearScan 寄存器分配</em>
@@ -88,7 +86,7 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 6 · C2 编译器 — 极致性能</span>
-    <span class="section-count">L4-L5 · 19 章</span>
+    
   </summary>
   <div class="section-content">
     <em>Sea-of-Nodes / GVN / 内联 / 逃逸分析 / Chaitin 寄存器分配</em>
@@ -98,7 +96,7 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 7 · 代码管理 — CodeCache / nmethod / Deopt</span>
-    <span class="section-count">L3-L4 · 12 章</span>
+    
   </summary>
   <div class="section-content">
     <em>编译产物的生老病死 — 从 CodeCache 分配到 Sweeper 回收</em>
@@ -108,7 +106,7 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 8 · G1 GC — 内存的生死轮回</span>
-    <span class="section-count">L3-L5 · 26 章</span>
+    
   </summary>
   <div class="section-content">
     <em>Region / TAMS / SATB / RSet / Young GC / Mixed GC / Full GC — G1 的全部秘密</em>
@@ -118,7 +116,7 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 9 · 多 GC 对比 — 全景视野</span>
-    <span class="section-count">L4 · 13 章</span>
+    
   </summary>
   <div class="section-content">
     <em>Serial / Parallel / CMS / G1 / ZGC / Shenandoah — 6 种 GC 的设计哲学对比</em>
@@ -128,7 +126,7 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 10 · 线程与锁 — 并发根基</span>
-    <span class="section-count">L3-L5 · 18 章</span>
+    
   </summary>
   <div class="section-content">
     <em>ObjectMonitor / 偏向锁 / ParkEvent — synchronized 的完整 C++ 实现</em>
@@ -138,7 +136,7 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 11 · Safepoint + 信号处理</span>
-    <span class="section-count">L4 · 16 章</span>
+    
   </summary>
   <div class="section-content">
     <em>Polling Page / VM_Operation / libjsig — JVM 如何安全地暂停整个世界</em>
@@ -148,7 +146,7 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 12 · 边界 — JNI / JVMTI / Unsafe / JPMS</span>
-    <span class="section-count">L2-L4 · 16 章</span>
+    
   </summary>
   <div class="section-content">
     <em>JVM 与外部世界的所有桥梁 — 从 231 个 JNI 函数到模块系统</em>
@@ -158,16 +156,11 @@
 <details class="home-section">
   <summary>
     <span class="section-title">卷 13 · 诊断与定制 — UL / JMX / JFR / SA / 构建</span>
-    <span class="section-count">L2-L3 · 29 章</span>
+    
   </summary>
   <div class="section-content">
     <em>让 JVM 告诉你它在做什么 — 日志 / 监控 / 飞行记录 / 事后调试 / 定制裁剪</em>
   </div>
 </details>
 
-</div>
-
-<div class="update-badge">
-  <span class="update-icon">🔥</span>
-  <span class="update-text">卷 0 写作中 · 14 卷持续更新</span>
 </div>
