@@ -21,14 +21,14 @@
   <div class="section-content">
 
 * [第一章 — java 命令到底是什么](openjdk/vol-00/ch01.md) - 一个 C 编译出来的可执行文件
-* [第二章 — 编译你自己的 JDK](openjdk/vol-00/ch02.md) - configure → make → 你的第一个 JDK
+* [第二章 — 编译你自己的 JDK](openjdk/vol-00/ch02.md) - configure -> make -> 你的第一个 JDK
 * [第三章 — make 到底做了什么](openjdk/vol-00/ch03.md) - 8 阶段流水线拆解 make 的 1 分 31 秒
 * [第四章 — jdk11u-copy：裁剪、CMake 与 IDE](openjdk/vol-00/ch04.md) - 从 Make 到 CMake，秒级增量编译
 * [第五章 — configure 在做什么](openjdk/vol-00/ch05.md) - 检测 GCC/头文件/系统调用
 * [第六章 — 编译的 5 个阶段](openjdk/vol-00/ch06.md) - 从 .cpp 到 libjvm.so
 * [第七章 — 不运行也能审查二进制](openjdk/vol-00/ch07.md) - file / readelf / ldd / nm / size
 * [第八章 — GDB 工具箱](openjdk/vol-00/ch08.md) - break / bt / p / ptype / x / info
-* [第九章 — 改一行 JVM 源码](openjdk/vol-00/ch09.md) - 编辑 → 增量编译 → 验证生效
+* [第九章 — 改一行 JVM 源码](openjdk/vol-00/ch09.md) - 编辑 -> 增量编译 -> 验证生效
 * [第十章 — HotSpot 源码地图](openjdk/vol-00/ch10.md) - 每个目录对应什么，去哪找
 
   </div>
