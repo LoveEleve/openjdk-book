@@ -1028,4 +1028,4 @@ public class HelloWorld {
 
 重新编译 `java_launcher`，直接执行 `java`（不传任何参数），整条链路通了：
 
-![HelloWorld 运行截图](./image.png)
+<img src="/docs/openjdk/vol-01/ch01/image.png" alt="HelloWorld 运行截图" style="max-width:100%">
