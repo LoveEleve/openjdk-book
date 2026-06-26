@@ -313,6 +313,6 @@ main() → JLI_Launch() → JavaMain() → InitializeJVM()
 
 `JavaVMInitArgs`（`nOptions` + `options`）终于传到了 `Threads::create_vm` 的手上。
 
-`Threads::create_vm` 返回后的 JVMCI 引导、运行时统计、JVMTI 通知、线程状态切换等——这些是 JVM 完全初始化之后的收尾工作，涉及即时编译器、调试接口、性能监控等独立子系统。等走完 Vol 1 核心流程（`init_globals` → `universe_init`）之后再回来理解它们。
+`Threads::create_vm` 返回后的运行时统计、JVMTI 通知、线程状态切换等——这些是 JVM 完全初始化之后的收尾工作，涉及调试接口、性能监控等独立子系统。等走完 Vol 1 核心流程（`init_globals` → `universe_init`）之后再回来理解它们。
 
 下一章进入 `Threads::create_vm`——HotSpot 初始化的心脏地带。
