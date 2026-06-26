@@ -3,3 +3,4 @@
 * [第 1 卷：启动](openjdk/vol-01/ch01)
   * [Ch01：Launcher Chain](openjdk/vol-01/ch01)
   * [Ch02：JavaMain → InitializeJVM](openjdk/vol-01/ch02.md)
+  * [Ch03：JNI_CreateJavaVM](openjdk/vol-01/ch03)
