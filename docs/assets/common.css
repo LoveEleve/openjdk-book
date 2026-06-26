@@ -1560,7 +1560,7 @@ html[data-theme="dark"] .home-section[open] > summary {
 }
 
 /* ===== 首页子章节折叠 (Vol 1 复杂章) ===== */
-.section-content details { margin: 2px 0; display: list-item; }
+.section-content details { margin: 2px 0; }
 .section-content details summary {
   display: inline !important;
   font-weight: normal !important;
