@@ -72,7 +72,7 @@ Java 进程 (PID=xxx)
 
 ```
 strace -f -e trace=clone,execve
-       bash -c '/path/to/jdk/bin/java -version; true'
+       bash -c '/data/workspace/jdk11u-copy/build/linux-x86_64-normal-server-slowdebug/jdk/bin/java -version; true'
 ```
 
 `-f` 追踪子进程，`-e trace=clone,execve` 只看进程相关的系统调用。末尾的 `; true` 是为了让 bash 必须 fork 子进程（否则 bash 会把最后一个命令直接 exec 而不 fork）。实际输出：
