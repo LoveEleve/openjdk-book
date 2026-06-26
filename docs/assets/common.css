@@ -1558,27 +1558,3 @@ html[data-theme="dark"] .home-section[open] > summary {
   border-bottom-color: rgba(255, 255, 255, 0.06);
   background: var(--card-head-bg);
 }
-
-/* ===== 首页子章节折叠 (Vol 1 复杂章) ===== */
-.section-content details { margin: 2px 0; }
-.section-content details summary {
-  display: inline !important;
-  font-weight: normal !important;
-  cursor: pointer;
-  color: #1a56db;
-  outline: none;
-  list-style: none;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-}
-.section-content details summary::-webkit-details-marker { display: none !important; }
-.section-content details summary::marker { content: none !important; }
-.section-content details summary:hover { text-decoration: underline; }
-.section-content details ul { margin: 2px 0 2px 20px; padding: 0; list-style: none; }
-.section-content details ul li { margin: 1px 0; }
-.section-content details ul li a { font-size: 13px; color: #475569; }
-.section-content details ul li a:hover { color: #1a56db; }
-
-html[data-theme="dark"] .section-content details summary { color: #93c5fd; }
-html[data-theme="dark"] .section-content details ul li a { color: rgba(148, 163, 184, 0.78); }
