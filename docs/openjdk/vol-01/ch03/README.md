@@ -23,6 +23,8 @@ r = ifn->CreateJavaVM(pvm, (void**)penv, &args);
 └─ Java 进程 (PID=xxx, 即 java 可执行文件)
 ```
 
+<img src="/docs/openjdk/vol-01/ch03/assets/Clipboard_Screenshot_1782478472.png" alt="进程与线程模型" style="max-width:100%">
+
 Shell 进程要等 Java 进程退出后收集退出码、显示新的命令提示符。Java 进程是我们关注的主角。
 
 **Java 进程内有 2 个线程。** 第一章的 `pthread_create` 之后：
