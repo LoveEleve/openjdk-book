@@ -12,26 +12,37 @@ r = ifn->CreateJavaVM(pvm, (void**)penv, &args);
 
 ## 此刻的进程与线程
 
-进入 `JNI_CreateJavaVM` 之前，回顾一下当前的进程和线程状态：
+进入 `JNI_CreateJavaVM` 之前，回顾一下从敲键盘到现在的进程和线程状态。
 
-**1 个进程。** 从你在终端执行 `java` 开始，OS 创建了一个进程。到现在，还是这一个进程。
-
-**2 个线程。** 第一章的 `pthread_create` 之后：
+**2 个进程。** 终端执行 `java` 时，Shell 调用 `fork` 创建子进程，子进程 `exec` 替换成 `java` 二进制——所以有两个进程：
 
 ```
-OS 进程 (PID=xxx)
-├─ 主线程（pid=原始线程）
+终端进程 (shell, 例如 bash)
+│  执行了 fork + exec，Shell 还活着，等待 Java 进程退出
+│
+└─ Java 进程 (PID=xxx, 即 java 可执行文件)
+```
+
+Shell 进程要等 Java 进程退出后收集退出码、显示新的命令提示符。Java 进程是我们关注的主角。
+
+**Java 进程内有 2 个线程。** 第一章的 `pthread_create` 之后：
+
+```
+Java 进程 (PID=xxx)
+├─ 主线程（pid=LWP-1）
 │     main() → JLI_Launch() → JVMInit() → ContinueInNewThread()
-│     → CallJavaMainInNewThread() → pthread_create() → pthread_join()
+│     → CallJavaMainInNewThread() → pthread_create()
 │     状态：阻塞在 pthread_join，等待 Java 线程结束
 │
-└─ Java 线程（pid=tid）
+└─ Java 线程（pid=LWP-2）
       ThreadJavaMain() → JavaMain() → InitializeJVM()
       → ifn->CreateJavaVM() → JNI_CreateJavaVM()    ← 现在在这里
       状态：正在执行，即将创建 JVM
 ```
 
-主线程在 `pthread_join` 上阻塞睡觉，Java 线程扛着所有工作。这个 Java 线程目前只是一个普通 POSIX 线程——它还不是 HotSpot 的 `JavaThread` 对象。`Threads::create_vm` 要做的第一件事，就是把这个 OS 线程包装成 HotSpot 的 `JavaThread`。
+主线程在 `pthread_join` 上阻塞，Java 线程扛着所有工作。这个 Java 线程目前只是一个普通 POSIX 线程——它还不是 HotSpot 的 `JavaThread` 对象。`Threads::create_vm` 要做的第一件事，就是把这个 OS 线程包装成 HotSpot 的 `JavaThread`。
+
+> `pthread_create` 之前，Java 进程确实只有 1 个线程（主线程），此时"进程"和"它的唯一线程"在执行路径上是等价的。`pthread_create` 之后，进程变成了 2 个线程，进程和线程就不再是等价概念。
 
 ---
 
