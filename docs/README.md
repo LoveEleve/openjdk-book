@@ -12,15 +12,6 @@
 </div>
 
 <!-- 首页专栏列表：可折叠 -->
-<style>
-.chapter-detail { margin: 4px 0; padding: 2px 0; }
-.chapter-detail summary { cursor: pointer; font-weight: 600; color: var(--theme-color, #42b983); padding: 4px 0; list-style: none; }
-.chapter-detail summary::-webkit-details-marker { display: none; }
-.chapter-detail summary::before { content: "▸ "; font-size: 12px; }
-.chapter-detail[open] summary::before { content: "▾ "; }
-.chapter-detail ul { margin: 2px 0 2px 24px; padding: 0; list-style: none; }
-.chapter-detail ul li a { font-size: 0.95em; color: var(--muted-color, #666); }
-</style>
 <div class="home-sections">
 
 <details class="home-section" open>
@@ -53,24 +44,20 @@
 * [第八章 — stubRoutines_init1](openjdk/vol-01/ch08.md) - 16 个早期桩代码
 * [第九章 — classLoader_init1](openjdk/vol-01/ch09.md) - Bootstrap Classpath 与 Zip 库
 * [第十章 — universe_init 总览](openjdk/vol-01/ch10.md) - init_globals 的转折点
-* <details class="chapter-detail"><summary>第十一章 — G1CollectedHeap —— 堆创建的 18 步序列</summary>
-  * [11.1 堆创建全景](openjdk/vol-01/ch11-heap/01-overview.md)
+* [第十一章 — G1CollectedHeap：18步堆创建](openjdk/vol-01/ch11-heap/01-overview.md)
   * [11.2 HeapRegion——堆的原子单位](openjdk/vol-01/ch11-heap/02-region.md)
   * [11.3 Card Table——跨 Region 写跟踪](openjdk/vol-01/ch11-heap/03-card-table.md)
   * [11.4 BOT——Block Offset Table](openjdk/vol-01/ch11-heap/04-bot.md)
-  * [11.5 HeapRegionManager——2000+ Region 的管家](openjdk/vol-01/ch11-heap/05-manager.md)
-  * [11.6 mmap 预留与辅助内存汇总](openjdk/vol-01/ch11-heap/06-mmap.md)
-  </details>
+  * [11.5 HeapRegionManager](openjdk/vol-01/ch11-heap/05-manager.md)
+  * [11.6 mmap 预留与辅助内存](openjdk/vol-01/ch11-heap/06-mmap.md)
 * [第十二章 — Metaspace](openjdk/vol-01/ch12.md) - 类元数据的内存管理
 * [第十三章 — SymbolTable + StringTable](openjdk/vol-01/ch13.md) - 并发安全的符号存储
 * [第十四章 — G1Policy + ConcurrentMark](openjdk/vol-01/ch14.md) - GC 调度基础设施
 * [第十五章 — GC 屏障桩](openjdk/vol-01/ch15.md) - G1 SATB 写屏障
-* <details class="chapter-detail"><summary>第十六章 — TemplateInterpreter —— 286 个 Codelet 生成</summary>
-  * [16.1 解释器全景](openjdk/vol-01/ch16-interpreter/01-overview.md)
-  * [16.2 CodeletMark——桩代码的 RAII 提交](openjdk/vol-01/ch16-interpreter/02-codelet.md)
+* [第十六章 — TemplateInterpreter：286 Codelet](openjdk/vol-01/ch16-interpreter/01-overview.md)
+  * [16.2 CodeletMark——RAII 提交](openjdk/vol-01/ch16-interpreter/02-codelet.md)
   * [16.3 TosState——11 种栈顶类型](openjdk/vol-01/ch16-interpreter/03-tosstate.md)
-  * [16.4 generate_all()——286 个 codelet 的分类生成](openjdk/vol-01/ch16-interpreter/04-generate-all.md)
-  </details>
+  * [16.4 generate_all()——分类生成](openjdk/vol-01/ch16-interpreter/04-generate-all.md)
 * [第十七章 — InvocationCounter](openjdk/vol-01/ch17.md) - 编译阈值状态机
 * [第十八章 — 微小初始化](openjdk/vol-01/ch18.md) - sizeof 断言/GC 种子/寄存器名
 * [第十九章 — TemplateTable](openjdk/vol-01/ch19.md) - 256 字节码的"设计图纸"
@@ -80,20 +67,16 @@
 * [第二十三章 — 引用 + JNI 句柄](openjdk/vol-01/ch23.md) - 软引用时钟与 OopStorage
 * [第二十四章 — 编译底座](openjdk/vol-01/ch24.md) - 虚表桩/IC 缓冲/编译指令
 * [第二十五章 — CompileBroker](openjdk/vol-01/ch25.md) - C1/C2 调度中枢
-* <details class="chapter-detail"><summary>第二十六章 — Universe 后初始化 —— 异常预分配工厂</summary>
-  * [26.1 全景](openjdk/vol-01/ch26-post/01-overview.md)
+* [第二十六章 — Universe 后初始化](openjdk/vol-01/ch26-post/01-overview.md)
   * [26.2 第二次 Interpreter::initialize()](openjdk/vol-01/ch26-post/02-reinit-interpreter.md)
   * [26.3 OOM 错误预分配](openjdk/vol-01/ch26-post/03-oom-prealloc.md)
   * [26.4 initialize_known_methods](openjdk/vol-01/ch26-post/04-known-methods.md)
-  </details>
 * [第二十七章 — Intrinsic 桩 Phase 2](openjdk/vol-01/ch27.md) - 50+ 硬件加速入口
 * [第二十八章 — MH 适配器](openjdk/vol-01/ch28.md) - invokedynamic 的桥梁
 * [第二十九章 — Post-init (上)](openjdk/vol-01/ch29.md) - VMThread + java.lang 类加载
-* <details class="chapter-detail"><summary>第三十章 — Post-init (下) —— 编译器线程到 JNI_OK</summary>
-  * [30.1 编译器线程创建](openjdk/vol-01/ch30-post/01-compiler-threads.md)
+* [第三十章 — Post-init：编译器线程 -> JNI_OK](openjdk/vol-01/ch30-post/01-compiler-threads.md)
   * [30.2 模块系统初始化](openjdk/vol-01/ch30-post/02-modules.md)
   * [30.3 最后一步——return JNI_OK](openjdk/vol-01/ch30-post/03-final-steps.md)
-  </details>
 
   </div>
 </details>
