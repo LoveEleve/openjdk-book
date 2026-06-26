@@ -1568,6 +1568,9 @@ html[data-theme="dark"] .home-section[open] > summary {
   color: #1a56db;
   outline: none;
   list-style: none;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 .section-content details summary::-webkit-details-marker { display: none !important; }
 .section-content details summary::marker { content: none !important; }
