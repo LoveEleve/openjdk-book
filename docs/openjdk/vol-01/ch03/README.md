@@ -75,26 +75,21 @@ strace -f -e trace=clone,execve
        bash -c '/data/workspace/jdk11u-copy/build/linux-x86_64-normal-server-slowdebug/jdk/bin/java -version; true'
 ```
 
-`-f` 追踪子进程，`-e trace=clone,execve` 只看进程相关的系统调用。末尾的 `; true` 是为了让 bash 必须 fork 子进程（否则 bash 会把最后一个命令直接 exec 而不 fork）。实际输出：
+`-f` 追踪子进程，`-e trace=clone,execve` 只看进程相关的系统调用。末尾的 `; true` 是为了让 bash 必须 fork 子进程（否则 bash 会把最后一个命令直接 exec 而不 fork）。本机实际输出：
 
 ```
-execve("/usr/bin/bash", ["bash", "-c", "..."], ...) = 0
-                                          ← bash 自己启动了
-
-clone(flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD)
-                                          ← bash 调用 clone（等同于 fork）
-                                          ← 创建子进程，新 PID
-
-execve("/data/workspace/jdk11u-copy/build/.../jdk/bin/java",
-       ["java", "-version"], ...)          ← 子进程 exec 加载 java 二进制
-                                          ← java 现在替换了子进程的代码
+execve("/usr/bin/bash", ["bash", "-c", "/data/workspace/jdk11u-copy/buil"...], 0x7ffc5ed2d858 /* 68 vars */) = 0
+clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7feabeaafa10) = 1584511
+[pid 1584511] execve("/data/workspace/jdk11u-copy/build/linux-x86_64-normal-server-slowdebug/jdk/bin/java", ["/data/workspace/jdk11u-copy/buil"..., "-version"], 0x5580490706d0 /* 68 vars */) = 0
 ```
 
-三个系统调用，对应三件事：
+三行输出对应三件事：
 
-1. bash 启动
-2. bash 调用 `clone`（也就是 `fork`）创建一个子进程——Linux 用 `clone` 分别实现 fork 和 pthread_create
-3. 子进程调用 `execve` 把自己的代码替换为 java 二进制
+1. `execve("/usr/bin/bash", ...)` — bash 启动。`strace` 用 `execve` 把自己替换成 bash
+2. `clone(child_stack=NULL, flags=SIGCHLD)` — bash fork 出一个子进程。flag 里没有 `CLONE_THREAD`，说明创建的是进程（新 PID），不是线程
+3. `execve(".../jdk/bin/java", ...)` — 子进程把自身代码替换为 java 二进制。加 `-version` 是因为 hardcoded_argv 设的就是这个
+
+之后 java 内部会调用 `clone3(CLONE_THREAD)` 创建 JVM 线程——那些 flag 和这里的 `SIGCHLD` 完全不同。
 
 `clone` 的 flag 是关键——`SIGCHLD` 且没有 `CLONE_THREAD`，说明创建的是**进程**（新 PID），不是线程。如果 `strace` 继续追踪，后面进入 java 内部，会看到 `clone3(CLONE_THREAD)`——那些是 JVM 创建的线程，和 java 进程共享 PID。
 
