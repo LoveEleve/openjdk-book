@@ -152,11 +152,6 @@
     requestHeaders: { 'cache-control': 'max-age=0' },
     auto2top: true,
 
-    // 目录别名：ch01/ → ch01/README
-    alias: {
-      '/openjdk/vol-01/ch01': '/openjdk/vol-01/ch01/README',
-    },
-
     // 代码块默认语言：无标记/纯文本 → Java
     markdown: {
       renderer: {
