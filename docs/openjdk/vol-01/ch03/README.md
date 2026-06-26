@@ -64,6 +64,44 @@ Java 进程 (PID=xxx)
 
 ---
 
+## 动手验证：strace 追踪 fork + exec + clone
+
+上面的进程树形图不是推论，可以用 `strace` 在系统调用层面验证。`strace` 能追踪进程的每一次系统调用——包括进程创建和程序加载。
+
+让它追踪 bash 执行 `java -version` 的完整过程：
+
+```
+strace -f -e trace=clone,execve
+       bash -c '/path/to/jdk/bin/java -version; true'
+```
+
+`-f` 追踪子进程，`-e trace=clone,execve` 只看进程相关的系统调用。末尾的 `; true` 是为了让 bash 必须 fork 子进程（否则 bash 会把最后一个命令直接 exec 而不 fork）。实际输出：
+
+```
+execve("/usr/bin/bash", ["bash", "-c", "..."], ...) = 0
+                                          ← bash 自己启动了
+
+clone(flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD)
+                                          ← bash 调用 clone（等同于 fork）
+                                          ← 创建子进程，新 PID
+
+execve("/data/workspace/jdk11u-copy/build/.../jdk/bin/java",
+       ["java", "-version"], ...)          ← 子进程 exec 加载 java 二进制
+                                          ← java 现在替换了子进程的代码
+```
+
+三个系统调用，对应三件事：
+
+1. bash 启动
+2. bash 调用 `clone`（也就是 `fork`）创建一个子进程——Linux 用 `clone` 分别实现 fork 和 pthread_create
+3. 子进程调用 `execve` 把自己的代码替换为 java 二进制
+
+`clone` 的 flag 是关键——`SIGCHLD` 且没有 `CLONE_THREAD`，说明创建的是**进程**（新 PID），不是线程。如果 `strace` 继续追踪，后面进入 java 内部，会看到 `clone3(CLONE_THREAD)`——那些是 JVM 创建的线程，和 java 进程共享 PID。
+
+用同样的命令追踪 CLion 启动 java，输出几乎一样——CLion 也是通过 fork + exec 启动 java 进程。
+
+---
+
 ## JNI_CreateJavaVM() 外层包装器
 
 `JNI_CreateJavaVM` 只有 14 行，在 `jni.cpp:4098-4111`：
