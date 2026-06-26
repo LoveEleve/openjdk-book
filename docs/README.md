@@ -37,6 +37,7 @@
 * [第一章 — Launcher Chain](openjdk/vol-01/ch01) - main.c -> JLI_Launch -> dlopen -> dlsym
 * [第二章 — JavaMain → InitializeJVM](openjdk/vol-01/ch02.md) - JavaMainArgs 解包 → CreateJavaVM 调用
 * [第三章 — JNI_CreateJavaVM](openjdk/vol-01/ch03/01-overview.md) - Atomic::xchg 守卫 → Threads::create_vm
+  * [3.1 概览：进程线程模型 + _inner 全貌](openjdk/vol-01/ch03/01-overview.md)
   * [3.2 Threads::create_vm 总览](openjdk/vol-01/ch03/02-threads-create-vm.md)
   * [3.3 前置初始化](openjdk/vol-01/ch03/03-preamble-init.md)
   * [3.4 参数解析](openjdk/vol-01/ch03/04-args-parse.md)
