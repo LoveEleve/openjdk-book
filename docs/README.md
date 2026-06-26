@@ -12,6 +12,15 @@
 </div>
 
 <!-- 首页专栏列表：可折叠 -->
+<style>
+.section-content details { margin: 2px 0; }
+.section-content details summary {
+  color: #1a56db; cursor: pointer; display: inline; font-weight: normal;
+}
+.section-content details summary:hover { text-decoration: underline; }
+.section-content details ul { margin: 2px 0 2px 20px; padding: 0; }
+.section-content details ul li { margin: 1px 0; }
+</style>
 <div class="home-sections">
 
 <details class="home-section" open>
