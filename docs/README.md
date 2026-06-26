@@ -28,12 +28,43 @@
   </div>
 </details>
 
-<details class="home-section">
+<details class="home-section" open>
   <summary>
     <span class="section-title">卷 1 · 启动</span>
   </summary>
   <div class="section-content">
-    <em>从 java 命令到 Threads::create_vm 的 78 步初始化全景</em>
+
+* [第一章 — Launcher Chain](openjdk/vol-01/ch01.md) - main.c -> JLI_Launch -> dlopen -> dlsym
+* [第二章 — JNI_CreateJavaVM](openjdk/vol-01/ch02.md) - Atomic::xchg 守卫 + 错误传播
+* [第三章 — Threads::create_vm 总览](openjdk/vol-01/ch03.md) - 10 Stage 架构 + HandleMark RAII
+* [第四章 — vm_init_globals](openjdk/vol-01/ch04.md) - 7 项全局基础设施 + 主线程绑定
+* [第五章 — mutex_init](openjdk/vol-01/ch05.md) - ~90 锁 + 10 级 ranking 系统
+* [第六章 — CodeCache](openjdk/vol-01/ch06.md) - 三段 JIT 代码内存
+* [第七章 — VM_Version_init](openjdk/vol-01/ch07.md) - CPU 特性探测与 Intrinsic 级联
+* [第八章 — stubRoutines_init1](openjdk/vol-01/ch08.md) - 16 个早期桩代码
+* [第九章 — classLoader_init1](openjdk/vol-01/ch09.md) - Bootstrap Classpath 与 Zip 库
+* [第十章 — universe_init 总览](openjdk/vol-01/ch10.md) - init_globals 的转折点
+* [第十一章 — G1CollectedHeap](openjdk/vol-01/ch11.md) - 堆创建的 18 步序列
+* [第十二章 — Metaspace](openjdk/vol-01/ch12.md) - 类元数据的内存管理
+* [第十三章 — SymbolTable + StringTable](openjdk/vol-01/ch13.md) - 并发安全的符号存储
+* [第十四章 — G1Policy + ConcurrentMark](openjdk/vol-01/ch14.md) - GC 调度基础设施
+* [第十五章 — GC 屏障桩](openjdk/vol-01/ch15.md) - G1 SATB 写屏障
+* [第十六章 — TemplateInterpreter](openjdk/vol-01/ch16.md) - 286 个 Codelet 生成
+* [第十七章 — InvocationCounter](openjdk/vol-01/ch17.md) - 编译阈值状态机
+* [第十八章 — 微小初始化](openjdk/vol-01/ch18.md) - sizeof 断言/GC 种子/寄存器名
+* [第十九章 — TemplateTable](openjdk/vol-01/ch19.md) - 256 字节码的"设计图纸"
+* [第二十章 — SharedRuntime 桩](openjdk/vol-01/ch20.md) - 6 个 Resolve Blob
+* [第二十一章 — 类型系统](openjdk/vol-01/ch21.md) - TypeArrayKlass 与核心类偏移
+* [第二十二章 — vmStructs + PrintFlags](openjdk/vol-01/ch22.md) - SA 调试与配置归档
+* [第二十三章 — 引用 + JNI 句柄](openjdk/vol-01/ch23.md) - 软引用时钟与 OopStorage
+* [第二十四章 — 编译底座](openjdk/vol-01/ch24.md) - 虚表桩/IC 缓冲/编译指令
+* [第二十五章 — CompileBroker](openjdk/vol-01/ch25.md) - C1/C2 调度中枢
+* [第二十六章 — Universe 后初始化](openjdk/vol-01/ch26.md) - 异常预分配工厂
+* [第二十七章 — Intrinsic 桩 Phase 2](openjdk/vol-01/ch27.md) - 50+ 硬件加速入口
+* [第二十八章 — MH 适配器](openjdk/vol-01/ch28.md) - invokedynamic 的桥梁
+* [第二十九章 — Post-init (上)](openjdk/vol-01/ch29.md) - VMThread + java.lang 类加载
+* [第三十章 — Post-init (下)](openjdk/vol-01/ch30.md) - 编译器线程 -> JNI_OK
+
   </div>
 </details>
 
