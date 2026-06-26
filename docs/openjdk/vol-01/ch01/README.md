@@ -1001,7 +1001,7 @@ main() → JLI_Launch() → JVMInit() → ContinueInNewThread()
        → ThreadJavaMain() → JavaMain()
 ```
 
-下一章进入 `JavaMain`：`ifn->CreateJavaVM(...)` 创建 JVM 实例，加载用户类，执行 `main(String[] args)`。
+下一章进入 [JavaMain](openjdk/vol-01/ch02.md)：`InitializeJVM` → `ifn->CreateJavaVM(...)` 创建 JVM 实例。
 
 ## 动手验证
 
