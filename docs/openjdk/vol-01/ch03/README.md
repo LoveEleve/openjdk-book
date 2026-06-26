@@ -151,7 +151,6 @@ static jint JNI_CreateJavaVM_inner(JavaVM **vm, void **penv, void *args) {
         *vm = (JavaVM *)(&main_vm);
         *(JNIEnv**)penv = thread->jni_environment();
 
-        // JVMCI 编译器引导 — 需 INCLUDE_JVMCI 编译选项，标准构建不编译
         RuntimeService::record_application_start();
         JvmtiExport::post_thread_start(thread);
         post_thread_start_event(thread);
