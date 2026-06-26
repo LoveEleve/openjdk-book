@@ -10,6 +10,31 @@ r = ifn->CreateJavaVM(pvm, (void**)penv, &args);
 
 ---
 
+## 此刻的进程与线程
+
+进入 `JNI_CreateJavaVM` 之前，回顾一下当前的进程和线程状态：
+
+**1 个进程。** 从你在终端执行 `java` 开始，OS 创建了一个进程。到现在，还是这一个进程。
+
+**2 个线程。** 第一章的 `pthread_create` 之后：
+
+```
+OS 进程 (PID=xxx)
+├─ 主线程（pid=原始线程）
+│     main() → JLI_Launch() → JVMInit() → ContinueInNewThread()
+│     → CallJavaMainInNewThread() → pthread_create() → pthread_join()
+│     状态：阻塞在 pthread_join，等待 Java 线程结束
+│
+└─ Java 线程（pid=tid）
+      ThreadJavaMain() → JavaMain() → InitializeJVM()
+      → ifn->CreateJavaVM() → JNI_CreateJavaVM()    ← 现在在这里
+      状态：正在执行，即将创建 JVM
+```
+
+主线程在 `pthread_join` 上阻塞睡觉，Java 线程扛着所有工作。这个 Java 线程目前只是一个普通 POSIX 线程——它还不是 HotSpot 的 `JavaThread` 对象。`Threads::create_vm` 要做的第一件事，就是把这个 OS 线程包装成 HotSpot 的 `JavaThread`。
+
+---
+
 ## JNI_CreateJavaVM() 外层包装器
 
 `JNI_CreateJavaVM` 只有 14 行，在 `jni.cpp:4098-4111`：
