@@ -37,9 +37,6 @@
 * [第一章 — Launcher Chain](openjdk/vol-01/ch01) - main.c -> JLI_Launch -> dlopen -> dlsym
 * [第二章 — JavaMain → InitializeJVM](openjdk/vol-01/ch02.md) - JavaMainArgs 解包 → CreateJavaVM 调用
 * [第三章 — JNI_CreateJavaVM](openjdk/vol-01/ch03) - Atomic::xchg 守卫 → Threads::create_vm
-  * [3.1 概览：进程线程模型 + _inner 全貌](openjdk/vol-01/ch03/01-overview.md)
-  * [3.2 Atomic::xchg 原子守卫](openjdk/vol-01/ch03/02-atomic-guard.md)
-  * [3.3 后处理与收尾](openjdk/vol-01/ch03/03-post-processing.md)
 * [第四章 — vm_init_globals](openjdk/vol-01/ch04.md) - 7 项全局基础设施 + 主线程绑定
 * [第五章 — mutex_init](openjdk/vol-01/ch05.md) - ~90 锁 + 10 级 ranking 系统
 * [第六章 — CodeCache](openjdk/vol-01/ch06.md) - 三段 JIT 代码内存
