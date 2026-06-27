@@ -118,17 +118,45 @@ void ThreadLocalStorage::init() {
 
 `_thread_key` 是全局变量，只创建一次。第二个参数 `restore_thread_pointer` 是析构函数——线程退出时如果该线程的 TLS 槽位值不为 NULL，pthread 自动调用它。
 
-源码里 `restore_thread_pointer` 的实现只有一行：
+举个例子。假设一个 JNI 用户写了这样的代码：
 
 ```c
-extern "C" void restore_thread_pointer(void* p) {
-  ThreadLocalStorage::set_thread((Thread*) p);
+// 用户自定义的线程清理函数
+void my_cleanup(void* p) {
+    (*jvm)->DetachCurrentThread(jvm);   // 线程退出时解绑 JVM
+}
+
+void my_thread_main() {
+    (*jvm)->AttachCurrentThread((void**)&env, NULL);  // 绑定当前线程到 JVM
+    // ... 业务代码 ...
+    pthread_cleanup_push(my_cleanup, NULL);  // 注册清理函数
 }
 ```
 
-就是把 `Thread*` 重新存回 TLS。这个看似简单的操作解决了一个实际问题：有些 JNI 用户会在线程退出时通过自定义的 pthread 析构函数调用 `DetachCurrentThread`——这个函数内部需要 `Thread::current()` 来找到自己的 `Thread*`。但 pthread 的析构函数调用顺序不可控，有可能 HotSpot 的析构函数先被调用、TLS 槽位被清空了，然后用户的析构函数才调用——这时候 `Thread::current()` 返回 NULL，crash。
+当这个线程退出时，pthread 会按注册顺序依次调用所有 TLS key 的析构函数。HotSpot 的 `_thread_key` 对应的析构函数就是 `restore_thread_pointer`。
 
-`restore_thread_pointer` 的作用就是"复活"这个指针：无论析构函数被调用的顺序如何，它先把 `Thread*` 存回 TLS。这样后续任何需要 `Thread::current()` 的代码都能找到它。等到 `DetachCurrentThread` 真正执行时，会调用 `pthread_setspecific(key, NULL)` 把槽位置空，pthread 就不会再次调用析构函数——避免了死循环。
+**没有 `restore_thread_pointer` 的情况：**
+
+```
+1. pthread 先调 HotSpot 的析构函数 → 清空了 TLS 里的 Thread*
+2. pthread 再调 my_cleanup → 内部调 DetachCurrentThread
+3. DetachCurrentThread 需要 Thread::current() 
+   → 读 TLS → 返回 NULL（已经被第一步清空了）→ crash
+```
+
+**有 `restore_thread_pointer` 的情况：**
+
+```
+1. pthread 先调 HotSpot 的析构函数 → restore_thread_pointer 被触发
+   → set_thread((Thread*)p)  ← 把 Thread* 重新存回 TLS
+2. pthread 再调 my_cleanup → 内部调 DetachCurrentThread
+3. DetachCurrentThread 需要 Thread::current()
+   → 读 TLS → 拿到了 Thread*（第一步复活了）→ 正常执行
+4. DetachCurrentThread 内部调 pthread_setspecific(key, NULL)
+   → TLS 槽位清空 → pthread 不再调用析构函数 → 避免死循环
+```
+
+源码注释里也提到了这个死循环问题：如果指针一直留在 TLS 里不被清空，pthread 可能会反复调用析构函数。`restore_thread_pointer` 只是"暂时复活"，最终由 `DetachCurrentThread` 的 `pthread_setspecific(NULL)` 来永久清空。
 
 ```c
 Thread* ThreadLocalStorage::thread() {
