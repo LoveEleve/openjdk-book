@@ -545,31 +545,42 @@ public:
 
 `StackObj` 是 HotSpot 的基类——标记这个对象只能在栈上分配，不能用 `new` 创建到堆。
 
-接着看 `TimeStamp` 的内部实现（`timer.hpp`）：
+接着看 `TimeStamp` 的完整实现（`timer.hpp` + `timer.cpp`）：
 
 ```c
+// timer.hpp — 类定义
 class TimeStamp {
 private:
   jlong _counter;
 public:
-  void update_to(jlong ticks) { ... }    // _counter = ticks
-  jlong milliseconds() const { ... }     // 返回 _counter 对应的毫秒数
+  TimeStamp()  { _counter = 0; }
+  void clear() { _counter = 0; }
+  bool is_updated() const { return _counter != 0; }
 };
+
+// timer.cpp — 方法实现
+void TimeStamp::update_to(jlong ticks) {
+  _counter = ticks;
+  if (_counter == 0)  _counter = 1;     // 0 保留给"未启动"状态
+}
+
+void TimeStamp::update() {
+  update_to(os::elapsed_counter());     // 记录当前 tick 数
+}
+
+jlong TimeStamp::milliseconds() const {
+  jlong new_count = os::elapsed_counter();   // 读取当前的 tick 数
+  return (jlong)TimeHelper::counter_to_millis(new_count - _counter);
+}
 ```
 
-`start()` 把 `_counter` 设 0，后面 `milliseconds()` 返回的就是从 start 到现在的毫秒数。
+`_counter` 存的是一个"tick 数"——CPU 时间戳计数器的值（x86 上来自 `rdtsc` 指令），不是毫秒。
 
-继续往下走 `Threads::create_vm`，经过阶段 3-8，到阶段 9 末尾：
+`update_to(0)` 把 `_counter` 设为 1（不是 0），因为 `_counter == 0` 被 `is_updated()` 用来判断"计时器还没启动"。`start()` 调用它之后，`is_updated()` 返回 `true`。
 
-```c
-create_vm_timer.end();
-```
+`milliseconds()` 被调用时：读当前 tick 数（`os::elapsed_counter()`），减去 `_counter` 存的起点 tick 数，差值通过 `TimeHelper::counter_to_millis` 除以 CPU 频率得到毫秒数。
 
-`end()` 调用 `Management::record_vm_startup_time(_begin_time, _timer.milliseconds())`——把启动开始时间戳和耗时写入 PerfData 内存区域。`jstat` 和 JMX 查询 JVM 启动时间就是读这里的数据。
-
-但 `Threads::create_vm` 内部不止这一个计时器。阶段 3 开头还有：
-
-```c
+计时器的底层原理就是记录两个时刻的 tick 数，差值转时间。`os::elapsed_counter()` 是 `rdtsc`，`os::elapsed_frequency()` 是 CPU 频率（tick/秒），`counter_to_millis` 用这两个值做换算。
 TraceTime timer("Create VM", TRACETIME_LOG(Info, startuptime));
 ```
 
