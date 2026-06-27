@@ -310,7 +310,19 @@ void ostream_init() {
 
 三件事：
 
-**1. 创建 defaultStream 对象。** `new(ResourceObj::C_HEAP, mtInternal) defaultStream()`——在 C 堆上分配 `defaultStream`，打 `mtInternal` 标签。`defaultStream` 继承自 `outputStream`，封装了往 stdout 和 stderr 写数据的逻辑。构建完成后存到静态成员 `defaultStream::instance`。
+**1. 创建 defaultStream 对象。** `new(ResourceObj::C_HEAP, mtInternal) defaultStream()`——在 C 堆上分配 `defaultStream`，打 `mtInternal` 标签。`defaultStream` 继承自 `outputStream`。
+
+所谓的"封装 stdout/stderr"体现在它的静态成员定义（`ostream.cpp`）：
+
+```c
+defaultStream* defaultStream::instance = NULL;
+int    defaultStream::_output_fd     = 1;       // fd=1 即标准输出
+int    defaultStream::_error_fd      = 2;       // fd=2 即标准错误
+FILE*  defaultStream::_output_stream = stdout;  // C 标准库的 stdout
+FILE*  defaultStream::_error_stream  = stderr;  // C 标准库的 stderr
+```
+
+`stdout` 和 `stderr` 是 C 标准库的全局 `FILE*` 指针——`printf` 底层就是往 `stdout` 写。`defaultStream` 内部在需要输出时通过 `_output_stream`/`_error_stream` 直接操作这两个 FILE 指针，而不是调 `printf`。这样 HotSpot 可以控制缓冲、刷新时机、日志重定向等细节。构建完成后存到静态成员 `defaultStream::instance`。
 
 **2. 赋值给 tty。** `tty = defaultStream::instance`——全局变量 `tty` 指向这个唯一的 `defaultStream` 实例。从此 HotSpot 代码可以通过 `tty->print_cr("hello")` 输出到终端。
 
