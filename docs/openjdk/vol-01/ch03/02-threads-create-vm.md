@@ -168,6 +168,10 @@ jlong TimeStamp::milliseconds() const {
 `milliseconds()` 被调用时：读当前 tick 数（`os::elapsed_counter()`），减去 `_counter` 存的起点 tick 数，差值通过 `TimeHelper::counter_to_millis` 除以 CPU 频率得到毫秒数。
 
 计时器的底层原理就是记录两个时刻的 tick 数，差值转时间。`os::elapsed_counter()` 是 `rdtsc`，`os::elapsed_frequency()` 是 CPU 频率（tick/秒），`counter_to_millis` 用这两个值做换算。
+
+但 `Threads::create_vm` 内部不止这一个计时器。阶段 3 开头还有另一个：
+
+```c
 TraceTime timer("Create VM", TRACETIME_LOG(Info, startuptime));
 ```
 
@@ -180,14 +184,14 @@ TraceTime timer("Create VM", TRACETIME_LOG(Info, startuptime));
 所以整个计时布局是：
 
 ```
-create_vm_timer.start()              ← 全函数计时开始
+create_vm_timer.start()                   — 全函数计时开始
   阶段 2 ~ 阶段 3 开头 ...
-  TraceTime timer("Create VM")       ← 核心段计时开始（RAII 构造）
+  TraceTime timer("Create VM")            — 核心段计时开始（RAII 构造）
     阶段 3 ~ 阶段 7 ...
     HOTSPOT_VM_INIT_END()
-  → timer 析构，输出 -Xlog 日志      ← 核心段计时结束
+    timer 析构，输出 -Xlog 日志           — 核心段计时结束
   阶段 8 ~ 阶段 9 ...
-create_vm_timer.end()                ← 全函数计时结束
+create_vm_timer.end()                     — 全函数计时结束
 ```
 
 两个计时器的数据流向不同——`create_vm_timer` 把结果写入 PerfData（生产环境 `jstat`/JMX 可读），`TraceTime` 输出到 `-Xlog` 日志（开发诊断用）。
