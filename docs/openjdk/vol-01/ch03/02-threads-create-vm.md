@@ -538,7 +538,7 @@ public:
 ```
 
 `start()` 做了两件事：
-- `_timer.update_to(0)` —— 把内部的 `TimeStamp` 计数器设为起点（`_counter = 0`）。之后任何时候调用 `milliseconds()`，返回的就是从这次 `update_to(0)` 至今经过的毫秒数。约等于按了一下秒表的归零按钮
+- `_timer.update_to(0)`：把内部的 `TimeStamp` 计数器设为起点（`_counter = 0`）。之后任何时候调用 `milliseconds()`，返回的就是从这次 `update_to(0)` 至今经过的毫秒数。约等于按了一下秒表的归零按钮
 - `_begin_time = os::javaTimeMillis()` —— 记录系统时间戳。这个值会被 `LogConfiguration::initialize(create_vm_timer.begin_time())` 在阶段 2 开头取走，用于配置日志框架的基准时间
 
 `StackObj` 是 HotSpot 的基类——标记这个对象只能在栈上分配，不能用 `new` 创建到堆。
