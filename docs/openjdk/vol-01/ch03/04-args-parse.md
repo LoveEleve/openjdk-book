@@ -1,6 +1,6 @@
 # 3.4 Stage 2：参数解析
 
-从 `Threads::create_vm` 的 Stage 2 开始，命令行的 `-Xms/-Xmx/-XX:+UseG1GC` 才真正拿到语义。Stage 2 覆盖 `thread.cpp:3729-3766`：
+从 `Threads::create_vm` 的 Stage 2 开始，命令行的 `-Xms/-Xmx/-XX:+UseG1GC` 才真正拿到语义。Stage 2 的源码：
 
 ```c
 /* === src/hotspot/share/runtime/thread.cpp === */
@@ -35,7 +35,7 @@ if (PauseAtStartup) {
 }
 ```
 
-37 行，4 个阶段：初始化基础设施、解析参数、自动推算校验、收尾。下面逐个展开。
+四个阶段：初始化基础设施、解析参数、自动推算校验、收尾。下面逐个展开。
 
 ---
 
