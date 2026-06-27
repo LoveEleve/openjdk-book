@@ -126,34 +126,34 @@ extern "C" void restore_thread_pointer(void* p) {
 
 就是把 `Thread*` 重新存回 TLS。为什么要这么做？
 
-**POSIX 的规则**：线程退出时，pthread 遍历所有 TLS key，对每个非 NULL 的 key，调用其析构函数，然后把该 key 的值设为 NULL。如果析构函数又把值设回去了（非 NULL），pthread 会再调一次，最多重复 4 次（`PTHREAD_DESTRUCTOR_ITERATIONS`）。
+**POSIX 的规则**：线程退出（`pthread_exit` 或从线程函数 `return`）时，该线程的 TLS 清理流程启动——对所有通过 `pthread_key_create` 注册的 key，如果该线程在这个 key 上的值非 NULL，就调用其析构函数，然后把值设为 NULL。如果析构函数又把值设回去了，就再调一次，最多重复 4 次（`PTHREAD_DESTRUCTOR_ITERATIONS`）。
 
 普通代码在析构函数里做清理后就不再设回去，让 pthread 自然终止循环。但 HotSpot 特意设回去——因为这 4 次迭代期间，可能有其他 key 的析构函数需要 `Thread::current()`。比如某个 JNI 第三方库创建了自己的 `pthread_key_t`，析构函数里调了 `DetachCurrentThread`。
 
 **具体场景**：
 
 ```
-1. 线程退出，pthread 开始遍历 TLS key
-2. pthread 遇到 HotSpot 的 key，值非 NULL，调用 restore_thread_pointer
-3. pthread 把 HotSpot key 的值设为 NULL（POSIX 规则）
-4. restore_thread_pointer 里调 pthread_setspecific 把值又设回去了
-5. pthread 继续遍历，遇到第三方库的 key，调用其析构函数
-6. 第三方析构函数调 DetachCurrentThread，内部需要 Thread::current():
-   pthread_getspecific 拿到的是第 4 步设回去的 Thread* — 有效
+1. 线程退出，该线程的 TLS 清理流程启动
+2. 检测到 HotSpot 的 key 上该线程的值为非 NULL，调 restore_thread_pointer
+3. 该 key 的值被设为 NULL（清理流程的标准步骤）
+4. restore_thread_pointer 内部调 pthread_setspecific 把值又设回去了
+5. 清理流程继续：检测到第三方库的 key 上该线程的值非 NULL，调其析构函数
+6. 第三方析构函数调 DetachCurrentThread，内部需要 Thread::current()：
+   读该线程在 HotSpot key 上的值 — 拿到第 4 步设回去的 Thread* — 有效
 7. DetachCurrentThread → exit() → Thread::~Thread() → clear_thread_current()
    → pthread_setspecific(key, NULL) — 永久清空
-8. pthread 继续迭代，HotSpot key 已经是 NULL，不再调析构函数 — 结束
+8. 清理流程再次检查，HotSpot key 上该线程的值已是 NULL — 不再调析构函数 — 结束
 ```
 
 **如果没有 restore_thread_pointer**：
 
 ```
-1. 线程退出，pthread 开始遍历 TLS key
-2. pthread 遇到 HotSpot 的 key，调用析构函数（正常清理类）
-3. pthread 把 HotSpot key 的值设为 NULL — 不再设回去
-4. pthread 继续遍历，遇到第三方库的 key，调用其析构函数
-5. 第三方析构函数调 DetachCurrentThread，需要 Thread::current():
-   pthread_getspecific 返回 NULL — crash
+1. 线程退出，该线程的 TLS 清理流程启动
+2. 检测到 HotSpot 的 key 上值为非 NULL，调析构函数（正常清理逻辑，不设回去）
+3. 该 key 的值被设为 NULL
+4. 清理流程继续：检测到第三方库的 key 上值为非 NULL，调其析构函数
+5. 第三方析构函数调 DetachCurrentThread，需要 Thread::current()：
+   读该线程在 HotSpot key 上的值 — NULL — crash
 ```
 
 `DetachCurrentThread` 的 `exit()` 内部涉及释放 Java 监视器、JNI 句柄、JVMTI 清理、GC barrier 刷新、全局线程列表移除——每一步都依赖 `Thread::current()` 返回有效指针。`restore_thread_pointer` 保证整个析构链期间它不会丢。
