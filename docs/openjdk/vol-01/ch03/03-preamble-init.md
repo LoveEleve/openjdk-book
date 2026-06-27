@@ -654,32 +654,36 @@ public:
 };
 ```
 
-> **RAII（Resource Acquisition Is Initialization）**：C++ 惯用法——对象的生命周期管理资源。构造函数获取资源、析构函数释放。`TraceVmCreationTime` 是栈对象（继承 `StackObj`），在 `create_vm` 函数结束时自动析构，析构函数会调用 `Management::record_vm_startup_time()` 记录 JVM 启动时间。
+`start()` 做了两件事：把 `_timer` 的起点（`_counter`）归零，用 `os::javaTimeMillis()` 记录系统时间戳。
 
-`start()` 做了两件事：把 `_timer` 的起点设置为当前时间（毫秒精度），用 `os::javaTimeMillis()` 记录挂钟时间戳。后面 `create_vm` 结束时调用 `end()`：
+在整个 `create_vm` 390 行执行完毕后，Stage 9 末尾调用 `end()`：
 
-```
+```c
 void end()
 { Management::record_vm_startup_time(_begin_time, _timer.milliseconds()); }
 ```
 
-`_timer.milliseconds()` 返回从 `start()` 到 `end()` 经过的毫秒数——这就是 JVM 启动耗时。
+`_timer.milliseconds()` 返回从 `start()` 到现在经过的毫秒数。`Management::record_vm_startup_time()` 把启动耗时写入 PerfData 共享内存。在本机 HelloWorld 运行中，这个值约 200-300ms（debug build）。
 
 ---
 
 ## Stage 1 总结
 
-Stage 1 是整个 `Threads::create_vm` 的序幕。八个步骤完成了进入正式初始化之前的所有前置工作：
+`os::init()` 是 Stage 1 中最大的函数，它把采集到的信息存到了 `os::Linux` 类的静态成员变量里：
 
-| 步骤 | 函数 | 做了什么 |
-|------|------|----------|
-| 1 | `VM_Version::early_initialize()` | CPU 特性检测（x86 平台） |
-| 2 | `is_supported_jni_version()` | 白名单检查 JNI 版本号 |
-| 3 | `ThreadLocalStorage::init()` | 创建全局 pthread TLS key |
-| 4 | `ostream_init()` | 初始化全局输出流 `tty` |
-| 5 | `process_sun_java_launcher_properties()` | 提取 launcher 名称/PID/altjvm 标记 |
-| 6 | `os::init()` | OS 级初始化（时钟/页大小/系统信息/malloc 统计/CPU tick/线程名/POSIX 时钟） |
-| 7 | `os::current_thread_enable_wx(WXWrite)` | macOS 专用（Linux 展开为空） |
-| 8 | `create_vm_timer.start()` | 启动 JVM 启动计时器 |
+| 变量 | 类型 | 存储位置 | 来源 |
+|------|------|---------|------|
+| `_processor_count` | `int` | `os::Linux` | `sysconf(_SC_NPROCESSORS_CONF)` |
+| `_physical_memory` | `julong` | `os::Linux` | `sysconf(_SC_PHYS_PAGES) × sysconf(_SC_PAGESIZE)` |
+| `_page_size` | `int` | `os::Linux` | `sysconf(_SC_PAGESIZE)` |
+| `_os_version` | `uint32_t` | `os::Linux` | `uname()` → `sscanf` 解析内核版本号 |
+| `_main_thread` | `pthread_t` | `os::Linux` | `pthread_self()` |
+| `clock_tics_per_sec` | `int` | `os`（父类） | `sysconf(_SC_CLK_TCK)` |
+| `_rand_seed` | `unsigned int` | `os` | `init_random(1234567)` |
+| `_mallinfo` / `_mallinfo2` | 函数指针 | `os::Linux` | `dlsym(RTLD_DEFAULT, "mallinfo")` |
+| `_pthread_setname_np` | 函数指针 | `os::Linux` | `dlsym(RTLD_DEFAULT, "pthread_setname_np")` |
+| `_thread_key` | `pthread_key_t` | `ThreadLocalStorage` | `pthread_key_create()` |
+| `tty` | `outputStream*` | 全局变量 | `new defaultStream()` |
+| `defaultStream::instance` | `defaultStream*` | `defaultStream` 静态成员 | 同上 |
 
-这些步骤之间没有复杂的数据依赖——它们是为后续 Stage 准备运行环境。版本检查确保调用方兼容，TLS 注册让线程模型可用，输出流让日志能写，OS 初始化让系统信息可查——每一项都不可跳过，但每一项都简单直接。
+所有值都存为静态成员或全局变量——Stage 1 不做任何堆分配（除了 `tty` 的 `defaultStream` 对象），不为任何 Java 代码服务。它就是纯 C++ 初始化，把系统信息采集齐全，让后续 Stage 随时可以读取。
