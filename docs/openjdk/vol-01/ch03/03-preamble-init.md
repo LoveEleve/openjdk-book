@@ -135,14 +135,15 @@ extern "C" void restore_thread_pointer(void* p) {
 ```
 1. 线程退出，该线程的 TLS 清理流程启动
 2. 检测到 HotSpot 的 key 上该线程的值为非 NULL，调 restore_thread_pointer
-3. 该 key 的值被设为 NULL（清理流程的标准步骤）
-4. restore_thread_pointer 内部调 pthread_setspecific 把值又设回去了
-5. 清理流程继续：检测到第三方库的 key 上该线程的值非 NULL，调其析构函数
-6. 第三方析构函数调 DetachCurrentThread，内部需要 Thread::current()：
-   读该线程在 HotSpot key 上的值 — 拿到第 4 步设回去的 Thread* — 有效
-7. DetachCurrentThread → exit() → Thread::~Thread() → clear_thread_current()
-   → pthread_setspecific(key, NULL) — 永久清空
-8. 清理流程再次检查，HotSpot key 上该线程的值已是 NULL — 不再调析构函数 — 结束
+   （POSIX 规则：析构函数返回后，该 key 的值会被自动设为 NULL）
+3. 但 restore_thread_pointer 内部先调了 pthread_setspecific 把值设回去
+   ——两相抵消，最终值不变，仍是 Thread*
+4. 清理流程继续：检测到第三方库的 key 上值非 NULL，调其析构函数
+5. 第三方析构函数调 DetachCurrentThread，内部需要 Thread::current()：
+   读该线程在 HotSpot key 上的值 — 拿到 Thread* — 有效
+6. DetachCurrentThread → exit() → Thread::~Thread() → clear_thread_current()
+   → pthread_setspecific(key, NULL) — 这一次是真的永久清空
+7. 清理流程再次检查，HotSpot key 的值已是 NULL — 不再调析构函数 — 结束
 ```
 
 **如果没有 restore_thread_pointer**：
