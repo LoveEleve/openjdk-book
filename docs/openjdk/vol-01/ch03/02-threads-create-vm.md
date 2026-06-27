@@ -169,17 +169,101 @@ jlong TimeStamp::milliseconds() const {
 
 计时器的底层原理就是记录两个时刻的 tick 数，差值转时间。`os::elapsed_counter()` 是 `rdtsc`，`os::elapsed_frequency()` 是 CPU 频率（tick/秒），`counter_to_millis` 用这两个值做换算。
 
-但 `Threads::create_vm` 内部不止这一个计时器。阶段 3 开头还有另一个：
+### TraceTime —— 第二个计时器
+
+`Threads::create_vm` 内部不止 `create_vm_timer`。阶段 3 开头还有另一个 RAII 计时器：
 
 ```c
 TraceTime timer("Create VM", TRACETIME_LOG(Info, startuptime));
 ```
 
-`TraceTime` 是 RAII 计时器——构造时自动开始计时，离开作用域时自动停止并输出日志。它出现在 `HOTSPOT_VM_INIT_BEGIN()` 之后，`HOTSPOT_VM_INIT_END()` 之前，只覆盖阶段 3-7（`os::init_2` 到 `set_init_completed`）。本机 debug build 通过 `-Xlog:startuptime=info` 可以看到它的输出：
+这行代码构造了一个 `TraceTime` 对象，构造时自动开始计时。变量 `timer` 是栈上对象，当 `Threads::create_vm` 执行到它所在作用域的末尾（`HOTSPOT_VM_INIT_END` 附近）时，`timer` 析构——析构函数停止计时并输出耗时日志。
+
+先看类的定义（`timerTrace.hpp`）：
+
+```c
+class TraceTime : public StackObj {
+private:
+  bool          _active;     // 是否实际计时
+  bool          _verbose;    // 析构时是否输出
+  elapsedTimer  _t;          // 内部计时器
+  const char*   _title;      // 计时器名称（输出到日志）
+  TraceTimerLogPrintFunc _print;  // 日志输出函数指针
+};
+```
+
+`StackObj` 和 `create_vm_timer` 一样——只能在栈上分配。`_print` 是一个函数指针，如果非 NULL，析构时通过它输出日志；如果 NULL，输出到 `tty`。
+
+再看构造函数（`timerTrace.cpp`）。`TraceTime` 有三个重载，这里用的是第三个：
+
+```c
+TraceTime::TraceTime(const char* title, TraceTimerLogPrintFunc ttlpf) {
+  _active   = ttlpf != NULL;      // 如果日志开启则激活
+  _verbose  = true;
+  _title    = title;
+  _print    = ttlpf;
+  if (_active) {
+    _accum = NULL;
+    _t.start();                    // 开始计时——记录起点 tick 数
+  }
+}
+```
+
+`TRACETIME_LOG(Info, startuptime)` 是一个宏，展开后判断日志级别是否开启：
+
+```c
+log_is_enabled(Info, startuptime)
+  ? &LogImpl<startuptime>::write<Info>   // 开了：返回日志函数指针
+  : NULL                                   // 没开：返回 NULL
+```
+
+如果 `-Xlog:startuptime=info` 没开，`_active` 为 `false`，构造函数什么也不做，析构函数也直接返回。开了才计时。
+
+`_t.start()` 内部调用 `elapsedTimer::start()`（`timer.cpp`）：
+
+```c
+void elapsedTimer::start() {
+  if (!_active) {
+    _active = true;
+    _start_counter = os::elapsed_counter();  // 记录起点 tick 数
+  }
+}
+```
+
+和 `TimeStamp` 一样，底层也是 `os::elapsed_counter()`（`rdtsc`）拿到当前 tick 数存入 `_start_counter`。
+
+析构函数（`timerTrace.cpp`）：
+
+```c
+TraceTime::~TraceTime() {
+  if (!_active) return;
+  _t.stop();                                // 停止计时，累加耗时
+  if (_print) {
+    _print("%s, %3.7f secs", _title, _t.seconds());  // 走日志框架输出
+  }
+}
+```
+
+`_t.stop()` 内部：
+
+```c
+void elapsedTimer::stop() {
+  if (_active) {
+    _counter += os::elapsed_counter() - _start_counter;  // 累加 tick 差
+    _active = false;
+  }
+}
+```
+
+当前 tick 减去起点 tick，差值累加到 `_counter`。`_t.seconds()` 把 tick 差转为秒数。
+
+最后 `_print(...)` 输出日志。本机 debug build 通过 `-Xlog:startuptime=info` 的实际输出：
 
 ```
 [0.456s][info][startuptime] Create VM, 0.456 seconds
 ```
+
+`"Create VM"` 是构造时传的 `_title`，`0.456` 是 `_t.seconds()` 的值——阶段 3-7（从 `os::init_2` 到 `set_init_completed`）的耗时。
 
 所以整个计时布局是：
 
