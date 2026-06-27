@@ -8,7 +8,7 @@
 
 ## Stage 3 全貌
 
-`Threads::create_vm` 中 Stage 3 对应 `thread.cpp:3768-3801` 这 33 行：
+`Threads::create_vm` 中 Stage 3 的源码：
 
 ```cpp
 /* === src/hotspot/share/runtime/thread.cpp === */
@@ -205,7 +205,7 @@ jint os::init_2(void) {
 }
 ```
 
-这个函数有 130 行，按逻辑分 10 段。逐一展开。
+这个函数按逻辑分 10 段。逐一展开。
 
 ### 1.1 Posix 公共层：时钟与信号集
 

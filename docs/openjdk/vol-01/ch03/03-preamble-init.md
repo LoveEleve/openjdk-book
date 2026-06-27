@@ -1,6 +1,6 @@
 # 3.3 Stage 1 — 前置初始化
 
-`Threads::create_vm` 入口在 `/data/workspace/jdk11u-copy/src/hotspot/share/runtime/thread.cpp:3702`。整个函数约 350 行，分为多个 Stage。Stage 1 是进入正式 JVM 初始化之前的准备工作——版本检查、TLS 注册、输出流初始化、参数处理、OS 初始化——每一项都是后续能正常走下去的前提。
+`Threads::create_vm` 入口在 `thread.cpp`。Stage 1 是进入正式 JVM 初始化之前的准备工作——版本检查、TLS 注册、输出流初始化、参数处理、OS 初始化——每一项都是后续能正常走下去的前提。
 
 Stage 1 的完整代码：
 
