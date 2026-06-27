@@ -1,6 +1,8 @@
 # 3.2 Threads::create_vm 总览
 
-`Threads::create_vm` 在 `/data/workspace/jdk11u-copy/src/hotspot/share/runtime/thread.cpp`，从 3702 行开始，共 390 行，是 HotSpot 初始化的心脏函数。它接收启动参数、初始化所有 VM 子系统、创建主线程、加载 Java 核心类，最终让一个 Java 虚拟机从一堆 C++ 代码变成可以执行字节码的完整运行时。
+`Threads::create_vm` 在 `/data/workspace/jdk11u-copy/src/hotspot/share/runtime/thread.cpp`，从 3702 行开始，共 390 行，是 HotSpot 初始化的心脏函数。
+
+本节只粗略看全貌——把 9 个阶段过一遍，知道每个阶段做了什么、各阶段之间的先后关系。不会深入到 `os::init`、`Arguments::parse`、`init_globals` 等函数内部，那些在后续章节逐一展开。
 
 ---
 ## 9 阶段骨架
