@@ -472,13 +472,35 @@ void os::Linux::initialize_os_info() {
 ### glibc malloc 统计
 
 ```
-#ifdef __GLIBC__
-  Linux::_mallinfo = CAST_TO_FN_PTR(Linux::mallinfo_func_t, dlsym(RTLD_DEFAULT, "mallinfo"));
-  Linux::_mallinfo2 = CAST_TO_FN_PTR(Linux::mallinfo2_func_t, dlsym(RTLD_DEFAULT, "mallinfo2"));
-#endif // __GLIBC__
+Linux::_mallinfo  = CAST_TO_FN_PTR(Linux::mallinfo_func_t, dlsym(RTLD_DEFAULT, "mallinfo"));
+Linux::_mallinfo2 = CAST_TO_FN_PTR(Linux::mallinfo2_func_t, dlsym(RTLD_DEFAULT, "mallinfo2"));
 ```
 
-用 `dlsym` 动态查找 glibc 的 `mallinfo` 和 `mallinfo2` 函数指针。`dlsym(RTLD_DEFAULT, "mallinfo")` 在当前进程的全局符号表中查找 `mallinfo` 符号，返回函数地址。`CAST_TO_FN_PTR` 是 HotSpot 的类型安全函数指针转换宏。
+glibc 的 `malloc` 内部维护了 arena、已分配块数、空闲块数等统计信息。`mallinfo` 是一个 glibc 函数，返回 `struct mallinfo`，包含这些 malloc 内部数据。`mallinfo2` 是 glibc 2.33+ 的版本，把字段从 `int` 升级为 `size_t`（避免 32 位溢出）。
+
+HotSpot 在 `os_linux.hpp` 中定义了自己版本的这两个结构体（避免直接依赖 glibc 头文件）：
+
+```c
+struct glibc_mallinfo {                      struct glibc_mallinfo2 {
+    int arena;    // 已分配的总空间              size_t arena;
+    int ordblks;  // 普通块数量                  size_t ordblks;
+    int smblks;   // 快速 bin 块数量             size_t smblks;
+    int hblks;    // mmap 块数量                 size_t hblks;
+    int hblkhd;   // mmap 总空间                 size_t hblkhd;
+    int usmblks;  // 始终为 0                    size_t usmblks;
+    int fsmblks;  // 快速 bin 的空闲空间          size_t fsmblks;
+    int uordblks; // 已使用的空间                 size_t uordblks;
+    int fordblks; // 空闲空间                     size_t fordblks;
+    int keepcost; // 堆顶可释放空间               size_t keepcost;
+};                                           };
+
+typedef struct glibc_mallinfo (*mallinfo_func_t)(void);
+typedef struct glibc_mallinfo2 (*mallinfo2_func_t)(void);
+```
+
+用 `dlsym(RTLD_DEFAULT, "mallinfo")` 动态查找函数地址，而不是静态链接——这样 HotSpot 可以在不链接 glibc 特定版本的情况下，在运行时按需调用。`CAST_TO_FN_PTR` 做类型安全的函数指针转换。
+
+找到的函数地址存到 `Linux::_mallinfo` 和 `Linux::_mallinfo2` 两个静态函数指针中。后续 NMT（Native Memory Tracking）和 GC 日志打印 malloc 统计时，通过这两个指针间接调用。
 
 `mallinfo` 返回 `struct mallinfo`（包含 arena、ordblks、uordblks 等字段），`mallinfo2` 是 glibc 2.33+ 的改进版本（返回 `struct mallinfo2`，使用 64 位字段避免溢出）。HotSpot 在 NMT 和 GC 日志中打印 malloc 统计时调用这些函数。
 
