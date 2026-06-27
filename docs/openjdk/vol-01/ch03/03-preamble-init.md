@@ -250,11 +250,51 @@ void ThreadLocalStorage::set_thread(Thread* current) {
 ostream_init();
 ```
 
-HotSpot 的输出不是直接 `printf`，而是通过自己的流抽象层。`tty` 是全局的输出流对象指针，在 `ostream_init()` 被调用之前是 NULL——这意味着在此之前任何试图打印日志的代码都会遇到未定义行为。
+在解释这行代码做什么之前，先搞清楚 HotSpot 是怎么做"输出"的。
 
-定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/utilities/ostream.cpp:922`：
+### 背景：HotSpot 的 outputStream
+
+标准 C 程序的输出用 `printf`，C++ 用 `std::cout`。HotSpot 不用这两者——它自己实现了一套流抽象层，核心是 `outputStream` 类（`ostream.hpp`）。
+
+`outputStream` 做了什么？它把输出操作（`print`、`print_cr`、`print_raw`）和"输出到哪里"解耦。子类决定写到 stdout、stderr、文件还是内存缓冲区：
 
 ```
+outputStream（基类）
+  ├── stringStream   → 写到内存缓冲区（日志拼接）
+  ├── fileStream     → 写到文件（GC 日志、编译日志）
+  ├── defaultStream  → 写到 stdout/stderr（默认输出）
+  └── bufferedStream → 带缓冲的包装
+  ... 共 12 个子类
+```
+
+全局变量 `tty`（`outputStream*` 类型）是 HotSpot 代码中最常用的输出入口。在 `ostream_init()` 之前它是 NULL——在那之前任何试图 `tty->print(...)` 的代码都会段错误。
+
+> **为什么叫 `tty`？** Unix 传统——`/dev/tty` 永远指向当前进程的控制终端。`tty = TeleTYpewriter`。HotSpot 用它命名全局输出流变量，表示"往终端输出"。
+
+### HotSpot 的 new 重载：ResourceObj::C_HEAP 和 NMT
+
+C++ 标准的 `new` 调 `malloc` 分配内存。HotSpot 重载了 `new`，加了一个关键参数——分配位置和内存类型：
+
+```c
+new(ResourceObj::C_HEAP, mtInternal) defaultStream()
+```
+
+标准 C++ `new` 只做两件事：分配内存、调构造函数。HotSpot 扩展为四件事：
+
+| 参数/标签 | 含义 |
+|----------|------|
+| `ResourceObj::C_HEAP` | 分配位置——在普通 C 堆上分配（即 `malloc`）。其他选项有 `ResourceObj::RESOURCE_AREA`（线程局部资源区）、`ResourceObj::ARENA`（Arena 区域） |
+| `mtInternal` | NMT（Native Memory Tracking）标签——`mt` 前缀是 "memory type"。HotSpot 对每块 malloc 的内存打标签，统计各模块内存开销。`mtInternal` = "内部杂项"。其他标签如 `mtThread`（线程）、`mtGC`（GC）、`mtCode`（编译代码） |
+
+NMT 开启后，`jcmd <pid> VM.native_memory summary` 能看到所有标签的内存占用。不开启时这些标签在编译期被优化掉。
+
+这就是 HotSpot 的 memory management 基础——不是随便 `new`，每次分配都要声明"从哪分配"和"算谁的账"。
+
+### 源码
+
+现在看 `ostream_init()` 的完整实现（`ostream.cpp`）：
+
+```c
 void ostream_init() {
   if (defaultStream::instance == NULL) {
     defaultStream::instance = new(ResourceObj::C_HEAP, mtInternal) defaultStream();
@@ -262,30 +302,23 @@ void ostream_init() {
 
     // We want to ensure that time stamps in GC logs consider time 0
     // the time when the JVM is initialized, not the first time we ask
-    // for a time stamp. So, here, we explicitly update the time stamp
-    // of tty.
+    // for a time stamp.
     tty->time_stamp().update_to(1);
   }
 }
 ```
 
-三行代码，三个动作：
+三件事：
 
-1. **`new(ResourceObj::C_HEAP, mtInternal) defaultStream()`** — 构造 `defaultStream` 对象。`defaultStream` 继承自 `outputStream`，封装了 stdout/stderr 和日志文件的写入逻辑。`C_HEAP` 表示在 C 堆上分配（也就是普通 `malloc`），`mtInternal` 是 NMT（Native Memory Tracking）的分类标签。
+**1. 创建 defaultStream 对象。** `new(ResourceObj::C_HEAP, mtInternal) defaultStream()`——在 C 堆上分配 `defaultStream`，打 `mtInternal` 标签。`defaultStream` 继承自 `outputStream`，封装了往 stdout 和 stderr 写数据的逻辑。构建完成后存到静态成员 `defaultStream::instance`。
 
-2. **`tty = defaultStream::instance`** — `tty` 是全局变量，定义为 `outputStream* tty`。此后所有输出代码通过 `tty->print_cr(...)`、`tty->print(...)` 等方式写日志。
+**2. 赋值给 tty。** `tty = defaultStream::instance`——全局变量 `tty` 指向这个唯一的 `defaultStream` 实例。从此 HotSpot 代码可以通过 `tty->print_cr("hello")` 输出到终端。
 
-3. **`tty->time_stamp().update_to(1)`** — 把时间戳起点重置为当前时刻 + 1 毫秒。注释解释了动机：GC 日志中的时间戳应该以 JVM 初始化为零点，而不是以第一次请求时间戳的时刻为起点。`update_to(1)` 而不是 `update_to(0)` 是为了避免时间戳为 0 时可能被误判为"未初始化"。
+**3. 对齐时间戳零点。** `tty->time_stamp().update_to(1)`——把流的时间戳重设为当前时刻 + 1 毫秒。这样 GC 日志里的时间戳以 JVM 初始化完成那一刻为零点，而不是以第一次写日志的时刻为零点。`update_to(1)` 而不是 `update_to(0)` 是为了避免值为 0 时被误判为"未初始化"。
 
-`defaultStream` 的静态成员 `instance` 定义在同一个文件第 616 行：
+---
 
-```
-defaultStream* defaultStream::instance = NULL;
-```
-
-这就是上面 `if (defaultStream::instance == NULL)` 检查的依据——第一次调用 `ostream_init()` 时，`instance` 是 NULL，创建新对象；后续调用直接跳过。这个模式在 HotSpot 中称为 "lazy initialization"。
-
-**总结**：`ostream_init()` 创建全局输出流对象 `tty`，将 GC 日志时间戳零点校准到当前时刻。从此以后 HotSpot 代码可以安全地使用 `tty->print_cr()` 输出日志。
+**总结**：`ostream_init()` 创建全局输出流对象 `tty`，并校准时间戳零点。从此 HotSpot 代码可以安全地通过 `tty` 输出日志。没有这步，`tty` 还是 NULL，任何输出操作崩溃。
 
 ---
 
