@@ -589,22 +589,49 @@ if (condattr_setclock_func != NULL) {
 
 ### 背景：pthread 的属性对象
 
-pthread 提供了"属性对象"机制——创建互斥锁和条件变量时，可以传入一个已配置好的属性对象，而不是每次创建都重复指定参数。两次调用一次配置，后面一直复用：
+理解这段代码之前，先搞清楚两个关键信息：
 
-- `pthread_mutexattr_t` — 互斥锁属性对象。控制锁的类型（普通/递归/检错）、跨进程共享等。用 `pthread_mutexattr_init` 初始化，用 `pthread_mutexattr_settype` 设类型
-- `pthread_condattr_t` — 条件变量属性对象。控制条件变量的时钟源（`CLOCK_REALTIME` 或 `CLOCK_MONOTONIC`）、跨进程共享等。用 `pthread_condattr_init` 初始化
+**1. 为什么要 `[1]`？**
 
-HotSpot 在 Posix 层维护了两个全局属性对象 `_condAttr` 和 `_mutexAttr`，后续所有 `pthread_cond_init` 和 `pthread_mutex_init` 都传入这两个属性对象。`pthread_init_common()` 就是初始化它们：
+```c
+static pthread_condattr_t _condAttr[1];
+static pthread_mutexattr_t _mutexAttr[1];
+```
+
+声明成长度为 1 的数组而不是单个变量，是因为 C 语言里数组名自动退化为指针。写成 `_condAttr[1]` 后，传参时 `_condAttr` 就是 `pthread_condattr_t*`（指向第一个元素）。如果写成普通变量 `pthread_condattr_t _condAttr`，每次传参都要写 `&_condAttr`。这是 C 的惯用手法——用单元素数组替代取地址操作。
+
+**2. 属性对象的工作方式**
+
+pthread 创建互斥锁或条件变量时，可以传一个"属性对象"进去。这个对象是一组配置集合——创建时把配置拷贝进去，后续所有用这个属性对象创建的锁/条件变量都继承同样的配置。流程是这样的：
+
+```c
+/* 第一步：初始化属性对象（全填默认值） */
+pthread_mutexattr_t attr;
+pthread_mutexattr_init(&attr);           // 默认值：普通锁、进程私有
+
+/* 第二步：修改配置 */
+pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_NORMAL);
+
+/* 第三步：创建互斥锁时传入属性对象——配置被拷贝到锁里 */
+pthread_mutex_t lock;
+pthread_mutex_init(&lock, &attr);        // lock 现在就是普通锁
+
+/* 之后所有用 attr 创建的锁都一样 */
+pthread_mutex_t lock2;
+pthread_mutex_init(&lock2, &attr);       // 和 lock 同样的配置
+```
+
+HotSpot 的做法就是把属性对象设为全局变量，配一次，后面每次 `pthread_cond_init` / `pthread_mutex_init` 都传进去。`pthread_init_common()` 就是设置全局属性对象的函数：
 
 ```c
 static void pthread_init_common(void) {
-  pthread_condattr_init(_condAttr);                           // 初始化条件变量属性
-  pthread_mutexattr_init(_mutexAttr);                         // 初始化互斥锁属性
-  pthread_mutexattr_settype(_mutexAttr, PTHREAD_MUTEX_NORMAL);// 设为普通锁（非递归）
+  pthread_condattr_init(_condAttr);   // 填默认值（PTHREAD_PROCESS_PRIVATE、CLOCK_REALTIME）
+  pthread_mutexattr_init(_mutexAttr); // 填默认值（PTHREAD_MUTEX_DEFAULT）
+  pthread_mutexattr_settype(_mutexAttr, PTHREAD_MUTEX_NORMAL);
 }
 ```
 
-`PTHREAD_MUTEX_NORMAL` 是 POSIX 标准定义的互斥锁类型——普通互斥锁不检测死锁，同一线程重复 `lock` 会导致自身死锁（不是报错）。HotSpot 用它是因为自己的 `Mutex` 层已经做了状态检测，不需要 pthread 层面的死锁检查。
+`pthread_condattr_init` 把属性对象重置为系统默认值——条件变量默认使用进程私有、系统时钟。`pthread_mutexattr_init` 同理。`pthread_mutexattr_settype` 把锁类型设为 `PTHREAD_MUTEX_NORMAL`——普通互斥锁，不检测死锁、不递归——和 HotSpot 的 `Mutex` 层语义一致。后续 `pthread_init_common()` 外面还会把条件变量的时钟源从默认的 `CLOCK_REALTIME` 改为 `CLOCK_MONOTONIC`（通过 `_pthread_condattr_setclock(_condAttr, CLOCK_MONOTONIC)`）。
 
 属性对象配好后，尝试把条件变量时钟源设为单调时钟——成功则 `_use_clock_monotonic_condattr = true`，失败降级。
 
