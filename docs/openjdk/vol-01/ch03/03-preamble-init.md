@@ -4,7 +4,7 @@
 
 Stage 1 的完整代码：
 
-```
+```c
 jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   extern void JDK_Version_init();
 
@@ -31,7 +31,7 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   // Record VM creation timing statistics
   TraceVmCreationTime create_vm_timer;
   create_vm_timer.start();
-```
+```c
 
 `VM_Version::early_initialize()` 是 CPU 平台各异的提前初始化——在 x86 上检测 CPU 特性（SSE、AVX 等），在默认基类中为空操作。这里先一笔带过。
 
@@ -41,15 +41,15 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
 
 ## 3.3.1 JNI 版本检查
 
-```
+```c
 if (!is_supported_jni_version(args->version)) return JNI_EVERSION;
-```
+```c
 
 `args` 是从 `JNI_CreateJavaVM` 传进来的 `JavaVMInitArgs*`，其中的 `version` 字段由调用方（launcher）设置。`JNI_EVERSION` 是 JNI 规范定义的错误码 `-3`，表示"JNI version error"。
 
-`is_supported_jni_version` 定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/runtime/thread.cpp:4445`：
+`is_supported_jni_version` 定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/runtime/thread.cpp`：
 
-```
+```c
 jboolean Threads::is_supported_jni_version(jint version) {
   if (version == JNI_VERSION_1_2) return JNI_TRUE;
   if (version == JNI_VERSION_1_4) return JNI_TRUE;
@@ -59,18 +59,18 @@ jboolean Threads::is_supported_jni_version(jint version) {
   if (version == JNI_VERSION_10) return JNI_TRUE;
   return JNI_FALSE;
 }
-```
+```c
 
 每个 `JNI_VERSION_*` 是定义在 `/data/workspace/jdk11u-copy/src/java.base/share/native/include/jni.h` 中的整数常量：
 
-```
+```c
 #define JNI_VERSION_1_2 0x00010002
 #define JNI_VERSION_1_4 0x00010004
 #define JNI_VERSION_1_6 0x00010006
 #define JNI_VERSION_1_8 0x00010008
 #define JNI_VERSION_9   0x00090000
 #define JNI_VERSION_10  0x000a0000
-```
+```c
 
 版本号的编码规律：`0x0001` 开头的是 Java 1.x 系列（`0x00010002` 中末两位 `02` 对应 1.2），`0x0009` 对应 Java 9，`0x000a` 对应 Java 10。JNI 版本号与 JDK 主版本号一一对应。
 
@@ -82,9 +82,9 @@ jboolean Threads::is_supported_jni_version(jint version) {
 
 ## 3.3.2 线程局部存储初始化
 
-```
+```c
 ThreadLocalStorage::init();
-```
+```c
 
 HotSpot 的内部线程模型建立在 `Thread` 类层次上（`Thread` → `JavaThread` / `CompilerThread` / `VMThread` 等）。注意区分三个概念：
 
@@ -114,7 +114,7 @@ static pthread_key_t _thread_key;
 void ThreadLocalStorage::init() {
     int rslt = pthread_key_create(&_thread_key, restore_thread_pointer);
 }
-```
+```c
 
 `_thread_key` 是全局变量，只创建一次。第二个参数 `restore_thread_pointer` 是析构函数。
 
@@ -128,7 +128,7 @@ void ThreadLocalStorage::init() {
 extern "C" void restore_thread_pointer(void* p) {
   ThreadLocalStorage::set_thread((Thread*) p);
 }
-```
+```c
 
 #### 为什么要这样设计
 
@@ -157,16 +157,16 @@ int main() {
     pthread_join(t, NULL);
     return 0;
 }
-```
+```c
 
 编译运行：`gcc -lpthread test.c && ./a.out`。本机输出：
 
-```
+```c
 destructor called, value = 0xdeadbeef
 destructor called, value = 0xdeadbeef
 destructor called, value = 0xdeadbeef
 destructor called, value = 0xdeadbeef
-```
+```c
 
 析构函数被调了 4 次——因为每次设回去，glibc 发现值还在，就再调一次。4 轮后 glibc 强制停止，把值清 NULL。
 
@@ -197,14 +197,14 @@ int main() {
     pthread_key_create(&key2, destructor2);
     /* 创建线程，退出，观察 */
 }
-```
+```c
 
 本机输出：
 
-```
-key2 读 key1 = 0x6f       ← 在同一轮清理中，key2 的析构函数
-                             成功读到了 key1 的值
-```
+```c
+key2 读 key1 = 0x6f       在同一轮清理中，key2 的析构函数
+成功读到了 key1 的值
+```c
 
 这说明：glibc 在一轮清理中按 key 创建顺序依次调析构函数——先 key1（HotSpot 的 `_thread_key`），再 key2（第三方库）。key1 的析构函数设回去的值，key2 的析构函数马上就能读到。
 
@@ -232,7 +232,7 @@ Thread* ThreadLocalStorage::thread() {
 void ThreadLocalStorage::set_thread(Thread* current) {
     pthread_setspecific(_thread_key, current);
 }
-```
+```c
 
 `init()` 只被调用一次（`_thread_key` 全局唯一）。后续任何线程调用 `set_thread(p)` 存入自己的 `Thread*`，其他函数通过 `thread()` 取出——`Thread::current()` 最终就是调这里。
 
@@ -246,9 +246,9 @@ void ThreadLocalStorage::set_thread(Thread* current) {
 
 ## 3.3.3 输出流初始化
 
-```
+```c
 ostream_init();
-```
+```c
 
 在解释这行代码做什么之前，先搞清楚 HotSpot 是怎么做"输出"的。
 
@@ -258,14 +258,14 @@ ostream_init();
 
 `outputStream` 做了什么？它把输出操作（`print`、`print_cr`、`print_raw`）和"输出到哪里"解耦。子类决定写到 stdout、stderr、文件还是内存缓冲区：
 
-```
+```c
 outputStream（基类）
   ├── stringStream   → 写到内存缓冲区（日志拼接）
   ├── fileStream     → 写到文件（GC 日志、编译日志）
   ├── defaultStream  → 写到 stdout/stderr（默认输出）
   └── bufferedStream → 带缓冲的包装
   ... 共 12 个子类
-```
+```c
 
 全局变量 `tty`（`outputStream*` 类型）是 HotSpot 代码中最常用的输出入口。在 `ostream_init()` 之前它是 NULL——在那之前任何试图 `tty->print(...)` 的代码都会段错误。
 
@@ -277,7 +277,7 @@ C++ 标准的 `new` 调 `malloc` 分配内存。HotSpot 重载了 `new`，加了
 
 ```c
 new(ResourceObj::C_HEAP, mtInternal) defaultStream()
-```
+```c
 
 标准 C++ `new` 只做两件事：分配内存、调构造函数。HotSpot 扩展为四件事：
 
@@ -306,7 +306,7 @@ void ostream_init() {
     tty->time_stamp().update_to(1);
   }
 }
-```
+```c
 
 三件事：
 
@@ -324,15 +324,15 @@ void ostream_init() {
 
 ## 3.3.4 Launcher 属性处理
 
-```
+```c
 Arguments::process_sun_java_launcher_properties(args);
-```
+```c
 
 Java 启动器在调用 `JNI_CreateJavaVM` 时，会通过系统属性传递自己的元信息。这些属性以 `-D` 形式放在 `JavaVMInitArgs` 的 options 数组中，前缀是 `sun.java.launcher`。处理时机很关键——必须早于其他系统属性的初始化，因为后续的属性设置可能依赖 launcher 类型。
 
-定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/runtime/arguments.cpp:354`：
+定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/runtime/arguments.cpp`：
 
-```
+```c
 void Arguments::process_sun_java_launcher_properties(JavaVMInitArgs* args) {
   // See if sun.java.launcher, sun.java.launcher.is_altjvm or
   // sun.java.launcher.pid is defined.
@@ -358,11 +358,11 @@ void Arguments::process_sun_java_launcher_properties(JavaVMInitArgs* args) {
     }
   }
 }
-```
+```c
 
 遍历 `args->nOptions` 个 `JavaVMOption`，用 `match_option` 做前缀匹配。`match_option` 的定义在同文件第 227 行：
 
-```
+```c
 static bool match_option(const JavaVMOption *option, const char* name,
                          const char** tail) {
   size_t len = strlen(name);
@@ -373,7 +373,7 @@ static bool match_option(const JavaVMOption *option, const char* name,
     return false;
   }
 }
-```
+```c
 
 `match_option` 用 `strncmp` 做前缀比较，匹配成功则把等号后面的部分（tail）通过指针返回。
 
@@ -381,11 +381,11 @@ static bool match_option(const JavaVMOption *option, const char* name,
 
 - **`-Dsun.java.launcher=<名称>`**：launcher 程序名。`tail` 是 "java" 或 "javac" 等。交给 `process_java_launcher_argument` 处理，该函数在同文件第 2013 行：
 
-```
+```c
 void Arguments::process_java_launcher_argument(const char* launcher, void* extra_info) {
   _sun_java_launcher = os::strdup_check_oom(launcher);
 }
-```
+```c
 
 直接用 `strdup` 保存一份 launcher 名称，存到 `_sun_java_launcher` 成员变量。
 
@@ -403,13 +403,13 @@ void Arguments::process_java_launcher_argument(const char* launcher, void* extra
 
 ## 3.3.5 OS 层初始化
 
-```
+```c
 os::init();
-```
+```c
 
-这是 Stage 1 中最大的步骤。HotSpot 将 OS 相关代码封装在 `os` 命名空间下，`os::init()` 在不同平台有不同的实现。Linux 实现在 `/data/workspace/jdk11u-copy/src/hotspot/os/linux/os_linux.cpp:5529`：
+这是 Stage 1 中最大的步骤。HotSpot 将 OS 相关代码封装在 `os` 命名空间下，`os::init()` 在不同平台有不同的实现。Linux 实现在 `/data/workspace/jdk11u-copy/src/hotspot/os/linux/os_linux.cpp`：
 
-```
+```c
 void os::init(void) {
   char dummy;   // used to get a guess on initial stack address
 
@@ -419,7 +419,7 @@ void os::init(void) {
 
   Linux::set_page_size(sysconf(_SC_PAGESIZE));
   if (Linux::page_size() == -1) {
-    fatal("os_linux.cpp: os::init: sysconf failed (%s)",
+    fatal("os_linux.cpp os::init: sysconf failed (%s)",
           os::strerror(errno));
   }
   init_page_sizes((size_t) Linux::page_size());
@@ -456,29 +456,29 @@ void os::init(void) {
 
   os::Posix::init();
 }
-```
+```c
 
 逐段拆解。
 
 ### 时钟 ticks 和随机数
 
-```
+```c
 clock_tics_per_sec = sysconf(_SC_CLK_TCK);
 init_random(1234567);
-```
+```c
 
 `sysconf(_SC_CLK_TCK)` 获取系统时钟滴答频率——标准 Linux 是 100（每秒 100 个 jiffies）。`init_random(1234567)` 用固定种子初始化随机数生成器，确保 JVM 内部的随机行为可复现。
 
 ### 页大小
 
-```
+```c
 Linux::set_page_size(sysconf(_SC_PAGESIZE));
 if (Linux::page_size() == -1) {
-  fatal("os_linux.cpp: os::init: sysconf failed (%s)",
+  fatal("os_linux.cpp os::init: sysconf failed (%s)",
         os::strerror(errno));
 }
 init_page_sizes((size_t) Linux::page_size());
-```
+```c
 
 `sysconf(_SC_PAGESIZE)` 获取系统内存页大小——标准 x86 Linux 是 4096 字节（4KB）。如果返回 -1 说明系统调用失败，直接 `fatal` 终止 JVM。
 
@@ -486,21 +486,21 @@ init_page_sizes((size_t) Linux::page_size());
 
 ### 系统和 OS 信息
 
-```
+```c
 Linux::initialize_system_info();
 Linux::initialize_os_info();
-```
+```c
 
 `initialize_system_info` 读取 `/proc/cpuinfo` 和 `/proc/meminfo` 获取 CPU 核数、内存大小等。`initialize_os_info` 读取 `/proc/version` 获取内核版本、读取 `/etc/os-release` 获取发行版信息。这些信息后续用于 `-XshowSettings` 输出、`hs_err` 崩溃日志以及 JFR 事件。
 
 ### glibc malloc 统计
 
-```
+```c
 #ifdef __GLIBC__
   Linux::_mallinfo = CAST_TO_FN_PTR(Linux::mallinfo_func_t, dlsym(RTLD_DEFAULT, "mallinfo"));
   Linux::_mallinfo2 = CAST_TO_FN_PTR(Linux::mallinfo2_func_t, dlsym(RTLD_DEFAULT, "mallinfo2"));
 #endif // __GLIBC__
-```
+```c
 
 用 `dlsym` 动态查找 glibc 的 `mallinfo` 和 `mallinfo2` 函数指针。`dlsym(RTLD_DEFAULT, "mallinfo")` 在当前进程的全局符号表中查找 `mallinfo` 符号，返回函数地址。`CAST_TO_FN_PTR` 是 HotSpot 的类型安全函数指针转换宏。
 
@@ -508,7 +508,7 @@ Linux::initialize_os_info();
 
 ### CPU 性能计数器
 
-```
+```c
 os::Linux::CPUPerfTicks pticks;
 bool res = os::Linux::get_tick_information(&pticks, -1);
 
@@ -517,17 +517,17 @@ if (res && pticks.has_steal_ticks) {
   initial_total_ticks = pticks.total;
   initial_steal_ticks = pticks.steal;
 }
-```
+```c
 
 `get_tick_information` 读取 `/proc/stat` 获取系统启动以来的 CPU tick 计数，包括总 ticks 和被虚拟机 steal 的 ticks（虚拟化环境下的 stolen time）。这些初始值保存下来，后续监控代码通过差值计算 JVM 运行期间的 CPU 利用率。
 
 ### 主线程和时钟
 
-```
+```c
 Linux::_main_thread = pthread_self();
 Linux::clock_init();
 initial_time_count = javaTimeNanos();
-```
+```c
 
 `pthread_self()` 获取调用 `create_vm` 的线程的 POSIX 线程 ID——这就是 JVM 主线程（不是 Java 的 main 线程，是创建 JVM 的那个 native 线程）。`Linux::_main_thread` 用于后续 JVM attach 机制判断是否为原始主线程。
 
@@ -535,30 +535,30 @@ initial_time_count = javaTimeNanos();
 
 ### 线程命名函数
 
-```
+```c
 Linux::_pthread_setname_np =
   (int(*)(pthread_t, const char*))dlsym(RTLD_DEFAULT, "pthread_setname_np");
-```
+```c
 
 `pthread_setname_np` 是 Linux 特有的 POSIX 扩展（`_np` = non-portable），用于给线程设置名称（在 `top -H` 和 `ps` 中可见）。`dlsym` 动态查找函数地址，存为函数指针，后续 HotSpot 创建 Java 线程时调用它设置线程名——如 "C2 CompilerThread0"、"GC Thread#0" 等。
 
 ### PaX 安全检查
 
-```
+```c
 check_pax();
-```
+```c
 
 PaX 是 Linux 内核的安全补丁（主要用于 Hardened Gentoo），提供地址空间布局随机化（ASLR）增强和内存页的执行权限控制。`check_pax` 检测当前内核是否启用了 PaX，如果启用了某些限制，HotSpot 需要调整代码生成策略——JIT 编译器生成的代码需要在可执行内存页上运行。
 
 ### POSIX 子层初始化
 
-```
+```c
 os::Posix::init();
-```
+```c
 
-Linux 的 OS 层分成两级：`os::Linux`（Linux 特有）和 `os::Posix`（所有 POSIX 系统共享）。`os::Posix::init()` 在 `/data/workspace/jdk11u-copy/src/hotspot/os/posix/os_posix.cpp:1752`，核心任务是确认单调时钟可用：
+Linux 的 OS 层分成两级：`os::Linux`（Linux 特有）和 `os::Posix`（所有 POSIX 系统共享）。`os::Posix::init()` 在 `/data/workspace/jdk11u-copy/src/hotspot/os/posix/os_posix.cpp`，核心任务是确认单调时钟可用：
 
-```
+```c
 void os::Posix::init(void) {
   // 1. Check for CLOCK_MONOTONIC support.
 
@@ -616,7 +616,7 @@ void os::Posix::init(void) {
     }
   }
 }
-```
+```c
 
 > **单调时钟（CLOCK_MONOTONIC）**：Linux 提供多种时钟源。`CLOCK_REALTIME` 跟随系统时间（会被 NTP 和用户手动调整），而 `CLOCK_MONOTONIC` 从某个固定起点开始单调递增，不受系统时间调整影响。JVM 中的 `Object.wait(timeout)` 和 `Thread.sleep()` 使用条件变量实现超时等待，如果用 `CLOCK_REALTIME`，系统时间被回拨时等待时间会错误延长。用 `CLOCK_MONOTONIC` 可以保证超时精确。
 
@@ -634,15 +634,15 @@ void os::Posix::init(void) {
 
 ## 3.3.6 macOS AArch64 — W^X 配置
 
-```
+```c
 MACOS_AARCH64_ONLY(os::current_thread_enable_wx(WXWrite));
-```
+```c
 
-`MACOS_AARCH64_ONLY(x)` 宏定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/utilities/macros.hpp:602`：
+`MACOS_AARCH64_ONLY(x)` 宏定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/utilities/macros.hpp`：
 
-```
+```c
 #define MACOS_AARCH64_ONLY(x) MACOS_ONLY(AARCH64_ONLY(x))
-```
+```c
 
 层层展开：在非 macOS 平台上展开为空，在非 AArch64 平台上展开为空。只有 macOS + Apple Silicon（M1/M2/M3）上才展开为 `os::current_thread_enable_wx(WXWrite)`。
 
@@ -654,14 +654,14 @@ macOS on Apple Silicon 默认执行 W^X（Write XOR Execute）安全策略——
 
 ## 3.3.7 启动计时器
 
-```
+```c
 TraceVmCreationTime create_vm_timer;
 create_vm_timer.start();
-```
+```c
 
-`TraceVmCreationTime` 是定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/services/management.hpp:111` 的一个 RAII 风格的计时器：
+`TraceVmCreationTime` 是定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/services/management.hpp` 的一个 RAII 风格的计时器：
 
-```
+```c
 class TraceVmCreationTime : public StackObj {
 private:
   TimeStamp _timer;
@@ -674,16 +674,16 @@ public:
   void start()
   { _timer.update_to(0); _begin_time = os::javaTimeMillis(); }
 };
-```
+```c
 
 > **RAII（Resource Acquisition Is Initialization）**：C++ 惯用法——对象的生命周期管理资源。构造函数获取资源、析构函数释放。`TraceVmCreationTime` 是栈对象（继承 `StackObj`），在 `create_vm` 函数结束时自动析构，析构函数会调用 `Management::record_vm_startup_time()` 记录 JVM 启动时间。
 
 `start()` 做了两件事：把 `_timer` 的起点设置为当前时间（毫秒精度），用 `os::javaTimeMillis()` 记录挂钟时间戳。后面 `create_vm` 结束时调用 `end()`：
 
-```
+```c
 void end()
 { Management::record_vm_startup_time(_begin_time, _timer.milliseconds()); }
-```
+```c
 
 `_timer.milliseconds()` 返回从 `start()` 到 `end()` 经过的毫秒数——这就是 JVM 启动耗时。
 
