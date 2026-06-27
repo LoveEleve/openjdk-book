@@ -280,6 +280,8 @@ create_vm_timer.end()                     — 全函数计时结束
 
 两个计时器的数据流向不同——`create_vm_timer` 把结果写入 PerfData（生产环境 `jstat`/JMX 可读），`TraceTime` 输出到 `-Xlog` 日志（开发诊断用）。
 
+PerfData 是 HotSpot 内部的一块共享内存区域，JVM 运行时的各种计数器（GC 次数、堆使用量、线程数、启动耗时等）都写在这里，外部工具通过 `/tmp/hsperfdata_<user>/<pid>` 文件读取。`jstat -gc`、`jstat -class`、JMX 监控都依赖它。这部分会在后续章节专门展开。
+
 ---
 ## 9 阶段速览
 
