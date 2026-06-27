@@ -574,6 +574,61 @@ TraceTime timer("Create VM", TRACETIME_LOG(Info, startuptime));
 
 `create_vm_timer.start()` 在阶段 2（参数解析）之前启动，是因为 `LogConfiguration::initialize(create_vm_timer.begin_time())` 需要这个时间戳来配置日志框架。这不是计时的原始目的，但正好复用了同一个时间源。
 
+### TraceVmCreationTime 的实现
+
+`create_vm_timer` 的类型是 `TraceVmCreationTime`，定义在 `management.hpp`：
+
+```c
+class TraceVmCreationTime : public StackObj {
+private:
+  TimeStamp _timer;
+  jlong     _begin_time;
+
+public:
+  TraceVmCreationTime() {}
+  ~TraceVmCreationTime() {}
+
+  void start()
+  { _timer.update_to(0); _begin_time = os::javaTimeMillis(); }
+
+  jlong begin_time() const { return _begin_time; }
+
+  void end()
+  { Management::record_vm_startup_time(_begin_time, _timer.milliseconds()); }
+};
+```
+
+`start()` 做两件事：
+- `_timer.update_to(0)` —— 把 `TimeStamp` 内部的计数器归零
+- `_begin_time = os::javaTimeMillis()` —— 记录系统时间戳，供 `LogConfiguration` 初始化时取用
+
+`end()` 调用 `Management::record_vm_startup_time()` 把 `_begin_time` 和耗时（`_timer.milliseconds()`）写入 PerfData 内存区域——`jstat`、JMX 获取 JVM 启动时间就是读这里。
+
+`StackObj` 是 HotSpot 的基类，标记这类对象只能在 C++ 栈上分配、禁止 `new` 到堆。`create_vm_timer` 在 `Threads::create_vm` 栈上声明，函数结束时自动析构（析构函数为空，因为 `start()/end()` 是显式调用而非 RAII）。
+
+### TimeStamp 的内部实现
+
+`TraceVmCreationTime` 使用的 `TimeStamp` 类定义在 `timer.hpp`：
+
+```c
+class TimeStamp {
+private:
+  jlong _counter;
+public:
+  TimeStamp()  { _counter = 0; }
+  void clear() { _counter = 0; }
+  bool is_updated() const { return _counter != 0; }
+  void update();                           // 更新到当前时间
+  void update_to(jlong ticks);             // 更新到指定值
+  double seconds() const;                  // 返回秒数
+  jlong milliseconds() const;              // 返回毫秒数
+  jlong ticks() const { return _counter; }
+  jlong ticks_since_update() const;        // 距上次 update 的 tick 数
+};
+```
+
+`start()` 调用 `update_to(0)` 把 `_counter` 设 0。`end()` 调用 `milliseconds()` 返回从 0 到现在的毫秒数——就是整个 `Threads::create_vm` 的执行时长。
+
 ---
 ## 9 阶段速览
 
