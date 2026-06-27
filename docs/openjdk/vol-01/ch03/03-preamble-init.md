@@ -126,11 +126,37 @@ extern "C" void restore_thread_pointer(void* p) {
 
 就是把 `Thread*` 重新存回 TLS。为什么要这么做？
 
-**问题**：线程退出时，如果 TLS 里还存着 `Thread*`（比如线程被 OS 杀掉，或用户忘了调用 `DetachCurrentThread`），pthread 会自动调用 `restore_thread_pointer`。普通的做法是在析构函数里清理掉这个值——但这里不能清理。
+**POSIX 的规则**：线程退出时，pthread 遍历所有 TLS key，对每个非 NULL 的 key，调用其析构函数，然后把该 key 的值设为 NULL。如果析构函数又把值设回去了（非 NULL），pthread 会再调一次，最多重复 4 次（`PTHREAD_DESTRUCTOR_ITERATIONS`）。
 
-原因是线程退出过程是一连串的清理动作，pthread 可能先调用这个析构函数，然后再触发其他清理逻辑。如果 `restore_thread_pointer` 把 `Thread*` 清理掉了，后续任何需要 `Thread::current()` 的代码都会返回 NULL，导致 crash 或死循环。
+普通代码在析构函数里做清理后就不再设回去，让 pthread 自然终止循环。但 HotSpot 特意设回去——因为这 4 次迭代期间，可能有其他 key 的析构函数需要 `Thread::current()`。比如某个 JNI 第三方库创建了自己的 `pthread_key_t`，析构函数里调了 `DetachCurrentThread`。
 
-所以它只是把值"原样放回"TLS——等于什么都没做，但保证 `Thread*` 始终可访问。最终由 `DetachCurrentThread` 调 `pthread_setspecific(NULL)` 来完成真正的清理。
+**具体场景**：
+
+```
+1. 线程退出，pthread 开始遍历 TLS key
+2. pthread 遇到 HotSpot 的 key，值非 NULL，调用 restore_thread_pointer
+3. pthread 把 HotSpot key 的值设为 NULL（POSIX 规则）
+4. restore_thread_pointer 里调 pthread_setspecific 把值又设回去了
+5. pthread 继续遍历，遇到第三方库的 key，调用其析构函数
+6. 第三方析构函数调 DetachCurrentThread，内部需要 Thread::current():
+   pthread_getspecific 拿到的是第 4 步设回去的 Thread* — 有效
+7. DetachCurrentThread → exit() → Thread::~Thread() → clear_thread_current()
+   → pthread_setspecific(key, NULL) — 永久清空
+8. pthread 继续迭代，HotSpot key 已经是 NULL，不再调析构函数 — 结束
+```
+
+**如果没有 restore_thread_pointer**：
+
+```
+1. 线程退出，pthread 开始遍历 TLS key
+2. pthread 遇到 HotSpot 的 key，调用析构函数（正常清理类）
+3. pthread 把 HotSpot key 的值设为 NULL — 不再设回去
+4. pthread 继续遍历，遇到第三方库的 key，调用其析构函数
+5. 第三方析构函数调 DetachCurrentThread，需要 Thread::current():
+   pthread_getspecific 返回 NULL — crash
+```
+
+`DetachCurrentThread` 的 `exit()` 内部涉及释放 Java 监视器、JNI 句柄、JVMTI 清理、GC barrier 刷新、全局线程列表移除——每一步都依赖 `Thread::current()` 返回有效指针。`restore_thread_pointer` 保证整个析构链期间它不会丢。
 
 JNI 的 `AttachCurrentThread` 和 `DetachCurrentThread` 的细节会在后续章节展开，这里只需要知道基本概念。
 
