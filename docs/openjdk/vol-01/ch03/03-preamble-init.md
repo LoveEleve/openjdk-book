@@ -340,16 +340,19 @@ FILE*  defaultStream::_error_stream  = stderr;  // C 标准库的 stderr
 Arguments::process_sun_java_launcher_properties(args);
 ```
 
-Java 启动器在调用 `JNI_CreateJavaVM` 时，会通过系统属性传递自己的元信息。这些属性以 `-D` 形式放在 `JavaVMInitArgs` 的 options 数组中，前缀是 `sun.java.launcher`。处理时机很关键——必须早于其他系统属性的初始化，因为后续的属性设置可能依赖 launcher 类型。
+### 背景：启动器传给 JVM 的信息
 
-定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/runtime/arguments.cpp`：
+回忆第一章——`JLI_Launch` 的 Step 10（设置伪系统属性）通过 `AddOption` 往 `options` 数组里塞了三个 `-D` 属性：
 
 ```
+AddOption("-Dsun.java.launcher=SUN_STANDARD", NULL);
+AddOption("-Dsun.java.launcher.pid=<pid>", NULL);
+```
+
+`args` 就是 `InitializeJVM` 里组装好的 `JavaVMInitArgs`，其中的 `options` 数组里除了用户指定的 `-D` 属性外，还夹带了启动器注入的这些 `sun.java.launcher.*` 属性。本函数做的事情就是从 `options` 里把这三个属性找出来，存到 `Arguments` 类的静态成员变量里。代码（`arguments.cpp`）：
+
+```c
 void Arguments::process_sun_java_launcher_properties(JavaVMInitArgs* args) {
-  // See if sun.java.launcher, sun.java.launcher.is_altjvm or
-  // sun.java.launcher.pid is defined.
-  // Must do this before setting up other system properties,
-  // as some of them may depend on launcher type.
   for (int index = 0; index < args->nOptions; index++) {
     const JavaVMOption* option = args->options + index;
     const char* tail;
@@ -372,44 +375,30 @@ void Arguments::process_sun_java_launcher_properties(JavaVMInitArgs* args) {
 }
 ```
 
-遍历 `args->nOptions` 个 `JavaVMOption`，用 `match_option` 做前缀匹配。`match_option` 的定义在同文件第 227 行：
+遍历 `args->nOptions` 个选项，对每个选项做前缀匹配。匹配到就把等号后面的值提取出来，存入成员变量。不匹配的跳过。
 
-```
-static bool match_option(const JavaVMOption *option, const char* name,
-                         const char** tail) {
+`match_option` 就是简单的 `strncmp`：
+
+```c
+static bool match_option(const JavaVMOption *option, const char* name, const char** tail) {
   size_t len = strlen(name);
   if (strncmp(option->optionString, name, len) == 0) {
-    *tail = option->optionString + len;
+    *tail = option->optionString + len;     // 跳过前缀，tail 指向等号后面的值
     return true;
-  } else {
-    return false;
   }
+  return false;
 }
 ```
 
-`match_option` 用 `strncmp` 做前缀比较，匹配成功则把等号后面的部分（tail）通过指针返回。
+三个属性各自处理：
 
-处理的三个属性：
+| 属性 | 提取的值 | 存到 | HelloWorld 时的值 |
+|------|---------|------|------------------|
+| `sun.java.launcher` | `"SUN_STANDARD"` | `_sun_java_launcher` | `"SUN_STANDARD"` |
+| `sun.java.launcher.is_altjvm` | `"true"` / 不存在 | `_sun_java_launcher_is_altjvm` | `false`（属性不存在） |
+| `sun.java.launcher.pid` | 数字字符串 | `_sun_java_launcher_pid` | 启动器的进程 PID |
 
-- **`-Dsun.java.launcher=<名称>`**：launcher 程序名。`tail` 是 "java" 或 "javac" 等。交给 `process_java_launcher_argument` 处理，该函数在同文件第 2013 行：
-
-```
-void Arguments::process_java_launcher_argument(const char* launcher, void* extra_info) {
-  _sun_java_launcher = os::strdup_check_oom(launcher);
-}
-```
-
-直接用 `strdup` 保存一份 launcher 名称，存到 `_sun_java_launcher` 成员变量。
-
-- **`-Dsun.java.launcher.is_altjvm=true`**：标记是否使用了 `-altjvm` 参数选择了备选 JVM。`_sun_java_launcher_is_altjvm` 在类定义中默认为 false，只有碰到这个属性才设为 true。
-
-- **`-Dsun.java.launcher.pid=<数字>`**：launcher 进程的 PID。用 `atoi` 转为整数存入 `_sun_java_launcher_pid`。这个 PID 值后续用于 `jcmd` 和管理接口。
-
-`args->options + index` 是指针运算——`options` 是 `JavaVMOption*`，`+ index` 直接偏移到第 index 个选项。
-
-`continue` 确保每个 option 只匹配一个属性，避免重复检查。
-
-**总结**：从 launcher 传入的 JVM options 中提取三个内部属性——launcher 名称、是否 altjvm、launcher PID——存到 `Arguments` 类的静态成员变量中。这些值在后继的系统属性初始化阶段被使用。
+这些值后续被 HotSpot 用于日志输出（"哪个启动器创建了我"）、管理接口（`jcmd` 通过 PID 找到进程）以及启动器兼容性判断。
 
 ---
 
