@@ -130,6 +130,8 @@ void ThreadLocalStorage::set_thread(Thread* current) {
 
 `init()` 只被调用一次（`_thread_key` 全局唯一）。后续任何线程调用 `set_thread(p)` 存入自己的 `Thread*`，其他函数通过 `thread()` 取出——`Thread::current()` 最终就是调这里。
 
+如果你写过 Java，这个模式和 `java.lang.ThreadLocal` 几乎一样：`new ThreadLocal<T>()` 对应 `pthread_key_create`，`set(T value)` 对应 `pthread_setspecific`，`get()` 对应 `pthread_getspecific`。
+
 `pthread_setspecific` 把 `Thread*` 存入当前线程的 TLS 槽位——这个操作会在 Stage 2 创建 `JavaThread` 时发生，届时每个新线程都会把自己的 `JavaThread*` 通过这里注册。
 
 **总结**：`ThreadLocalStorage::init()` 用 `pthread_key_create` 创建了一个全局 TLS key，后续 HotSpot 所有线程都通过这个 key 存取自己的 `Thread*`。这是整个线程模型的基础——没有它，任何代码都无法通过 `Thread::current()` 获取当前线程对象。
