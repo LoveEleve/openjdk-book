@@ -396,7 +396,7 @@ clock_tics_per_sec = sysconf(_SC_CLK_TCK);
 init_random(1234567);
 ```
 
-`sysconf(_SC_CLK_TCK)` 获取系统时钟滴答频率——标准 Linux 是 100（每秒 100 个 jiffies）。
+`sysconf` 是 POSIX 标准函数，查询系统运行时的配置参数。`sysconf(_SC_CLK_TCK)` 返回每秒的 clock tick 数——标准 Linux 是 100（每秒 100 个 jiffies，每个 tick 10ms）。`SC` 前缀代表 System Config。
 
 `init_random` 的实现（`os.cpp`）：
 
