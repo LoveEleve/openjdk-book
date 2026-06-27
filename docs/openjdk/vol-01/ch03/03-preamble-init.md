@@ -126,24 +126,9 @@ extern "C" void restore_thread_pointer(void* p) {
 
 就是把 `Thread*` 重新存回 TLS。为什么要这么做？
 
-**glibc 的实际行为**：线程退出时，对每个非 NULL 的 key 调析构函数。析构函数里如果通过 `pthread_setspecific` 把值设回去了，glibc 完成后检查——发现值还在——再来一轮（最多 `PTHREAD_DESTRUCTOR_ITERATIONS` 次，Linux 上为 4）。4 轮后值还在就强制清 NULL。
+`restore_thread_pointer` 在 glibc 清理 TLS 时被调用。线程退出时，glibc 会依次调每个 key 的析构函数做清理。HotSpot 的 `Thread*` 还留在 TLS 里——如果析构函数把它清掉了，后续其他清理步骤（比如第三方库的析构函数）需要 `Thread::current()` 时就会拿到 NULL，崩掉。
 
-本机验证——析构函数里反复设回去，glibc 反复调：
-
-```
-[destructor #1] called with value=0xdeadbeef, set back → still non-NULL
-[destructor #2] called with value=0xdeadbeef, set back → still non-NULL
-[destructor #3] called with value=0xdeadbeef, set back → still non-NULL
-[destructor #4] called with value=0xdeadbeef, 4 轮上限到达 → 强制 NULL
-```
-
-`restore_thread_pointer` 做的就是这件事——设回去，不清理。目的不是拖延到 4 轮，而是保证**第一轮清理期间**、其他 key 的析构函数执行时，`Thread::current()` 始终能拿到值。
-
-**具体场景**：glibc 在一轮里依次调所有非 NULL key 的析构函数。如果 HotSpot 的 `restore_thread_pointer` 先被调用，设回去；后面某个第三方 key 的析构函数调了 `DetachCurrentThread`——它需要 `Thread::current()` 有效——读到的正是 `restore` 设回去的值，正常运行。`DetachCurrentThread` 最终调 `clear_thread_current()` 永久清空。下一轮 glibc 看到 HotSpot key 的值是 NULL，不再调析构函数。
-
-**如果没有 `restore_thread_pointer`**：HotSpot 的析构函数不做设回，值在清理流程中丢掉。后续第三方析构函数调 `DetachCurrentThread` 时 `Thread::current()` 返回 NULL——crash。
-
-JNI 的 `AttachCurrentThread` 和 `DetachCurrentThread` 的细节会在后续章节展开，这里只需要知道基本概念。
+所以 `restore_thread_pointer` 什么都不做——只是把值原样放回去，等于"这个指针还没到扔的时候"。真正清理由 `DetachCurrentThread` 完成。
 
 ```c
 Thread* ThreadLocalStorage::thread() {
