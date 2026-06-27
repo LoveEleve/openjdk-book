@@ -170,18 +170,57 @@ destructor called, value = 0xdeadbeef
 
 析构函数被调了 4 次——因为每次设回去，glibc 发现值还在，就再调一次。4 轮后 glibc 强制停止，把值清 NULL。
 
+再写一个双 key 的程序，验证同一轮清理中 key 之间的调用顺序和可见性：
+
+```c
+#include <stdio.h>
+#include <pthread.h>
+
+static pthread_key_t key1, key2;
+
+void destructor1(void* p) {
+    pthread_setspecific(key1, p);                    /* 设回去——模拟 restore_thread_pointer */
+}
+
+void destructor2(void* p) {
+    printf("  key2 读 key1 = %p\n", pthread_getspecific(key1));  /* 模拟 Thread::current() */
+}
+
+void* thread(void* arg) {
+    pthread_setspecific(key1, (void*)111);
+    pthread_setspecific(key2, (void*)222);
+    return NULL;
+}
+
+int main() {
+    pthread_key_create(&key1, destructor1);
+    pthread_key_create(&key2, destructor2);
+    /* 创建线程，退出，观察 */
+}
+```
+
+本机输出：
+
+```
+key2 读 key1 = 0x6f       ← 在同一轮清理中，key2 的析构函数
+                             成功读到了 key1 的值
+```
+
+这说明：glibc 在一轮清理中按 key 创建顺序依次调析构函数——先 key1（HotSpot 的 `_thread_key`），再 key2（第三方库）。key1 的析构函数设回去的值，key2 的析构函数马上就能读到。
+
 #### 实际用途
 
-现在把这个模式套到 HotSpot 的场景里。HotSpot 注册了 `restore_thread_pointer` 作为 `_thread_key` 的析构函数。线程退出时：
+线程退出时，HotSpot 注册了 `restore_thread_pointer` 作为 `_thread_key` 的析构函数。同一个线程可能还被某个 JNI 第三方库注册了另一个 key，其析构函数里调了 `DetachCurrentThread`。
 
-1. glibc 开始 TLS 清理流程
-2. 发现 `_thread_key` 上该线程的值为 `Thread*`，非 NULL，调 `restore_thread_pointer`
-3. `restore_thread_pointer` 调 `set_thread` 把 `Thread*` 设回去
-4. glibc 继续调其他 key 的析构函数
-5. 此时如果某个第三方库的析构函数里调了 `DetachCurrentThread`（解绑线程），它需要 `Thread::current()` 找到自己的 `Thread*`
-6. `Thread::current()` 读 `_thread_key`——拿到了第 3 步设回去的值——正常执行
+清理流程是这样的：
 
-如果没有 `restore_thread_pointer`（即析构函数真的做了清理），第 3 步值就丢了。第 6 步 `Thread::current()` 返回 NULL，`DetachCurrentThread` 崩掉。
+1. glibc 第一轮：先调 HotSpot 的 `restore_thread_pointer`——把 `Thread*` 设回 TLS
+2. 接着调第三方库的析构函数，其中调 `DetachCurrentThread`
+3. `DetachCurrentThread` 内需要 `Thread::current()`——读 TLS，拿到了上一步设回去的值，正常运行
+4. `DetachCurrentThread` 最终调 `clear_thread_current()`，把 `Thread*` 永久清空
+5. glibc 第二轮：`_thread_key` 的值已是 NULL，不再调 `restore_thread_pointer`——结束
+
+**如果没有** `restore_thread_pointer`：HotSpot 的析构函数真的做了清理，第 1 步值就丢了。第 3 步 `Thread::current()` 返回 NULL，`DetachCurrentThread` 崩溃。
 
 一句话总结：`restore_thread_pointer` 是 HotSpot 注册到 glibc 的保险——线程退出清理期间，如果别的代码还需要 `Thread::current()`，它保证 TLS 里始终有这个值。真正的清理由 `DetachCurrentThread` 调用 `pthread_setspecific(NULL)` 来完成。
 
