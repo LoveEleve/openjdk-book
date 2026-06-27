@@ -124,43 +124,15 @@ extern "C" void restore_thread_pointer(void* p) {
 }
 ```
 
-就是把 `Thread*` 重新存回 TLS。为什么要这么做？先退一步理解背景。
+就是把 `Thread*` 重新存回 TLS。为什么要这么做？
 
-**JNI 的线程绑定机制。** 操作系统线程默认和 JVM 没有关系——一个 C 程序 `pthread_create` 出来的线程不能直接调 JNI 函数。必须先调用 `AttachCurrentThread` 把线程注册到 JVM（让 JVM 分配一个 `JNIEnv` 和一个 `JavaThread` 对象），才能用 JNI。用完之后调用 `DetachCurrentThread` 解绑，释放 `JavaThread` 和 `JNIEnv`。这部分在后续章节专门展开，这里只需要知道基本概念。
+**问题**：线程退出时，如果 TLS 里还存着 `Thread*`（比如线程被 OS 杀掉，或用户忘了调用 `DetachCurrentThread`），pthread 会自动调用 `restore_thread_pointer`。普通的做法是在析构函数里清理掉这个值——但这里不能清理。
 
-现在假设一个线程这样使用：
+原因是线程退出过程是一连串的清理动作，pthread 可能先调用这个析构函数，然后再触发其他清理逻辑。如果 `restore_thread_pointer` 把 `Thread*` 清理掉了，后续任何需要 `Thread::current()` 的代码都会返回 NULL，导致 crash 或死循环。
 
-```
-pthread_create  线程运行  AttachCurrentThread  业务  DetachCurrentThread  线程退出
-```
+所以它只是把值"原样放回"TLS——等于什么都没做，但保证 `Thread*` 始终可访问。最终由 `DetachCurrentThread` 调 `pthread_setspecific(NULL)` 来完成真正的清理。
 
-正常情况没问题。但如果线程在调用 `DetachCurrentThread` 之前就退出了（异常退出、被 kill、或者用户忘了调），会发生什么？
-
-pthread 在退出时会遍历所有通过 `pthread_key_create` 注册的析构函数，把 TLS 里每个 key 的值传给对应的析构函数。HotSpot 注册的就是 `restore_thread_pointer`。
-
-**具体场景：**
-
-```
-时间线：
-  1. OS 线程即将退出
-  2. pthread 自动遍历所有 TLS key 的析构函数
-  3. 先调用 restore_thread_pointer：
-     TLS 里还有 Thread*（因为没走到 DetachCurrentThread）
-     restore_thread_pointer 把 Thread* 重新存回 TLS（什么都不变？对，就是再存一次）
-  4. 然后可能调用其他 TLS key 的析构函数
-  5. 最终走到 DetachCurrentThread（或者线程清理逻辑）
-     Thread::current() 读 TLS — 拿到了 Thread* — 正常执行解绑
-```
-
-**如果没有 `restore_thread_pointer`**，情况变成：
-
-```
-  3. HotSpot 的 TLS key 析构函数做了默认清理（或什么也不做）
-  4. TLS 里 Thread* 丢失
-  5. 后续 DetachCurrentThread — Thread::current() 返回 NULL — crash 或死循环
-```
-
-所以 `restore_thread_pointer` 就是 pthread 析构链中的一个保险：不管析构顺序如何，把 `Thread*` 原样放回 TLS，让后续任何需要 `Thread::current()` 的代码都能找到它。最终由 `DetachCurrentThread` 调 `pthread_setspecific(NULL)` 永久清空。
+JNI 的 `AttachCurrentThread`（把 OS 线程注册到 JVM）和 `DetachCurrentThread`（解绑）的细节会在后续 Attach 机制章节展开，这里只需要知道基本概念。
 
 ```c
 Thread* ThreadLocalStorage::thread() {
