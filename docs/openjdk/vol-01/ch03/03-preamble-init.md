@@ -116,47 +116,51 @@ void ThreadLocalStorage::init() {
 }
 ```
 
-`_thread_key` 是全局变量，只创建一次。第二个参数 `restore_thread_pointer` 是析构函数——线程退出时如果该线程的 TLS 槽位值不为 NULL，pthread 自动调用它。
-
-举个例子。假设一个 JNI 用户写了这样的代码：
+`_thread_key` 是全局变量，只创建一次。第二个参数 `restore_thread_pointer` 是析构函数，实现只有一行：
 
 ```c
-// 用户自定义的线程清理函数
-void my_cleanup(void* p) {
-    (*jvm)->DetachCurrentThread(jvm);   // 线程退出时解绑 JVM
-}
-
-void my_thread_main() {
-    (*jvm)->AttachCurrentThread((void**)&env, NULL);  // 绑定当前线程到 JVM
-    // ... 业务代码 ...
-    pthread_cleanup_push(my_cleanup, NULL);  // 注册清理函数
+extern "C" void restore_thread_pointer(void* p) {
+  ThreadLocalStorage::set_thread((Thread*) p);
 }
 ```
 
-当这个线程退出时，pthread 会按注册顺序依次调用所有 TLS key 的析构函数。HotSpot 的 `_thread_key` 对应的析构函数就是 `restore_thread_pointer`。
+就是把 `Thread*` 重新存回 TLS。为什么要这么做？先退一步理解背景。
 
-**没有 `restore_thread_pointer` 的情况：**
+**JNI 的线程绑定机制。** 操作系统线程默认和 JVM 没有关系——一个 C 程序 `pthread_create` 出来的线程不能直接调 JNI 函数。必须先调用 `AttachCurrentThread` 把线程"注册"到 JVM（让 JVM 分配一个 `JNIEnv` 和一个 `JavaThread` 对象），才能用 JNI。用完之后调用 `DetachCurrentThread` 解绑，释放 `JavaThread` 和 `JNIEnv`。
 
-```
-1. pthread 先调 HotSpot 的析构函数 → 清空了 TLS 里的 Thread*
-2. pthread 再调 my_cleanup → 内部调 DetachCurrentThread
-3. DetachCurrentThread 需要 Thread::current() 
-   → 读 TLS → 返回 NULL（已经被第一步清空了）→ crash
-```
-
-**有 `restore_thread_pointer` 的情况：**
+现在假设一个线程这样使用：
 
 ```
-1. pthread 先调 HotSpot 的析构函数 → restore_thread_pointer 被触发
-   → set_thread((Thread*)p)  ← 把 Thread* 重新存回 TLS
-2. pthread 再调 my_cleanup → 内部调 DetachCurrentThread
-3. DetachCurrentThread 需要 Thread::current()
-   → 读 TLS → 拿到了 Thread*（第一步复活了）→ 正常执行
-4. DetachCurrentThread 内部调 pthread_setspecific(key, NULL)
-   → TLS 槽位清空 → pthread 不再调用析构函数 → 避免死循环
+pthread_create → 线程运行 → AttachCurrentThread → ...业务... → DetachCurrentThread → 线程退出
 ```
 
-源码注释里也提到了这个死循环问题：如果指针一直留在 TLS 里不被清空，pthread 可能会反复调用析构函数。`restore_thread_pointer` 只是"暂时复活"，最终由 `DetachCurrentThread` 的 `pthread_setspecific(NULL)` 来永久清空。
+正常情况没问题。但如果线程在调用 `DetachCurrentThread` 之前就退出了（异常退出、被 kill、或者用户忘了调），会发生什么？
+
+pthread 在退出时会遍历所有通过 `pthread_key_create` 注册的析构函数，把 TLS 里每个 key 的值传给对应的析构函数。HotSpot 注册的就是 `restore_thread_pointer`。
+
+**具体场景：**
+
+```
+时间线：
+  1. OS 线程即将退出
+  2. pthread 自动遍历所有 TLS key 的析构函数
+  3. 先调用 restore_thread_pointer：
+     → TLS 里还有 Thread*（因为没走到 DetachCurrentThread）
+     → restore_thread_pointer 把 Thread* 重新存回 TLS（什么都不变？对，就是再存一次）
+  4. 然后可能调用其他 TLS key 的析构函数
+  5. 最终走到 DetachCurrentThread（或者线程清理逻辑）
+     → Thread::current() 读 TLS → 拿到了 Thread* → 正常执行解绑
+```
+
+**如果没有 `restore_thread_pointer`**，情况变成：
+
+```
+  3. HotSpot 的 TLS key 析构函数做了默认清理（或什么也不做）
+  4. TLS 里 Thread* 丢失
+  5. 后续 DetachCurrentThread → Thread::current() → NULL → crash 或死循环
+```
+
+所以 `restore_thread_pointer` 就是 pthread 析构链中的一个保险：不管析构顺序如何，把 `Thread*` 原样放回 TLS，让后续任何需要 `Thread::current()` 的代码都能找到它。最终由 `DetachCurrentThread` 调 `pthread_setspecific(NULL)` 永久清空。
 
 ```c
 Thread* ThreadLocalStorage::thread() {
