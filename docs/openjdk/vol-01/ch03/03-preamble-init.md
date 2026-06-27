@@ -116,7 +116,19 @@ void ThreadLocalStorage::init() {
 }
 ```
 
-`_thread_key` 是全局变量，只创建一次。`restore_thread_pointer` 是析构函数——线程退出时，如果该线程的槽位值不为 NULL，pthread 自动调用它。HotSpot 用它来防止 JNI 用户在 `DetachCurrentThread` 时因找不到 `Thread*` 而 crash。
+`_thread_key` 是全局变量，只创建一次。第二个参数 `restore_thread_pointer` 是析构函数——线程退出时如果该线程的 TLS 槽位值不为 NULL，pthread 自动调用它。
+
+源码里 `restore_thread_pointer` 的实现只有一行：
+
+```c
+extern "C" void restore_thread_pointer(void* p) {
+  ThreadLocalStorage::set_thread((Thread*) p);
+}
+```
+
+就是把 `Thread*` 重新存回 TLS。这个看似简单的操作解决了一个实际问题：有些 JNI 用户会在线程退出时通过自定义的 pthread 析构函数调用 `DetachCurrentThread`——这个函数内部需要 `Thread::current()` 来找到自己的 `Thread*`。但 pthread 的析构函数调用顺序不可控，有可能 HotSpot 的析构函数先被调用、TLS 槽位被清空了，然后用户的析构函数才调用——这时候 `Thread::current()` 返回 NULL，crash。
+
+`restore_thread_pointer` 的作用就是"复活"这个指针：无论析构函数被调用的顺序如何，它先把 `Thread*` 存回 TLS。这样后续任何需要 `Thread::current()` 的代码都能找到它。等到 `DetachCurrentThread` 真正执行时，会调用 `pthread_setspecific(key, NULL)` 把槽位置空，pthread 就不会再次调用析构函数——避免了死循环。
 
 ```c
 Thread* ThreadLocalStorage::thread() {
