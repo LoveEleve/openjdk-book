@@ -86,7 +86,15 @@ jboolean Threads::is_supported_jni_version(jint version) {
 ThreadLocalStorage::init();
 ```
 
-HotSpot 的内部线程模型建立在 `Thread` 类层次上（`Thread` → `JavaThread` / `CompilerThread` / `VMThread` 等）。HotSpot 需要一种方式让任意线程——不管是不是 HotSpot 自己创建的——能快速获取其关联的 `Thread*` 指针。这就是 Thread Local Storage（TLS）的作用：每个线程一个槽位，存着该线程对应的 HotSpot `Thread*`。
+HotSpot 的内部线程模型建立在 `Thread` 类层次上（`Thread` → `JavaThread` / `CompilerThread` / `VMThread` 等）。注意区分三个概念：
+
+| 概念 | 是什么 | 关系 |
+|------|--------|------|
+| OS 线程（pthread） | 操作系统创建和调度的执行单元 | 底层实体 |
+| `Thread` / `JavaThread` | HotSpot 的 C++ 类，是 JVM 内部的线程对象模型 | 包装一个 OS 线程，不是 OS 线程本身 |
+| `java.lang.Thread` | Java 层的类，`new Thread().start()` 创建 | 在 JVM 内部对应一个 `JavaThread` |
+
+HotSpot 需要一种方式让任意线程——不管是不是 HotSpot 自己创建的——能快速获取其关联的 `Thread*` 指针。这就是 Thread Local Storage（TLS）的作用：每个线程一个槽位，存着该线程对应的 HotSpot `Thread*`。
 
 > **Thread Local Storage（TLS）**：操作系统提供的机制，允许每个线程拥有独立的变量副本。Linux 通过 `pthread_key_create` / `pthread_getspecific` / `pthread_setspecific` 三个 POSIX 函数实现。每个 key 是全局的，但每个线程通过该 key get/set 的值是线程私有的。
 
