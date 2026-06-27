@@ -96,52 +96,39 @@ HotSpot 的内部线程模型建立在 `Thread` 类层次上（`Thread` → `Jav
 
 HotSpot 需要一种方式让任意线程——不管是不是 HotSpot 自己创建的——能快速获取其关联的 `Thread*` 指针。这就是 Thread Local Storage（TLS）的作用：每个线程一个槽位，存着该线程对应的 HotSpot `Thread*`。
 
-> **Thread Local Storage（TLS）**：操作系统提供的机制，允许每个线程拥有独立的变量副本。Linux 通过 `pthread_key_create` / `pthread_getspecific` / `pthread_setspecific` 三个 POSIX 函数实现。每个 key 是全局的，但每个线程通过该 key get/set 的值是线程私有的。
+Linux 通过三个 POSIX 函数实现 TLS：
 
-实现文件：`/data/workspace/jdk11u-copy/src/hotspot/os/posix/threadLocalStorage_posix.cpp`。
+| 函数 | 作用 |
+|------|------|
+| `pthread_key_create(key, destructor)` | 创建一个全局 key，所有线程共享这个 key。`destructor` 是析构函数，线程退出时自动调用，传该线程 key 对应的值 |
+| `pthread_setspecific(key, value)` | 把 `value`（`void*`）存入当前线程的 key 槽位 |
+| `pthread_getspecific(key)` | 取出当前线程的 key 槽位里存的值（`void*`），key 未设值时返回 NULL |
 
-```
-#include "runtime/threadLocalStorage.hpp"
-#include <pthread.h>
+使用模式：全局调用一次 `pthread_key_create` 创建 key，之后每个线程通过同一个 key 存取自己的私有数据——key 是全局的，值是按线程隔离的。
 
+HotSpot 的用法（`threadLocalStorage_posix.cpp`）：
+
+```c
 static pthread_key_t _thread_key;
-static bool _initialized = false;
-
-extern "C" void restore_thread_pointer(void* p) {
-  ThreadLocalStorage::set_thread((Thread*) p);
-}
 
 void ThreadLocalStorage::init() {
-  assert(!_initialized, "initializing TLS more than once!");
-  int rslt = pthread_key_create(&_thread_key, restore_thread_pointer);
-  assert_status(rslt == 0, rslt, "pthread_key_create");
-  _initialized = true;
+    int rslt = pthread_key_create(&_thread_key, restore_thread_pointer);
 }
 ```
 
-`pthread_key_create(&_thread_key, restore_thread_pointer)` 做了两件事：
+`_thread_key` 是全局变量，只创建一次。`restore_thread_pointer` 是析构函数——线程退出时，如果该线程的槽位值不为 NULL，pthread 自动调用它。HotSpot 用它来防止 JNI 用户在 `DetachCurrentThread` 时因找不到 `Thread*` 而 crash。
 
-1. 创建一个全局 key（`_thread_key`），所有线程通过这个 key 存取自己的 `Thread*`。
-2. 注册析构函数 `restore_thread_pointer`——当线程退出时，如果该 key 对应的值不为 NULL，pthread 库自动调用这个函数，把值重新存回 TLS。这样做是为了防止 JNI 用户错误地在线程退出时调用 `DetachCurrentThread` 导致 crash：HotSpot 把线程指针"复活"回 TLS，让 `DetachCurrentThread` 能找到自己的 `Thread*`。
-
-`assert(!_initialized)` 是防御性编程——确保 `init()` 只被调用一次。`assert_status(rslt == 0, rslt, "pthread_key_create")` 是 HotSpot 自定义的带错误码的断言宏，在 Debug 构建中如果 `pthread_key_create` 失败会打印错误码和函数名。
-
-初始化完成后，其他函数通过这个 key 存取 `Thread*`：
-
-```
+```c
 Thread* ThreadLocalStorage::thread() {
-  assert(_initialized, "TLS not initialized yet!");
-  return (Thread*) pthread_getspecific(_thread_key);
+    return (Thread*) pthread_getspecific(_thread_key);
 }
 
 void ThreadLocalStorage::set_thread(Thread* current) {
-  assert(_initialized, "TLS not initialized yet!");
-  int rslt = pthread_setspecific(_thread_key, current);
-  assert_status(rslt == 0, rslt, "pthread_setspecific");
+    pthread_setspecific(_thread_key, current);
 }
 ```
 
-`pthread_getspecific` 读取当前线程通过 `_thread_key` 存储的值，返回的就是该线程的 `Thread*`。初始状态（还没调用 `set_thread` 时）返回 NULL。
+`init()` 只被调用一次（`_thread_key` 全局唯一）。后续任何线程调用 `set_thread(p)` 存入自己的 `Thread*`，其他函数通过 `thread()` 取出——`Thread::current()` 最终就是调这里。
 
 `pthread_setspecific` 把 `Thread*` 存入当前线程的 TLS 槽位——这个操作会在 Stage 2 创建 `JavaThread` 时发生，届时每个新线程都会把自己的 `JavaThread*` 通过这里注册。
 
