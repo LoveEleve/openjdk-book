@@ -430,7 +430,44 @@ Linux::initialize_system_info();
 Linux::initialize_os_info();
 ```
 
-`initialize_system_info` 读取 `/proc/cpuinfo` 和 `/proc/meminfo` 获取 CPU 核数、内存大小等。`initialize_os_info` 读取 `/proc/version` 获取内核版本、读取 `/etc/os-release` 获取发行版信息。这些信息后续用于 `-XshowSettings` 输出、`hs_err` 崩溃日志以及 JFR 事件。
+`initialize_system_info` 用 `sysconf` 采集 CPU 和内存（`os_linux.cpp`）：
+
+```c
+void os::Linux::initialize_system_info() {
+  set_processor_count(sysconf(_SC_NPROCESSORS_CONF));   // CPU 核数
+  if (processor_count() == 1) {
+    // 检查 /proc/{pid} 是否存在——不存在说明运行在 chroot 环境
+    pid_t pid = os::Linux::gettid();
+    char fname[32];
+    jio_snprintf(fname, sizeof(fname), "/proc/%d", pid);
+    FILE *fp = fopen(fname, "r");
+    if (fp == NULL)  unsafe_chroot_detected = true;
+    else             fclose(fp);
+  }
+  // 物理内存 = 物理页数 × 页大小
+  _physical_memory = (julong)sysconf(_SC_PHYS_PAGES) * (julong)sysconf(_SC_PAGESIZE);
+}
+```
+
+- `set_processor_count(sysconf(_SC_NPROCESSORS_CONF))` — `_SC_NPROCESSORS_CONF` 返回系统配置的 CPU 核数，存到全局变量 `_processor_count`
+- `_physical_memory = _SC_PHYS_PAGES × _SC_PAGESIZE` — 物理页数乘以页大小得到总内存字节数，存到 `_physical_memory`
+
+`initialize_os_info` 用 `uname()` 获取内核版本（`os_linux.cpp`）：
+
+```c
+void os::Linux::initialize_os_info() {
+  struct utsname _uname;
+  _os_version = 0x01000000;              // 默认：未知版本
+  if (uname(&_uname) != -1) {
+    sscanf(_uname.release, "%d.%d.%d", &major, &minor, &fix);
+    _os_version = (major << 16) | (minor << 8) | fix;  // 如 5.4.0 → 0x050400
+  }
+}
+```
+
+`uname` 是 POSIX 系统调用，返回内核名称、版本、发行号等信息。这里取 `_uname.release`（内核版本号字符串），用 `sscanf` 解析三段数字，拼成 `0xMMmmff` 格式（M=major, m=minor, f=fix）。
+
+存到哪？CPU 核数在 `_processor_count`，物理内存在 `_physical_memory`，OS 版本在 `_os_version`——三个都是 `os::Linux` 的静态成员变量。后续 `-XshowSettings`、`hs_err` 崩溃日志、JFR 事件都从这里读取。
 
 ### glibc malloc 统计
 
