@@ -396,7 +396,17 @@ clock_tics_per_sec = sysconf(_SC_CLK_TCK);
 init_random(1234567);
 ```
 
-`sysconf(_SC_CLK_TCK)` 获取系统时钟滴答频率——标准 Linux 是 100（每秒 100 个 jiffies）。`init_random(1234567)` 用固定种子初始化随机数生成器，确保 JVM 内部的随机行为可复现。
+`sysconf(_SC_CLK_TCK)` 获取系统时钟滴答频率——标准 Linux 是 100（每秒 100 个 jiffies）。
+
+`init_random` 的实现（`os.cpp`）：
+
+```c
+void os::init_random(unsigned int initval) {
+  _rand_seed = initval;
+}
+```
+
+把全局变量 `_rand_seed` 设为固定值 `1234567`。后续 `os::random()` 用这个种子做线性同余计算——`next = (16807 × seed) % (2^31 - 1)`。固定种子保证每次 JVM 启动的随机序列完全一致，便于调试和复现问题。
 
 ### 页大小
 
