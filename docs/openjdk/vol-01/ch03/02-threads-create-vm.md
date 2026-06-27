@@ -512,86 +512,67 @@ result = Threads::create_vm((JavaVMInitArgs*) args, &can_try_again);
 ---
 ## create_vm 计时器
 
-`Threads::create_vm` 从阶段 1 尾部 `create_vm_timer.start()` 开始计时，到阶段 9 结尾 `create_vm_timer.end()` 停止。这个计时器测量的是从第一次 OS 初始化到 WatcherThread 启动完毕的整个 VM 创建耗时。
+`Threads::create_vm` 内部有两个计时器，起止点不同：
 
-### TraceVmCreationTime 类
-
-定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/services/management.hpp`：
-
-```c
-class TraceVmCreationTime : public StackObj {
-private:
-  TimeStamp _timer;
-  jlong     _begin_time;
-
-public:
-  TraceVmCreationTime() {}
-  ~TraceVmCreationTime() {}
-
-  void start()
-  { _timer.update_to(0); _begin_time = os::javaTimeMillis(); }
-
-  jlong begin_time() const {
-    return _begin_time;
-  }
-
-  void end()
-  { Management::record_vm_startup_time(_begin_time, _timer.milliseconds()); }
-};
+```
+Threads::create_vm
+│
+├─ 阶段 1 ───── create_vm_timer.start()        ← 计时器 A 开始
+│   ...                                         测量整函数耗时
+├─ 阶段 2
+│
+├─ HOTSPOT_VM_INIT_BEGIN()
+│   TraceTime timer("Create VM")                 ← 计时器 B 开始（RAII 构造）
+│   阶段 3 ~ 阶段 7                              测量 VM init 核心段耗时
+│   ...                                         
+│   set_init_completed()
+│   HOTSPOT_VM_INIT_END()
+│   → timer 析构，输出耗时日志                    ← 计时器 B 停止
+│
+├─ 阶段 8 ~ 阶段 9
+│   ...
+│   create_vm_timer.end()                        ← 计时器 A 停止
+└─ return JNI_OK
 ```
 
-`start()` 做两件事：
-- `_timer.update_to(0)` —— 把 `TimeStamp` 内部的 `_counter` 置为 0，后续 `milliseconds()` 会返回从此时到调用点经过的毫秒数
-- `_begin_time = os::javaTimeMillis()` —— 记录钟表时间（系统开机以来的毫秒数），供内部性能计数系统使用
-
-`end()` 调用 `Management::record_vm_startup_time(_begin_time, _timer.milliseconds())`，把启动开始时间和耗时写入 HotSpot 的 PerfData 内存区域——这是 `jstat`、JMX 等监控工具获取启动时间数据的底层来源。
-
-`StackObj` 是 HotSpot 的一个重要基类——标记对象只能在 C++ 栈上分配，禁止用 `new` 在堆上创建。`create_vm_timer` 在 `Threads::create_vm` 的栈上声明，函数结束时自动析构（析构函数为空，因为它依赖显式的 `start()/end()` 调用而不是 RAII）。
-
-### TimeStamp 类
-
-`TraceVmCreationTime` 内部使用的 `TimeStamp` 定义在 `/data/workspace/jdk11u-copy/src/hotspot/share/runtime/timer.hpp`：
+### 计时器 A：create_vm_timer（全函数计时）
 
 ```c
-class TimeStamp {
-private:
-  jlong _counter;
-public:
-  TimeStamp()  { _counter = 0; }
-  void clear() { _counter = 0; }
-  // has the timestamp been updated since being created or cleared?
-  bool is_updated() const { return _counter != 0; }
-  // update to current elapsed time
-  void update();
-  // update to given elapsed time
-  void update_to(jlong ticks);
-  // returns seconds since updated
-  double seconds() const;
-  jlong milliseconds() const;
-  // ticks elapsed between VM start and last update
-  jlong ticks() const { return _counter; }
-  // ticks elapsed since last update
-  jlong ticks_since_update() const;
-};
+TraceVmCreationTime create_vm_timer;    // 阶段 1 中声明（栈上对象）
+create_vm_timer.start();                // 阶段 1 末尾启动
+// ... 390 行 ...
+create_vm_timer.end();                  // 阶段 9 末尾停止
 ```
 
-`update_to(0)` 把 `_counter` 设 0。后续调用 `end()` 时，`_timer.milliseconds()` 返回从 `update_to(0)` 到现在经过的毫秒数——也就是 `Threads::create_vm` 的执行时长。
+`start()` 记录当前的系统时间（`os::javaTimeMillis()`）。`end()` 计算从 `start()` 到现在过了多少毫秒，写入 HotSpot 的 PerfData 内存区域——这就是 `jstat` 和 JMX 里看到的 JVM 启动耗时数据。读者可以用 `jstat -snap` 或 JMX `java.lang:type=Runtime/StartTime` 查看。
 
-### TraceTime 局部计时
-
-除了 `create_vm_timer` 这个全函数计时器外，`Threads::create_vm` 内部还有一个局部计时器：
+### 计时器 B：TraceTime("Create VM")（核心段计时）
 
 ```c
+// 阶段 3 开头（HOTSPOT_VM_INIT_BEGIN 之后）
 TraceTime timer("Create VM", TRACETIME_LOG(Info, startuptime));
+// 阶段 3 ~ 7 的执行
+// timer 离开作用域时自动析构，输出耗时日志
 ```
 
-`TraceTime` 是一个 RAII 计时器——构造时自动开始计时，离开作用域时自动停止并输出耗时日志。进入作用域在 `HOTSPOT_VM_INIT_BEGIN()` 之后，离开作用域在 `HOTSPOT_VM_INIT_END()` 之前，它测量的是阶段 3-7（从 `os::init_2` 到 `set_init_completed`）。用时 `-Xlog:startuptime=info` 可以在日志中看到这个输出：
+`TraceTime` 是 RAII 计时器——构造时自动开始计时，离开作用域（到达 `HOTSPOT_VM_INIT_END` 附近）时自动停止，并通过 `-Xlog:startuptime=info` 输出耗时日志。本机 debug build 的实际输出：
 
 ```
-[0.123s][info][startuptime] Create VM, 0.456 seconds
+[0.456s][info][startuptime] Create VM, 0.456 seconds
 ```
 
-**总结**：`create_vm_timer` 测量整个 `Threads::create_vm` 的执行时长，用于 JMX/jstat 暴露启动时间数据。`TraceTime("Create VM")` 是局部的 RAII 计时器，测量阶段 3-7 的耗时，通过 `-Xlog` 日志输出。前者是生产级性能指标，后者是开发/诊断日志。
+`Create VM` 是日志标签，`0.456` 是这个计时器测到的秒数。它只覆盖阶段 3-7（`os::init_2` 到 `set_init_completed`），不包含阶段 1-2 的前置工作和阶段 8-9 的后台服务启动。
+
+### 两个计时器的区别
+
+| | create_vm_timer | TraceTime("Create VM") |
+|---|---|---|
+| 起止 | start() ~ end() | 构造 ~ 析构（RAII） |
+| 覆盖 | 阶段 1 尾 ~ 阶段 9 尾（整函数） | 阶段 3 ~ 7（VM init 核心段） |
+| 输出 | PerfData（jstat/JMX 可读） | -Xlog 日志 |
+| 用途 | 生产级启动耗时指标 | 开发诊断日志 |
+
+`create_vm_timer.start()` 在阶段 2（参数解析）之前启动，是因为 `LogConfiguration::initialize(create_vm_timer.begin_time())` 需要这个时间戳来配置日志框架。这不是计时的原始目的，但正好复用了同一个时间源。
 
 ---
 ## 9 阶段速览
