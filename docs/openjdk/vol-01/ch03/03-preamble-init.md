@@ -330,20 +330,6 @@ FILE*  defaultStream::_error_stream  = stderr;  // C 标准库的 stderr
 
 ---
 
-**总结**：`ostream_init()` 创建全局输出流对象 `tty`，并校准时间戳零点。从此 HotSpot 代码可以安全地通过 `tty` 输出日志。没有这步，`tty` 还是 NULL，任何输出操作崩溃。
-
----
-
-## 3.3.4 Launcher 属性处理
-
-```
-Arguments::process_sun_java_launcher_properties(args);
-```
-
-第一章 `JLI_Launch` Step 10 通过 `AddOption` 在 options 数组里塞了三个 `-Dsun.java.launcher.*` 属性——启动器名称（`SUN_STANDARD`）、是否 altjvm、启动器 PID。这里把它们从 `args` 里提取出来，存到 `Arguments` 类的静态成员变量中，供后续日志和管理接口使用。HelloWorld 运行时只有 `sun.java.launcher=SUN_STANDARD` 和 `sun.java.launcher.pid=<数字>` 两条，`is_altjvm` 不存在，默认 `false`。
-
----
-
 ## 3.3.5 OS 层初始化
 
 ```
