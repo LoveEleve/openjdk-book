@@ -654,6 +654,52 @@ public:
 };
 ```
 
+`TraceVmCreationTime` 继承自 `StackObj`，这是 HotSpot 的一个标记类——它不做任何事，只是声明"这个类的对象只能在栈上分配，禁止 `new`"。`create_vm_timer` 在 `create_vm` 的栈上声明，函数结束时自动析构。但析构函数是空的——因为它不用 RAII 的构造-析构配对，而是显式调用 `start()/end()`。
+
+RAII 是 C++ 最常见的资源管理模式：构造函数获取资源，析构函数释放。写一个简单的程序来理解：
+
+```c
+#include <stdio.h>
+
+class Timer {
+    const char* _name;
+public:
+    Timer(const char* name) : _name(name) {
+        printf("[%s] 构造——开始计时\n", _name);
+    }
+    ~Timer() {
+        printf("[%s] 析构——停止计时\n", _name);
+    }
+};
+
+void do_work() {
+    Timer t("work");       // 栈上声明，构造时自动开始计时
+    printf("  工作中...\n");
+}                          // 离开作用域，自动析构——停止计时
+
+int main() {
+    Timer t("main");       // main 函数开始
+    do_work();
+    printf("  main 继续...\n");
+    return 0;
+}                          // main 函数结束，t 自动析构
+```
+
+编译运行：
+
+```
+[main] 构造——开始计时
+[work] 构造——开始计时
+  工作中...
+[work] 析构——停止计时
+  main 继续...
+[main] 析构——停止计时
+```
+
+`Timer` 对象的生命周期和花括号作用域绑定——进入作用域构造，离开作用域自动析构，不需要手动调 `start/stop`。这就是 RAII：**R**esource **A**cquisition **I**s **I**nitialization（资源获取即初始化）。
+
+HotSpot 里 `create_vm_timer` 的 RAII 不太典型——析构函数是空的，因为它用外部可见的 `start()/end()` 而非构造/析构来计时。但 `StackObj` 继承 + 栈上声明保证了它一定在函数退出时被析构（生命周期安全），哪怕 `create_vm` 中间任何地方 `return` 或抛异常。
+
 `start()` 做了两件事：把 `_timer` 的起点（`_counter`）归零，用 `os::javaTimeMillis()` 记录系统时间戳。
 
 在整个 `create_vm` 390 行执行完毕后，Stage 9 末尾调用 `end()`：
