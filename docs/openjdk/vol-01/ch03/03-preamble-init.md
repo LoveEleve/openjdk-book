@@ -132,7 +132,7 @@ extern "C" void restore_thread_pointer(void* p) {
 
 所以它只是把值"原样放回"TLS——等于什么都没做，但保证 `Thread*` 始终可访问。最终由 `DetachCurrentThread` 调 `pthread_setspecific(NULL)` 来完成真正的清理。
 
-JNI 的 `AttachCurrentThread`（把 OS 线程注册到 JVM）和 `DetachCurrentThread`（解绑）的细节会在后续 Attach 机制章节展开，这里只需要知道基本概念。
+JNI 的 `AttachCurrentThread` 和 `DetachCurrentThread` 的细节会在后续章节展开，这里只需要知道基本概念。
 
 ```c
 Thread* ThreadLocalStorage::thread() {
