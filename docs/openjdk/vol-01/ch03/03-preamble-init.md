@@ -585,27 +585,28 @@ if (condattr_setclock_func != NULL) {
 }
 ```
 
-第三，`pthread_init_common()` 初始化 HotSpot 全局条件变量和互斥锁的属性对象（`os_posix.cpp`）：
+第三，`pthread_init_common()` 初始化 HotSpot 的全局线程同步属性。
+
+### 背景：pthread 的属性对象
+
+pthread 提供了"属性对象"机制——创建互斥锁和条件变量时，可以传入一个已配置好的属性对象，而不是每次创建都重复指定参数。两次调用一次配置，后面一直复用：
+
+- `pthread_mutexattr_t` — 互斥锁属性对象。控制锁的类型（普通/递归/检错）、跨进程共享等。用 `pthread_mutexattr_init` 初始化，用 `pthread_mutexattr_settype` 设类型
+- `pthread_condattr_t` — 条件变量属性对象。控制条件变量的时钟源（`CLOCK_REALTIME` 或 `CLOCK_MONOTONIC`）、跨进程共享等。用 `pthread_condattr_init` 初始化
+
+HotSpot 在 Posix 层维护了两个全局属性对象 `_condAttr` 和 `_mutexAttr`，后续所有 `pthread_cond_init` 和 `pthread_mutex_init` 都传入这两个属性对象。`pthread_init_common()` 就是初始化它们：
 
 ```c
 static void pthread_init_common(void) {
-  pthread_condattr_init(_condAttr);                          // 初始化全局条件变量属性
-  pthread_mutexattr_init(_mutexAttr);                        // 初始化全局互斥锁属性
-  pthread_mutexattr_settype(_mutexAttr, PTHREAD_MUTEX_NORMAL); // 设为普通锁（非递归）
+  pthread_condattr_init(_condAttr);                           // 初始化条件变量属性
+  pthread_mutexattr_init(_mutexAttr);                         // 初始化互斥锁属性
+  pthread_mutexattr_settype(_mutexAttr, PTHREAD_MUTEX_NORMAL);// 设为普通锁（非递归）
 }
 ```
 
-`_condAttr` 和 `_mutexAttr` 是 `os::Posix` 的静态成员，所有后续创建的 `pthread_cond_t` 和 `pthread_mutex_t` 都用这两个属性对象初始化。`PTHREAD_MUTEX_NORMAL` 表示普通互斥锁——不自检死锁、不递归——和 HotSpot 的 `Mutex` 语义一致。
+`PTHREAD_MUTEX_NORMAL` 是 POSIX 标准定义的互斥锁类型——普通互斥锁不检测死锁，同一线程重复 `lock` 会导致自身死锁（不是报错）。HotSpot 用它是因为自己的 `Mutex` 层已经做了状态检测，不需要 pthread 层面的死锁检查。
 
-然后尝试把条件变量时钟设为单调时钟——成功则 `_use_clock_monotonic_condattr = true`，失败降级并警告。
-
-```c
-if (_pthread_condattr_setclock(_condAttr, CLOCK_MONOTONIC) == 0) {
-    _use_clock_monotonic_condattr = true;
-} else {
-    _use_clock_monotonic_condattr = false;     // 降级
-}
-```
+属性对象配好后，尝试把条件变量时钟源设为单调时钟——成功则 `_use_clock_monotonic_condattr = true`，失败降级。
 
 至此 Posix 层初始化完成。五个变量被赋值：`_clock_gettime`、`_pthread_condattr_setclock`（两个函数指针）、`_condAttr`、`_mutexAttr`（两个属性对象）、`_use_clock_monotonic_condattr`（bool）。
 
