@@ -585,10 +585,21 @@ if (condattr_setclock_func != NULL) {
 }
 ```
 
-第三，调 `pthread_init_common()` 初始化互斥锁和条件变量。然后尝试把条件变量时钟设为单调时钟——成功则 `_use_clock_monotonic_condattr = true`，失败降级并警告。
+第三，`pthread_init_common()` 初始化 HotSpot 全局条件变量和互斥锁的属性对象（`os_posix.cpp`）：
 
 ```c
-pthread_init_common();
+static void pthread_init_common(void) {
+  pthread_condattr_init(_condAttr);                          // 初始化全局条件变量属性
+  pthread_mutexattr_init(_mutexAttr);                        // 初始化全局互斥锁属性
+  pthread_mutexattr_settype(_mutexAttr, PTHREAD_MUTEX_NORMAL); // 设为普通锁（非递归）
+}
+```
+
+`_condAttr` 和 `_mutexAttr` 是 `os::Posix` 的静态成员，所有后续创建的 `pthread_cond_t` 和 `pthread_mutex_t` 都用这两个属性对象初始化。`PTHREAD_MUTEX_NORMAL` 表示普通互斥锁——不自检死锁、不递归——和 HotSpot 的 `Mutex` 语义一致。
+
+然后尝试把条件变量时钟设为单调时钟——成功则 `_use_clock_monotonic_condattr = true`，失败降级并警告。
+
+```c
 if (_pthread_condattr_setclock(_condAttr, CLOCK_MONOTONIC) == 0) {
     _use_clock_monotonic_condattr = true;
 } else {
@@ -596,7 +607,7 @@ if (_pthread_condattr_setclock(_condAttr, CLOCK_MONOTONIC) == 0) {
 }
 ```
 
-至此 Posix 层初始化完成。三个变量被赋值：`_clock_gettime`（函数指针）、`_pthread_condattr_setclock`（函数指针）、`_use_clock_monotonic_condattr`（bool）。
+至此 Posix 层初始化完成。五个变量被赋值：`_clock_gettime`、`_pthread_condattr_setclock`（两个函数指针）、`_condAttr`、`_mutexAttr`（两个属性对象）、`_use_clock_monotonic_condattr`（bool）。
 
 **总结**：`os::init()` 完成六个方面的初始化：时钟参数和随机种子、内存页大小、CPU/内存/OS 信息采集、malloc 统计函数绑定、CPU tick 快照、PaX 安全检查，最后委托 `os::Posix::init()` 设置单调时钟和条件变量。经过这一步，HotSpot 具备了在 Linux 上正常运行所需的全部 OS 级信息。
 
