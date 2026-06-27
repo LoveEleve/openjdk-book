@@ -340,65 +340,7 @@ FILE*  defaultStream::_error_stream  = stderr;  // C 标准库的 stderr
 Arguments::process_sun_java_launcher_properties(args);
 ```
 
-### 背景：启动器传给 JVM 的信息
-
-回忆第一章——`JLI_Launch` 的 Step 10（设置伪系统属性）通过 `AddOption` 往 `options` 数组里塞了三个 `-D` 属性：
-
-```
-AddOption("-Dsun.java.launcher=SUN_STANDARD", NULL);
-AddOption("-Dsun.java.launcher.pid=<pid>", NULL);
-```
-
-`args` 就是 `InitializeJVM` 里组装好的 `JavaVMInitArgs`，其中的 `options` 数组里除了用户指定的 `-D` 属性外，还夹带了启动器注入的这些 `sun.java.launcher.*` 属性。本函数做的事情就是从 `options` 里把这三个属性找出来，存到 `Arguments` 类的静态成员变量里。代码（`arguments.cpp`）：
-
-```c
-void Arguments::process_sun_java_launcher_properties(JavaVMInitArgs* args) {
-  for (int index = 0; index < args->nOptions; index++) {
-    const JavaVMOption* option = args->options + index;
-    const char* tail;
-
-    if (match_option(option, "-Dsun.java.launcher=", &tail)) {
-      process_java_launcher_argument(tail, option->extraInfo);
-      continue;
-    }
-    if (match_option(option, "-Dsun.java.launcher.is_altjvm=", &tail)) {
-      if (strcmp(tail, "true") == 0) {
-        _sun_java_launcher_is_altjvm = true;
-      }
-      continue;
-    }
-    if (match_option(option, "-Dsun.java.launcher.pid=", &tail)) {
-      _sun_java_launcher_pid = atoi(tail);
-      continue;
-    }
-  }
-}
-```
-
-遍历 `args->nOptions` 个选项，对每个选项做前缀匹配。匹配到就把等号后面的值提取出来，存入成员变量。不匹配的跳过。
-
-`match_option` 就是简单的 `strncmp`：
-
-```c
-static bool match_option(const JavaVMOption *option, const char* name, const char** tail) {
-  size_t len = strlen(name);
-  if (strncmp(option->optionString, name, len) == 0) {
-    *tail = option->optionString + len;     // 跳过前缀，tail 指向等号后面的值
-    return true;
-  }
-  return false;
-}
-```
-
-三个属性各自处理：
-
-| 属性 | 提取的值 | 存到 | HelloWorld 时的值 |
-|------|---------|------|------------------|
-| `sun.java.launcher` | `"SUN_STANDARD"` | `_sun_java_launcher` | `"SUN_STANDARD"` |
-| `sun.java.launcher.is_altjvm` | `"true"` / 不存在 | `_sun_java_launcher_is_altjvm` | `false`（属性不存在） |
-| `sun.java.launcher.pid` | 数字字符串 | `_sun_java_launcher_pid` | 启动器的进程 PID |
-
-这些值后续被 HotSpot 用于日志输出（"哪个启动器创建了我"）、管理接口（`jcmd` 通过 PID 找到进程）以及启动器兼容性判断。
+第一章 `JLI_Launch` Step 10 通过 `AddOption` 在 options 数组里塞了三个 `-Dsun.java.launcher.*` 属性——启动器名称（`SUN_STANDARD`）、是否 altjvm、启动器 PID。这里把它们从 `args` 里提取出来，存到 `Arguments` 类的静态成员变量中，供后续日志和管理接口使用。HelloWorld 运行时只有 `sun.java.launcher=SUN_STANDARD` 和 `sun.java.launcher.pid=<数字>` 两条，`is_altjvm` 不存在，默认 `false`。
 
 ---
 
