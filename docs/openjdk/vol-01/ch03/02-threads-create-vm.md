@@ -257,13 +257,13 @@ void elapsedTimer::stop() {
 
 当前 tick 减去起点 tick，差值累加到 `_counter`。`_t.seconds()` 把 tick 差转为秒数。
 
-最后 `_print(...)` 输出日志。本机 debug build 通过 `-Xlog:startuptime=info` 的实际输出：
+最后 `_print(...)` 输出日志。在本机上用 `-Xlog:startuptime=info` 跑 `java -version` 的实际输出：
 
 ```
-[0.456s][info][startuptime] Create VM, 0.456 seconds
+[0.561s][info][startuptime] Create VM, 0.5601185 secs
 ```
 
-`"Create VM"` 是构造时传的 `_title`，`0.456` 是 `_t.seconds()` 的值——阶段 3-7（从 `os::init_2` 到 `set_init_completed`）的耗时。
+`"Create VM"` 是构造时传的 `_title`，`0.5601185` 是 `_t.seconds()` 的值——阶段 3-7（从 `os::init_2` 到 `set_init_completed`）的耗时。本机 debug build（slowdebug），release build 通常在 50ms 以内。
 
 所以整个计时布局是：
 
