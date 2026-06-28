@@ -755,7 +755,34 @@ void os::init_before_ergo() {
 
 **`large_page_init`** —— `os_linux.cpp:4156`。读 `/proc/meminfo` 的 `Hugepagesize` 字段获取大页大小（本机 2048 kB），存到 `_large_page_size`。`setup_large_page_type` 检查系统是否支持 Transparent Huge Pages 或 hugetlbfs，根据结果设 `UseLargePages`、`UseHugeTLBFS`、`UseSHM` 三个 bool。`apply_ergo` 后续会根据 `_large_page_size` 调整堆的起始地址对齐——堆必须对齐到大页边界。
 
-**四个栈守卫区域** —— `thread.hpp:1606-1635`。四个 `Stack*Pages` 宏（`globals_x86.hpp`）定义了默认 4K 页数：red=1、yellow=2、reserved=1、shadow=20。`align_up` 把这四个值向上对齐到 `vm_page_size()`（本机 x86-64 的 `sysconf(_SC_PAGESIZE)` 也是 4096，所以不变），存入 `JavaThread` 的四个静态成员。之后每创建一个 `JavaThread`，这四个值就决定该线程栈的保护页布局——red zone 在最顶端（1 页 = 4K），往下依次是 yellow（2 页）、reserved（1 页）、shadow（20 页）。
+**四个栈守卫区域** —— `thread.hpp:1606-1635`。这是 JVM 检测 `StackOverflowError` 的底层机制。
+
+每个 `JavaThread` 的栈不是一整块裸内存，而是在栈底预留了受保护的"守卫页"——这些页通过 `mprotect(PROT_NONE)` 设为不可读写。当 Java 方法调用层级太深、栈指针触及守卫页时，CPU 触发 `SIGSEGV`，JVM 的信号处理器识别为栈溢出，根据触及的区域执行不同策略。
+
+四个区域从上往下（地址从高到低）排列：
+
+```
+栈底（高地址）
+   │
+   ├─ Shadow zone   20 页 (80K)  对外层：native 方法/JNI 调用需要额外栈空间
+   │                              标记为 stack_guard_shadow_zone_unused
+   │
+   ├─ Reserved zone  1 页 (4K)   对内层：处理 StackOverflowError 本身和执行
+   │                              关键代码（如信号处理）的最小栈空间，永不禁用
+   │
+   ├─ Yellow zone    2 页 (8K)   警告区：触及表示"快溢出了"，JVM 解开保护后
+   │                              抛 StackOverflowError，允许异常处理代码执行
+   │
+   ├─ Red zone       1 页 (4K)   最后防线：如果 yellow zone 已被解开（异常处理
+   │                              又触发了溢出），red zone 接住这次访问，
+   │                              直接终止线程（无法恢复）
+   ↓
+栈顶（低地址）
+```
+
+四个 `Stack*Pages` 宏（`globals_x86.hpp`）定义了默认 4K 页数：red=1、yellow=2、reserved=1、shadow=20。`align_up` 把这四个值向上对齐到 `vm_page_size()`（本机 x86-64 也是 4096，所以不变），存入 `JavaThread` 的四个静态成员。之后每创建一个 `JavaThread`，这四个值就决定该线程栈的保护页布局。
+
+**为什么需要 `align_up`？** `mprotect` 以页为单位保护内存。如果 OS 页大小是 64KB（如 ARM64 某些配置），而 `StackRedPages` 只指定了 1 页 × 4KB = 4KB，保护范围就会不完整。对齐到 OS 实际页大小保证每个区域都是完整的页倍数。本机 x86-64 的 `sysconf(_SC_PAGESIZE)` 返回 4096，与 4KB 乘数一致，所以 `align_up` 在此没有改变计算结果。
 
 **`VM_Version::init_before_ergo`** —— CPU 特定的平台特性检测。x86 上通过 CPUID 指令检测 SSE、SSE2、AVX、AVX2、LZCNT 等指令集，存为 `VM_Version` 的静态标志位。`apply_ergo` 中 `UseCompressedOops` 等 flag 的默认值依赖于这些 CPU 特性。例如不支持 64 位的平台不会启用压缩指针。
 
