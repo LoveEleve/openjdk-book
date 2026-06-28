@@ -727,33 +727,37 @@ UL 的每条日志行都有前缀装饰（decorations），如：
 ```c
 void os::init_before_ergo() {
   initialize_initial_active_processor_count();
-  // We need to initialize large page support here because ergonomics takes some
-  // decisions depending on large page support and the calculated large page size.
   large_page_init();
-
-  // We need to adapt the configured number of stack protection pages given
-  // in 4K pages to the actual os page size. We must do this before setting
-  // up minimal stack sizes etc. in os::init_2().
   JavaThread::set_stack_red_zone_size     (align_up(StackRedPages      * 4 * K, vm_page_size()));
   JavaThread::set_stack_yellow_zone_size  (align_up(StackYellowPages   * 4 * K, vm_page_size()));
   JavaThread::set_stack_reserved_zone_size(align_up(StackReservedPages * 4 * K, vm_page_size()));
   JavaThread::set_stack_shadow_zone_size  (align_up(StackShadowPages   * 4 * K, vm_page_size()));
-
-  // VM version initialization identifies some characteristics of the
-  // platform that are used during ergonomic decisions.
   VM_Version::init_before_ergo();
 }
 ```
 
-三步：
+这个函数只做变量赋值，不创建任何对象。被赋值的变量总结：
 
-1. `initialize_initial_active_processor_count()` —— 检测可用 CPU 核数。如果运行在容器中（Docker `--cpus` 限制），会读 `/sys/fs/cgroup/cpu/cpu.cfs_quota_us` 和 `cpu.cfs_period_us` 计算限制后的核数；否则用 `sysconf(_SC_NPROCESSORS_CONF)`。
+| 函数 | 被赋值的变量 | 类型 | 本机实际值 | 来源 |
+|------|-------------|------|-----------|------|
+| `initialize_initial_active_processor_count` | `os::_initial_active_processor_count` | `int` | **96** | `sysconf(_SC_NPROCESSORS_CONF)`（不在容器中） 或 `cpu.cfs_quota_us / cpu.cfs_period_us`（Docker 中） |
+| `large_page_init` | `os::Linux::_large_page_size` | `size_t` | **2M** | `/proc/meminfo` 的 `Hugepagesize: 2048 kB` |
+| | `UseLargePages` | `bool` | true/false | `setup_large_page_type` 根据 hugepage 可用性自动设 |
+| `set_stack_red_zone_size` | `JavaThread::_stack_red_zone_size` | `size_t` | **4K** | `StackRedPages(1) × 4K`，本机页大小也是 4K，不变 |
+| `set_stack_yellow_zone_size` | `JavaThread::_stack_yellow_zone_size` | `size_t` | **8K** | `StackYellowPages(2) × 4K` |
+| `set_stack_reserved_zone_size` | `JavaThread::_stack_reserved_zone_size` | `size_t` | **4K** | `StackReservedPages(1) × 4K` |
+| `set_stack_shadow_zone_size` | `JavaThread::_stack_shadow_zone_size` | `size_t` | **80K** | `StackShadowPages(20) × 4K` |
+| `VM_Version::init_before_ergo` | `VM_Version::_features` 等 | CPU 特性位 | 平台相关 | CPUID 指令检测 SSE/AVX/LZCNT 等 |
 
-2. `large_page_init()` —— 检测大页支持。Linux 通过读 `/proc/meminfo` 中的 `Hugepagesize` 获取大页大小（通常 2MB），`apply_ergo` 后续会据此决定堆的起始地址对齐。
+逐项说明：
 
-3. 栈守卫区域大小调整 —— `StackRedPages` 等 flag 以 4KB 页为单位定义，但 OS 的实际页大小可能不同（如 ARM 的 64KB）。`align_up(StackRedPages * 4 * K, vm_page_size())` 把值向上对齐到 OS 页大小。`vm_page_size()` 在 Linux x86-64 上返回 4096（`sysconf(_SC_PAGE_SIZE)`），所以计算结果通常保持不变。
+**`initialize_initial_active_processor_count`** —— `os.cpp:1744`。调用 `active_processor_count()` 获取可用 CPU 核数，存到 `os::_initial_active_processor_count`。本机是物理机（非容器环境），走 `sysconf(_SC_NPROCESSORS_CONF)`，返回 96。如果在 Docker 容器中，会读 `/sys/fs/cgroup/cpu/cpu.cfs_quota_us` 和 `cpu.cfs_period_us` 计算受限核数（如 `quota=200000 / period=100000 = 2` 核）。这个值直接影响后续 `apply_ergo` 中的 `CompilerConfig::ergo_initialize()`——编译器线程数默认值 = `min(cpu_count, 2)`。
 
-`VM_Version::init_before_ergo()` 是 CPU 特定初始化——检测 CPU 特性（SSE、AVX、LZCNT 等），这些特性会影响后续 `apply_ergo` 中 `UseCompressedOops` 等 flag 的默认值。
+**`large_page_init`** —— `os_linux.cpp:4156`。读 `/proc/meminfo` 的 `Hugepagesize` 字段获取大页大小（本机 2048 kB），存到 `_large_page_size`。`setup_large_page_type` 检查系统是否支持 Transparent Huge Pages 或 hugetlbfs，根据结果设 `UseLargePages`、`UseHugeTLBFS`、`UseSHM` 三个 bool。`apply_ergo` 后续会根据 `_large_page_size` 调整堆的起始地址对齐——堆必须对齐到大页边界。
+
+**四个栈守卫区域** —— `thread.hpp:1606-1635`。四个 `Stack*Pages` 宏（`globals_x86.hpp`）定义了默认 4K 页数：red=1、yellow=2、reserved=1、shadow=20。`align_up` 把这四个值向上对齐到 `vm_page_size()`（本机 x86-64 的 `sysconf(_SC_PAGESIZE)` 也是 4096，所以不变），存入 `JavaThread` 的四个静态成员。之后每创建一个 `JavaThread`，这四个值就决定该线程栈的保护页布局——red zone 在最顶端（1 页 = 4K），往下依次是 yellow（2 页）、reserved（1 页）、shadow（20 页）。
+
+**`VM_Version::init_before_ergo`** —— CPU 特定的平台特性检测。x86 上通过 CPUID 指令检测 SSE、SSE2、AVX、AVX2、LZCNT 等指令集，存为 `VM_Version` 的静态标志位。`apply_ergo` 中 `UseCompressedOops` 等 flag 的默认值依赖于这些 CPU 特性。例如不支持 64 位的平台不会启用压缩指针。
 
 ---
 
