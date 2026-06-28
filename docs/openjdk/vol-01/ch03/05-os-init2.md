@@ -85,19 +85,47 @@ Linux::signal_sets_init();
 Linux::install_signal_handlers();
 ```
 
-- **`SR_initialize()`** —— 初始化线程挂起/恢复机制。GC 的 Stop-The-World 需要暂停所有 Java 线程，底层用信号实现。初始化失败直接 `return JNI_ERR`。
+### 1.1 信号处理器注册 —— 核心段落
 
-- **`install_signal_handlers()`** —— 向 Linux 内核注册 JVM 自定义的信号处理器。SIGSEGV 被注册为 `JVM_handle_linux_signal`。
+这是 `os::init_2()` 最重要的产出。首先 `SR_initialize()` 初始化线程挂起/恢复机制（Stop-The-World 需要暂停所有 Java 线程），然后注册信号处理器：
 
-这行注册的处理器是整个 JVM 信号体系统一的入口。它要处理三种 SIGSEGV：
+```c
+// === os_linux.cpp ===
+void os::Linux::install_signal_handlers() {
+  if (!signal_handlers_are_installed) {
+    signal_handlers_are_installed = true;
 
-1. **空指针访问** —— 隐式 null check，Java 代码中不执行 `if (o == null)`，直接用过 `o` 的地址 + offset 来读写。如果 `o` 是 null 地址 + offset 落入不可读取的页，触发 SIGSEGV。信号处理器的处理：直接从信号 handler 里往外抛 NullPointerException。
+    set_signal_handler(SIGSEGV, true);   // 段错误
+    set_signal_handler(SIGPIPE, true);   // 管道破裂
+    set_signal_handler(SIGBUS,  true);   // 总线错误
+    set_signal_handler(SIGILL,  true);   // 非法指令
+    set_signal_handler(SIGFPE,  true);   // 浮点异常
+    set_signal_handler(SIGXFSZ, true);   // 文件大小超限
+  }
+}
+```
 
-2. **栈溢出** —— Stage 2 的 `init_before_ergo` 设置了四个区域的尺寸。`create_stack_guard_pages` 调用 `mprotect(PROT_NONE)` 把栈底 16KB 变成保护页。一旦方法的调用太深，栈指针触及保护页，触发 SIGSEGV。处理器识别出是 `stack_overflow` 后抛出 StackOverflowError。
+`set_signal_handler` 内部调用 Linux 的 `sigaction()` 系统调用，注册到的处理器是同一个函数——`signalHandler`：
 
-3. **安全点轮询** —— 本章接下来 `SafepointMechanism::initialize()` 会分配 `bad_page`（即将用 `mprotect` 保护）。线程如果触发了 bad_page 的 SIGSEGV，信号处理器识别出后把线程挂起，等待 GC 等全局操作完成。
+```c
+void os::Linux::set_signal_handler(int sig, bool set_installed) {
+  struct sigaction sigAct;
+  sigfillset(&(sigAct.sa_mask));
+  sigAct.sa_sigaction = signalHandler;       // 统一入口函数
+  sigAct.sa_flags = SA_SIGINFO | SA_RESTART; // 需要 siginfo + 自动重启被中断的系统调用
+  sigaction(sig, &sigAct, &oldAct);
+}
+```
 
-同一个信号（SIGSEGV），同一个处理器入口（`JVM_handle_linux_signal`），根据哪个地址触发了来区分语义。本质上就是：CPU 发现了被保护的页，通知内核；内核把信号派发给 JVM；JVM 判断是什么操作碰到的，执行不同类型的分支。
+关键参数：`SA_SIGINFO` 让内核在信号到达时提供 `siginfo_t` 结构体（包括触发地址 `si_addr`），JVM 借此区分三种 SIGSEGV：
+
+1. **空指针访问** —— `si_addr` 落在 `[0, 4K)` 零页附近。JVM 的隐式 null check 不写 `if (o == null)`，直接读 `o + offset`。如果 `o` 为 null，地址在零页，触发 SIGSEGV。信号处理器从 handler 里往外抛 `NullPointerException`。
+
+2. **栈溢出** —— `si_addr` 落在当前线程栈的保护页范围（Stage 2 的 `mprotect(PROT_NONE)` 保护的栈底 16KB）。处理器识别后抛 `StackOverflowError`，并暂时解开 yellow zone 保护，让异常处理代码有栈空间执行。
+
+3. **安全点轮询** —— `si_addr` 落在 `os::_polling_page`（本章后续 `SafepointMechanism::initialize()` 分配的 bad_page）。处理器调用 `SafepointSynchronize::block()` 阻塞线程，等 GC 等全局操作完成。
+
+同一个信号（SIGSEGV），同一个入口（`signalHandler`），通过 `si_addr` 判断是哪种触发源。
 
 ### 1.2 NUMA 初始化
 
