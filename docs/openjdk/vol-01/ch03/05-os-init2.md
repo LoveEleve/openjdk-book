@@ -105,26 +105,72 @@ Linux::install_signal_handlers();
 
 真正跟内核交互的是以下两个系统调用：
 
-**`sigaction` —— 向内核注册"信号来了调哪个函数"**
+**sigaction -- 向内核注册"信号来了调哪个函数"**
 
 ```c
-int sigaction(int signum,                        // 要处理的信号编号
-              const struct sigaction *act,        // 新处理器配置（NULL 表示只查询）
-              struct sigaction *oldact);          // 旧处理器配置（可为 NULL）
+int sigaction(int signum,                     // 要处理的信号编号
+              const struct sigaction *act,     // 新处理器配置（NULL 表示只查询）
+              struct sigaction *oldact);       // 旧处理器配置（可为 NULL）
 ```
 
-参数 `act` 的核心字段：
+`act` 是一个 `struct sigaction`，告诉内核三件事：调哪个函数、要不要附带额外信息、处理期间屏蔽哪些信号：
 
 ```c
 struct sigaction {
-    void (*sa_handler)(int);                           // 简单版：只有信号号
-    void (*sa_sigaction)(int, siginfo_t *, void *);     // 完整版：带 siginfo（故障地址等）+ ucontext（寄存器快照）
-    sigset_t sa_mask;                                   // 处理该信号时内核自动额外屏蔽的信号集
-    int      sa_flags;                                  // 行为标志：SA_SIGINFO、SA_RESTART 等
+    void (*sa_handler)(int);                      // 简单版：只拿到信号号
+    void (*sa_sigaction)(int, siginfo_t *, void *); // 完整版：拿到 siginfo + ucontext
+    sigset_t sa_mask;                              // 处理该信号期间内核自动屏蔽的信号集
+    int      sa_flags;                             // SA_SIGINFO / SA_RESTART / SA_NODEFER
 };
 ```
 
-`siginfo_t` 是内核在信号到达时填充的结构体，`si_addr` 字段记录了触发地址——JVM 全靠它区分空指针、栈溢出、安全点。`ucontext_t` 是触发信号瞬间的 CPU 寄存器快照，信号处理器可以直接修改它来改变返回后的执行流（比如把 RIP 改成异常抛出桩）。
+三个字段的作用用代码演示最直观。写一个简单的 C 程序：
+
+```c
+/* ===== 本机 demo: sigaction_demo.c ===== */
+#include <signal.h>
+#include <stdio.h>
+#include <unistd.h>
+
+void handler(int sig, siginfo_t *info, void *ucontext) {
+    printf("信号到达: sig=%d\n", sig);
+    printf("  si_signo = %d\n", info->si_signo);    // 信号编号(和 sig 相同)
+    printf("  si_code  = %d\n", info->si_code);     // 0=SI_USER(kill发送)
+    printf("  si_addr  = %p\n", info->si_addr);     // 触发地址(硬件信号时有值)
+    printf("  si_pid   = %d\n", info->si_pid);      // 发送者 PID
+    printf("  ucontext = %p\n", ucontext);          // 寄存器快照指针
+    _exit(0);
+}
+
+int main() {
+    struct sigaction act = {0};
+    act.sa_sigaction = handler;      // 用完整版处理器(三个参数)
+    act.sa_flags = SA_SIGINFO;       // 要求内核填充 siginfo_t
+
+    sigaction(SIGUSR1, &act, NULL);  // 注册: 信号 10 -> handler
+    printf("PID=%d\n", getpid());
+
+    kill(getpid(), SIGUSR1);         // 给自己发信号 10
+}
+```
+
+编译运行（本机 x86_64，glibc 2.38）：
+
+```
+PID=995043
+信号到达: sig=10 (User defined signal 1)
+  si_signo = 10
+  si_code  = 0 (SI_USER, 由 kill 发送)
+  si_addr  = 0xf2ee3 (非硬件信号时为 NULL)
+  si_pid   = 995043 (发送者 PID)
+  ucontext = 0x7ffd92a82840 (寄存器快照)
+```
+
+关键观察：`si_code = SI_USER(0)` 说明信号由 `kill()` 发送。如果是硬件异常（SIGSEGV），`si_code` 会是 `SEGV_ACCERR` 或 `SEGV_MAPERR`，`si_addr` 指向触发地址——这正是 HotSpot 区分三种 SIGSEGV 的依据。
+
+`sa_mask` 的作用：如果 handler 执行期间不希望被某些信号打断（比如正在处理 SIGSEGV 时又来一个 SIGSEGV），把这些信号放进 `sa_mask`，内核自动屏蔽。`sa_flags = SA_SIGINFO` 是必须的——没有它，内核不填充 `siginfo_t`，handler 只能拿到信号号，拿不到 `si_addr`。
+
+**pthread_sigmask -- 修改当前线程的信号掩码（阻塞/解除阻塞）**
 
 **`pthread_sigmask` —— 修改当前线程的信号掩码（阻塞/解除阻塞）**
 
