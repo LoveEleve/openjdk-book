@@ -343,7 +343,7 @@ libjvm.so 绝对路径（本机）
 
 #### `os::jvm_path` 是如何拿到路径的
 
-整棵树的第一步——"获取 libjvm.so 的绝对路径"——在这里用的是 `os::jvm_path()`，实现位于 `os_linux.cpp:2878-2965`。它的原理和 Ch01 里启动器的 `GetJVMPath`（字符串拼接 + `stat()` 验证）完全不同：
+整棵树的第一步——"获取 `libjvm.so` 的绝对路径"——在这里用的是 `os::jvm_path()`，实现位于 `os_linux.cpp:2878-2965`。它的原理和 Ch01 里启动器的 `GetJVMPath`（字符串拼接 + `stat()` 验证）完全不同：
 
 ```c
 void os::jvm_path(char *buf, jint buflen) {
@@ -364,11 +364,160 @@ void os::jvm_path(char *buf, jint buflen) {
 }
 ```
 
-`dll_address_to_library_name` 内部用 `dl_iterate_phdr` 遍历当前进程所有已加载的 .so 文件，找到地址范围包含 `os::jvm_path` 自身的那个——因为 `os::jvm_path` 就是 `libjvm.so` 里的代码，所以拿到的就是 `libjvm.so` 的路径。这是 Linux 动态链接器的标准能力：给定一个内存地址，反查它属于哪个共享库。
+`dll_address_to_library_name` 内部有两层查询策略，`os_linux.cpp:1803-1840`：
 
-Ch01 中启动器已经通过 `GetJVMPath`（`%s/lib/%s/%s/libjvm.so` 拼字符串 + `stat()` 验证）找到了这个路径，然后 `dlopen` 加载。但 `JNI_CreateJavaVM` 的入参里没有"我是在哪个路径被加载的"这个字段——所以 VM 启动后必须自己重新发现。启动器用的是文件系统拼接，VM 用的是动态链接器反查——二者殊途同归，拿到的是同一个路径。
+```c
+bool os::dll_address_to_library_name(address addr, char* buf,
+                                     int buflen, int* offset) {
+  struct _address_to_library_name data;
+  data.addr = addr;
+  data.fname = buf;
+  data.buflen = buflen;
+  data.base = NULL;
 
-总结：`init_system_properties` 函数做了两件事——**初始化 4 个不可写属性**（写死值的规范声明，如 `java.vm.name`），**创建 5 个可写属性**（值先填 NULL 或空字符串占位），最后调用 `os::init_system_properties_values()` 把三条 NULL + `_system_boot_class_path` 全部填充为 OS 真实值。整个链表是尾插法构建的，`_next` 指针对应的遍历顺序就是代码中的添加顺序。
+  // 策略1：遍历 ELF program header，返回地址所在的 .so
+  int rslt = dl_iterate_phdr(address_to_library_name_callback, (void *)&data);
+  if (rslt) {
+    return true;                         // 回调已经填好了 buf
+  }
+
+  // 策略2：回退到 dladdr()
+  Dl_info dlinfo;
+  if (dladdr((void*)addr, &dlinfo) != 0) {
+    jio_snprintf(buf, buflen, "%s", dlinfo.dli_fname);
+    if (dlinfo.dli_fbase != NULL && offset != NULL) {
+      *offset = addr - (address)dlinfo.dli_fbase;  // 返回相对偏移
+    }
+    return true;
+  }
+  return false;
+}
+```
+
+两个 Linux 系统 API 分别解释：
+
+**策略 1：`dl_iterate_phdr` —— 遍历进程的 ELF 加载表**
+
+`dl_iterate_phdr` 是 GNU C 库提供的函数（非 POSIX 标准，Linux/BSD 可用）。它的工作方式是：ld.so（动态链接器）在加载进程时维护了一份"已加载共享库链表"（link map），每个节点记录了一个 .so 文件的名称、加载基址、以及 ELF Program Header 数组。`dl_iterate_phdr` 遍历这张表，对每个节点调用回调函数，传入 `struct dl_phdr_info`：
+
+```c
+struct dl_phdr_info {
+    ElfW(Addr) dlpi_addr;        // 共享库的加载基址（link_map.l_addr）
+    const char *dlpi_name;       // 共享库文件名
+    const ElfW(Phdr) *dlpi_phdr; // ELF Program Header 数组指针
+    ElfW(Half) dlpi_phnum;       // Program Header 数量
+    // ...
+};
+```
+
+HotSpot 的 `address_to_library_name_callback` 回调做的事情：遍历每个 `PT_LOAD` 段（真正被映射到内存的段），检查目标地址是否落在 `[dlpi_addr + p_vaddr, dlpi_addr + p_vaddr + p_memsz)` 范围内。如果命中，说明目标地址属于这个 .so——把文件名写入 `buf`，返回非零值终止遍历。
+
+```
+进程虚拟地址空间
+   │
+   ├─ 0x7f...0000  libc.so.6      [dlpi_addr = 0x7f...0000]
+   │     ├─ PT_LOAD: vaddr=0x00000, memsz=0x1e0000  →  [base, base+1e0000)
+   │     └─ PT_LOAD: vaddr=0x1e0000, memsz=0x08000  →  [base+1e0000, ...)
+   │
+   ├─ 0x7f...0000  libjava.so     [dlpi_addr = ...]
+   │     └─ ...
+   │
+   ├─ 0x7f...0000  libjvm.so      [dlpi_addr = 0x7f...0000]
+   │     ├─ PT_LOAD: vaddr=0x00000, memsz=0x...     ← os::jvm_path 地址落在这里
+   │     └─ PT_LOAD: vaddr=0x..., memsz=0x...
+   │
+   └─ ...
+```
+
+**策略 2：`dladdr` —— POSIX 标准 API，一行调用搞定**
+
+`dladdr` 是 POSIX 定义的标准函数，语义更简单：给定一个地址，直接返回这个地址所属共享库的信息。它填入一个 `Dl_info` 结构体：
+
+```c
+typedef struct {
+    const char *dli_fname;  // 共享库文件路径，如 "/usr/lib/jvm/.../lib/server/libjvm.so"
+    void       *dli_fbase;  // 共享库加载基址
+    const char *dli_sname;  // 最近符号名（可选）
+    void       *dli_saddr;  // 最近符号地址（可选）
+} Dl_info;
+```
+
+**为什么 HotSpot 用两个策略？** 注释里说明了原因（`os_linux.cpp:1811-1815`）：旧版 glibc 的 `dladdr()` 有一个 bug——当 .so 文件被预链接（prelink）导致加载基址不为 NULL 时，`dladdr` 可能返回错误的库名。因此优先用 `dl_iterate_phdr` 手动遍历 ELF header（更精确），`dladdr` 作为后备方案。
+
+**与 Ch01 的衔接：** Ch01 中启动器已经通过 `GetJVMPath`（`%s/lib/%s/%s/libjvm.so` 拼字符串 + `stat()` 验证）找到了这个路径，然后 `dlopen` 加载。但 `JNI_CreateJavaVM` 的入参里没有"我是在哪个路径被加载的"这个字段——所以 VM 启动后必须自己重新发现。启动器用的是"文件系统拼接 + stat 验证"（**编译期已知的目录布局**），VM 用的是"动态链接器反查 + realpath 解析"（**运行时自省**）——二者殊途同归，拿到的是同一个路径。
+
+#### 此时 SystemProperty 链表的完整状态
+
+`init_system_properties` 分两个阶段构建了链表，随后 `init_version_specific_system_properties` 追加了 3 个节点，`os::init_system_properties_values` 把 NULL 填上了真实值。最终链表共 **13 个节点**（尾插法，遍历顺序 = 添加顺序）：
+
+```
+_system_properties (头指针)
+   │
+   ▼
+┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
+│ key    = java.vm.specification.name│─────│ key    = java.vm.version         │─────
+│ value  = "Java Virtual Machine     │     │ value  = "11.0.31"               │
+│          Specification"            │     │ w=true  i=false                  │
+│ w=false  i=false                   │     └─────────────────────────────────┘
+└───────────────────────────────────┘
+                                                                              │
+     ┌────────────────────────────────────────────────────────────────────────┘
+     ▼
+┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
+│ key    = java.vm.name        │─────│ key    = jdk.debug            │─────
+│ value  = "OpenJDK 64-Bit     │     │ value  = "release"            │
+│          Server VM"           │     │ w=false  i=false              │
+│ w=false  i=false              │     └───────────────────────────────┘
+└───────────────────────────────┘
+                                                                               │
+     ┌─────────────────────────────────────────────────────────────────────────┘
+     ▼
+┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
+│ key    = sun.boot.library.path│─────│ key    = java.library.path    │─────
+│ value  = "/usr/lib/jvm/      │     │ value  = "/usr/java/packages/ │
+│          java-11-xxx/lib"     │     │          lib:/usr/lib64:/lib64│
+│ w=true   i=false              │     │          :/lib:/usr/lib"       │
+└───────────────────────────────┘     │ w=true   i=false              │
+                                      └───────────────────────────────┘
+                                                                               │
+     ┌─────────────────────────────────────────────────────────────────────────┘
+     ▼
+┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
+│ key    = java.home           │─────│ key    = java.class.path      │─────
+│ value  = "/usr/lib/jvm/      │     │ value  = ""  (占位，等          │
+│          java-11-xxx"         │     │         -Djava.class.path)    │
+│ w=true   i=false              │     │ w=true   i=false              │
+└───────────────────────────────┘     └───────────────────────────────┘
+                                                                               │
+     ┌─────────────────────────────────────────────────────────────────────────┘
+     ▼
+┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
+│ key    = jdk.boot.class.path │─────│ key    = java.vm.info         │─────
+│          .append              │     │ value  = "mixed mode"         │
+│ value  = ""  (占位，等         │     │ w=true   i=false              │
+│         -Xbootclasspath/a:)   │     └───────────────────────────────┘
+│ w=false  i=true               │
+└───────────────────────────────┘
+                                                                               │
+     ┌─────────────────────────────────────────────────────────────────────────┘
+     ▼
+┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
+│ key    = java.vm.specification│─────│ key    = java.vm.specification│─────
+│          .vendor              │     │          .version              │
+│ value  = "Oracle Corporation" │     │ value  = "11"                 │
+│ w=false  i=false              │     │ w=false  i=false              │
+└───────────────────────────────┘     └───────────────────────────────┘
+                                                                               │
+     ┌─────────────────────────────────────────────────────────────────────────┘
+     ▼
+┌──────────────────────────────┐
+│ key    = java.vm.vendor      │ _next = NULL  ← 链表尾
+│ value  = 平台相关字符串         │
+│ w=false  i=false              │
+└──────────────────────────────┘
+```
+
+初始 4 个不可写属性（`w=false`）在最前面——它们是 JVM 规范声明的固定值。中间 5 个可写属性（`w=true`）的值由 `os::init_system_properties_values` 或后续参数解析写入。最后 3 个（`init_version_specific_system_properties` 追加）在版本号拿到后才添加——因为它们依赖 `JDK_Version::current().major_version()`。`Arguments` 类同时维护了五个快捷指针（`_sun_boot_library_path` 等），指向链表中对应的节点——后续 `set_dll_dir()` / `set_java_home()` 等操作不需要遍历链表，直接用指针覆盖值。
 
 ---
 
