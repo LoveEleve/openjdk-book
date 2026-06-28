@@ -89,42 +89,30 @@ Linux::install_signal_handlers();
 
 这是 `os::init_2()` 最重要的产出，三步搭建 JVM 的完整信号体系。
 
-先补一点 Linux 信号系统编程的背景——不然后面的代码看不懂。
+先搞清楚 Linux 信号是怎么到达线程的。信号是**进程级**的事件——SIGSEGV 是因为某个线程访问了非法地址，SIGTERM 是 `kill` 命令发给整个进程。但信号的**处理**是线程级的：内核从"不阻塞该信号的线程"中挑一个，把信号投递给它。如果所有线程都阻塞了该信号，信号就在进程级别 pending，直到有线程解除阻塞。
 
-**背景：Linux 信号处理三件套**
+每线程有自己的信号掩码（signal mask），控制哪些信号在投递时被忽略。posix 的线程信号 API：
 
-| 函数 | 签名 | 作用 |
-|------|------|------|
-| `sigemptyset(sigset_t *set)` | 清空信号集，所有信号都不在集合中 | 初始化空集合 |
-| `sigaddset(sigset_t *set, int signum)` | 把 `signum` 加入集合 | 往集合里加一个信号 |
-| `sigfillset(sigset_t *set)` | 所有信号都加入集合 | 填满集合（全阻塞/全接收） |
-| `sigaction(int signum, const struct sigaction *act, struct sigaction *oldact)` | 注册/修改信号处理器 | 核心 API：告诉内核"信号来了调哪个函数" |
+| 函数 | 作用 |
+|------|------|
+| `pthread_sigmask(SIG_BLOCK, &set, NULL)` | 阻塞 `set` 中的信号——此线程不再接收它们 |
+| `pthread_sigmask(SIG_UNBLOCK, &set, NULL)` | 解除阻塞——此线程可以接收了 |
+| `sigaction(signum, &act, NULL)` | 进程级别注册处理器——任何线程收到此信号都调这个函数 |
+| `pthread_kill(thread_id, signum)` | 向**指定线程**发信号——绕过内核的自动选线程逻辑 |
 
-`sigset_t` 是一个位图——每一位对应一个信号编号。`sigemptyset` 把位图全清零，`sigaddset` 把指定位设为 1，`sigfillset` 全设为 1。
+HotSpot 的控制策略：
 
-**`sigaction` 的核心结构体：**
-
-```c
-struct sigaction {
-    void     (*sa_handler)(int);           // 处理器函数（简单版）
-    void     (*sa_sigaction)(int, siginfo_t *, void *);  // 处理器函数（带附加信息）
-    sigset_t   sa_mask;                    // 处理该信号时额外阻塞的信号
-    int        sa_flags;                   // 行为标志
-};
+```
+                    SIGSEGV                BREAK_SIGNAL (Ctrl-Break)
+普通 Java 线程:     不阻塞（能接收）        阻塞（不接收）
+VMThread:           不阻塞（能接收）        不阻塞（能接收）
 ```
 
-两个处理器字段二选一——如果 `sa_flags` 包含 `SA_SIGINFO`，用 `sa_sigaction`；否则用 `sa_handler`。关键标志：
+- SIGSEGV/SIGBUS 等业务信号：**所有线程都不阻塞**，谁的代码触发的就投递给谁，`signalHandler` 读取 `siginfo_t.si_addr` 判断触发源
+- `SR_signum`（suspend/resume）：**所有线程默认阻塞**，Stop-The-World 时 VMThread 对特定线程调 `pthread_kill(thread_id, SR_signum)` 绕过阻塞直接送达
+- BREAK_SIGNAL（Ctrl-Break）：**只有 VMThread 不阻塞**，内核自动选 VMThread 投递，触发线程 dump
 
-| flag | 含义 |
-|------|------|
-| `SA_SIGINFO` | 信号到达时内核填充 `siginfo_t`，包括触发地址 `si_addr`——JVM 借此区分空指针/栈溢出/安全点 |
-| `SA_RESTART` | 被信号中断的可中断系统调用（如 `read`、`futex`）自动重启，不返回 `EINTR` |
-
-HotSpot 用 `SA_SIGINFO | SA_RESTART`——前者是业务需求（需要知道哪个地址触发了 SIGSEGV），后者是稳定性需求（信号不应打断系统调用导致意外 `EINTR` 错误）。
-
-**`pthread_kill(pthread_t thread, int sig)`**：像 `kill()` 但目标是特定线程而非整个进程。HotSpot 用它向指定 Java 线程发 `SR_signum` 实现暂停。
-
-有了这些基础，看三步源码：
+`signal_sets_init()` 就是在准备这两张掩码表。有了这个模型，看三步源码：
 
 **第一步：信号集初始化**
 
@@ -207,6 +195,31 @@ void os::Linux::set_signal_handler(int sig, bool set_installed) {
 - `si_addr` 在零页附近 → NullPointerException（隐式 null check）
 - `si_addr` 在栈保护页范围 → StackOverflowError（Stage 2 的 `mprotect(PROT_NONE)`）
 - `si_addr` 在安全点轮询页 → 线程挂起等待 GC（本章后续的 `SafepointMechanism::initialize()`）
+
+**综合时间线——空指针怎么变成 NullPointerException：**
+
+一台机器的 Java 方法拿到了一个 `null` 对象引用。对它的`field`字段进行写操作。HotSpot 不会先生成 `if (o == null)` 的检查代码——而是直接计算`o+field_offset`的地址，向这个地址写入一个新值。计算时`o = null`加上偏移量，得到的是一个位于`0x00`附近的极低地址。
+
+CPU 的 MMU 查找页表，发现这个地址所在的页面被映射为了`PROT_NONE`。内存控制器向 CPU 报告一个 page fault。内核从中断向量表中查找对应的处理程序，把page fault转换为一个 SIGSEGV 信号——`si_addr` 记录了那个触发的地址。
+
+内核检查自己维护的进程信号掩码和线程信号掩码，确定这个信号要发送给当前正在运行的线程。kill系统调用的 `signo=SIGSEGV`, `si_code=SEGV_ACCERR`, `si_addr=<那个极低地址>` 组成的 `siginfo_t` 被压入当前线程的内核栈。调度器选择此线程作为下一次运行的候选后，在返回用户空间之前把信号帧推入用户栈，然后跳转到 HotSpot 注册的 `signalHandler(sig=11, info=包含故障地址的siginfo_t, uc=用户态上下文)`。
+
+`signalHandler` 拿到 `si_addr` —— 一个极低地址，检查是零页附近。走NullPointer的逻辑，从当前栈帧中获取被中断的Java方法，为该帧创建一个NullPointerException对象，然后直接修改 `uc->uc_mcontext.gregs[REG_RIP]` 指向异常抛出桩——返回到 Java 层的异常处理代码。
+
+**`sigaction` 结构体——HotSpot 为什么选 `SA_SIGINFO | SA_RESTART`：**
+
+```c
+struct sigaction {
+    void     (*sa_handler)(int);                              // 简单版：只有信号号
+    void     (*sa_sigaction)(int, siginfo_t *, void *);       // 完整版：带 siginfo + ucontext
+    sigset_t   sa_mask;                                       // 处理该信号时额外屏蔽的信号
+    int        sa_flags;
+};
+```
+
+两个处理器字段二选一：如果 `sa_flags` 包含 `SA_SIGINFO`，用 `sa_sigaction`（三个参数，能拿到 `si_addr`）；否则用 `sa_handler`（只有一个信号号）。HotSpot 必须用 `SA_SIGINFO`——没有 `si_addr` 就无法区分三种 SIGSEGV 的触发源。
+
+`SA_RESTART` 的作用：当 `signalHandler` 处理 SIGSEGV 时，内核会自动重启当时被中断的可中断系统调用（`futex`、`read` 等），避免返回 `EINTR`。没有这个 flag，每次信号处理完，线程上正在进行的 `pthread_cond_wait`、`epoll_wait` 都会报 `EINTR` 错误。
 
 ### 1.2 NUMA 初始化
 
