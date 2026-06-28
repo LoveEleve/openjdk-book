@@ -67,7 +67,7 @@ Linux 上当前主流的动态追踪是 eBPF 及其前端工具 `bpftrace`，但
 | `UseNUMA` | bool | `Linux::libnuma_init()` | **false**（本机只有 1 个 NUMA node，被关闭） |
 | `UseAdaptiveSizePolicy` | bool | `os::init_2()` 内部 | false（如果 NUMA+Parallel+LargePages 冲突） |
 | `UseAdaptiveNUMAChunkSizing` | bool | `os::init_2()` 内部 | false（同上） |
-| `Linux::_libc_version` | const char* | `Linux::libc_version()` | **"glibc 2.38"**（本机 ldd 输出） |
+| `Linux::_libc_version` | const char* | `Linux::libc_version()` | `glibc 2.38`（本机 ldd 输出） |
 | `Linux::_libpthread_version` | const char* | `Linux::libpthread_version()` | "NPTL 2.38" |
 
 下面拆解四个核心动作，其余用树形图略过。
