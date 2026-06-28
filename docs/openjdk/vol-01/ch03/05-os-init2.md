@@ -53,7 +53,7 @@ Linux 上当前主流的动态追踪是 eBPF 及其前端工具 `bpftrace`，但
 
 ## 1. os::init_2() —— OS 第二阶段初始化 ★★
 
-声明在 `os.hpp:173`，Linux 实现在 `os_linux.cpp:5588-5717`。和 Stage 1 的 `os::init()` 对比：
+声明在 `os.hpp`，Linux 实现在 `os_linux.cpp`。和 Stage 1 的 `os::init()` 对比：
 
 | | `os::init()` (Stage 1) | `os::init_2()` (Stage 3) |
 |---|---|---|

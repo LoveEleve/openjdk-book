@@ -89,7 +89,7 @@ Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain)
 返回值 `JNI_OK`（`0`）表示创建成功，非零表示失败。这两个参数是从 `JNI_CreateJavaVM_inner` 直接透传下来的：
 
 ```c
-// jni.cpp:4007
+// jni.cpp
 bool can_try_again = true;
 result = Threads::create_vm((JavaVMInitArgs*) args, &can_try_again);
 ```
