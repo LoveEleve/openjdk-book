@@ -757,32 +757,43 @@ void os::init_before_ergo() {
 
 **四个栈守卫区域** —— `thread.hpp:1606-1635`。这是 JVM 检测 `StackOverflowError` 的底层机制。
 
-每个 `JavaThread` 的栈不是一整块裸内存，而是在栈底预留了受保护的"守卫页"——这些页通过 `mprotect(PROT_NONE)` 设为不可读写。当 Java 方法调用层级太深、栈指针触及守卫页时，CPU 触发 `SIGSEGV`，JVM 的信号处理器识别为栈溢出，根据触及的区域执行不同策略。
+每个 `JavaThread` 的栈由 `pthread_create` 分配一块完整内存（大小由 `-Xss` 指定，默认 1MB）。HotSpot 拿到这块内存后，调用 `mprotect(PROT_NONE)` 把栈底方向的一部分页标记为不可读写——不是"预留"，是修改已有页的访问权限。当 Java 方法调用层级太深、栈指针触及这些被保护的页时，CPU 触发 `SIGSEGV`，JVM 的信号处理器识别为栈溢出，根据触及的区域执行不同策略。
 
-四个区域从上往下（地址从高到低）排列：
+四个区域从栈底往上（地址从低到高）排列：
 
 ```
-栈底（高地址）
-   │
-   ├─ Shadow zone   20 页 (80K)  对外层：native 方法/JNI 调用需要额外栈空间
-   │                              标记为 stack_guard_shadow_zone_unused
-   │
-   ├─ Reserved zone  1 页 (4K)   对内层：处理 StackOverflowError 本身和执行
-   │                              关键代码（如信号处理）的最小栈空间，永不禁用
-   │
-   ├─ Yellow zone    2 页 (8K)   警告区：触及表示"快溢出了"，JVM 解开保护后
-   │                              抛 StackOverflowError，允许异常处理代码执行
-   │
-   ├─ Red zone       1 页 (4K)   最后防线：如果 yellow zone 已被解开（异常处理
-   │                              又触发了溢出），red zone 接住这次访问，
-   │                              直接终止线程（无法恢复）
-   ↓
-栈顶（低地址）
+低地址  ┌─────────────────────┐ ← stack_end（栈的末端）
+       │ Red zone    1 页 (4K) │  最后防线：触及直接终止线程
+       ├─────────────────────┤
+       │ Yellow zone 2 页 (8K) │  警戒区：触及抛 StackOverflowError
+       ├─────────────────────┤
+       │ Reserved zone 1 页(4K)│  异常处理和关键代码的最小栈空间，永不禁用
+       ├─────────────────────┤
+       │                     │
+       │   正常可用栈空间       │  ← Java 方法帧在这里实际运行
+       │     (约 1MB)         │
+       │                     │
+高地址  └─────────────────────┘ ← stack_base（栈的起始位置）
 ```
 
-四个 `Stack*Pages` 宏（`globals_x86.hpp`）定义了默认 4K 页数：red=1、yellow=2、reserved=1、shadow=20。`align_up` 把这四个值向上对齐到 `vm_page_size()`（本机 x86-64 也是 4096，所以不变），存入 `JavaThread` 的四个静态成员。之后每创建一个 `JavaThread`，这四个值就决定该线程栈的保护页布局。
+四个 `Stack*Pages` 宏（`globals_x86.hpp`）定义了默认 4K 页数：red=1、yellow=2、reserved=1、shadow=20。`align_up` 把这四个值向上对齐到 `vm_page_size()`（本机 x86-64 也是 4096，所以不变），存入 `JavaThread` 的四个静态成员。
 
-**为什么需要 `align_up`？** `mprotect` 以页为单位保护内存。如果 OS 页大小是 64KB（如 ARM64 某些配置），而 `StackRedPages` 只指定了 1 页 × 4KB = 4KB，保护范围就会不完整。对齐到 OS 实际页大小保证每个区域都是完整的页倍数。本机 x86-64 的 `sysconf(_SC_PAGESIZE)` 返回 4096，与 4KB 乘数一致，所以 `align_up` 在此没有改变计算结果。
+**`init_before_ergo` 只是保存大小值，真正的保护动作发生在创建线程时。** `pthread_create` 确实只控制线程栈的总大小——HotSpot 启动 `JavaThread` 时传入 `-Xss` 指定的值（默认 1MB），内核分配这段虚拟地址空间作为线程栈。HotSpot 拿到这块完整内存后，在 `JavaThread` 构造函数末尾调用 `create_stack_guard_pages()`，关键源码在 `thread.cpp:2607-2640`：
+
+```c
+void JavaThread::create_stack_guard_pages() {
+  address low_addr = stack_end();          // 栈的底部地址（低地址端）
+  size_t len = stack_guard_zone_size();    // red + yellow + reserved 三区总大小
+
+  if (os::guard_memory((char *) low_addr, len)) {  // ★ 核心动作
+    _stack_guard_state = stack_guard_enabled;
+  }
+}
+```
+
+`os::guard_memory` 最终调的是 Linux 系统调用 `mprotect(addr, len, PROT_NONE)`（`os_linux.cpp:3944-3946`），把栈底连续的 `len` 个字节标记为不可读、不可写、不可执行。**这些页仍然是同一块栈内存的一部分，没有被"拿走"或"重分配"——只是进程页表里它们的访问权限被改成了 `PROT_NONE`。** CPU 尝试访问这些页时触发 SIGSEGV，JVM 信号处理器识别为栈溢出，根据触及的区域采取不同策略。
+
+**为什么需要 `align_up`？** `mprotect` 以页为单位保护内存。如果 OS 页大小是 64KB（如 ARM64 某些配置），而 `StackRedPages` 只指定了 1 页 × 4KB = 4KB，保护范围就会不完整。对齐到 OS 实际页大小保证每个区域都是完整的页倍数。
 
 **`VM_Version::init_before_ergo`** —— CPU 特定的平台特性检测。x86 上通过 CPUID 指令检测 SSE、SSE2、AVX、AVX2、LZCNT 等指令集，存为 `VM_Version` 的静态标志位。`apply_ergo` 中 `UseCompressedOops` 等 flag 的默认值依赖于这些 CPU 特性。例如不支持 64 位的平台不会启用压缩指针。
 
