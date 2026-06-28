@@ -101,29 +101,10 @@ Linux::install_signal_handlers();
 
 每线程有自己的信号掩码（signal mask），函数 `pthread_sigmask(SIG_BLOCK/SIG_UNBLOCK/SIG_SETMASK, &set, &old)` 控制阻塞哪些信号。同步信号的触发线程如果阻塞了该信号，行为是未定义的——通常导致进程被内核杀死。
 
-`signal_sets_init()` 准备两张掩码表，后续创建线程时分别应用：
+`signal_sets_init()` 准备两张掩码表，后续创建线程时分别应用。三步按运行时顺序讲解：
 
-**第一步：信号集初始化**
+**第一步：线程挂起/恢复信号注册**
 
-```c
-// === os_linux.cpp ===
-void os::Linux::signal_sets_init() {
-  sigemptyset(&unblocked_sigs);
-  sigaddset(&unblocked_sigs, SIGILL);    // 非法指令
-  sigaddset(&unblocked_sigs, SIGSEGV);   // 段错误
-  sigaddset(&unblocked_sigs, SIGBUS);    // 总线错误
-  sigaddset(&unblocked_sigs, SIGFPE);    // 浮点异常
-  sigaddset(&unblocked_sigs, SR_signum); // suspend/resume 信号
-  // ... SHUTDOWN 信号（Ctrl-C 等，ReduceSignalUsage=false 时）
-}
-```
-
-两张掩码的用途：
-
-- `unblocked_sigs` —— 后续创建每个线程时，用 `pthread_sigmask(SIG_UNBLOCK, &unblocked_sigs, NULL)` 解除对这些信号的阻塞。SIGSEGV/SIGBUS/SIGFPE/SIGILL 是同步信号，触发线程必须能接收，否则内核直接杀进程。`SR_signum` 虽然会被 `pthread_kill` 定向发送，但收到信号的线程也需要不被阻塞才能进入 `SR_handler`。
-- `vm_sigs` —— 包含 `BREAK_SIGNAL`。创建线程时普通 Java 线程阻塞它，只有 VMThread 解除阻塞。BREAK_SIGNAL 是异步信号（用户按 Ctrl-Break），内核从不阻塞它的线程中选一个——因为只有 VMThread 不阻塞，所以始终投递给 VMThread，由它输出线程 dump。
-
-**第二步：线程挂起/恢复信号注册**
 
 Stop-The-World 需要暂停所有 Java 线程。JVM 不是用 `pthread_kill(SIGSTOP)`，而是用自己的信号 `SR_signum`：
 
@@ -151,6 +132,29 @@ static int SR_initialize() {
 `SR_handler` 是挂起等待的处理函数。当 VMThread 需要 Stop-The-World 时，对每个 Java 线程调 `pthread_kill(thread_id, SR_signum)` 发送此信号。收到信号的线程在 `SR_handler` 中检查自己是否需要暂停，如果需要就阻塞等待。
 
 `_JAVA_SR_SIGNUM` 环境变量允许嵌入式场景自定义信号号（避免冲突）。
+
+
+**第二步：信号集初始化**
+
+
+```c
+// === os_linux.cpp ===
+void os::Linux::signal_sets_init() {
+  sigemptyset(&unblocked_sigs);
+  sigaddset(&unblocked_sigs, SIGILL);    // 非法指令
+  sigaddset(&unblocked_sigs, SIGSEGV);   // 段错误
+  sigaddset(&unblocked_sigs, SIGBUS);    // 总线错误
+  sigaddset(&unblocked_sigs, SIGFPE);    // 浮点异常
+  sigaddset(&unblocked_sigs, SR_signum); // suspend/resume 信号
+  // ... SHUTDOWN 信号（Ctrl-C 等，ReduceSignalUsage=false 时）
+}
+```
+
+两张掩码的用途：
+
+- `unblocked_sigs` —— 后续创建每个线程时，用 `pthread_sigmask(SIG_UNBLOCK, &unblocked_sigs, NULL)` 解除对这些信号的阻塞。SIGSEGV/SIGBUS/SIGFPE/SIGILL 是同步信号，触发线程必须能接收，否则内核直接杀进程。`SR_signum` 虽然会被 `pthread_kill` 定向发送，但收到信号的线程也需要不被阻塞才能进入 `SR_handler`。
+- `vm_sigs` —— 包含 `BREAK_SIGNAL`。创建线程时普通 Java 线程阻塞它，只有 VMThread 解除阻塞。BREAK_SIGNAL 是异步信号（用户按 Ctrl-Break），内核从不阻塞它的线程中选一个——因为只有 VMThread 不阻塞，所以始终投递给 VMThread，由它输出线程 dump。
+
 
 **第三步：业务信号处理器注册**
 
