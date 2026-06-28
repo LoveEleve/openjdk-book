@@ -291,36 +291,7 @@ static int sr_notify(OSThread* osthread) {
 
 此刻（os::init_2）— 只做注册。内核记录了"信号 12 -> SR_handler"的映射，但没有任何线程收到这个信号。
 
-Stop-The-World 时（未来某个 GC 触发点）— VMThread 对目标线程调 `pthread_kill(thread_id, SR_signum)`。目标线程被内核打断，进入 `SR_handler`。handler 内部是一个 `SuspendResume` 状态机：
-
-```c
-// === os_linux.cpp (实际的 SR_handler 核心逻辑) ===
-static void SR_handler(int sig, siginfo_t* siginfo, ucontext_t* context) {
-  OSThread* osthread = Thread::current()->osthread();
-
-  os::SuspendResume::State current = osthread->sr.state();
-  if (current == os::SuspendResume::SR_SUSPEND_REQUEST) {
-    // 保存线程当前的 CPU 上下文（ucontext），醒来后需要恢复执行
-    suspend_save_context(osthread, siginfo, context);
-
-    // 状态切换到 SR_SUSPENDED——告诉 VMThread "我已经挂了"
-    osthread->sr.set_state(os::SuspendResume::SR_SUSPENDED);
-
-    // 用 sigsuspend 阻塞自己，等待唤醒信号
-    sigset_t suspend_set;
-    sigemptyset(&suspend_set);
-    sigaddset(&suspend_set, SR_signum);      // 恢复 SR_signum 的阻塞
-    sigsuspend(&suspend_set);                // 原子操作：解除阻塞 + 阻塞等待
-
-    // 被唤醒后，状态切回 SR_RUNNING
-    osthread->sr.set_state(os::SuspendResume::SR_RUNNING);
-  }
-}
-```
-
-状态机：`SR_RUNNING` → VMThread 设 `SR_SUSPEND_REQUEST` + `pthread_kill` → 目标线程进入 handler → 设 `SR_SUSPENDED` → `sigsuspend` 睡眠 → VMThread 唤醒 → 设 `SR_RUNNING`。
-
-这里的阻塞用的是 `sigsuspend` 而非 `pthread_cond_wait`。因为信号处理器里不能调大多数 pthread 函数（它们不是 async-signal-safe 的），`sigsuspend` 是能在信号处理器里安全使用的少数阻塞调用之一——它原子地解除信号阻塞并进入睡眠，被任意信号唤醒后恢复原掩码。
+Stop-The-World 时（未来某个 GC 触发点）— VMThread 对目标线程调 `pthread_kill(thread_id, SR_signum)`，目标线程进入 `SR_handler`，内部通过 `SuspendResume` 状态机判断是否阻塞自己等待唤醒。`SuspendResume` 和 `sigsuspend` 的完整机制将在后续 Stop-The-World 章节详细展开，这里只需知道此刻 `os::init_2()` 的唯一任务就是注册这个处理器。
 
 为什么线程能收到？— `signal_sets_init` 把 `SR_signum` 放进了 `unblocked_sigs`，每个 Java 线程创建时都会 `pthread_sigmask(SIG_UNBLOCK, &unblocked_sigs, ...)` 解除对它的阻塞。
 
