@@ -791,7 +791,9 @@ void JavaThread::create_stack_guard_pages() {
 }
 ```
 
-`os::guard_memory` 最终调的是 Linux 系统调用 `mprotect(addr, len, PROT_NONE)`（`os_linux.cpp:3944-3946`），把栈底连续的 `len` 个字节标记为不可读、不可写、不可执行。**这些页仍然是同一块栈内存的一部分，没有被"拿走"或"重分配"——只是进程页表里它们的访问权限被改成了 `PROT_NONE`。** CPU 尝试访问这些页时触发 SIGSEGV，JVM 信号处理器识别为栈溢出，根据触及的区域采取不同策略。
+`os::guard_memory` 最终调的是 Linux 系统调用 `mprotect(addr, len, PROT_NONE)`（`os_linux.cpp:3944-3946`）。**这些页就是 `pthread_create` 分配栈的一部分，不是额外的内存。** `stack_end()` 的计算公式是 `stack_base() - stack_size()`，其中 `stack_size()` 是在 `record_stack_base_and_size()` 中从 OS 拿到的实际栈大小——和 `pthread_create` 分配的大小一致（默认约 1MB）。`create_stack_guard_pages` 从栈的底端取 `red + yellow + reserved`（16K）字节，调 `mprotect` 把它们的页表访问权限改为 `PROT_NONE`。剩余的约 1008K 正常使用。CPU 尝试访问被保护的页时触发 SIGSEGV，JVM 信号处理器识别为栈溢出，根据触及的区域采取不同策略。
+
+另外注意，HotSpot 在 `os::create_thread` 中**显式禁用了 glibc 的默认 guard page**——`pthread_attr_setguardsize(&attr, 0)`（`os_linux.cpp:3503-3508`），因为 glibc 只支持一个 guard page，而 HotSpot 需要四层守卫。
 
 **为什么需要 `align_up`？** `mprotect` 以页为单位保护内存。如果 OS 页大小是 64KB（如 ARM64 某些配置），而 `StackRedPages` 只指定了 1 页 × 4KB = 4KB，保护范围就会不完整。对齐到 OS 实际页大小保证每个区域都是完整的页倍数。
 
