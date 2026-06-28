@@ -89,6 +89,43 @@ Linux::install_signal_handlers();
 
 这是 `os::init_2()` 最重要的产出，三步搭建 JVM 的完整信号体系。
 
+先补一点 Linux 信号系统编程的背景——不然后面的代码看不懂。
+
+**背景：Linux 信号处理三件套**
+
+| 函数 | 签名 | 作用 |
+|------|------|------|
+| `sigemptyset(sigset_t *set)` | 清空信号集，所有信号都不在集合中 | 初始化空集合 |
+| `sigaddset(sigset_t *set, int signum)` | 把 `signum` 加入集合 | 往集合里加一个信号 |
+| `sigfillset(sigset_t *set)` | 所有信号都加入集合 | 填满集合（全阻塞/全接收） |
+| `sigaction(int signum, const struct sigaction *act, struct sigaction *oldact)` | 注册/修改信号处理器 | 核心 API：告诉内核"信号来了调哪个函数" |
+
+`sigset_t` 是一个位图——每一位对应一个信号编号。`sigemptyset` 把位图全清零，`sigaddset` 把指定位设为 1，`sigfillset` 全设为 1。
+
+**`sigaction` 的核心结构体：**
+
+```c
+struct sigaction {
+    void     (*sa_handler)(int);           // 处理器函数（简单版）
+    void     (*sa_sigaction)(int, siginfo_t *, void *);  // 处理器函数（带附加信息）
+    sigset_t   sa_mask;                    // 处理该信号时额外阻塞的信号
+    int        sa_flags;                   // 行为标志
+};
+```
+
+两个处理器字段二选一——如果 `sa_flags` 包含 `SA_SIGINFO`，用 `sa_sigaction`；否则用 `sa_handler`。关键标志：
+
+| flag | 含义 |
+|------|------|
+| `SA_SIGINFO` | 信号到达时内核填充 `siginfo_t`，包括触发地址 `si_addr`——JVM 借此区分空指针/栈溢出/安全点 |
+| `SA_RESTART` | 被信号中断的可中断系统调用（如 `read`、`futex`）自动重启，不返回 `EINTR` |
+
+HotSpot 用 `SA_SIGINFO | SA_RESTART`——前者是业务需求（需要知道哪个地址触发了 SIGSEGV），后者是稳定性需求（信号不应打断系统调用导致意外 `EINTR` 错误）。
+
+**`pthread_kill(pthread_t thread, int sig)`**：像 `kill()` 但目标是特定线程而非整个进程。HotSpot 用它向指定 Java 线程发 `SR_signum` 实现暂停。
+
+有了这些基础，看三步源码：
+
 **第一步：信号集初始化**
 
 ```c
