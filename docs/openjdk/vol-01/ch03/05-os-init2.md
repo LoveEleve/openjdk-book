@@ -110,10 +110,12 @@ Stop-The-World 需要暂停所有 Java 线程。JVM 不是用 `pthread_kill(SIGS
 
 ```c
 // === os_linux.cpp ===
+static int SR_signum = SIGUSR2;   // 默认信号号：12（SIGUSR2）
+
 static int SR_initialize() {
   struct sigaction act;
 
-  // 信号号：环境变量 _JAVA_SR_SIGNUM 可覆盖，默认取 > max(SIGSEGV, SIGBUS) 的可用信号
+  // 可通过环境变量覆盖信号号，但必须 > max(SIGSEGV=11, SIGBUS=7)
   if ((s = ::getenv("_JAVA_SR_SIGNUM")) != 0) {
     SR_signum = strtol(s, 0, 10);
   }
