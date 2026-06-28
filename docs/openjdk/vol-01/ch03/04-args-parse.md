@@ -104,13 +104,226 @@ class SystemProperty : public PathString {
 };
 ```
 
-构造函数签名是 `SystemProperty(key, value, writeable, internal)`。`writeable=true` 表示可以通过 JVMTI agent 或命令行 `-Dkey=value` 修改，`internal=true` 表示这个属性会在 `jdk.internal.VM.saveAndRemoveProperties` 调用时从可读属性中移除。唯一的特例是 `jdk.boot.class.path.append`——虽然是 `internal=true`，但暴露为可读。
+在解释 `SystemProperty` 的构造函数之前，必须先看懂它的父类 `PathString`——属性值就存在这个父类里。
 
-`PropertyList_add` 是链表头插法。`_system_properties` 是 `Arguments` 类的静态成员（`arguments.hpp:291`），类型 `SystemProperty*`，作为整个系统属性链表的头指针。
+### PathString —— 属性值的所有权管理器
 
-函数末尾调用 `os::init_system_properties_values()` 填充之前设为 NULL 的 OS 相关属性（`sun.boot.library.path`、`java.library.path`、`java.home`）。`java.class.path` 的初始值设为空字符串 `""`，不是为了有意义——是为了后续 `-Djava.class.path` 的值有地方可写。
+`PathString` 定义在 `arguments.hpp:58-69`，是 SystemProperty 的直接父类：
 
-总结：`init_system_properties` 做两件事——初始化 4 个不可写属性（写死值的规范声明）、创建 5 个可写属性（值先填 NULL 或空字符串，OS 相关调用完成后填充），最终组成一个链表。链表的初始顺序和节点的 `_next` 指针由 `PropertyList_add` 的头插法决定。
+```c
+class PathString : public CHeapObj<mtArguments> {
+ protected:
+  char* _value;                   // 唯一数据成员：堆上的 C 字符串
+ public:
+  char* value() const { return _value; }
+
+  bool set_value(const char *value);
+  void append_value(const char *value);
+
+  PathString(const char* value);
+  ~PathString();
+};
+```
+
+基类 `CHeapObj<mtArguments>` 是一个纯标记类——没有虚函数，只表示"这个对象分配在 C 堆上（malloc，不是 GC 堆）"，模板参数 `mtArguments` 是 NMT（Native Memory Tracking）的内存分类标签，让 `jcmd VM.native_memory summary` 能把这块内存计入"Arguments"类别。
+
+`_value` 指向堆上由 `AllocateHeap`（HotSpot 的 `malloc` 包装）分配的内存。四个方法在 `arguments.cpp:120-173`：
+
+```c
+// ===== 构造：深拷贝 =====
+PathString::PathString(const char* value) {
+  if (value == NULL) {
+    _value = NULL;                               // 允许 NULL——空壳，等后续 set_value
+  } else {
+    _value = AllocateHeap(strlen(value)+1, mtArguments);  // malloc
+    strcpy(_value, value);                       // 深拷贝，不持有外部指针
+  }
+}
+
+// ===== 设值：释放旧值→分配新值 =====
+bool PathString::set_value(const char *value) {
+  if (_value != NULL) {
+    FreeHeap(_value);                            // 释放旧内存
+  }
+  _value = AllocateHeap(strlen(value)+1, mtArguments);
+  if (_value != NULL) {
+    strcpy(_value, value);
+  } else {
+    return false;                                // OOM 时返回 false
+  }
+  return true;
+}
+
+// ===== 追加：自动插入路径分隔符 =====
+void PathString::append_value(const char *value) {
+  char *sp;
+  size_t len = 0;
+  if (value != NULL) {
+    len = strlen(value);
+    if (_value != NULL) {
+      len += strlen(_value);                     // 总长度 = 旧 + 新
+    }
+    sp = AllocateHeap(len+2, mtArguments);       // +2 = 分隔符 + '\0'
+    if (sp != NULL) {
+      if (_value != NULL) {
+        strcpy(sp, _value);
+        strcat(sp, os::path_separator());        // Linux 是 ":"
+        strcat(sp, value);
+        FreeHeap(_value);                        // 释放旧内存
+      } else {
+        strcpy(sp, value);
+      }
+      _value = sp;
+    }
+  }
+}
+
+// ===== 析构 =====
+PathString::~PathString() {
+  if (_value != NULL) {
+    FreeHeap(_value);
+    _value = NULL;
+  }
+}
+```
+
+**关键设计点：**
+
+1. **不是原地修改，而是"释放→重分配"。** `set_value` 和 `append_value` 都不修改原 `_value` 指向的内存——它们释放旧内存、分配新内存、拷贝新值。外部持有了旧 `_value` 指针的代码，在 set/append 之后指针就悬空了。这和 Java `String` 的不可变性是同一个思路，只不过 Java 用 GC 自动回收，PathString 用手动 free+malloc。
+
+2. **`append_value` 是路径语义，不是通用字符串追加。** 注意内部插入了 `os::path_separator()`（Linux 是 `":"`）。它专为类路径拼接设计——`-Xbootclasspath/a:/other.jar` 最终调用 `append_sysclasspath("/other.jar")`，内部走 `append_value` 自动加 `:`。
+
+3. **`AllocateHeap` / `FreeHeap` 是带内存标签的 malloc/free。** 模板参数 `mtArguments` 让 NMT 追踪到"这块内存属于参数解析"——调 `jcmd <pid> VM.native_memory summary` 时，Arguments 的内存占用独立统计。
+
+**Java 类比：**
+
+```java
+class PathString {
+    protected String value;
+
+    public PathString(String value) { this.value = value; }
+
+    // 对应 set_value：替换（旧 String 由 GC 回收）
+    public boolean setValue(String value) {
+        this.value = value;
+        return true;
+    }
+
+    // 对应 append_value：路径拼接，自动加 File.pathSeparator
+    public void appendValue(String value) {
+        if (value != null) {
+            if (this.value != null) {
+                this.value = this.value + File.pathSeparator + value;  // Linux 自动加 ":"
+            } else {
+                this.value = value;
+            }
+        }
+    }
+
+    public String value() { return value; }
+
+    // 析构——Java 不需要，GC 自动回收
+}
+```
+
+`PathString` 的本质：**C 字符串的所有权管理器**。Java 里 GC 和 `String` 不可变性隐式完成了这件事，HotSpot 在 C 语言中必须手动封装——`AllocateHeap` 分配、`FreeHeap` 释放、`strcpy` 拷贝——PathString 把这三步包在一个类里。
+
+有了父类的完整理解，再看 SystemProperty 的构造函数，`arguments.cpp:194-204`：
+
+```c
+SystemProperty::SystemProperty(const char* key, const char* value,
+                               bool writeable, bool internal)
+  : PathString(value)                       // ← 父类构造：malloc + strcpy 存 value
+{
+  if (key == NULL) {
+    _key = NULL;
+  } else {
+    _key = AllocateHeap(strlen(key)+1, mtArguments);  // 深拷贝 key
+    strcpy(_key, key);
+  }
+  _next = NULL;                // 刚创建时不属于任何链表
+  _internal = internal;
+  _writeable = writeable;
+}
+```
+
+构造函数做了两件事：调用 `PathString(value)` 把属性值存入父类的 `_value`，然后把 `_key` 也深拷贝一份。`_next = NULL` 表示新节点初始独立，等 `PropertyList_add` 尾插法把它链入链表。
+
+### writeable、internal、readable 三种权限
+
+构造函数里的 `writeable` 和 `internal` 两个 bool，决定了这个属性的三种访问控制。它们在 `SystemProperty` 类中对应的方法（`arguments.hpp:96-127`）：
+
+```c
+private:
+  bool writeable() { return _writeable; }   // 是否允许写
+
+public:
+  bool is_readable() const {                // 是否可读
+    return !_internal                       // 非 internal 属性 → 可读
+        || strcmp(_key, "jdk.boot.class.path.append") == 0;  // 唯一例外
+  }
+
+  bool set_writeable_value(const char *value) {
+    if (writeable()) {                      // ★ 只有 writeable=true 才允许写
+      return set_value(value);              // 调到父类 PathString::set_value
+    }
+    return false;                           // 否则静默拒绝
+  }
+```
+
+**四种属性类型举例：**
+
+| 属性 | writeable | internal | readable | 含义 |
+|------|-----------|----------|----------|------|
+| `java.vm.name` | false | false | true | 规范声明，只读 |
+| `sun.boot.library.path` | true | false | true | OS 启动时写入，后续 JVMTI 可改 |
+| `java.class.path` | true | false | true | 用户 `-Djava.class.path=...` 可写 |
+| `jdk.boot.class.path.append` | false | true | **true** | 唯一的 internal 但 readable——只允许 `-Xbootclasspath/a:` 修改 |
+
+关键理解：**writeable 控制"写"权限**（谁可以通过 `set_writeable_value` 修改）；**internal 控制"读"权限**（`System.getProperty` 能不能读到）。`java.class.path` 初始值设为 `""` 的原因就在这里——它 writeable=true，用户传 `-Djava.class.path=xxx` 时，`Arguments::parse` 会调用 `set_writeable_value` 把 `""` 覆盖成实际值。空串只是一个"占位符"，确保 `_java_class_path` 指针非 NULL，后续写入有地方可写。
+
+### PropertyList_add —— 尾插法
+
+```c
+void Arguments::PropertyList_add(SystemProperty** plist, SystemProperty *new_p) {
+  SystemProperty* p = *plist;
+  if (p == NULL) {
+    *plist = new_p;           // 空链表：新节点直接当头
+  } else {
+    while (p->next() != NULL) {
+      p = p->next();          // 遍历到尾部
+    }
+    p->set_next(new_p);       // 尾部追加
+  }
+}
+```
+
+尾插法意味着属性在链表中的顺序就是 `init_system_properties` 代码中的添加顺序。`_system_properties` 是 `Arguments` 类的静态成员（`arguments.hpp:291`），类型 `SystemProperty*`，作为整个系统属性链表的头指针。
+
+### 最后一步：`os::init_system_properties_values()` 
+
+函数末尾这一行调用，填充之前设为 NULL 的 OS 相关属性。它在 Linux 上的实现是 `os_linux.cpp:400-521`，做了三件事：
+
+```
+libjvm.so 的绝对路径（由 os::jvm_path 获取）
+   │
+   ├──→ 向上剥目录：/libjvm.so → /server → /lib → 得到 JAVA_HOME
+   │       ├── set_java_home(buf)                 → java.home  = "/usr/lib/jvm/java-11"
+   │       └── set_dll_dir(buf)                   → sun.boot.library.path = 同上
+   │
+   ├──→ 拼接 java.library.path
+   │       LD_LIBRARY_PATH + ":/usr/java/packages/lib:" + DEFAULT_LIBPATH
+   │       └── set_library_path(result)
+   │
+   └──→ 设置引导类路径
+           set_boot_path('/',':')                  → 扫描 JAVA_HOME/lib/modules (jimage)
+               └── 如果存在 → set_sysclasspath("...modules", true)
+               └── 如果不存在 → 检查 exploded modules
+```
+
+`_system_boot_class_path`（类型 `PathString*`，最初 `new PathString(NULL)`）最终被 `set_sysclasspath` 写入真实的类引导路径。如果有 `-Xbootclasspath/a:` 用户参数，后续 `append_sysclasspath` 会调用 `append_value` 追加路径。
+
+总结：`init_system_properties` 函数做了两件事——**初始化 4 个不可写属性**（写死值的规范声明，如 `java.vm.name`），**创建 5 个可写属性**（值先填 NULL 或空字符串占位），最后调用 `os::init_system_properties_values()` 把 NULL 填充为 OS 的真实值。整个链表是尾插法构建的，`_next` 指针对应的遍历顺序就是代码中的添加顺序。
 
 ---
 
