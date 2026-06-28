@@ -89,7 +89,23 @@ Linux::install_signal_handlers();
 
 这是 `os::init_2()` 最重要的产出，三步搭建 JVM 的完整信号体系。
 
-先搞清楚 Linux 信号的投递规则。信号的**产生方式**决定了它投递给谁：
+先搞懂几个基本概念——不然后面每行代码都看不懂。
+
+**`sigset_t` —— 信号的"集合"**
+
+`sigset_t` 是一个位图（bitmap），每一位代表一个信号编号。在 Linux x86_64 上它通常是 `unsigned long sig[2]`（128 位，足够覆盖 1-64 号信号）。第 `n` 位为 1 表示信号 `n` 在集合中，为 0 表示不在。
+
+操作它的三个函数都是普通的 C 库函数，不走系统调用——它们只是读写用户态内存里的位图：
+
+| 函数 | 作用 | 等价伪代码 |
+|------|------|-----------|
+| `sigemptyset(sigset_t *set)` | 清空集合（所有位设 0） | `memset(set, 0, sizeof(sigset_t))` |
+| `sigaddset(sigset_t *set, int signum)` | 把信号 `signum` 加入集合（对应位设 1） | `set->sig[word] |= 1 << bit` |
+| `sigfillset(sigset_t *set)` | 填满集合（所有位设 1，包含所有信号） | `memset(set, 0xFF, sizeof(sigset_t))` |
+
+真正跟内核交互的是 `sigaction`（注册处理器）和 `pthread_sigmask`（修改线程的信号掩码）——这两个才是系统调用。
+
+有了这些基础，先看信号的投递规则：
 
 | 信号类型 | 产生方式 | 投递目标 | 例子 |
 |---------|---------|---------|------|
