@@ -271,14 +271,21 @@ static int sr_notify(OSThread* osthread) {
 }
 ```
 
-逐行解释：
+逐行拆解——每行为什么这样写：
 
-- `SR_signum = SIGUSR2` — 默认取 POSIX 的用户自定义信号 2（编号 12）。为什么不用 SIGSTOP（19）？因为 SIGSTOP 不能被捕获或忽略，内核强制暂停线程，JVM 无法在 handler 里做自定义逻辑（检查安全点状态、记录 JFR 事件等）。
-- `getenv("_JAVA_SR_SIGNUM")` — 嵌入式场景下可能和宿主程序的信号冲突，允许通过环境变量换成其他信号号。但必须 > max(SIGSEGV=11, SIGBUS=7)，因为低编号信号被 JVM 业务信号占用（见第三步）。
-- `sigemptyset`/`sigaddset` — 把 `SR_signum` 单独放入 `SR_sigset`。后续代码中可以通过 `sigismember(&SR_sigset, sig)` 快速判断一个信号是否是 suspend/resume 信号。
-- `act.sa_handler = SR_handler` — 指定收到信号时调用 `SR_handler`（不是 `signalHandler`，那是第三步的通用处理器）。
-- `pthread_sigmask(SIG_BLOCK, NULL, &act.sa_mask)` — 把**当前主线程正阻塞的信号集**读到 `act.sa_mask`。此时 `SR_signum` 本身就在阻塞集中。`sigaction` 把这个集合写入内核——以后任何线程收到 `SR_signum` 时，内核在调用 `SR_handler` 前自动屏蔽 `act.sa_mask` 中的信号。作用：防止 handler 正在处理挂起请求时又被另一个 `SR_signum` 打断（重入保护）。
-- `sigaction(SR_signum, &act, 0)` — 向内核注册：进程收到信号 12 时调用 `SR_handler`。
+`SR_signum = SIGUSR2` 默认取 POSIX 的用户自定义信号 2（编号 12）。为什么不用 SIGSTOP（19）？因为 SIGSTOP 不能被捕获或忽略——内核收到 SIGSTOP 直接暂停线程，不给 JVM 任何执行 handler 的机会。而 Stop-The-World 的需求是：线程收到信号后，要先进 handler 检查安全点状态、判断自己是否需要阻塞、记录 JFR 事件——这些逻辑必须在 handler 里跑。所以不能
+
+`getenv("_JAVA_SR_SIGNUM")` 允许环境变量覆盖信号号。有些嵌入式场景（比如 JVM 被嵌入到一个已经用了 SIGUSR2 的 C 程序里），可以换个不冲突的号。但必须 > max(SIGSEGV=11, SIGBUS=7)，因为低编号信号被 JVM 的业务信号占用了（见第三步的 `install_signal_handlers`）。
+
+`sigemptyset(&SR_sigset)` 和 `sigaddset(&SR_sigset, SR_signum)` 把信号 12 单独放进 `SR_sigset` 位图里。后续代码用 `sigismember(&SR_sigset, sig)` 检查"这个信号是不是 suspend/resume 信号"——判断一次位图和判断一次整数 `sig == SR_signum` 等效，但位图方式在批量检查多个信号时更高效。
+
+`act.sa_handler = SR_handler` 告诉内核：收到信号 12 时，调 `SR_handler`。注意这里用的是 `sa_handler` 字段（不是 `sa_sigaction`）——虽然 flags 里有 `SA_SIGINFO`，但 `SR_handler` 只关心信号号，不关心 `siginfo_t`。因为 suspend/resume 不需要知道"哪个地址触发的"，只需要知道"有线程要我停下来"。
+
+`pthread_sigmask(SIG_BLOCK, NULL, &act.sa_mask)` 是最容易被误解的一行。它的作用是读当前线程（主线程）的阻塞信号集，写入 `act.sa_mask`。然后 `sigaction` 把这个集合告诉内核：**以后任何线程进入 `SR_handler` 时，内核自动屏蔽 `act.sa_mask` 中的所有信号**（相当于在处理期间临时 `SIG_BLOCK` 这些信号，handler 返回时自动恢复）。
+
+这行代码的关键在于：`SR_signum` 默认是被阻塞的（注释写着 "SR_signum is blocked by default"），所以它一定在阻塞集中，也就一定在 `act.sa_mask` 里。效果：线程 A 正在 `SR_handler` 里处理 suspend 请求时，如果 VMThread 又对它发了另一个 `SR_signum`——第二个信号被内核自动屏蔽，不会重入打断正在执行的 handler。handler 结束后屏蔽自动解除。
+
+`sigaction(SR_signum, &act, 0)` 把上面的全部配置注册到内核。从此整个进程里任何线程收到信号 12，内核都会：屏蔽 `act.sa_mask` 中的信号 → 调 `SR_handler` → handler 返回后恢复原掩码。
 
 **使用时间线：**
 
