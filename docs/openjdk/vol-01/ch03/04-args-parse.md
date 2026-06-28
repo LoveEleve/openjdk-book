@@ -512,7 +512,18 @@ void JDK_Version::initialize() {
 
 这段代码解释了一个核心的 OS 概念：`os::native_java_library()` 和 `os::dll_lookup` 是在 `dlopen`/`dlsym` 的语义上工作的。
 
-`os::native_java_library()` 加载 libjava.so 并返回其句柄。HotSpot（libjvm.so）和 java 标准库（libjava.so）是不同的 `.so` 文件——HotSpot 的方法区、GC、JIT 在 libjvm.so 中，`String`、`HashMap` 在 libjava.so 中。libjvm.so 需要调用 libjava.so 里的函数，而这通过 `dlopen` 动态加载实现。
+`os::native_java_library()` 加载 `libjava.so` 并返回其句柄。注意：`libjava.so` **不是** Java 标准库的字节码——Java 类（`String`、`HashMap` 等）的字节码存储在 `modules` jimage 文件中。`libjava.so` 是 java.base 模块中 **native 方法的 C 实现**，由以下源文件编译而成（`CMakeLists.txt` 第 19-23 行）：
+
+```
+src/java.base/share/native/libjava/*.c     ← Object.c, Class.c, Runtime.c,
+                                              System.c, ClassLoader.c ... (40+ 个)
+src/java.base/unix/native/libjava/*.c      ← 平台相关：ProcessEnvironment_md.c,
+                                              childproc.c, io_util_md.c ... (10+ 个)
+src/java.base/linux/native/libjava/*.c     ← Linux 专有：ProcessHandleImpl_linux.c,
+                                              CgroupMetrics.c (2 个)
+```
+
+举例：Java 代码中 `Object.getClass()` 是一个 native 方法，它的 C 实现在 `Object.c` 里叫 `Java_java_lang_Object_getClass`——这才是 `libjava.so` 里的函数。HotSpot（`libjvm.so`）需要调用 `libjava.so` 里的这些 JNI 函数，因此通过 `dlopen` 动态加载 `libjava.so`，再用 `dlsym` 查找具体函数。
 
 `os::dll_lookup(lib_handle, "JDK_GetVersionInfo0")` 等价于 `dlsym(handle, "JDK_GetVersionInfo0")`，在 libjava.so 的符号表中查找 `JDK_GetVersionInfo0` 的函数地址。找到后把函数指针转换成 `jdk_version_info_fn_t`，调用它填入 `jdk_version_info` 结构体——这个结构体由 java 层写入，但内容由构建时 `-source 8` 或 `--release 11` 编译参数决定。
 
