@@ -689,6 +689,8 @@ UL 的每条日志行都有前缀装饰（decorations），如：
 
 ## Arguments::parse() —— 参数解析主流程
 
+> **★★ 关注点：** 4 路参数源的优先级顺序——理解命令行怎么覆盖环境变量、vm_options 怎么提供默认值。至于 `parse_each_vm_init_arg` 里具体匹配了哪些 flag——本质是 JVM 版 `getopt_long`，700 行 `if/else if` 字符串匹配，不需要逐行阅读。
+
 `arguments.cpp:3761-3961`，200 行，分 5 个阶段：
 
 ```
