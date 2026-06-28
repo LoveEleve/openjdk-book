@@ -105,10 +105,11 @@ Linux::install_signal_handlers();
 
 **第一步：线程挂起/恢复信号注册**
 
+Stop-The-World 需要暂停所有 Java 线程。JVM 不是用 pthread_kill(SIGSTOP)，而是用自己的信号 SR_signum。
 
-Stop-The-World 需要暂停所有 Java 线程。JVM 不是用 `pthread_kill(SIGSTOP)`，而是用自己的信号 `SR_signum`：
+首先看完整源码，再拆开解释：
 
-```c
+```
 // === os_linux.cpp ===
 static int SR_signum = SIGUSR2;   // 默认信号号：12（SIGUSR2）
 
@@ -121,20 +122,43 @@ static int SR_initialize() {
   }
 
   sigemptyset(&SR_sigset);
-  sigaddset(&SR_sigset, SR_signum);
+  sigaddset(&SR_sigset, SR_signum);       // 把 SR_signum 加入集合，方便后续用 sigismember 检查
 
   act.sa_flags = SA_RESTART | SA_SIGINFO;
-  act.sa_handler = (void (*)(int)) SR_handler;   // 处理器：SR_handler
-  sigaction(SR_signum, &act, 0);                 // 向内核注册
+  act.sa_handler = (void (*)(int)) SR_handler;   // 收到信号时调 SR_handler
 
+  // 把当前线程（主线程）的阻塞信号集读到 act.sa_mask 里。
+  // SR_signum 此时被阻塞，所以 act.sa_mask 包含 SR_signum。
+  // sigaction 注册后，任何线程收到 SR_signum 时，内核自动
+  // 在 handler 执行期间屏蔽 act.sa_mask 中的信号，防止重入。
+  pthread_sigmask(SIG_BLOCK, NULL, &act.sa_mask);
+
+  sigaction(SR_signum, &act, 0);           // 向内核注册信号处理器
   return 0;
+}
+
+// === 使用场景（不在此刻调用，后续 Stop-The-World 时调用）===
+static int sr_notify(OSThread* osthread) {
+  int status = pthread_kill(osthread->pthread_id(), SR_signum);
 }
 ```
 
-`SR_handler` 是挂起等待的处理函数。当 VMThread 需要 Stop-The-World 时，对每个 Java 线程调 `pthread_kill(thread_id, SR_signum)` 发送此信号。收到信号的线程在 `SR_handler` 中检查自己是否需要暂停，如果需要就阻塞等待。
+逐行解释：
 
-`_JAVA_SR_SIGNUM` 环境变量允许嵌入式场景自定义信号号（避免冲突）。
+- `SR_signum = SIGUSR2` — 默认取 POSIX 的用户自定义信号 2（编号 12）。为什么不用 SIGSTOP（19）？因为 SIGSTOP 不能被捕获或忽略，内核强制暂停线程，JVM 无法在 handler 里做自定义逻辑（检查安全点状态、记录 JFR 事件等）。
+- `getenv("_JAVA_SR_SIGNUM")` — 嵌入式场景下可能和宿主程序的信号冲突，允许通过环境变量换成其他信号号。但必须 > max(SIGSEGV=11, SIGBUS=7)，因为低编号信号被 JVM 业务信号占用（见第三步）。
+- `sigemptyset`/`sigaddset` — 把 `SR_signum` 单独放入 `SR_sigset`。后续代码中可以通过 `sigismember(&SR_sigset, sig)` 快速判断一个信号是否是 suspend/resume 信号。
+- `act.sa_handler = SR_handler` — 指定收到信号时调用 `SR_handler`（不是 `signalHandler`，那是第三步的通用处理器）。
+- `pthread_sigmask(SIG_BLOCK, NULL, &act.sa_mask)` — 把**当前主线程正阻塞的信号集**读到 `act.sa_mask`。此时 `SR_signum` 本身就在阻塞集中。`sigaction` 把这个集合写入内核——以后任何线程收到 `SR_signum` 时，内核在调用 `SR_handler` 前自动屏蔽 `act.sa_mask` 中的信号。作用：防止 handler 正在处理挂起请求时又被另一个 `SR_signum` 打断（重入保护）。
+- `sigaction(SR_signum, &act, 0)` — 向内核注册：进程收到信号 12 时调用 `SR_handler`。
 
+**使用时间线：**
+
+此刻（os::init_2）— 只做注册。内核记录了"信号 12 -> SR_handler"的映射，但没有任何线程收到这个信号。
+
+Stop-The-World 时（未来某个 GC 触发点）— VMThread 遍历所有 Java 线程，对每个调 `sr_notify(thread)`，即 `pthread_kill(thread_id, SR_signum)`。目标线程正在执行 Java 字节码，被内核打断，跳转到 `SR_handler`。handler 内部检查 `SafepointSynchronize::_state`——如果需要阻塞，就 `os::PlatformEvent::park()` 让自己睡下去，等 GC 完成后被唤醒。
+
+为什么线程能收到？— `signal_sets_init` 把 `SR_signum` 放进了 `unblocked_sigs`，每个 Java 线程创建时都会 `pthread_sigmask(SIG_UNBLOCK, &unblocked_sigs, ...)` 解除对它的阻塞。
 
 **第二步：信号集初始化**
 
