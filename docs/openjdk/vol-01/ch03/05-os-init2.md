@@ -279,7 +279,7 @@ static int sr_notify(OSThread* osthread) {
 
 `sigemptyset(&SR_sigset)` 和 `sigaddset(&SR_sigset, SR_signum)` 把信号 12 单独放进 `SR_sigset` 位图里。后续代码用 `sigismember(&SR_sigset, sig)` 检查"这个信号是不是 suspend/resume 信号"——判断一次位图和判断一次整数 `sig == SR_signum` 等效，但位图方式在批量检查多个信号时更高效。
 
-`act.sa_handler = SR_handler` 告诉内核：收到信号 12 时，调 `SR_handler`。注意这里用的是 `sa_handler` 字段（不是 `sa_sigaction`）——虽然 flags 里有 `SA_SIGINFO`，但 `SR_handler` 只关心信号号，不关心 `siginfo_t`。因为 suspend/resume 不需要知道"哪个地址触发的"，只需要知道"有线程要我停下来"。
+`act.sa_handler = SR_handler` 告诉内核：收到信号 12 时，调 `SR_handler`。和第三步 `install_signal_handlers()` 注册的 `signalHandler` 是**两个不同的处理器**——`signalHandler` 统一处理 SIGSEGV/SIGBUS 等业务信号，`SR_handler` 只处理 suspend/resume 信号。suspend/resume 不需要知道"哪个地址触发的"，只需要知道"有线程要我停下来"，所以这里用 `sa_handler` 而非 `sa_sigaction`。
 
 `pthread_sigmask(SIG_BLOCK, NULL, &act.sa_mask)` 是最容易被误解的一行。它的作用是读当前线程（主线程）的阻塞信号集，写入 `act.sa_mask`。然后 `sigaction` 把这个集合告诉内核：**以后任何线程进入 `SR_handler` 时，内核自动屏蔽 `act.sa_mask` 中的所有信号**（相当于在处理期间临时 `SIG_BLOCK` 这些信号，handler 返回时自动恢复）。
 
@@ -361,7 +361,7 @@ void os::Linux::install_signal_handlers() {
 void os::Linux::set_signal_handler(int sig, bool set_installed) {
   struct sigaction sigAct;
   sigfillset(&(sigAct.sa_mask));
-  sigAct.sa_sigaction = signalHandler;       // 统一入口函数
+  sigAct.sa_sigaction = signalHandler;       // 业务信号的统一入口（非第一步的 SR_handler）
   sigAct.sa_flags = SA_SIGINFO | SA_RESTART;
   sigaction(sig, &sigAct, &oldAct);
 }
