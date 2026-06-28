@@ -448,76 +448,25 @@ typedef struct {
 
 #### 此时 SystemProperty 链表的完整状态
 
-`init_system_properties` 分两个阶段构建了链表，随后 `init_version_specific_system_properties` 追加了 3 个节点，`os::init_system_properties_values` 把 NULL 填上了真实值。最终链表共 **13 个节点**（尾插法，遍历顺序 = 添加顺序）：
+`init_system_properties` 分两个阶段构建了链表，随后 `init_version_specific_system_properties` 追加了 3 个节点，`os::init_system_properties_values` 把 NULL 填上了真实值。最终链表共 **13 个节点**（尾插法，遍历顺序等于添加顺序）：
 
 ```
-_system_properties (头指针)
-   │
-   ▼
-┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
-│ key    = java.vm.specification.name│─────│ key    = java.vm.version         │─────
-│ value  = "Java Virtual Machine     │     │ value  = "11.0.31"               │
-│          Specification"            │     │ w=true  i=false                  │
-│ w=false  i=false                   │     └─────────────────────────────────┘
-└───────────────────────────────────┘
-                                                                              │
-     ┌────────────────────────────────────────────────────────────────────────┘
-     ▼
-┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
-│ key    = java.vm.name        │─────│ key    = jdk.debug            │─────
-│ value  = "OpenJDK 64-Bit     │     │ value  = "release"            │
-│          Server VM"           │     │ w=false  i=false              │
-│ w=false  i=false              │     └───────────────────────────────┘
-└───────────────────────────────┘
-                                                                               │
-     ┌─────────────────────────────────────────────────────────────────────────┘
-     ▼
-┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
-│ key    = sun.boot.library.path│─────│ key    = java.library.path    │─────
-│ value  = "/usr/lib/jvm/      │     │ value  = "/usr/java/packages/ │
-│          java-11-xxx/lib"     │     │          lib:/usr/lib64:/lib64│
-│ w=true   i=false              │     │          :/lib:/usr/lib"       │
-└───────────────────────────────┘     │ w=true   i=false              │
-                                      └───────────────────────────────┘
-                                                                               │
-     ┌─────────────────────────────────────────────────────────────────────────┘
-     ▼
-┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
-│ key    = java.home           │─────│ key    = java.class.path      │─────
-│ value  = "/usr/lib/jvm/      │     │ value  = ""  (占位，等          │
-│          java-11-xxx"         │     │         -Djava.class.path)    │
-│ w=true   i=false              │     │ w=true   i=false              │
-└───────────────────────────────┘     └───────────────────────────────┘
-                                                                               │
-     ┌─────────────────────────────────────────────────────────────────────────┘
-     ▼
-┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
-│ key    = jdk.boot.class.path │─────│ key    = java.vm.info         │─────
-│          .append              │     │ value  = "mixed mode"         │
-│ value  = ""  (占位，等         │     │ w=true   i=false              │
-│         -Xbootclasspath/a:)   │     └───────────────────────────────┘
-│ w=false  i=true               │
-└───────────────────────────────┘
-                                                                               │
-     ┌─────────────────────────────────────────────────────────────────────────┘
-     ▼
-┌──────────────────────────────┐ _next ┌──────────────────────────────┐ _next
-│ key    = java.vm.specification│─────│ key    = java.vm.specification│─────
-│          .vendor              │     │          .version              │
-│ value  = "Oracle Corporation" │     │ value  = "11"                 │
-│ w=false  i=false              │     │ w=false  i=false              │
-└───────────────────────────────┘     └───────────────────────────────┘
-                                                                               │
-     ┌─────────────────────────────────────────────────────────────────────────┘
-     ▼
-┌──────────────────────────────┐
-│ key    = java.vm.vendor      │ _next = NULL  ← 链表尾
-│ value  = 平台相关字符串         │
-│ w=false  i=false              │
-└──────────────────────────────┘
+( 1) java.vm.specification.name       = "Java Virtual Machine Specification"   w=false i=false
+( 2) java.vm.version                  = "11.0.31"                              w=false i=false
+( 3) java.vm.name                     = "OpenJDK 64-Bit Server VM"             w=false i=false
+( 4) jdk.debug                        = "release"                              w=false i=false
+( 5) sun.boot.library.path            = "/usr/lib/jvm/java-11-xxx/lib"         w=true  i=false
+( 6) java.library.path                = "/usr/java/packages/lib:/usr/lib64..." w=true  i=false
+( 7) java.home                        = "/usr/lib/jvm/java-11-xxx"             w=true  i=false
+( 8) java.class.path                  = ""        (占位，等 -Djava.class.path)  w=true  i=false
+( 9) jdk.boot.class.path.append       = ""        (占位，等 -Xbootclasspath/a:) w=false i=true
+(10) java.vm.info                     = "mixed mode"                           w=true  i=false
+(11) java.vm.specification.vendor     = "Oracle Corporation"                   w=false i=false
+(12) java.vm.specification.version    = "11"                                   w=false i=false
+(13) java.vm.vendor                   = 平台相关字符串                           w=false i=false
 ```
 
-初始 4 个不可写属性（`w=false`）在最前面——它们是 JVM 规范声明的固定值。中间 5 个可写属性（`w=true`）的值由 `os::init_system_properties_values` 或后续参数解析写入。最后 3 个（`init_version_specific_system_properties` 追加）在版本号拿到后才添加——因为它们依赖 `JDK_Version::current().major_version()`。`Arguments` 类同时维护了五个快捷指针（`_sun_boot_library_path` 等），指向链表中对应的节点——后续 `set_dll_dir()` / `set_java_home()` 等操作不需要遍历链表，直接用指针覆盖值。
+(1)-(4) 是 `init_system_properties` 第一阶段加入的不可写属性——JVM 规范声明的固定值。(5)-(9) 是第二阶段加入的可写属性，其中 (5)-(7) 在 `os::init_system_properties_values()` 中被本机真实路径填充，(8)-(9) 是空串占位符。(11)-(13) 是 `init_version_specific_system_properties` 拿到版本号后追加的三个属性。`Arguments` 类还维护了五个快捷指针——`_sun_boot_library_path`、`_java_library_path`、`_java_home`、`_java_class_path`、`_jdk_boot_class_path_append`——直接指向链表中对应的节点，后续 `set_dll_dir()` / `set_java_home()` 等操作不需要遍历链表，直接用指针覆盖值。
 
 ---
 
