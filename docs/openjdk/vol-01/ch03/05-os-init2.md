@@ -166,7 +166,42 @@ PID=995043
   ucontext = 0x7ffd92a82840 (寄存器快照)
 ```
 
-关键观察：`si_code = SI_USER(0)` 说明信号由 `kill()` 发送。如果是硬件异常（SIGSEGV），`si_code` 会是 `SEGV_ACCERR` 或 `SEGV_MAPERR`，`si_addr` 指向触发地址——这正是 HotSpot 区分三种 SIGSEGV 的依据。
+关键观察：`si_code = SI_USER(0)` 说明信号由 `kill()` 发送。如果是硬件异常（SIGSEGV），`si_code` 会是 `SEGV_ACCERR` 或 `SEGV_MAPERR`，`si_addr` 指向触发地址。
+
+那 HotSpot 在自己的信号处理器里具体怎么用这些字段的？它是注册了一个统一的入口 `signalHandler` → `JVM_handle_linux_signal`，然后在 `os_linux_x86.cpp` 里根据 `si_addr` 做三层分发：
+
+```c
+// === os_linux_x86.cpp (HotSpot 的 SIGSEGV 处理核心) ===
+JVM_handle_linux_signal(int sig, siginfo_t* info, void* ucVoid, ...) {
+  // ...
+  if (sig == SIGSEGV) {
+    address addr = (address) info->si_addr;   // 拿到触发地址
+
+    // 第 1 层: 地址在线程栈上？
+    if (thread->on_local_stack(addr)) {
+      if (thread->in_stack_yellow_reserved_zone(addr)) {
+        // → StackOverflowError: 先解开 yellow zone 保护,
+        //   让异常处理代码有栈空间, 然后抛异常
+      } else if (thread->in_stack_red_zone(addr)) {
+        // → 致命 red zone 违反: 不可恢复, 打印错误
+      }
+    }
+
+    // 第 2 层: 地址是安全点轮询页？
+    if (sig == SIGSEGV && os::is_poll_address((address)info->si_addr)) {
+      // → 安全点: 阻塞当前线程, 等待 GC 完成
+    }
+
+    // 第 3 层: 隐式空指针?
+    if (!MacroAssembler::needs_explicit_null_check((intptr_t)info->si_addr)) {
+      // → NullPointerException: si_addr 在零页附近,
+      //   JIT 没有生成 if(o==null) 检查, 直接抛 NPE
+    }
+  }
+}
+```
+
+三层检查的顺序是关键：先查栈溢出（最紧急，需要立即处理），再查安全点（不能阻塞在 GC 里抛 NPE），最后查空指针。三个分支都靠 `info->si_addr` 这一个字段来区分——这就是为什么 `SA_SIGINFO` 是必须的。
 
 `sa_mask` 的作用：如果 handler 执行期间不希望被某些信号打断（比如正在处理 SIGSEGV 时又来一个 SIGSEGV），把这些信号放进 `sa_mask`，内核自动屏蔽。`sa_flags = SA_SIGINFO` 是必须的——没有它，内核不填充 `siginfo_t`，handler 只能拿到信号号，拿不到 `si_addr`。
 
