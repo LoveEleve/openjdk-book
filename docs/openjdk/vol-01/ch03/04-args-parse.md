@@ -41,7 +41,7 @@ if (PauseAtStartup) {
 
 ## Arguments::init_system_properties() —— 创建系统属性空链表
 
-第一行就做这件事，在 `arguments.cpp:381-420`：
+第一行就做这件事，在 `arguments.cpp`：
 
 ```c
 void Arguments::init_system_properties() {
@@ -83,7 +83,7 @@ void Arguments::init_system_properties() {
 }
 ```
 
-`SystemProperty` 是一个单链表节点，继承自 `PathString`（一个长度自适应的字符串管理器），定义在 `arguments.hpp:90-131`：
+`SystemProperty` 是一个单链表节点，继承自 `PathString`（一个长度自适应的字符串管理器），定义在 `arguments.hpp`：
 
 ```c
 class SystemProperty : public PathString {
@@ -108,7 +108,7 @@ class SystemProperty : public PathString {
 
 ### PathString —— 属性值的所有权管理器
 
-`PathString` 定义在 `arguments.hpp:58-69`，是 SystemProperty 的直接父类：
+`PathString` 定义在 `arguments.hpp`，是 SystemProperty 的直接父类：
 
 ```c
 class PathString : public CHeapObj<mtArguments> {
@@ -127,7 +127,7 @@ class PathString : public CHeapObj<mtArguments> {
 
 基类 `CHeapObj<mtArguments>` 是一个纯标记类——没有虚函数，只表示"这个对象分配在 C 堆上（malloc，不是 GC 堆）"，模板参数 `mtArguments` 是 NMT（Native Memory Tracking）的内存分类标签，让 `jcmd VM.native_memory summary` 能把这块内存计入"Arguments"类别。
 
-`_value` 指向堆上由 `AllocateHeap`（HotSpot 的 `malloc` 包装）分配的内存。四个方法在 `arguments.cpp:120-173`：
+`_value` 指向堆上由 `AllocateHeap`（HotSpot 的 `malloc` 包装）分配的内存。四个方法在 `arguments.cpp`：
 
 ```c
 // ===== 构造：深拷贝 =====
@@ -228,7 +228,7 @@ class PathString {
 
 `PathString` 的本质：**C 字符串的所有权管理器**。Java 里 GC 和 `String` 不可变性隐式完成了这件事，HotSpot 在 C 语言中必须手动封装——`AllocateHeap` 分配、`FreeHeap` 释放、`strcpy` 拷贝——PathString 把这三步包在一个类里。
 
-有了父类的完整理解，再看 SystemProperty 的构造函数，`arguments.cpp:194-204`：
+有了父类的完整理解，再看 SystemProperty 的构造函数，`arguments.cpp`：
 
 ```c
 SystemProperty::SystemProperty(const char* key, const char* value,
@@ -251,7 +251,7 @@ SystemProperty::SystemProperty(const char* key, const char* value,
 
 ### writeable、internal、readable 三种权限
 
-构造函数里的 `writeable` 和 `internal` 两个 bool，决定了这个属性的三种访问控制。它们在 `SystemProperty` 类中对应的方法（`arguments.hpp:96-127`）：
+构造函数里的 `writeable` 和 `internal` 两个 bool，决定了这个属性的三种访问控制。它们在 `SystemProperty` 类中对应的方法（`arguments.hpp`）：
 
 ```c
 private:
@@ -298,7 +298,7 @@ void Arguments::PropertyList_add(SystemProperty** plist, SystemProperty *new_p) 
 }
 ```
 
-尾插法意味着属性在链表中的顺序就是 `init_system_properties` 代码中的添加顺序。`_system_properties` 是 `Arguments` 类的静态成员（`arguments.hpp:291`），类型 `SystemProperty*`，作为整个系统属性链表的头指针。
+尾插法意味着属性在链表中的顺序就是 `init_system_properties` 代码中的添加顺序。`_system_properties` 是 `Arguments` 类的静态成员（`arguments.hpp`），类型 `SystemProperty*`，作为整个系统属性链表的头指针。
 
 ### 最后一步：`os::init_system_properties_values()` 
 
@@ -310,7 +310,7 @@ _java_library_path     = new SystemProperty("java.library.path",     NULL,  true
 _java_home             = new SystemProperty("java.home",             NULL,  true);
 ```
 
-现在 `os::init_system_properties_values()` 负责把这些 NULL 填上真实值。Linux 实现位于 `os_linux.cpp:400-521`，核心逻辑是用 `os::jvm_path` 获取 `libjvm.so` 的绝对路径，然后向上逐层剥目录：
+现在 `os::init_system_properties_values()` 负责把这些 NULL 填上真实值。Linux 实现位于 `os_linux.cpp`，核心逻辑是用 `os::jvm_path` 获取 `libjvm.so` 的绝对路径，然后向上逐层剥目录：
 
 ```
 libjvm.so 绝对路径（本机）
@@ -343,7 +343,7 @@ libjvm.so 绝对路径（本机）
 
 #### `os::jvm_path` 是如何拿到路径的
 
-整棵树的第一步——"获取 `libjvm.so` 的绝对路径"——在这里用的是 `os::jvm_path()`，实现位于 `os_linux.cpp:2878-2965`。它的原理和 Ch01 里启动器的 `GetJVMPath`（字符串拼接 + `stat()` 验证）完全不同：
+整棵树的第一步——"获取 `libjvm.so` 的绝对路径"——在这里用的是 `os::jvm_path()`，实现位于 `os_linux.cpp`。它的原理和 Ch01 里启动器的 `GetJVMPath`（字符串拼接 + `stat()` 验证）完全不同：
 
 ```c
 void os::jvm_path(char *buf, jint buflen) {
@@ -364,7 +364,7 @@ void os::jvm_path(char *buf, jint buflen) {
 }
 ```
 
-`dll_address_to_library_name` 内部有两层查询策略，`os_linux.cpp:1803-1840`：
+`dll_address_to_library_name` 内部有两层查询策略，`os_linux.cpp`：
 
 ```c
 bool os::dll_address_to_library_name(address addr, char* buf,
@@ -442,7 +442,7 @@ typedef struct {
 } Dl_info;
 ```
 
-**为什么 HotSpot 用两个策略？** 注释里说明了原因（`os_linux.cpp:1811-1815`）：旧版 glibc 的 `dladdr()` 有一个 bug——当 .so 文件被预链接（prelink）导致加载基址不为 NULL 时，`dladdr` 可能返回错误的库名。因此优先用 `dl_iterate_phdr` 手动遍历 ELF header（更精确），`dladdr` 作为后备方案。
+**为什么 HotSpot 用两个策略？** 注释里说明了原因（`os_linux.cpp`）：旧版 glibc 的 `dladdr()` 有一个 bug——当 .so 文件被预链接（prelink）导致加载基址不为 NULL 时，`dladdr` 可能返回错误的库名。因此优先用 `dl_iterate_phdr` 手动遍历 ELF header（更精确），`dladdr` 作为后备方案。
 
 **与 Ch01 的衔接：** Ch01 中启动器已经通过 `GetJVMPath`（`%s/lib/%s/%s/libjvm.so` 拼字符串 + `stat()` 验证）找到了这个路径，然后 `dlopen` 加载。但 `JNI_CreateJavaVM` 的入参里没有"我是在哪个路径被加载的"这个字段——所以 VM 启动后必须自己重新发现。启动器用的是"文件系统拼接 + stat 验证"（**编译期已知的目录布局**），VM 用的是"动态链接器反查 + realpath 解析"（**运行时自省**）——二者殊途同归，拿到的是同一个路径。
 
@@ -472,7 +472,7 @@ typedef struct {
 
 ## JDK_Version_init() —— 读取 JDK 版本
 
-第二行调用 `JDK_Version_init()`，位置 `java.cpp:726-728`：
+第二行调用 `JDK_Version_init()`，位置 `java.cpp`：
 
 ```c
 void JDK_Version_init() {
@@ -480,7 +480,7 @@ void JDK_Version_init() {
 }
 ```
 
-`JDK_Version::initialize()` 在 `java.cpp:699-724`：
+`JDK_Version::initialize()` 在 `java.cpp`：
 
 ```c
 void JDK_Version::initialize() {
@@ -527,7 +527,7 @@ src/java.base/linux/native/libjava/*.c      Linux 专有：ProcessHandleImpl_lin
 
 `os::dll_lookup(lib_handle, "JDK_GetVersionInfo0")` 等价于 `dlsym(handle, "JDK_GetVersionInfo0")`，在 libjava.so 的符号表中查找 `JDK_GetVersionInfo0` 的函数地址。找到后把函数指针转换成 `jdk_version_info_fn_t`，调用它填入 `jdk_version_info` 结构体——这个结构体由 java 层写入，但内容由构建时 `-source 8` 或 `--release 11` 编译参数决定。
 
-`_current` 是 `JDK_Version` 的静态成员，定义在 `java.hpp:65`：
+`_current` 是 `JDK_Version` 的静态成员，定义在 `java.hpp`：
 
 ```c
 class JDK_Version {
@@ -560,7 +560,7 @@ class JDK_Version {
 
 ## Arguments::init_version_specific_system_properties() —— 补齐版本相关属性
 
-拿到版本号后立即补充三个系统属性，`arguments.cpp:423-437`：
+拿到版本号后立即补充三个系统属性，`arguments.cpp`：
 
 ```c
 void Arguments::init_version_specific_system_properties() {
@@ -615,7 +615,7 @@ LogOutput  ->  LogStdoutOutput    （全局对象 StdoutLog，编译期已存在
 
 ### 初始化源码
 
-`LogConfiguration::initialize` 在 `logConfiguration.cpp:103-111`。注意它在 `Arguments::parse()` 之前被调用——因为 parse 阶段要解析 `-Xlog:...` 参数，UL 的输出端必须先建好：
+`LogConfiguration::initialize` 在 `logConfiguration.cpp`。注意它在 `Arguments::parse()` 之前被调用——因为 parse 阶段要解析 `-Xlog:...` 参数，UL 的输出端必须先建好：
 
 ```c
 void LogConfiguration::initialize(jlong vm_start_time) {
@@ -633,7 +633,7 @@ void LogConfiguration::initialize(jlong vm_start_time) {
 
 **第 1 行：`LogFileOutput::set_file_name_parameters(vm_start_time)`**
 
-这行的作用是**预先格式化两个字符串并存为静态成员**——后续所有 `-Xlog:...:file=gc-%p-%t.log` 都从这两个字符串取值做占位符替换。实现位于 `logFileOutput.cpp:54-63`：
+这行的作用是**预先格式化两个字符串并存为静态成员**——后续所有 `-Xlog:...:file=gc-%p-%t.log` 都从这两个字符串取值做占位符替换。实现位于 `logFileOutput.cpp`：
 
 ```c
 // 两个静态字符数组，全局只有一份
@@ -657,7 +657,7 @@ void LogFileOutput::set_file_name_parameters(jlong vm_start_time) {
 }
 ```
 
-两个静态成员 `_pid_str` 和 `_vm_start_time_str` 存了格式化后的字符串——**这是 HotSpot 整个进程生命周期中唯一一次计算日志文件名的时间戳**。后续当 `Arguments::parse` 解析到 `-Xlog:gc*=info:file=gc-%p-%t.log` 时，会调用 `new LogFileOutput("file=gc-%p-%t.log")`，其构造函数内部调 `make_file_name`（`logFileOutput.cpp:359`），把文件名里的 `%p` 替换为 `_pid_str`，`%t` 替换为 `_vm_start_time_str`，得到最终文件名：`gc-12345-2024-06-28_12-30-45.log`。如果有日志滚动配置（`filecount=5`），还会产出 `gc-12345-2024-06-28_12-30-45.log.0`、`.log.1` 等。
+两个静态成员 `_pid_str` 和 `_vm_start_time_str` 存了格式化后的字符串——**这是 HotSpot 整个进程生命周期中唯一一次计算日志文件名的时间戳**。后续当 `Arguments::parse` 解析到 `-Xlog:gc*=info:file=gc-%p-%t.log` 时，会调用 `new LogFileOutput("file=gc-%p-%t.log")`，其构造函数内部调 `make_file_name`（`logFileOutput.cpp`），把文件名里的 `%p` 替换为 `_pid_str`，`%t` 替换为 `_vm_start_time_str`，得到最终文件名：`gc-12345-2024-06-28_12-30-45.log`。如果有日志滚动配置（`filecount=5`），还会产出 `gc-12345-2024-06-28_12-30-45.log.0`、`.log.1` 等。
 
 **第 2 行：`LogDecorations::initialize(vm_start_time)`**
 
@@ -691,7 +691,7 @@ UL 的每条日志行都有前缀装饰（decorations），如：
 
 > **★★ 关注点：** 4 路参数源的优先级顺序——理解命令行怎么覆盖环境变量、vm_options 怎么提供默认值。至于 `parse_each_vm_init_arg` 里具体匹配了哪些 flag——本质是 JVM 版 `getopt_long`，700 行 `if/else if` 字符串匹配，不需要逐行阅读。
 
-`arguments.cpp:3761-3961`，200 行，分 5 个阶段：
+`arguments.cpp`，200 行，分 5 个阶段：
 
 ```
 阶段 (1)  Flag 管理链表初始化   -- Range/Constraint/Writeable 的 init()
@@ -710,7 +710,7 @@ UL 的每条日志行都有前缀装饰（decorations），如：
 
 环境变量用 `getenv` 读取后按空格分割为 `JavaVMOption` 数组；`vm_options` 通过 `ClassLoader::lookup_vm_options()`——本质是一个 `dlsym` 从 `libjava.so` 读取编译期写入的字符串。`expand_vm_options_as_needed` 对每路参数源展开 `@file` 语法（读取文件内容，每行作为独立参数插入）。
 
-**阶段 (4) 的核心：** `parse_vm_init_args` 按优先级从低到高依次调用 `parse_each_vm_init_arg`，后解析的覆盖先解析的。`parse_each_vm_init_arg`（`arguments.cpp:2380`，700+ 行）就是一个巨大的 `if/else if` 链，按 `-verbose`，`-da/-ea`，`-Xbootclasspath/a:`，`-Xms`，`-Xmx`，`-Xmn`，`--add-modules`， ... 的顺序逐个 `match_option` 匹配字符串前缀，匹配到就调用对应的 setter——本质是 JVM 版的 `getopt_long`。
+**阶段 (4) 的核心：** `parse_vm_init_args` 按优先级从低到高依次调用 `parse_each_vm_init_arg`，后解析的覆盖先解析的。`parse_each_vm_init_arg`（`arguments.cpp`，700+ 行）就是一个巨大的 `if/else if` 链，按 `-verbose`，`-da/-ea`，`-Xbootclasspath/a:`，`-Xms`，`-Xmx`，`-Xmn`，`--add-modules`， ... 的顺序逐个 `match_option` 匹配字符串前缀，匹配到就调用对应的 setter——本质是 JVM 版的 `getopt_long`。
 
 **阶段 (5) 收尾：** CDS 归档路径解析、`.hotspotrc` 兼容性警告、`-XX:+PrintGC` 等旧 flag 自动转换为 `-Xlog:gc` 的 UL 配置、`ObjectAlignmentInBytes` 对齐修正。
 
@@ -722,7 +722,7 @@ UL 的每条日志行都有前缀装饰（decorations），如：
 
 ## os::init_before_ergo() —— 自动推算前的 OS 准备
 
-参数解析完成后，`os::init_before_ergo()` 为自动推算做 OS 级准备，`os.cpp:449-466`：
+参数解析完成后，`os::init_before_ergo()` 为自动推算做 OS 级准备，`os.cpp`：
 
 ```c
 void os::init_before_ergo() {
@@ -751,11 +751,11 @@ void os::init_before_ergo() {
 
 逐项说明：
 
-**`initialize_initial_active_processor_count`** —— `os.cpp:1744`。调用 `active_processor_count()` 获取可用 CPU 核数，存到 `os::_initial_active_processor_count`。本机是物理机（非容器环境），走 `sysconf(_SC_NPROCESSORS_CONF)`，返回 96。如果在 Docker 容器中，会读 `/sys/fs/cgroup/cpu/cpu.cfs_quota_us` 和 `cpu.cfs_period_us` 计算受限核数（如 `quota=200000 / period=100000 = 2` 核）。这个值直接影响后续 `apply_ergo` 中的 `CompilerConfig::ergo_initialize()`——编译器线程数默认值 = `min(cpu_count, 2)`。
+**`initialize_initial_active_processor_count`** —— `os.cpp`。调用 `active_processor_count()` 获取可用 CPU 核数，存到 `os::_initial_active_processor_count`。本机是物理机（非容器环境），走 `sysconf(_SC_NPROCESSORS_CONF)`，返回 96。如果在 Docker 容器中，会读 `/sys/fs/cgroup/cpu/cpu.cfs_quota_us` 和 `cpu.cfs_period_us` 计算受限核数（如 `quota=200000 / period=100000 = 2` 核）。这个值直接影响后续 `apply_ergo` 中的 `CompilerConfig::ergo_initialize()`——编译器线程数默认值 = `min(cpu_count, 2)`。
 
-**`large_page_init`** —— `os_linux.cpp:4156`。读 `/proc/meminfo` 的 `Hugepagesize` 字段获取大页大小（本机 2048 kB），存到 `_large_page_size`。`setup_large_page_type` 检查系统是否支持 Transparent Huge Pages 或 hugetlbfs，根据结果设 `UseLargePages`、`UseHugeTLBFS`、`UseSHM` 三个 bool。`apply_ergo` 后续会根据 `_large_page_size` 调整堆的起始地址对齐——堆必须对齐到大页边界。
+**`large_page_init`** —— `os_linux.cpp`。读 `/proc/meminfo` 的 `Hugepagesize` 字段获取大页大小（本机 2048 kB），存到 `_large_page_size`。`setup_large_page_type` 检查系统是否支持 Transparent Huge Pages 或 hugetlbfs，根据结果设 `UseLargePages`、`UseHugeTLBFS`、`UseSHM` 三个 bool。`apply_ergo` 后续会根据 `_large_page_size` 调整堆的起始地址对齐——堆必须对齐到大页边界。
 
-**四个栈守卫区域** —— `thread.hpp:1606-1635`。这是 JVM 检测 `StackOverflowError` 的底层机制。
+**四个栈守卫区域** —— `thread.hpp`。这是 JVM 检测 `StackOverflowError` 的底层机制。
 
 每个 `JavaThread` 的栈由 `pthread_create` 分配一块完整内存（大小由 `-Xss` 指定，默认 1MB）。HotSpot 拿到这块内存后，调用 `mprotect(PROT_NONE)` 把栈底方向的一部分页标记为不可读写——不是"预留"，是修改已有页的访问权限。当 Java 方法调用层级太深、栈指针触及这些被保护的页时，CPU 触发 `SIGSEGV`，JVM 的信号处理器识别为栈溢出，根据触及的区域执行不同策略。
 
@@ -765,7 +765,7 @@ void os::init_before_ergo() {
 
 四个 `Stack*Pages` 宏（`globals_x86.hpp`）定义了默认 4K 页数：red=1、yellow=2、reserved=1、shadow=20。`align_up` 把这四个值向上对齐到 `vm_page_size()`（本机 x86-64 也是 4096，所以不变），存入 `JavaThread` 的四个静态成员。
 
-**`init_before_ergo` 只是保存大小值，真正的保护动作发生在创建线程时。** `pthread_create` 确实只控制线程栈的总大小——HotSpot 启动 `JavaThread` 时传入 `-Xss` 指定的值（默认 1MB），内核分配这段虚拟地址空间作为线程栈。HotSpot 拿到这块完整内存后，在 `JavaThread` 构造函数末尾调用 `create_stack_guard_pages()`，关键源码在 `thread.cpp:2607-2640`：
+**`init_before_ergo` 只是保存大小值，真正的保护动作发生在创建线程时。** `pthread_create` 确实只控制线程栈的总大小——HotSpot 启动 `JavaThread` 时传入 `-Xss` 指定的值（默认 1MB），内核分配这段虚拟地址空间作为线程栈。HotSpot 拿到这块完整内存后，在 `JavaThread` 构造函数末尾调用 `create_stack_guard_pages()`，关键源码在 `thread.cpp`：
 
 ```c
 void JavaThread::create_stack_guard_pages() {
@@ -778,9 +778,9 @@ void JavaThread::create_stack_guard_pages() {
 }
 ```
 
-`os::guard_memory` 最终调的是 Linux 系统调用 `mprotect(addr, len, PROT_NONE)`（`os_linux.cpp:3944-3946`）。**这些页就是 `pthread_create` 分配栈的一部分，不是额外的内存。** `stack_end()` 的计算公式是 `stack_base() - stack_size()`，其中 `stack_size()` 是在 `record_stack_base_and_size()` 中从 OS 拿到的实际栈大小——和 `pthread_create` 分配的大小一致（默认约 1MB）。`create_stack_guard_pages` 从栈的底端取 `red + yellow + reserved`（16K）字节，调 `mprotect` 把它们的页表访问权限改为 `PROT_NONE`。剩余的约 1008K 正常使用。CPU 尝试访问被保护的页时触发 SIGSEGV，JVM 信号处理器识别为栈溢出，根据触及的区域采取不同策略。
+`os::guard_memory` 最终调的是 Linux 系统调用 `mprotect(addr, len, PROT_NONE)`（`os_linux.cpp`）。**这些页就是 `pthread_create` 分配栈的一部分，不是额外的内存。** `stack_end()` 的计算公式是 `stack_base() - stack_size()`，其中 `stack_size()` 是在 `record_stack_base_and_size()` 中从 OS 拿到的实际栈大小——和 `pthread_create` 分配的大小一致（默认约 1MB）。`create_stack_guard_pages` 从栈的底端取 `red + yellow + reserved`（16K）字节，调 `mprotect` 把它们的页表访问权限改为 `PROT_NONE`。剩余的约 1008K 正常使用。CPU 尝试访问被保护的页时触发 SIGSEGV，JVM 信号处理器识别为栈溢出，根据触及的区域采取不同策略。
 
-另外注意，HotSpot 在 `os::create_thread` 中**显式禁用了 glibc 的默认 guard page**——`pthread_attr_setguardsize(&attr, 0)`（`os_linux.cpp:3503-3508`），因为 glibc 只支持一个 guard page，而 HotSpot 需要四层守卫。
+另外注意，HotSpot 在 `os::create_thread` 中**显式禁用了 glibc 的默认 guard page**——`pthread_attr_setguardsize(&attr, 0)`（`os_linux.cpp`），因为 glibc 只支持一个 guard page，而 HotSpot 需要四层守卫。
 
 **为什么需要 `align_up`？** `mprotect` 以页为单位保护内存。如果 OS 页大小是 64KB（如 ARM64 某些配置），而 `StackRedPages` 只指定了 1 页 × 4KB = 4KB，保护范围就会不完整。对齐到 OS 实际页大小保证每个区域都是完整的页倍数。
 
@@ -794,7 +794,7 @@ void JavaThread::create_stack_guard_pages() {
 
 解析完用户的显式参数后，JVM 填补缺失的值。用户只指定了几个 flag（`-Xmx2g`、`-XX:+UseG1GC` 等），而 JVM 运行需要 200+ 个 flag 有明确值——`apply_ergo` 负责根据物理环境自动推算。
 
-`arguments.cpp:3963-4068`，主要赋值路径：
+`arguments.cpp`，主要赋值路径：
 
 ```
 set_ergonomics_flags()

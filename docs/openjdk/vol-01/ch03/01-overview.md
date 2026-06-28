@@ -6,7 +6,7 @@
 r = ifn->CreateJavaVM(pvm, (void**)penv, &args);
 ```
 
-`ifn->CreateJavaVM` 是第一章 `dlsym` 解析的函数指针，指向 `jni.cpp:4098` 的 `JNI_CreateJavaVM`。本章沿着这个入口走进去——从外层包装器到 `JNI_CreateJavaVM_inner`，经过两把原子锁，到达整个 Volume 1 的核心调用：`Threads::create_vm`。
+`ifn->CreateJavaVM` 是第一章 `dlsym` 解析的函数指针，指向 `jni.cpp` 的 `JNI_CreateJavaVM`。本章沿着这个入口走进去——从外层包装器到 `JNI_CreateJavaVM_inner`，经过两把原子锁，到达整个 Volume 1 的核心调用：`Threads::create_vm`。
 
 ---
 
@@ -99,7 +99,7 @@ clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, c
 
 ## JNI_CreateJavaVM() 外层包装器
 
-`JNI_CreateJavaVM` 只有 14 行，在 `jni.cpp:4098-4111`：
+`JNI_CreateJavaVM` 只有 14 行，在 `jni.cpp`：
 
 ```c
 _JNI_IMPORT_OR_EXPORT_ jint JNICALL JNI_CreateJavaVM(JavaVM **vm, void **penv, void *args) {
@@ -119,7 +119,7 @@ _JNI_IMPORT_OR_EXPORT_ jint JNICALL JNI_CreateJavaVM(JavaVM **vm, void **penv, v
 
 ## JNI_CreateJavaVM_inner() 全貌
 
-`JNI_CreateJavaVM_inner` 在 `jni.cpp:3952-4096`，145 行，4 个核心阶段：
+`JNI_CreateJavaVM_inner` 在 `jni.cpp`，145 行，4 个核心阶段：
 
 ```c
 /* === src/hotspot/share/prims/jni.cpp === */
@@ -198,7 +198,7 @@ if (Atomic::xchg(0, &safe_to_recreate_vm) == 0) {
 }
 ```
 
-三个关键全局变量定义在 `jni.cpp:3914-3918`：
+三个关键全局变量定义在 `jni.cpp`：
 
 ```c
 volatile int vm_created = 0;              // 0=未创建，1=创建中或已创建
@@ -210,7 +210,7 @@ struct JavaVM_ main_vm = {&jni_InvokeInterface};
 
 **`safe_to_recreate_vm`**——第二把锁。`Atomic::xchg(0, &safe_to_recreate_vm)` 把标志位清 0，同时返回旧值。如果旧值是 0，说明上次创建失败且不允许重试——返回 `JNI_ERR`（`-1`）。如果旧值是 1，允许本次创建。
 
-**为什么用 `Atomic::xchg` 而不是互斥锁？** 源码注释给了答案（`jni.cpp:3976-3984`）：互斥锁依赖 `Thread` 对象，此时线程系统还没初始化——`Threads::create_vm` 本身就是要创建第一个 `JavaThread`，不能在此之前的守卫代码里用互斥锁。`Atomic::xchg` 是 CPU 指令级别的原子操作（`lock xchg` 或等价指令），不依赖任何线程基础设施。
+**为什么用 `Atomic::xchg` 而不是互斥锁？** 源码注释给了答案（`jni.cpp`）：互斥锁依赖 `Thread` 对象，此时线程系统还没初始化——`Threads::create_vm` 本身就是要创建第一个 `JavaThread`，不能在此之前的守卫代码里用互斥锁。`Atomic::xchg` 是 CPU 指令级别的原子操作（`lock xchg` 或等价指令），不依赖任何线程基础设施。
 
 源码还解释了为什么用 `xchg` 而不是 `Atomic::add/dec`：`Atomic::add/dec` 在某些平台上依赖 `os::is_MP()` 判断是否多处理器，而初始化阶段这个函数始终返回 false。`xchg` 不受此限制。
 
