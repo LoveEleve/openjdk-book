@@ -373,6 +373,18 @@ void os::Linux::set_signal_handler(int sig, bool set_installed) {
 - `si_addr` 在栈保护页范围 → StackOverflowError（Stage 2 的 `mprotect(PROT_NONE)`）
 - `si_addr` 在安全点轮询页 → 线程挂起等待 GC（本章后续的 `SafepointMechanism::initialize()`）
 
+总结一下——内核根据信号编号查表来调用不同的处理器，分拣逻辑在信号号一层就已经分开了：
+
+| 信号编号 | 信号名 | 处理器 | 注册步骤 |
+|---------|--------|--------|---------|
+| 12 | SIGUSR2 (SR_signum) | `SR_handler` | 第一步 |
+| 11 | SIGSEGV | `signalHandler` | 第三步 |
+| 7 | SIGBUS | `signalHandler` | 第三步 |
+| 4 | SIGILL | `signalHandler` | 第三步 |
+| 8 | SIGFPE | `signalHandler` | 第三步 |
+
+`SR_handler` 和 `signalHandler` 互不干扰——不是因为代码里做了判断，而是因为它们被注册到了不同的信号号上。内核收到信号时，直接根据信号号查进程的 `sighand` 表，找到对应的 `struct sigaction`，执行里面的函数指针。
+
 **综合时间线——空指针怎么变成 NullPointerException：**
 
 一台机器的 Java 方法拿到了一个 `null` 对象引用。对它的`field`字段进行写操作。HotSpot 不会先生成 `if (o == null)` 的检查代码——而是直接计算`o+field_offset`的地址，向这个地址写入一个新值。计算时`o = null`加上偏移量，得到的是一个位于`0x00`附近的极低地址。
