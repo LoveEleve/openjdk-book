@@ -761,7 +761,7 @@ void os::init_before_ergo() {
 
 四个区域从栈底往上（地址从低到高）排列：
 
-<img src="/docs/openjdk/vol-01/ch03/assets/线程栈守卫区域.png" alt="线程栈守卫区域" style="max-width:100%">
+<img src="/data/workspace/LoveEleve.github.io/docs/openjdk/vol-01/ch03/assets/线程栈守卫区域.png" alt="线程栈守卫区域" style="max-width:100%">
 
 四个 `Stack*Pages` 宏（`globals_x86.hpp`）定义了默认 4K 页数：red=1、yellow=2、reserved=1、shadow=20。`align_up` 把这四个值向上对齐到 `vm_page_size()`（本机 x86-64 也是 4096，所以不变），存入 `JavaThread` 的四个静态成员。
 
@@ -876,4 +876,14 @@ PauseAtStartup 处理                             — 调试等待
 HOTSPOT_VM_INIT_BEGIN()                         — Stage 3 入口
 ```
 
-`parse` 之后，参数系统内保存的是 200+ 个已校验的 flag——GC 类型、堆大小、编译模式、日志配置——每个都经过了 4 路参数源优先级、范围校验和跨 flag 约束检查。接下来 `HOTSPOT_VM_INIT_BEGIN` 把这些配置喂给 init_globals，虚拟机的身体才开始搭建。
+`parse` + `apply_ergo` 之后，用户指定的几个 flag 被补齐为 200+ 个完整配置，每个都经过了优先级、范围校验和跨 flag 约束检查。这些 flag 的实际存储位置不是某个"配置对象"或 map——而是 **编译期由 `globals.hpp` 等文件中的宏展开生成的全局变量**。以 `UseG1GC` 为例：
+
+```c
+// gc_globals.hpp → 展开为 globals_extension.hpp 的宏
+MATERIALIZE_PRODUCT_FLAG(bool, UseG1GC, false, ...)
+// → 等价于: bool UseG1GC = false;           ← 全局变量，就是这个名字
+```
+
+每个 flag 对应一个 `JVMFlag` 结构体（`jvmFlag.hpp:107-112`），其 `_addr` 字段指向那个全局变量的地址。所有 `JVMFlag` 组成一个静态数组 `JVMFlag::flags[]`。当你写 `FLAG_SET_ERGO(uintx, MaxHeapSize, value)` 时，实际是找到 `MaxHeapSize` 的 JVMFlag 条目，往 `*(_addr)` 写入 value，并标记来源为 `ERGONOMIC`。
+
+换句话说：**flag 就是 C++ 全局变量，JVMFlag 只是包装了它的元数据（名字、类型、来源）。** `parse`/`apply_ergo` 做的事情本质上就是 `maxHeapSize = 2G; useG1GC = true; ciCompilerCount = 2;`。接下来 `HOTSPOT_VM_INIT_BEGIN` 进入 Stage 3，这些全局变量被 `init_globals` 读取来搭建虚拟机的身体。
