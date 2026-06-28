@@ -85,9 +85,57 @@ Linux::signal_sets_init();
 Linux::install_signal_handlers();
 ```
 
-### 1.1 信号处理器注册 —— 核心段落
+### 1.1 信号体系初始化 —— 核心段落
 
-这是 `os::init_2()` 最重要的产出。首先 `SR_initialize()` 初始化线程挂起/恢复机制（Stop-The-World 需要暂停所有 Java 线程），然后注册信号处理器：
+这是 `os::init_2()` 最重要的产出，三步搭建 JVM 的完整信号体系。
+
+**第一步：信号集初始化**
+
+```c
+// === os_linux.cpp ===
+void os::Linux::signal_sets_init() {
+  sigemptyset(&unblocked_sigs);
+  sigaddset(&unblocked_sigs, SIGILL);    // 非法指令
+  sigaddset(&unblocked_sigs, SIGSEGV);   // 段错误
+  sigaddset(&unblocked_sigs, SIGBUS);    // 总线错误
+  sigaddset(&unblocked_sigs, SIGFPE);    // 浮点异常
+  sigaddset(&unblocked_sigs, SR_signum); // suspend/resume 信号
+  // ... SHUTDOWN 信号（Ctrl-C 等，ReduceSignalUsage=false 时）
+}
+```
+
+创建了两个信号集：`unblocked_sigs`——所有线程都不阻塞这些信号（JVM 靠它们工作），`vm_sigs`——只有 VMThread 接收 `BREAK_SIGNAL`（Ctrl-Break 线程 dump）。
+
+**第二步：线程挂起/恢复信号注册**
+
+Stop-The-World 需要暂停所有 Java 线程。JVM 不是用 `pthread_kill(SIGSTOP)`，而是用自己的信号 `SR_signum`：
+
+```c
+// === os_linux.cpp ===
+static int SR_initialize() {
+  struct sigaction act;
+
+  // 信号号：环境变量 _JAVA_SR_SIGNUM 可覆盖，默认取 > max(SIGSEGV, SIGBUS) 的可用信号
+  if ((s = ::getenv("_JAVA_SR_SIGNUM")) != 0) {
+    SR_signum = strtol(s, 0, 10);
+  }
+
+  sigemptyset(&SR_sigset);
+  sigaddset(&SR_sigset, SR_signum);
+
+  act.sa_flags = SA_RESTART | SA_SIGINFO;
+  act.sa_handler = (void (*)(int)) SR_handler;   // 处理器：SR_handler
+  sigaction(SR_signum, &act, 0);                 // 向内核注册
+
+  return 0;
+}
+```
+
+`SR_handler` 是挂起等待的处理函数。当 VMThread 需要 Stop-The-World 时，对每个 Java 线程调 `pthread_kill(thread_id, SR_signum)` 发送此信号。收到信号的线程在 `SR_handler` 中检查自己是否需要暂停，如果需要就阻塞等待。
+
+`_JAVA_SR_SIGNUM` 环境变量允许嵌入式场景自定义信号号（避免冲突）。
+
+**第三步：业务信号处理器注册**
 
 ```c
 // === os_linux.cpp ===
@@ -105,27 +153,23 @@ void os::Linux::install_signal_handlers() {
 }
 ```
 
-`set_signal_handler` 内部调用 Linux 的 `sigaction()` 系统调用，注册到的处理器是同一个函数——`signalHandler`：
+`set_signal_handler` 内部调用 Linux 的 `sigaction()`：
 
 ```c
 void os::Linux::set_signal_handler(int sig, bool set_installed) {
   struct sigaction sigAct;
   sigfillset(&(sigAct.sa_mask));
   sigAct.sa_sigaction = signalHandler;       // 统一入口函数
-  sigAct.sa_flags = SA_SIGINFO | SA_RESTART; // 需要 siginfo + 自动重启被中断的系统调用
+  sigAct.sa_flags = SA_SIGINFO | SA_RESTART;
   sigaction(sig, &sigAct, &oldAct);
 }
 ```
 
-关键参数：`SA_SIGINFO` 让内核在信号到达时提供 `siginfo_t` 结构体（包括触发地址 `si_addr`），JVM 借此区分三种 SIGSEGV：
+关键参数 `SA_SIGINFO` 让内核在信号到达时提供 `siginfo_t` 结构体（包含触发地址 `si_addr`）。同一个信号处理器 `signalHandler`、同一种信号 SIGSEGV，通过 `si_addr` 区分三种触发源：
 
-1. **空指针访问** —— `si_addr` 落在 `[0, 4K)` 零页附近。JVM 的隐式 null check 不写 `if (o == null)`，直接读 `o + offset`。如果 `o` 为 null，地址在零页，触发 SIGSEGV。信号处理器从 handler 里往外抛 `NullPointerException`。
-
-2. **栈溢出** —— `si_addr` 落在当前线程栈的保护页范围（Stage 2 的 `mprotect(PROT_NONE)` 保护的栈底 16KB）。处理器识别后抛 `StackOverflowError`，并暂时解开 yellow zone 保护，让异常处理代码有栈空间执行。
-
-3. **安全点轮询** —— `si_addr` 落在 `os::_polling_page`（本章后续 `SafepointMechanism::initialize()` 分配的 bad_page）。处理器调用 `SafepointSynchronize::block()` 阻塞线程，等 GC 等全局操作完成。
-
-同一个信号（SIGSEGV），同一个入口（`signalHandler`），通过 `si_addr` 判断是哪种触发源。
+- `si_addr` 在零页附近 → NullPointerException（隐式 null check）
+- `si_addr` 在栈保护页范围 → StackOverflowError（Stage 2 的 `mprotect(PROT_NONE)`）
+- `si_addr` 在安全点轮询页 → 线程挂起等待 GC（本章后续的 `SafepointMechanism::initialize()`）
 
 ### 1.2 NUMA 初始化
 
