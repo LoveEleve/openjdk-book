@@ -97,7 +97,7 @@ Linux::install_signal_handlers();
 | 异步信号 | 外部事件（用户按 Ctrl-C、`kill` 命令、定时器到期） | 内核从"不阻塞该信号的线程"中**任选一个**投递 | SIGINT、SIGTERM、SIGALRM |
 | 定向信号 | `pthread_kill(thread_id, sig)` | **只投递给指定线程**，不受掩码限制 | HotSpot 的 `SR_signum` |
 
-这个区别至关重要——回看上一节我写的"从'不阻塞该信号的线程'中挑一个"只适用于异步信号。同步信号没有"挑选"的过程，触发线程必须处理它。
+这个区别至关重要：同步信号没有"挑选"的过程，触发线程必须处理它。如果触发线程阻塞了该信号，内核直接杀进程。
 
 每线程有自己的信号掩码（signal mask），函数 `pthread_sigmask(SIG_BLOCK/SIG_UNBLOCK/SIG_SETMASK, &set, &old)` 控制阻塞哪些信号。同步信号的触发线程如果阻塞了该信号，行为是未定义的——通常导致进程被内核杀死。
 
