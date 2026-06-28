@@ -633,7 +633,31 @@ void LogConfiguration::initialize(jlong vm_start_time) {
 
 **第 1 行：`LogFileOutput::set_file_name_parameters(vm_start_time)`**
 
-`vm_start_time` 是从 `create_vm_timer.begin_time()` 获得的 JVM 启动时间戳（毫秒级）。这行把一个全局变量填入：当前进程的 PID、启动时间戳。后续用户写 `-Xlog:gc*=info:file=gc-%p-%t.log` 时，`%p` 替换为 PID，`%t` 替换为这个时间戳格式化后的字符串——如 `gc-12345-2024-01-15_10-30-00.log`。
+这行的作用是**预先格式化两个字符串并存为静态成员**——后续所有 `-Xlog:...:file=gc-%p-%t.log` 都从这两个字符串取值做占位符替换。实现位于 `logFileOutput.cpp:54-63`：
+
+```c
+// 两个静态字符数组，全局只有一份
+char LogFileOutput::_pid_str[21];              // 存储 "12345"   (PID 字符串)
+char LogFileOutput::_vm_start_time_str[20];    // 存储 "2024-06-28_12-30-45"
+
+void LogFileOutput::set_file_name_parameters(jlong vm_start_time) {
+  // 第一件事：把进程 PID 格式化为字符串，存到 _pid_str
+  int res = jio_snprintf(_pid_str, sizeof(_pid_str), "%d",
+                         os::current_process_id());
+  // → _pid_str = "12345" (本机 PID)
+
+  // 第二件事：把 vm_start_time（毫秒时间戳）转为本地时间+格式化字符串
+  struct tm local_time;
+  time_t utc_time = vm_start_time / 1000;          // 毫秒→秒
+  os::localtime_pd(&utc_time, &local_time);        // UTC→本地时间
+  res = (int)strftime(_vm_start_time_str, sizeof(_vm_start_time_str),
+                      "%Y-%m-%d_%H-%M-%S",        // 格式化模板
+                      &local_time);
+  // → _vm_start_time_str = "2024-06-28_12-30-45"
+}
+```
+
+两个静态成员 `_pid_str` 和 `_vm_start_time_str` 存了格式化后的字符串——**这是 HotSpot 整个进程生命周期中唯一一次计算日志文件名的时间戳**。后续当 `Arguments::parse` 解析到 `-Xlog:gc*=info:file=gc-%p-%t.log` 时，会调用 `new LogFileOutput("file=gc-%p-%t.log")`，其构造函数内部调 `make_file_name`（`logFileOutput.cpp:359`），把文件名里的 `%p` 替换为 `_pid_str`，`%t` 替换为 `_vm_start_time_str`，得到最终文件名：`gc-12345-2024-06-28_12-30-45.log`。如果有日志滚动配置（`filecount=5`），还会产出 `gc-12345-2024-06-28_12-30-45.log.0`、`.log.1` 等。
 
 **第 2 行：`LogDecorations::initialize(vm_start_time)`**
 
