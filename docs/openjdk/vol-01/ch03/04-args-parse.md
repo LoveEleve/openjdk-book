@@ -761,20 +761,7 @@ void os::init_before_ergo() {
 
 四个区域从栈底往上（地址从低到高）排列：
 
-```
-低地址  ┌─────────────────────┐ ← stack_end（栈的末端）
-       │ Red zone    1 页 (4K) │  最后防线：触及直接终止线程
-       ├─────────────────────┤
-       │ Yellow zone 2 页 (8K) │  警戒区：触及抛 StackOverflowError
-       ├─────────────────────┤
-       │ Reserved zone 1 页(4K)│  异常处理和关键代码的最小栈空间，永不禁用
-       ├─────────────────────┤
-       │                     │
-       │   正常可用栈空间       │  ← Java 方法帧在这里实际运行
-       │     (约 1MB)         │
-       │                     │
-高地址  └─────────────────────┘ ← stack_base（栈的起始位置）
-```
+<img src="/docs/openjdk/vol-01/ch03/assets/线程栈守卫区域.png" alt="线程栈守卫区域" style="max-width:100%">
 
 四个 `Stack*Pages` 宏（`globals_x86.hpp`）定义了默认 4K 页数：red=1、yellow=2、reserved=1、shadow=20。`align_up` 把这四个值向上对齐到 `vm_page_size()`（本机 x86-64 也是 4096，所以不变），存入 `JavaThread` 的四个静态成员。
 
@@ -803,249 +790,58 @@ void JavaThread::create_stack_guard_pages() {
 
 ## Arguments::apply_ergo() —— 自动推算
 
-解析完用户的显式参数后，JVM 需要填补缺失的值——"你没说 -Xmx，我根据物理内存帮你算一个好用的"。这就是 `apply_ergo`，`arguments.cpp:3963-4068`：
+> **★★★ 核心关注：** ergo 自动补全了哪些关键 flag，以及补全的依据（物理内存 → 堆大小、CPU 核数 → 编译器线程数）。不需要逐行阅读源码。
 
-```c
-jint Arguments::apply_ergo() {
-  // Set flags based on ergonomics.
-  jint result = set_ergonomics_flags();
-  if (result != JNI_OK) return result;
+解析完用户的显式参数后，JVM 填补缺失的值。用户只指定了几个 flag（`-Xmx2g`、`-XX:+UseG1GC` 等），而 JVM 运行需要 200+ 个 flag 有明确值——`apply_ergo` 负责根据物理环境自动推算。
 
-  // Set heap size based on available physical memory
-  set_heap_size();
+`arguments.cpp:3963-4068`，主要赋值路径：
 
-  GCConfig::arguments()->initialize();
+```
+set_ergonomics_flags()
+  ├── GCConfig::initialize()      → UseG1GC / UseSerialGC 等（默认 G1）
+  ├── set_use_compressed_oops()   → UseCompressedOops（堆 < 32GB 且 64 位平台）
+  ├── set_use_compressed_klass_ptrs() → UseCompressedClassPointers
+  └── set_conservative_max_heap_alignment()
 
-  set_shared_spaces_flags();
+set_heap_size()
+  ├── phys_mem = os::physical_memory() → 本机 ~500GB（/proc/meminfo MemTotal）
+  ├── MaxHeapSize = phys_mem × MaxRAMPercentage(25%) ≈ 16GB（如果未显式指定）
+  └── 如果启用压缩指针：限制 ≤ 32GB
 
-  // Initialize Metaspace flags and alignments
-  Metaspace::ergo_initialize();
-
-  // Set compiler flags after GC is selected and GC specific
-  // flags (LoopStripMiningIter) are set.
-  CompilerConfig::ergo_initialize();
-
-  // Set bytecode rewriting flags
-  set_bytecode_flags();
-
-  // Set flags if Aggressive optimization flags (-XX:+AggressiveOpts) enabled
-  jint code = set_aggressive_opts_flags();
-  if (code != JNI_OK) {
-    return code;
-  }
-
-  // Turn off biased locking for locking debug mode flags
-  if (UseHeavyMonitors
-#ifdef COMPILER1
-      || !UseFastLocking
-#endif
-#if INCLUDE_JVMCI
-      || !JVMCIUseFastLocking
-#endif
-    ) {
-    if (!FLAG_IS_DEFAULT(UseBiasedLocking) && UseBiasedLocking) {
-      warning("Biased Locking is not supported with locking debug flags"
-              "; ignoring UseBiasedLocking flag." );
-    }
-    UseBiasedLocking = false;
-  }
-
-#ifdef CC_INTERP
-  FLAG_SET_DEFAULT(ProfileInterpreter, false);
-  FLAG_SET_DEFAULT(UseBiasedLocking, false);
-  LP64_ONLY(FLAG_SET_DEFAULT(UseCompressedOops, false));
-  LP64_ONLY(FLAG_SET_DEFAULT(UseCompressedClassPointers, false));
-#endif
-
-  if (PrintAssembly && FLAG_IS_DEFAULT(DebugNonSafepoints)) {
-    warning("PrintAssembly is enabled; turning on DebugNonSafepoints to gain additional output");
-    DebugNonSafepoints = true;
-  }
-
-  if (FLAG_IS_CMDLINE(CompressedClassSpaceSize) && !UseCompressedClassPointers) {
-    warning("Setting CompressedClassSpaceSize has no effect when compressed class pointers are not used");
-  }
-
-  if (PrintCommandLineFlags) {
-    JVMFlag::printSetFlags(tty);
-  }
-
-  // Apply CPU specific policy for the BiasedLocking
-  if (UseBiasedLocking) {
-    if (!VM_Version::use_biased_locking() &&
-        !(FLAG_IS_CMDLINE(UseBiasedLocking))) {
-      UseBiasedLocking = false;
-    }
-  }
-#ifdef COMPILER2
-  if (!UseBiasedLocking || EmitSync != 0) {
-    UseOptoBiasInlining = false;
-  }
-#endif
-
-  return JNI_OK;
-}
+GCConfig::arguments()->initialize()    → G1HeapRegionSize 等 GC 特定参数
+Metaspace::ergo_initialize()           → MetaspaceSize / MaxMetaspaceSize
+CompilerConfig::ergo_initialize()      → CICompilerCount（基于 CPU 核数，默认 min(cpus, 2)）
+set_bytecode_flags()                  → RewriteBytecodes / RewriteFrequentPairs
+set_aggressive_opts_flags()           → -XX:+AggressiveOpts 的附加优化
+UseBiasedLocking 冲突处理              → 调试模式下自动关闭偏向锁
+UseOptoBiasInlining                   → 和 UseBiasedLocking 联动
 ```
 
-### set_ergonomics_flags()
+**核心推算规则：**
 
-`arguments.cpp:1696-1714`：
+- **堆大小** = `MinRAMPercentage` 或 `MaxRAMPercentage` × 物理内存。本机 500GB 物理内存 → 默认 `MaxHeapSize ≈ 500 × 25% = 125GB`，但压缩指针上限 32GB 会截断这个值。实际本机若显式传 `-Xmx2g`，则不触发自动推算。
 
-```c
-jint Arguments::set_ergonomics_flags() {
-  GCConfig::initialize();
+- **编译器线程数** = `min(CPU 核数, 2)`。本机 96 核 → 默认 2 条 C1 + 2 条 C2 编译线程。`-XX:CICompilerCount=N` 可覆盖。
 
-  set_conservative_max_heap_alignment();
+- **GC 选择**：JDK 11 默认 G1。`GCConfig::initialize()` 检查是否有显式 GC flag 后，设 `UseG1GC = true` 并注册冲突检测（`-XX:+UseSerialGC` 和 `-XX:+UseG1GC` 不可同时开启）。
 
-#ifndef ZERO
-#ifdef _LP64
-  set_use_compressed_oops();
-  set_use_compressed_klass_ptrs();
-#endif
-#endif
+- **CompressedOops**：64 位平台上，如果堆大小不超过 32GB，自动启用压缩对象指针（8 字节引用 → 4 字节，节省内存）。
 
-  return JNI_OK;
-}
-```
-
-`GCConfig::initialize()` 选择 GC——如果用户没指定，默认选 G1（JDK 11 默认 GC）。检查步骤在 `src/hotspot/share/gc/shared/gcConfig.cpp`，含冲突检测（不能同时 -XX:+UseSerialGC 和 -XX:+UseG1GC）。
-
-`set_use_compressed_oops()` 决定是否使用压缩对象指针——64 位 JVM 把对象引用从 8 字节压缩到 4 字节，条件是堆大小不超过 32GB（压缩指针可达 4GB * 8 字节对齐 = 32GB）。`set_use_compressed_klass_ptrs()` 在 CompressedOops 的基础上为类元数据指针启用压缩。
-
-`set_conservative_max_heap_alignment()` 设置堆的最大对齐值——用于后续 allocatable memory 计算。
-
-### set_heap_size() —— 自动计算堆大小
-
-`arguments.cpp:1729-1790`，核心逻辑：
-
-```c
-void Arguments::set_heap_size() {
-  julong phys_mem =
-    FLAG_IS_DEFAULT(MaxRAM) ? MIN2(os::physical_memory(), (julong)MaxRAM)
-                            : (julong)MaxRAM;
-
-  if (FLAG_IS_DEFAULT(MaxRAMPercentage) &&
-      !FLAG_IS_DEFAULT(MaxRAMFraction))
-    MaxRAMPercentage = 100.0 / MaxRAMFraction;
-
-  if (FLAG_IS_DEFAULT(MaxHeapSize)) {
-    julong reasonable_max = (julong)((phys_mem * MaxRAMPercentage) / 100);
-    const julong reasonable_min = (julong)((phys_mem * MinRAMPercentage) / 100);
-    if (reasonable_min < MaxHeapSize) {
-      reasonable_max = reasonable_min;
-    } else {
-      reasonable_max = MAX2(reasonable_max, (julong)MaxHeapSize);
-    }
-
-    if (!FLAG_IS_DEFAULT(ErgoHeapSizeLimit) && ErgoHeapSizeLimit != 0) {
-      reasonable_max = MIN2(reasonable_max, (julong)ErgoHeapSizeLimit);
-    }
-    if (UseCompressedOops) {
-      julong max_coop_heap = (julong)max_heap_for_compressed_oops();
-      ...
-      reasonable_max = MIN2(reasonable_max, max_coop_heap);
-    }
-    reasonable_max = limit_by_allocatable_memory(reasonable_max);
-
-    FLAG_SET_ERGO(size_t, MaxHeapSize, (size_t)reasonable_max);
-  }
-```
-
-`phys_mem` 取值：如果 `-XX:MaxRAM` 是默认值，取物理内存；否则取用户指定的值。物理内存通过 `os::physical_memory()` 读取 `/proc/meminfo` 的 `MemTotal` 字段（Linux），经过容器限制校正。
-
-如果没有显式指定 `-Xmx`，堆大小按 `MaxRAMPercentage`（默认 25%）乘以物理内存计算。例如物理内存 64GB，`MaxHeapSize ≈ 64 × 25% = 16GB`。如果启用压缩指针，还受限于压缩指针可达的最大堆（通常是 32GB）。
-
-`MinRAMPercentage` 用于小内存设备——当计算出来的堆小于 `MaxHeapSize` 默认值（大约 96MB）时，用 `MinRAMPercentage` 重新计算。
-
-### 剩余的 ergo 步骤
-
-- **GCConfig::arguments()->initialize()** —— GC 特定参数初始化（G1 的 `G1HeapRegionSize` 默认值等）
-- **Metaspace::ergo_initialize()** —— 元空间初始/最大大小自动推算
-- **CompilerConfig::ergo_initialize()** —— 编译器线程数自动推算（基于 CPU 核数）
-- **set_bytecode_flags()** —— `RewriteBytecodes`、`RewriteFrequentPairs` 的默认值
-- **set_aggressive_opts_flags()** —— `-XX:+AggressiveOpts` 打开时启用额外优化
-- **BiaedLocking 冲突处理** —— 调试模式（`UseHeavyMonitors`、`!UseFastLocking`）下自动关闭偏向锁
-- **CPU 特定策略** —— 某些 CPU（ARM 低端芯片等）默认关闭偏向锁
-
-总结：`apply_ergo` 把用户在命令行指定的 10 个参数扩展成运行所需的 200+ 个参数的完整集合。它的输入是用户知道的 flag，输出是 JVM 可以工作的完整配置状态。
+区别于 `parse` 的"用户说什么就设什么"，ergo 是"用户没说的，我来帮用户算"。输入是少数用户 flag，输出是 200+ 个完整配置。
 
 ---
 
 ## JVMFlagRangeList::check_ranges() 和 JVMFlagConstraintList::check_constraints() —— Flag 校验
 
-`apply_ergo` 可能修改 flag 值（例如自动设置 `MaxHeapSize`），所以 range 和 constraint 校验放在 ergo 之后。
+`apply_ergo` 可能修改 flag 值（如自动设 `MaxHeapSize`），所以校验放在它之后、`mark_startup` 之前。两个检查各自遍历编译期注册的 range/constraint 链表：`check_ranges` 验证每个 flag 的值在其允许范围内（如 `MaxHeapSize` 不能超过物理地址空间），`check_constraints(AfterErgo)` 验证跨 flag 的互斥或依赖关系（如 `UseG1GC` 不能和 `UseSerialGC` 同时为 true）。不通过则 JVM 启动失败。
 
-### check_ranges
-
-`jvmFlagRangeList.cpp:423-430`：
-
-```c
-bool JVMFlagRangeList::check_ranges() {
-  bool status = true;
-  for (int i=0; i<length(); i++) {
-    JVMFlagRange* range = at(i);
-    if (range->check(true) != JVMFlag::SUCCESS) status = false;
-  }
-  return status;
-}
-```
-
-遍历所有注册的 range 对象，调用 `range->check(true)`。参数 `true` 表示这是最终检索（非中间阶段），会打印错误信息。例如 `MaxHeapSize` 的 range 检查确保值不超过物理地址空间限制。
-
-### check_constraints
-
-`jvmFlagConstraintList.cpp:356-367`：
-
-```c
-bool JVMFlagConstraintList::check_constraints(JVMFlagConstraint::ConstraintType type) {
-  guarantee(type > _validating_type, "Constraint check is out of order.");
-  _validating_type = type;
-
-  bool status = true;
-  for (int i=0; i<length(); i++) {
-    JVMFlagConstraint* constraint = at(i);
-    if (type != constraint->type()) continue;
-    if (constraint->apply(true) != JVMFlag::SUCCESS) status = false;
-  }
-  return status;
-}
-```
-
-遍历所有注册的约束对象，只检查匹配 `type` 的约束。Stage 2 传的是 `AfterErgo`——表示约束检查发生在 ergo 计算之后（ergo 可能会改变 flag 值，之前的校验结果可能不再有效）。
-
-`_validating_type` 是一个递增的时间标记——防止约束校验顺序错乱。HotSpot 有三轮约束校验：启动时的 `AfterErgo` 和 `AfterMemoryInit`（在 `Universe::genesis` 之后），以及运行时通过 `jcmd` 的 `VM.set_flag` 触发的校验。
-
-约束检查的一个实际例子：`ThreadLocalHandshakesConstraintFunc` 确保 `-XX:+ThreadLocalHandshakes` 只在支持线程本地轮询的平台上生效。如果平台不支持，该约束函数会把 `ThreadLocalHandshakes` 设回 `false` 并输出日志。
+HotSpot 有三轮约束校验：`AfterErgo`（此刻）、`AfterMemoryInit`（堆初始化后）、以及运行时 `jcmd VM.set_flag` 触发的动态校验。
 
 ---
 
 ## JVMFlagWriteableList::mark_startup() 和 PauseAtStartup
 
-### mark_startup
-
-`jvmFlagWriteableList.cpp:197-202`：
-
-```c
-void JVMFlagWriteableList::mark_startup(void) {
-  for (int i=0; i<length(); i++) {
-    JVMFlagWriteable* writeable = at(i);
-    writeable->mark_startup();
-  }
-}
-```
-
-遍历所有 writable flag，调用 `mark_startup()` 保存启动时的初始值。`jcmd VM.set_flag` 修改 flag 时，只允许修改标记为 writable 的 flag，且 `mark_startup` 记录的值用于 `jcmd VM.flags -all` 显示"启动时设的值 vs 当前值"。
-
-### PauseAtStartup
-
-`PauseAtStartup` 定义在 `globals.hpp:2551`：
-
-```c
-diagnostic(bool, PauseAtStartup, false,
-           "When set, VM will wait for external debugger connection on startup")
-```
-
-如果用户传递了 `-XX:+PauseAtStartup`，`os::pause()` 会让 JVM 进程在此处暂停——通常是 Linux 下调用 `pause()`（进程等待信号），或 `read(0, &c, 1)`（等待终端输入）。调式工具在 JVM 启动早期连接调试器时使用——此时 VM 结构体已经初始化，但还未进入 Java main 方法。
+`mark_startup` 遍历所有标记为 writable 的 flag，保存它们此刻的值——用于 `jcmd VM.flags -all` 显示"启动值 vs 当前值"。`PauseAtStartup` 是一个调试用 flag：如果用户传了 `-XX:+PauseAtStartup`，`os::pause()` 会暂停 JVM 进程等待调试器连接。
 
 ---
 
