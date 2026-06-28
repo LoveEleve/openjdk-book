@@ -761,7 +761,7 @@ void os::init_before_ergo() {
 
 四个区域从栈底往上（地址从低到高）排列：
 
-<img src="/data/workspace/LoveEleve.github.io/docs/openjdk/vol-01/ch03/assets/线程栈守卫区域.png" alt="线程栈守卫区域" style="max-width:100%">
+<img src="/docs/openjdk/vol-01/ch03/assets/线程栈守卫区域.png" alt="线程栈守卫区域" style="max-width:100%">
 
 四个 `Stack*Pages` 宏（`globals_x86.hpp`）定义了默认 4K 页数：red=1、yellow=2、reserved=1、shadow=20。`align_up` 把这四个值向上对齐到 `vm_page_size()`（本机 x86-64 也是 4096，所以不变），存入 `JavaThread` 的四个静态成员。
 
