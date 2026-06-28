@@ -302,28 +302,73 @@ void Arguments::PropertyList_add(SystemProperty** plist, SystemProperty *new_p) 
 
 ### 最后一步：`os::init_system_properties_values()` 
 
-函数末尾这一行调用，填充之前设为 NULL 的 OS 相关属性。它在 Linux 上的实现是 `os_linux.cpp:400-521`，做了三件事：
+回到 `init_system_properties` 第 63-68 行，那时有三条属性是带着 NULL 值创建的：
+
+```c
+_sun_boot_library_path = new SystemProperty("sun.boot.library.path", NULL,  true);
+_java_library_path     = new SystemProperty("java.library.path",     NULL,  true);
+_java_home             = new SystemProperty("java.home",             NULL,  true);
+```
+
+现在 `os::init_system_properties_values()` 负责把这些 NULL 填上真实值。Linux 实现位于 `os_linux.cpp:400-521`，核心逻辑是用 `os::jvm_path` 获取 `libjvm.so` 的绝对路径，然后向上逐层剥目录：
 
 ```
-libjvm.so 的绝对路径（由 os::jvm_path 获取）
+libjvm.so 绝对路径（本机）
+   /usr/lib/jvm/java-11-xxx/lib/server/libjvm.so
    │
-   ├──→ 向上剥目录：/libjvm.so → /server → /lib → 得到 JAVA_HOME
-   │       ├── set_java_home(buf)                 → java.home  = "/usr/lib/jvm/java-11"
-   │       └── set_dll_dir(buf)                   → sun.boot.library.path = 同上
+   ├── strrchr(buf, '/') → 去掉 /libjvm.so
+   │        /usr/lib/jvm/java-11-xxx/lib/server
    │
-   ├──→ 拼接 java.library.path
-   │       LD_LIBRARY_PATH + ":/usr/java/packages/lib:" + DEFAULT_LIBPATH
+   ├── strrchr(buf, '/') → 去掉 /server
+   │        /usr/lib/jvm/java-11-xxx/lib
+   │        └── set_dll_dir(buf)   → sun.boot.library.path 填入此路径
+   │
+   ├── strrchr(buf, '/') → 去掉 /lib
+   │        /usr/lib/jvm/java-11-xxx         ← 这就是 JAVA_HOME
+   │        └── set_java_home(buf)           → java.home 填入此路径
+   │
+   ├── 拼接 java.library.path
+   │       getenv("LD_LIBRARY_PATH") + ":/usr/java/packages/lib:" + DEFAULT_LIBPATH
+   │       本机 LD_LIBRARY_PATH 为空，DEFAULT_LIBPATH(AMD64) = /usr/lib64:/lib64:/lib:/usr/lib
+   │       → java.library.path = "/usr/java/packages/lib:/usr/lib64:/lib64:/lib:/usr/lib"
    │       └── set_library_path(result)
    │
-   └──→ 设置引导类路径
-           set_boot_path('/',':')                  → 扫描 JAVA_HOME/lib/modules (jimage)
-               └── 如果存在 → set_sysclasspath("...modules", true)
-               └── 如果不存在 → 检查 exploded modules
+   └── set_boot_path('/', ':')
+           扫描 JAVA_HOME/lib/modules (jimage 文件)
+           本机: /usr/lib/jvm/java-11-xxx/lib/modules 存在
+            └── set_sysclasspath("/usr/lib/jvm/java-11-xxx/lib/modules", true)
 ```
 
-`_system_boot_class_path`（类型 `PathString*`，最初 `new PathString(NULL)`）最终被 `set_sysclasspath` 写入真实的类引导路径。如果有 `-Xbootclasspath/a:` 用户参数，后续 `append_sysclasspath` 会调用 `append_value` 追加路径。
+三条 NULL 属性全部兑现：`sun.boot.library.path` 拿到了剥去 `libjvm.so` 的 lib 路径，`java.home` 拿到了剥去 `lib` 的 JAVA_HOME 路径，`java.library.path` 拿到了环境变量拼默认库路径。此外 `set_boot_path` 还顺便检测出本机是模块化镜像（有 `modules` jimage），把 `_system_boot_class_path`（最初 `new PathString(NULL)`）也填上了真实的 `modules` 文件路径。
 
-总结：`init_system_properties` 函数做了两件事——**初始化 4 个不可写属性**（写死值的规范声明，如 `java.vm.name`），**创建 5 个可写属性**（值先填 NULL 或空字符串占位），最后调用 `os::init_system_properties_values()` 把 NULL 填充为 OS 的真实值。整个链表是尾插法构建的，`_next` 指针对应的遍历顺序就是代码中的添加顺序。
+#### `os::jvm_path` 是如何拿到路径的
+
+整棵树的第一步——"获取 libjvm.so 的绝对路径"——在这里用的是 `os::jvm_path()`，实现位于 `os_linux.cpp:2878-2965`。它的原理和 Ch01 里启动器的 `GetJVMPath`（字符串拼接 + `stat()` 验证）完全不同：
+
+```c
+void os::jvm_path(char *buf, jint buflen) {
+  static char saved_jvm_path[MAXPATHLEN] = {0};   // 缓存
+
+  if (saved_jvm_path[0] != 0) {
+    strcpy(buf, saved_jvm_path);        // 后续调用：直接返回缓存
+    return;
+  }
+
+  // ★ 核心：把自己的函数地址喂给动态链接器，问"我在哪个 .so 里？"
+  dll_address_to_library_name(
+      CAST_FROM_FN_PTR(address, os::jvm_path),   // 传自己的地址
+      dli_fname, sizeof(dli_fname), NULL);
+
+  realpath(dli_fname, buf, buflen);     // 解析符号链接
+  strncpy(saved_jvm_path, buf, MAXPATHLEN);  // 缓存起来
+}
+```
+
+`dll_address_to_library_name` 内部用 `dl_iterate_phdr` 遍历当前进程所有已加载的 .so 文件，找到地址范围包含 `os::jvm_path` 自身的那个——因为 `os::jvm_path` 就是 `libjvm.so` 里的代码，所以拿到的就是 `libjvm.so` 的路径。这是 Linux 动态链接器的标准能力：给定一个内存地址，反查它属于哪个共享库。
+
+Ch01 中启动器已经通过 `GetJVMPath`（`%s/lib/%s/%s/libjvm.so` 拼字符串 + `stat()` 验证）找到了这个路径，然后 `dlopen` 加载。但 `JNI_CreateJavaVM` 的入参里没有"我是在哪个路径被加载的"这个字段——所以 VM 启动后必须自己重新发现。启动器用的是文件系统拼接，VM 用的是动态链接器反查——二者殊途同归，拿到的是同一个路径。
+
+总结：`init_system_properties` 函数做了两件事——**初始化 4 个不可写属性**（写死值的规范声明，如 `java.vm.name`），**创建 5 个可写属性**（值先填 NULL 或空字符串占位），最后调用 `os::init_system_properties_values()` 把三条 NULL + `_system_boot_class_path` 全部填充为 OS 真实值。整个链表是尾插法构建的，`_next` 指针对应的遍历顺序就是代码中的添加顺序。
 
 ---
 
