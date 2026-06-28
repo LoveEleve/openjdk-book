@@ -291,7 +291,27 @@ static int sr_notify(OSThread* osthread) {
 
 此刻（os::init_2）— 只做注册。内核记录了"信号 12 -> SR_handler"的映射，但没有任何线程收到这个信号。
 
-Stop-The-World 时（未来某个 GC 触发点）— VMThread 对目标线程调 `pthread_kill(thread_id, SR_signum)`，目标线程进入 `SR_handler`，内部通过 `SuspendResume` 状态机判断是否阻塞自己等待唤醒。`SuspendResume` 和 `sigsuspend` 的完整机制将在后续 Stop-The-World 章节详细展开，这里只需知道此刻 `os::init_2()` 的唯一任务就是注册这个处理器。
+Stop-The-World 时（未来某个 GC 触发点）— VMThread 对目标线程调 `pthread_kill(thread_id, SR_signum)`。目标线程被内核打断，进入 `SR_handler`：
+
+```c
+// === os_linux.cpp (SR_handler 核心逻辑) ===
+static void SR_handler(int sig, siginfo_t* siginfo, ucontext_t* context) {
+  OSThread* osthread = Thread::current()->osthread();
+
+  os::SuspendResume::State current = osthread->sr.state();
+  if (current == os::SuspendResume::SR_SUSPEND_REQUEST) {
+    suspend_save_context(osthread, siginfo, context);   // 保存 CPU 上下文
+    osthread->sr.set_state(os::SuspendResume::SR_SUSPENDED);  // 告诉 VMThread "已挂起"
+    sigset_t suspend_set;
+    sigemptyset(&suspend_set);
+    sigaddset(&suspend_set, SR_signum);
+    sigsuspend(&suspend_set);                           // 阻塞等待唤醒
+    osthread->sr.set_state(os::SuspendResume::SR_RUNNING);   // 被唤醒,恢复执行
+  }
+}
+```
+
+> 这里只展示了基本骨架。`SuspendResume` 状态机的完整生命周期（`SR_RUNNING` → `SR_SUSPEND_REQUEST` → `SR_SUSPENDED` → `SR_RUNNING`）、`sigsuspend` 的工作机制、以及 VMThread 如何遍历线程协调 Stop-The-World——这些将在后续 Stop-The-World 章节单独详细讲解。眼下只需知道：此刻 `os::init_2()` 只负责注册这个处理器，为后面的使用做好准备。
 
 为什么线程能收到？— `signal_sets_init` 把 `SR_signum` 放进了 `unblocked_sigs`，每个 Java 线程创建时都会 `pthread_sigmask(SIG_UNBLOCK, &unblocked_sigs, ...)` 解除对它的阻塞。
 
