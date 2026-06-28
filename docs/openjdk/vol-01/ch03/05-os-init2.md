@@ -103,9 +103,40 @@ Linux::install_signal_handlers();
 | `sigaddset(sigset_t *set, int signum)` | 把信号 `signum` 加入集合（对应位设 1） | `set->sig[word] |= 1 << bit` |
 | `sigfillset(sigset_t *set)` | 填满集合（所有位设 1，包含所有信号） | `memset(set, 0xFF, sizeof(sigset_t))` |
 
-真正跟内核交互的是 `sigaction`（注册处理器）和 `pthread_sigmask`（修改线程的信号掩码）——这两个才是系统调用。
+真正跟内核交互的是以下两个系统调用：
 
-有了这些基础，先看信号的投递规则：
+**`sigaction` —— 向内核注册"信号来了调哪个函数"**
+
+```c
+int sigaction(int signum,                        // 要处理的信号编号
+              const struct sigaction *act,        // 新处理器配置（NULL 表示只查询）
+              struct sigaction *oldact);          // 旧处理器配置（可为 NULL）
+```
+
+参数 `act` 的核心字段：
+
+```c
+struct sigaction {
+    void (*sa_handler)(int);                           // 简单版：只有信号号
+    void (*sa_sigaction)(int, siginfo_t *, void *);     // 完整版：带 siginfo（故障地址等）+ ucontext（寄存器快照）
+    sigset_t sa_mask;                                   // 处理该信号时内核自动额外屏蔽的信号集
+    int      sa_flags;                                  // 行为标志：SA_SIGINFO、SA_RESTART 等
+};
+```
+
+`siginfo_t` 是内核在信号到达时填充的结构体，`si_addr` 字段记录了触发地址——JVM 全靠它区分空指针、栈溢出、安全点。`ucontext_t` 是触发信号瞬间的 CPU 寄存器快照，信号处理器可以直接修改它来改变返回后的执行流（比如把 RIP 改成异常抛出桩）。
+
+**`pthread_sigmask` —— 修改当前线程的信号掩码（阻塞/解除阻塞）**
+
+```c
+int pthread_sigmask(int how,                    // SIG_BLOCK 加阻塞 / SIG_UNBLOCK 解阻塞 / SIG_SETMASK 替换
+                    const sigset_t *set,         // 要操作的新信号集
+                    sigset_t *oldset);           // 旧掩码（可为 NULL）
+```
+
+每个线程有自己的信号掩码位图。内核在投递信号前检查目标线程的掩码——如果信号位为 1（阻塞），信号挂起不投递。`pthread_sigmask` 不阻塞调用线程自身——它只是一个读写掩码的原子操作（futex 保护）。HotSpot 用它实现"只有 VMThread 能收到 Ctrl-Break"（所有普通线程阻塞 BREAK_SIGNAL，只有 VMThread 解除阻塞）。
+
+有了这些基础，看信号的投递规则：
 
 | 信号类型 | 产生方式 | 投递目标 | 例子 |
 |---------|---------|---------|------|
