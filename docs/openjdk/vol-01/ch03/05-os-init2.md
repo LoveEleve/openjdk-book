@@ -474,18 +474,73 @@ HotSpot 有一个预定义的映射表 `java_to_os_priority[]`，把 Java 的 1-
 
 `UseCriticalJavaThreadPriority` 打开时，`MaxPriority`（通常映射 nice=-10）被升级到 `CriticalPriority`（nice=-20），给 GC 线程这样的关键线程提供最高调度优先级。
 
-### 1.4 其余步骤 —— 树形图略过
+### 1.4 最小栈尺寸 — 和 Stage 2 的栈守卫区联动
+
+```c
+// === os_posix.cpp ===
+if (Posix::set_minimum_stack_sizes() == JNI_ERR) {
+    return JNI_ERR;
+}
+```
+
+这个函数计算 `_java_thread_min_stack_allowed`——JVM 允许创建 Java 线程的最小栈大小。计算公式：
+
+```
+最小栈 = 守卫区总大小 (red+yellow+reserved) + shadow zone + OS 要求的额外空间
+```
+
+这正好和 Stage 2 的 `init_before_ergo` 连接起来——Stage 2 设置了 `_stack_red_zone_size` 等四个静态变量，这里把它们加起来，再加上 OS 的默认线程栈最小值（通过 `pthread_attr_getstacksize` 获取），作为 Java 线程的最小栈限制。如果用户通过 `-Xss` 指定的值小于这个最小值，线程创建时会拒绝。
+
+**Linux 底层机制：** 每个 Linux 线程的栈由 `pthread_create` 调用时 `clone(CLONE_VM|CLONE_FS|...)` 系统调用分配。glibc 维护一个线程栈缓存池——线程退出后栈空间被回收重用，避免频繁的 `mmap/munmap`。HotSpot 计算的最小值就是在和 glibc 协商"给我至少这么大的空间，不然守卫区放不下"。
+
+### 1.5 捕获原始线程栈 — 嵌入式 JVM 的必需品
+
+```c
+// === os_linux.cpp ===
+if (!Arguments::created_by_java_launcher()) {    // 非标准 launcher 启动
+    Linux::capture_initial_stack(JavaThread::stack_size_at_create());
+}
+```
+
+当 Java 通过 `java` 命令启动时，原始线程（main 线程）的栈信息在 Stage 1 的 `os::init()` 阶段已经捕获。但如果 JVM 被嵌入到另一个 C 程序里（如 Tomcat 的 jsvc、IDE 的 JVM 插件），调用 `JNI_CreateJavaVM()` 的线程不是"自己创建的"——HotSpot 不知道这个线程的栈有多大、栈顶在哪。
+
+`capture_initial_stack` 通过 `/proc/self/maps` 读取进程的虚拟内存映射，扫描 `[stack]` 段获取栈基址；通过 `getrlimit(RLIMIT_STACK)` 获取栈的软限制（`ulimit -s` 的值）。还有一个兼容性 workaround：glibc 的 `ld.so` 会把自身的 `.data` 段重定位到原始栈的低端（bug 6308388），所以需要从栈底减去 2 页以防止守卫页覆盖 `ld.so` 的数据。
+
+### 1.6 glibc 守卫页兼容性 — HotSpot 与 glibc 的协商
+
+```c
+// === os_linux.cpp (__GLIBC__ 分支) ===
+static void init_adjust_stacksize_for_guard_pages() {
+  _get_minstack_func = (GetMinStack)dlsym(RTLD_DEFAULT, "__pthread_get_minstack");
+  if (_get_minstack_func != NULL) {
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    size_t min_stack = _get_minstack_func(&attr);           // guard=0 时的最小栈
+    pthread_attr_setguardsize(&attr, 16 * K);               // 设一个 guard 值
+    size_t min_stack2 = _get_minstack_func(&attr);          // 有 guard 时的最小栈
+    pthread_attr_destroy(&attr);
+    _adjustStackSizeForGuardPages = (min_stack2 != min_stack);  // 不同则需调整
+  }
+}
+```
+
+glibc 的 `pthread_create` 会在每个线程栈底自动加一个 guard page（通过 `mprotect(PROT_NONE)`）。如果 glibc 在计算最小栈大小时已经把 guard page 算在内了，HotSpot 就不需要再加一份——否则栈会多浪费一页。`__pthread_get_minstack` 是 glibc 的私有函数（命名以双下划线开头，不对外公开 API），HotSpot 通过 `dlsym(RTLD_DEFAULT, "__pthread_get_minstack")` 动态查找。比较"设了 guard"和"没设 guard"的最小栈值，如果两者不同说明 glibc 已经算进去了，HotSpot 就不额外加。
+
+注意 HotSpot 在 `os::create_thread()` 中把 glibc guard 设为 0（`pthread_attr_setguardsize(&attr, 0)`）——因为 HotSpot 有自己的四层守卫区，不需要 glibc 再画一个。
+
+### 1.7 其余步骤
 
 ```
 os::init_2() 其余步骤：
-├── Fast thread clock 初始化      -- Linux 特有优化，CLOCK_THREAD_CPUTIME_ID 替代系统调用
-├── set_minimum_stack_sizes       -- 校验 -Xss 不小于 OS 允许的线程栈最小值
-├── capture_initial_stack         -- 非 java launcher 场景下捕获原始线程栈地址
-├── libpthread_init / sched_getcpu_init  -- dlsym 查找 pthread 函数指针
-├── glibc guard page 调整         -- __GLIBC__ 分支：调整 glibc guard page 对栈尺寸的影响
-├── MaxFDLimit 处理              -- getrlimit/setrlimit 提升文件描述符上限
-├── atexit(perfMemory_exit_helper) -- 进程退出时清理性能监控共享内存
-└── set_coredump_filter()        -- core dump 过滤器（AllocateHeapAt/DAX 相关）
+├── fast_thread_clock_init        -- 用 CLOCK_THREAD_CPUTIME_ID 替代 clock_gettime(CLOCK_THREAD_CPUTIME_ID)
+│                                    获取线程 CPU 时间，比 /proc/self/stat 快 10 倍以上
+├── libpthread_init               -- dlsym(RTLD_DEFAULT, "pthread_condattr_setclock") 查找函数指针
+├── sched_getcpu_init             -- dlsym(RTLD_DEFAULT, "sched_getcpu") 查找函数指针，
+│                                    用于获取当前 CPU 在哪个 NUMA node
+├── MaxFDLimit 处理              -- 通过 setrlimit(RLIMIT_NOFILE) 把文件描述符上限提到硬限制
+├── atexit(perfMemory_exit_helper) -- C 标准库的 atexit() 注册进程退出回调，
+│                                    负责清理 /tmp/hsperfdata_<user>/<pid> 共享内存文件
+└── set_coredump_filter()         -- 通过写 /proc/self/coredump_filter 控制 core dump 包含哪些内存映射
 ```
 
 **小结**：`os::init_2()` 的核心产出是信号处理器注册——后续所有 SIGSEGV（空指针、栈溢出、安全点）都由这一个入口处理。附带验证了 NUMA 可用性，可能修改 `UseNUMA` 的值。
