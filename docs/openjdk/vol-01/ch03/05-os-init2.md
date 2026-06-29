@@ -698,163 +698,175 @@ HotSpot 读当前值、按位 OR 上去、再写回 `/proc/self/coredump_filter`
 
 ## HotSpot 内部锁机制
 
-`os::init_2()` 第 8 步创建的 `new Mutex(Mutex::leaf, "createThread_lock", false)` 只是 HotSpot 锁体系中的一个实例。要理解它为什么这样构造，需要先理解 HotSpot 锁的完整设计。
+`os::init_2()` 第 8 步创建的 `new Mutex(Mutex::leaf, "createThread_lock", false)` 只是 HotSpot 锁体系中的一个实例。要理解每个参数的含义，需要从底层向上逐层理解锁的设计。
 
-### 1. 为什么不用 `pthread_mutex_t`
+HotSpot 的锁是一个**四层堆积**的结构：从最简单的 pthread 原语开始，每层加一种能力，最终形成 JVM 专属的全功能锁。
 
-HotSpot 不用裸 `pthread_mutex_t`，因为 JVM 需要三个 pthread 锁不具备的能力：
+---
 
-1. **死锁检测**——给每个锁分配一个整数 rank，所有锁必须按 rank 从小到大的顺序获取。如果线程持有一个 rank=5 的锁后又尝试获取 rank=3 的锁，debug 构建直接 assert 失败。
+### 第 1 层：PlatformEvent —— 阻塞/唤醒的基本单元
 
-rank 的本质是一种**全序关系**（total ordering）。死锁的条件是"环形等待"——线程 A 持有锁 1 等锁 2，线程 B 持有锁 2 等锁 1。如果把所有锁排成一个线性顺序，规定只能从小往大拿，就永远不存在"A 等 B、B 等 A"的环。这是操作系统教科书里的标准死锁预防策略。
-
-"debug 构建"是指 `--with-debug-level=slowdebug` 编译的 HotSpot（带 `-DASSERT`），assert 宏在其中展开为真正的断言检查。生产环境用的是 `product` 构建，assert 是一个空宏——锁序违反不会被检测到，会直接挂成真正的死锁。
-
-rank 越小的锁性质越"危险"：`tty` 是 tty 输出锁，`special` 是信号处理器相关的锁，`leaf` 是 createThread_lock 所在的层级——它们不应在持有大锁时被请求。rank 越大的锁越"普通"，如 `barrier`（Threads_lock 的层级）是大部分 Java 线程频繁使用的锁。
-
-**注意区分两层死锁：** 这里的 rank 机制是 HotSpot C++ 内部锁的预防策略——防止 VMThread、CompilerThread、GC 线程等在 JVM 内部互相死锁。用户 Java 代码中 `synchronized` 产生的死锁，由另一套机制检测：`jcmd <pid> Thread.print`、`jstack`、`ThreadMXBean.findMonitorDeadlockedThreads()` 通过分析 Java 线程的 `ObjectMonitor` 等待关系图来发现循环依赖。两者完全不相关。
-2. **safepoint 协调**——`lock()` 过程自动检查是否有 safepoint 请求，检查到就主动阻塞让 GC 先执行。pthread 不知道什么是 safepoint。
-3. **JavaThread 状态管理**——`lock()` 如果发现 safepoint 正在进行中，会把 JavaThread 的状态从 `_thread_in_vm` 切换为 `_thread_blocked`，这样 safepoint 的 VMThread 就知道"这个线程虽然在 VM 内部，但它已经停下了，可以安全执行 GC"。JVM 的线程类型不仅有 Java 线程，也包括 CompilerThread、WatcherThread、GC 线程等。这些不同类型的线程加锁时 safepoint 的行为也不相同——Java 线程需要做状态转换，而 VMThread（负责协调 safepoint 的线程）需要走"不检查 safepoint"的路径，否则会死锁。
-
-### 2. 类层次
-
-HotSpot 的锁体系分两个独立层次——底层是 park/unpark 机制，上层是 Monitor/Mutex 的锁语义：
-
-**底层：park/unpark 基础设施**
-
-```
-os::PlatformEvent (os_posix.hpp)         ← pthread_mutex_t + pthread_cond_t
-  │  内部: int _event (三态信号量: 1/0/-1)
-  │         int _nParked
-  │         void park()      ← pthread_cond_wait
-  │         void unpark()    ← pthread_cond_signal
-  │
-  └── ParkEvent (park.hpp)              ← extends PlatformEvent + 链表节点
-       内部: ParkEvent* ListNext         ← MCS-CLH 链表指针
-             ParkEvent* FreeNext         ← 空闲链表
-             Thread* AssociatedWith      ← 所属线程
-             强制 256 字节对齐             ← 保证低 8 位为 0，供 SplitWord 使用
-             static Allocate/Release     ← 对象池，复用不销毁
-```
-
-**上层：锁语义**
-
-```
-Monitor (mutex.hpp)
-  内部: SplitWord _LockWord              ← 锁字节 + cxq 指针共用一个字
-        ParkEvent* _EntryList             ← 等待获取锁的 ParkEvent 链表
-        ParkEvent* _OnDeck               ← 下一任锁持有者（最多一个）
-        ParkEvent* _WaitSet               ← wait() 等待集合
-        Thread*    _owner                ← 当前持有者
-
-  ├── Mutex                              ← 继承 Monitor，禁用 wait/notify
-  │     └── PaddedMutex                  ← Mutex + cache line 对齐（防伪共享）
-  │
-  └── PaddedMonitor                      ← Monitor + cache line 对齐
-```
-
-`Monitor` **不是** `ParkEvent` 的子类——它只是用 `ParkEvent*` 作为链表节点来管理等待线程。每个线程有一个预分配的 `ParkEvent`（`Thread::_MutexEvent`），锁竞争时这个 ParkEvent 被插入 `_EntryList` 等待队列。
-
-`ParkEvent` 的 256 字节对齐是 `SplitWord` 可以工作的前提——因为地址低 8 位始终为 0，所以锁字节（`_LBIT`）和 cxq 指针可以安全地共享一个机器字。
-
-`Mutex` 继承 `Monitor` 但把 `wait()`、`notify()`、`notify_all()` 全部覆盖为 `ShouldNotReachHere()`——拿了锁就只能干活、放锁，不能在里面等条件。JVM 里绝大部分锁都是 `Mutex`。
-
-加锁使用 RAII 包装：
+最底层是一个 park/unpark 原语。HotSpot 不能直接用 `pthread_mutex_lock` 实现锁——因为线程被阻塞时，需要同时处理 safepoint 请求、记录 JFR 事件、管理 JavaThread 状态。所以在 `pthread_mutex` 之上包了一层 `PlatformEvent`（`os_posix.hpp`）：
 
 ```c
-MutexLocker ml(some_mutex);             // 构造 lock(), 析构 unlock()
-MutexLockerEx mle(some_mutex, true);    // true=跳过 safepoint 检查
+// === os_posix.hpp, os_posix.cpp ===
+class PlatformEvent {
+  volatile int _event;             // 三态信号量: 1(有许可) / 0(无许可) / -1(已阻塞)
+  volatile int _nParked;          // 是否有人在 cond_wait 上
+  pthread_mutex_t _mutex[1];      // 保护内部状态
+  pthread_cond_t  _cond[1];       // 真正的睡眠原语
+
+  void park() {
+    // 原子递减 _event: 1→0(直接返回), 0→-1(进入阻塞)
+    int v;
+    for (;;) {
+      v = _event;
+      if (Atomic::cmpxchg(v - 1, &_event, v) == v) break;
+    }
+    if (v == 0) {                  // 无许可, 需要阻塞
+      pthread_mutex_lock(_mutex);
+      ++_nParked;
+      while (_event < 0) {
+        pthread_cond_wait(_cond, _mutex);    // ← 最终在这里睡眠
+      }
+      --_nParked;
+      _event = 0;
+      pthread_mutex_unlock(_mutex);
+    }
+  }
+
+  void unpark() {
+    // 原子将 _event 设为 1; 如果原来是 -1, 需要 pthread_cond_signal
+    if (Atomic::xchg(1, &_event) >= 0) return;  // 没人等, 直接返回
+    pthread_mutex_lock(_mutex);
+    int anyWaiters = _nParked;
+    pthread_mutex_unlock(_mutex);
+    if (anyWaiters != 0) pthread_cond_signal(_cond);
+  }
+};
 ```
 
-### 3. SplitWord — LockByte 和竞争队列共享一个字
+`_event` 的三态信号量是这个设计的核心——`park()` 先做无锁 CAS 尝试"消费"一个许可，只有没许可时才走 `pthread_mutex_lock` + `pthread_cond_wait` 的慢路径。
 
-`_LockWord` 的类型是 `SplitWord`（`mutex.hpp`）：
+---
+
+### 第 2 层：ParkEvent —— 可链接的 ParkEvent
+
+`ParkEvent`（`park.hpp`）继承 `PlatformEvent`，加了链表能力：
+
+```c
+class ParkEvent : public os::PlatformEvent {
+  ParkEvent* volatile ListNext;       // 单链表指针
+  Thread* AssociatedWith;             // 所属线程
+  static Allocate/Release;            // 对象池：分配&回收, 从不销毁
+  // operator new 强制 256 字节对齐 — 保证地址低 8 位始终为 0
+};
+```
+
+每个线程在创建时预先分配一个 ParkEvent（`Thread::_MutexEvent`）。锁竞争时，这个 ParkEvent 被插入 Monitor 的等待队列中。256 字节对齐是后面的 `SplitWord` 能够工作的关键前提。
+
+---
+
+### 第 3 层：SplitWord —— 锁字节和竞争队列共用一个字
+
+`Monitor` 的 `_LockWord` 是一个 `SplitWord` 联合体：
 
 ```c
 union SplitWord {
-  volatile intptr_t FullWord;    // 整个字（x86_64 上 8 字节）
+  volatile intptr_t FullWord;     // 整个字（x86_64 上 8 字节）
   volatile void*   Address;
   volatile jbyte   Bytes[sizeof(intptr_t)];  // 按字节访问
 };
 ```
 
-设计原理：ParkEvent 按 256 字节对齐分配（`park.hpp`），低 8 位始终为 0。因此 `_LockWord` 的最低字节可以存放锁状态（0=空闲，1=已锁定），高 7 个字节存放竞争队列（cxq）的头指针。用一个字的 CAS 同时完成"检查锁是否空闲"和"将自己推入竞争队列"——没有 TOCTOU 竞态。
+由于 ParkEvent 是 256 字节对齐的，它的地址低 8 位永远是 0。`_LockWord` 利用这一点：**最低字节**存放锁状态（0=空闲，1=已锁定），**高 7 字节**存放竞争队列（cxq）的头指针。这样就实现了——一次 CAS 同时完成"检查锁是否空闲"和"把自己推入竞争队列"，没有 TOCTOU 竞态。
 
-### 4. 锁获取的完整路径
+---
 
-`Monitor::lock()` 的调用路径（`mutex.cpp`）：
+### 第 4 层：Monitor —— 完整的管程
+
+`Monitor`（`mutex.hpp`）是整个锁体系的核心类。它内部维护了三个 ParkEvent 链表，构成了完整的管程语义：
+
+```
+Monitor
+  ├─ SplitWord _LockWord       ← 锁字节 + cxq 头指针 (SplitWord)
+  ├─ ParkEvent* _EntryList      ← 等待获取锁的线程链表
+  ├─ ParkEvent* _OnDeck         ← 下一任锁持有者 (最多一个)
+  ├─ ParkEvent* _WaitSet        ← wait() 中的线程集合
+  └─ Thread*    _owner          ← 当前持有者
+```
+
+**`lock()` 的完整路径：**
 
 ```
 Monitor::lock()
-  │
-  ├─ TryFast()               ← 乐观 CAS: 假设锁空闲 + cxq 空，直接 CAS(0→_LBIT)
-  ├─ [VMThread only] sneak   ← VM 线程在 safepoint 可"偷"锁（原持有者在等 safepoint）
-  ├─ TrySpin()               ← 等不到就自旋（最多 20 轮，指数退避延迟）
-  │     ├─ 自旋中检测 safepoint 请求，有就主动阻塞
-  │     └─ 用 Marsaglia XOR-Shift 伪随机数做退避
-  ├─ ThreadBlockInVM          ← Java 线程状态: _thread_in_vm → _thread_blocked
-  └─ ILock()                  ← 慢路径
-        ├─ TryFast() → TrySpin() (再试运气)
-        ├─ AcquireOrPush()    ← 还是拿不到? 把自己推入 cxq
-        ├─ while(_OnDeck != self) park()   ← 在 _OnDeck 上排队
-        └─ while(true) TrySpin()/park()    ← 拿到 _OnDeck 后自旋到成功
+  ├─ TryFast()                ← CAS(0→_LBIT): 假设无竞争, 直接拿锁
+  ├─ TrySpin()                ← 等不到就自旋 20 轮 (指数退避)
+  ├─ ThreadBlockInVM           ← Java 线程状态: _thread_in_vm → _thread_blocked
+  │                              (让 safepoint 的 VMThread 知道这个线程已停下)
+  └─ ILock()                   ← 慢路径
+        ├─ TryFast() → TrySpin() 再试一次
+        ├─ AcquireOrPush()     ← 还是拿不到？把自己 ParkEvent 推入 cxq
+        ├─ while(_OnDeck != self) park()   ← 等待被选为 OnDeck
+        └─ while(true) TrySpin()/park()    ← 成为 OnDeck 后自旋到成功
 ```
 
-### 5. 锁释放与传承
+**`unlock()` 的传承机制：**
 
 ```
 Monitor::unlock()
-  │
-  ├─ release_store(LockByte=0)  ← 释放外层锁（字节存储，比 CAS 更轻量）
-  ├─ _OnDeck 已有 ? → unpark(_OnDeck), return
-  ├─ cxq + EntryList 双空 ? → return (无等待线程)
-  └─ 获取 OnDeck 内锁 (CAS null→_LBIT)
-       ├─ EntryList 有线程 → 提取头部设为新 OnDeck, unpark 它
+  ├─ release_store(LockByte=0)   ← 释放锁 (字节存储, 比 CAS 轻量)
+  ├─ _OnDeck 已有? → unpark(_OnDeck), return
+  ├─ cxq + EntryList 双空? → return
+  └─ CAS 获取 OnDeck 内锁 (CAS null→_LBIT)
+       ├─ EntryList 有线程 → 提取头部设为新 OnDeck, unpark
        ├─ EntryList 空 → CAS 批量搬迁 cxq 到 EntryList, 再提取头部
-       └─ 双空 → 清理, return
+       └─ 双空 → 清理
 ```
 
-释放锁的线程**不直接唤酨所有等待线程**——它只设一个 `_OnDeck`（"下一任"锁持有者）。被选为 `_OnDeck` 的线程被 unpark 后自己竞争锁。这种"传承"机制避免了惊群效应。
+释放者不唤醒所有等待线程——只设一个 `_OnDeck`。被选为 OnDeck 的线程被唤醒后自己竞争锁，避免惊群。
 
-### 6. 三队列模型
+**三队列模型：**
 
 ```
-[cxq]  ──搬迁──▶  [_EntryList]  ──选举──▶  [_OnDeck]  ──获取──▶  [Owner]
- 竞争队列           等待队列               继承者               持有者
+[cxq] ──批量搬迁──▶ [_EntryList] ──选一个──▶ [_OnDeck] ──获取──▶ [Owner]
+ 竞争队列            等待队列              继承者              持有者
 ```
 
-| 队列 | 入队方式 | 说明 |
-|------|---------|------|
-| cxq | `AcquireOrPush()` CAS 头插 | 最近到达的线程, 无锁并发入队 |
-| _EntryList | `IUnlock()` 批量搬迁 | 排队有序, 只有持有 OnDeck 锁者操作 |
-| _OnDeck | `IUnlock()` 从 EntryList 选 | 最多一个, 只有它能竞争锁 |
+| 队列 | 性质 | 操作者 |
+|------|------|--------|
+| cxq | 无锁 CAS 头插，多线程并发入队 | 任何竞争线程 |
+| _EntryList | 排队有序，单线程操作 | 持有 OnDeck 锁的线程 |
+| _OnDeck | 最多一个，唯一候选 | 从 EntryList 选出 |
 
-### 7. 底层 park/unpark
+---
 
-等待线程最终通过 `os::PlatformEvent::park()` 睡眠，底层是 `pthread_cond_wait`：
+### 第 5 层：Mutex 和 Padded 变体
+
+`Mutex` 继承 `Monitor`，把 `wait()`、`notify()`、`notify_all()` 全部覆盖为 `ShouldNotReachHere()`——拿了锁就只能干活、放锁，不能在里面等条件。JVM 里绝大多数锁都是 `Mutex`。
+
+`PaddedMutex` / `PaddedMonitor` 在 `Mutex` / `Monitor` 的基础上加了 cache line 对齐，防止相邻锁在同一 cache line 上导致伪共享（false sharing）——一个 CPU 核修改锁 A 时另一个核持有的锁 B 被迫刷新缓存。
+
+---
+
+### 为什么不用 `pthread_mutex_t`
+
+现在可以回答最初的问题了——在 `PlatformEvent` 已经提供了全部阻塞原语的前提下，HotSpot 为什么还要在上面堆三层（ParkEvent → Monitor → Mutex）：
+
+1. **Rank 死锁预防** —— 给每个锁分配整数 rank，只能从小往大加锁。debug 构建中反向加锁直接 assert。这是对 pthread 的全序关系增强。
+
+2. **Safepoint 协调** —— `lock()` 过程中自动检查是否有 safepoint 请求。Java 线程检测到 safepoint 时主动 `ThreadBlockInVM` 转换状态，让 VMThread 知道"我已停下"。VMThread 自己则用 `lock_without_safepoint_check()` 避免死锁。
+
+3. **三队列公平调度** —— pthread_mutex 的等待队列是内核管理的，HotSpot 控制不了。自建的 cxq → EntryList → OnDeck 三队列让 JVM 可以控制唤醒顺序、支持"偷锁"（VMThread sneak）、精确追踪 JFR 锁竞争事件。
+
+加锁使用 RAII 包装：
 
 ```c
-// === os_posix.cpp ===
-void os::PlatformEvent::park() {
-  int v;
-  for (;;) {
-    v = _event;
-    if (Atomic::cmpxchg(v - 1, &_event, v) == v) break;  // 原子递减
-  }
-  if (v == 0) {
-    pthread_mutex_lock(_mutex);
-    ++_nParked;
-    while (_event < 0) {
-      pthread_cond_wait(_cond, _mutex);    // ★ 最终在这里睡眠
-    }
-    --_nParked;
-    _event = 0;
-    pthread_mutex_unlock(_mutex);
-  }
-}
+MutexLocker ml(some_mutex);             // 构造 lock(), 析构 unlock()
+MutexLockerEx mle(some_mutex, true);    // true = 跳过 safepoint 检查
 ```
 
-`_event` 是它的三态信号量：1=有许可（unpark 已调用）、0=无许可（正常）、-1=已阻塞（在 cond_wait 上等）。`unpark()` 先检查原子的 `xchg(1, &_event)`——如果 `_event` 原本是 -1 才需要 `pthread_cond_signal`。
+现在回到 `createThread_lock`：它是一个 `Mutex(leaf, "createThread_lock", false)`——leaf 级别 rank（防止和 barrier 等高层锁形成死锁），不允许 VMThread 阻塞（`allow_vm_block=false`），默认需要 safepoint 检查。
 
 ---
 
