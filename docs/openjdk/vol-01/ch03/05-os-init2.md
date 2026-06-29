@@ -432,16 +432,34 @@ if (UseNUMA) {
 
 ### 1.3 线程创建锁 + 优先级策略
 
-`set_createThread_lock` 创建一个全局 Mutex，保护后续的线程创建操作：
+`set_createThread_lock` 创建一个 HotSpot 的 `Mutex` 对象。
 
-```c
-// === os_linux.cpp (os::init_2 中) ===
-Linux::set_createThread_lock(new Mutex(Mutex::leaf, "createThread_lock", false));
+但 `Mutex` 不是 `pthread_mutex_t`——它是 HotSpot 自己实现的锁，底层可能用 `pthread_mutex`、`futex` 或自旋锁，取决于平台。比 POSIX 锁多了三层 JVM 专属语义：
+
+**第一层：锁级别（rank），用于死锁检测。** HotSpot 给每个锁分配一个整数 rank，锁必须以 rank 从低到高的顺序获取。在 debug 构建中违反此规则直接 assert。rank 的层级 `mutex.hpp` 定义了：
+
+```
+tty < special < suspend_resume < leaf < safepoint < barrier < nonleaf < native
 ```
 
-这个锁的类型是 `Mutex::leaf`——HotSpot 的锁层级中最底层的一种（不代表叶子节点，代表"不参与 safepoint 检查"）。`"createThread_lock"` 是锁名称，用于调试和日志。
+锁的 rank 被存入结构体。锁获取时，断言自己的 rank 必须大于当前线程已持有的最上层锁的 rank——如果不是，死锁风险。
 
-为什么需要这个锁？`os::create_thread()` 被 `os::init_2()` 之后的多个地方调用：启动 Java 线程、启动 CompilerThread、启动 ServiceThread……多线程并发创建线程时，`_createThread_lock` 互斥保护 `pthread_create` 的调用过程，防止内部状态竞争。
+`createThread_lock` 的 rank 是 `Mutex::leaf`。leaf 不是一个准确的名称（注释里也承认"应该改个名"），位于 `vmweak+2` 的位置——比 `barrier` 和 `nonleaf` 低，但比 `special` 和 `suspend_resume` 高。大部分常规锁（如 `Threads_lock` 在 `barrier` 层级）都比它高。
+
+**第二层：`allow_vm_block` 控制 VMThread 能否在此锁上阻塞。** `false` 表示 VMThread（负责协调 Stop-The-World 操作）被禁止阻塞在此锁上。
+
+如果 VMThread 在进入 safepoint 时卡在某个锁上，而锁的持有者正在等待 safepoint 完成——死锁。`allow_vm_block` 就是在说明这个锁不在"hot path"上，可以安全持有。
+
+**第三层：`safepoint_check_required` 控制加锁时是否需要 safepoint 检查。** 两种对立 API：
+
+- `lock()` —— 强制 safepoint 检查：lock 过程中如果 safepoint 被触发，线程会停下让 GC 先执行。大部分 Java 线程用这个。
+- `lock_without_safepoint_check()` —— 跳过 safepoint 检查：用于 safepoint 代码自身、VMThread、signal handler 等不能阻塞的场景。
+
+`safepoint_check_required` 标记此锁应当走哪个版本。`_safepoint_check_always` 的锁如果被 `lock_without_safepoint_check` 调用会触发 assert 警告。
+
+这三个参数的组合生成了 `createThread_lock` 的"安全使用约束"——它是一个 leaf 级别（低 rank，不太会触发死锁检测），不允许 VMThread 阻塞（allow_vm_block=false），默认需要 safepoint 检查（`_safepoint_check_always`）的锁。
+
+具体锁的使用方式还需根据后续章节中锁的实际调用路径来观察，但不在此刻展开。
 
 `prio_init()` 初始化 Java 线程优先级到 OS 优先级的映射表：
 
