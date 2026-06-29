@@ -814,6 +814,22 @@ void gc_print(const char* msg) {
 
 `tty_lock` 就是这个 `Monitor` 的实例。100 个 Monitor 保护 100 个共享资源——stdout 一个、线程列表一个、代码缓存一个、符号表一个。JVM 代码里满屏的 `MutexLocker xxx(some_lock)` 就是在说"我要动这个资源了，别人别碰"。
 
+**对标 Java 的 ReentrantLock：** HotSpot 的 `Monitor` 就是 C++ 版的 `ReentrantLock`。概念几乎一一对应：
+
+| Java `ReentrantLock` | HotSpot `Monitor` |
+|---|---|
+| `lock.lock()` | `Monitor::lock()` |
+| `lock.unlock()` | `Monitor::unlock()` |
+| `Condition.await()` | `Monitor::wait()` |
+| `Condition.signal()` | `Monitor::notify()` |
+| `AQS` 的 CLH 同步队列 (Node 链表) | cxq + `_EntryList` (ParkEvent 链表) |
+| `AQS` 的 Condition Queue | `_WaitSet` (ParkEvent 链表) |
+| `LockSupport.park()` | `PlatformEvent::park()` |
+| `LockSupport.unpark(thread)` | `PlatformEvent::unpark()` |
+| `AbstractQueuedSynchronizer.Node` | ParkEvent |
+
+`Monitor` 和 `ReentrantLock` 本质上做了同样的事：维护一个状态字（AQS 用 `int state`，Monitor 用 `_LockWord`），无竞争时 CAS 改状态直接拿锁，有竞争时把等待线程推入队列并 park 睡眠，释放时唤醒下一个。理解 `ReentrantLock` 就理解了 `Monitor` 的骨架。唯一区别：HotSpot 版多了 rank 死锁检测和 safepoint 协调——这些是 C++ 内嵌 JVM 才需要的额外约束。
+
 现在看这个锁怎么实现的。`Monitor` 内部的全部状态就这几个字段：
 
 ```
