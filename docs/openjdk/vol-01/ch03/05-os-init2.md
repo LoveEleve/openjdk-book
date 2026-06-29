@@ -796,61 +796,109 @@ class ParkEvent : public os::PlatformEvent {
 
 ---
 
-### 第 3 层：SplitWord —— 锁字节和竞争队列共用一个字
+### 第 3 层：Monitor 与 SplitWord —— 完整管程的核心
 
-`Monitor` 的 `_LockWord` 是一个 `SplitWord` 联合体：
+前面两个零件（PlatformEvent 负责睡眠、ParkEvent 负责链接），现在把它们组装成完整管程。
 
-```c
-union SplitWord {
-  volatile intptr_t FullWord;     // 整个字（x86_64 上 8 字节）
-  volatile void*   Address;
-  volatile jbyte   Bytes[sizeof(intptr_t)];  // 按字节访问
-};
-```
-
-由于 ParkEvent 是 256 字节对齐的，它的地址低 8 位永远是 0。`_LockWord` 利用这一点：**最低字节**存放锁状态（0=空闲，1=已锁定），**高 7 字节**存放竞争队列（cxq）的头指针。这样就实现了——一次 CAS 同时完成"检查锁是否空闲"和"把自己推入竞争队列"，没有 TOCTOU 竞态。
-
----
-
-### 第 4 层：Monitor —— 完整的管程
-
-`Monitor`（`mutex.hpp`）是整个锁体系的核心类。它内部维护了三个 ParkEvent 链表，构成了完整的管程语义：
+`Monitor`（`mutex.hpp`）有五样东西：
 
 ```
 Monitor
-  ├─ SplitWord _LockWord       ← 锁字节 + cxq 头指针 (SplitWord)
+  ├─ SplitWord _LockWord       ← 锁状态 + 竞争队列 (cxq) 共享一个机器字
   ├─ ParkEvent* _EntryList      ← 等待获取锁的线程链表
   ├─ ParkEvent* _OnDeck         ← 下一任锁持有者 (最多一个)
   ├─ ParkEvent* _WaitSet        ← wait() 中的线程集合
   └─ Thread*    _owner          ← 当前持有者
 ```
 
-**`lock()` 的完整路径：**
+关键是 `_LockWord`——它是一个 `SplitWord` 联合体：
+
+```c
+union SplitWord {
+  volatile intptr_t FullWord;     // 整个字（x86_64 上 8 字节）
+  volatile jbyte   Bytes[sizeof(intptr_t)];  // 按字节访问
+};
+
+#define _LBIT 1
+#define _LSBINDEX 0                 // 小端：最低字节在数组索引 0
+```
+
+ParkEvent 按 256 字节对齐分配，地址的低 8 位永远是 0。所以 `_LockWord` 的**最低字节**可以存放锁状态（0=空闲，1=已锁定），**高 7 个字节**存放 cxq 的头指针。这就是 SplitWord 设计的目的——用一次 CAS 同时操作锁状态和 cxq。
+
+**解锁只看最低字节（`_LockWord.Bytes[0]`）。** `IUnlock` 用 `release_store` 把它写回 0——不需要 CAS，因为只有持有者会解锁：
+
+```c
+void Monitor::IUnlock(bool RelaxAssert) {
+  OrderAccess::release_store(&_LockWord.Bytes[_LSBINDEX], jbyte(0));
+  // ... 然后处理 _OnDeck / _EntryList / cxq 的传承 ...
+}
+```
+
+**加锁先试最低字节（TryFast），失败再同时操作锁+cxq（AcquireOrPush）：**
+
+```c
+// === mutex.cpp ===
+int Monitor::TryFast() {
+  // 乐观路径: CAS(0 → _LBIT), 期望 FullWord == 0 (锁空闲 + cxq 空)
+  intptr_t v = Atomic::cmpxchg(_LBIT, &_LockWord.FullWord, (intptr_t)0);
+  if (v == 0) return 1;         // FullWord 原本是 0, CAS 成功, 拿到锁
+
+  for (;;) {
+    if ((v & _LBIT) != 0) return 0;   // 锁已被持有, TryFast 放弃
+    // 锁空闲但 cxq 非空 → CAS 把 LockByte 从 0 设成 1, 同时保留 cxq 指针不变
+    const intptr_t u = Atomic::cmpxchg(v | _LBIT, &_LockWord.FullWord, v);
+    if (v == u) return 1;
+    v = u;
+  }
+}
+
+inline int Monitor::AcquireOrPush(ParkEvent * ESelf) {
+  intptr_t v = _LockWord.FullWord;
+  for (;;) {
+    if ((v & _LBIT) == 0) {
+      // 锁空闲 → CAS 把 LockByte 从 0 设成 1, 同时保留 cxq 指针不变
+      const intptr_t u = Atomic::cmpxchg(v | _LBIT, &_LockWord.FullWord, v);
+      if (u == v) return 1;
+      v = u;
+    } else {
+      // 锁被持有 → 把自己 ParkEvent 推入 cxq 头部
+      ESelf->ListNext = (ParkEvent *)(v & ~_LBIT);  // 链接旧 cxq
+      // CAS: 把 FullWord 设成 (self | _LBIT), 同时保留 LockByte=1
+      const intptr_t u = Atomic::cmpxchg(intptr_t(ESelf) | _LBIT,
+                                          &_LockWord.FullWord, v);
+      if (u == v) return 0;        // 入队成功
+      v = u;
+    }
+  }
+}
+```
+
+`AcquireOrPush` 用一次 CAS 原子的完成了两个动作：要么拿锁（LockByte 0→1），要么入队（旧 cxq → ListNext，自己 → LockWord 高位）。如果 CAS 失败（LockWord 被其他线程改了），重试循环。
+
+**`Monitor::lock()` 的完整路径：**
 
 ```
 Monitor::lock()
-  ├─ TryFast()                ← CAS(0→_LBIT): 假设无竞争, 直接拿锁
-  ├─ TrySpin()                ← 等不到就自旋 (指数退避, 自旋中检查 safepoint)
-  │     ↑ safepoint 检查: poll() 检测到 safepoint 请求 → 主动阻塞
-  ├─ ThreadBlockInVM           ← Java 线程状态: _thread_in_vm → _thread_blocked
-  │     ↑ 状态切换: VMThread 据此判断"这个 Java 线程已停, 可安全 GC"
-  │       VMThread 自身跳过此步, 走 lock_without_safepoint_check()
-  └─ ILock()                   ← 慢路径, 内含三队列调度
-        ├─ TryFast() → TrySpin() 再试一次
-        ├─ AcquireOrPush()     ← 还是拿不到？把自己 ParkEvent 推入 cxq
+  ├─ TryFast()                ← CAS(0→_LBIT), 改的是 _LockWord.Bytes[0]
+  ├─ TrySpin()                ← TryFast 失败后自旋重试
+  ├─ ThreadBlockInVM           ← 转换 JavaThread 状态 (_thread_in_vm → _thread_blocked)
+  └─ ILock()
+        ├─ TryFast() → TrySpin() 再试
+        ├─ AcquireOrPush()     ← 还是拿不到? CAS 把自己推入 cxq(_LockWord 高位)
         ├─ while(_OnDeck != self) park()   ← 等待被选为 OnDeck
-        │     ↑ park() 内部: CAS → pthread_mutex_lock + pthread_cond_wait
-        └─ while(true) TrySpin()/park()    ← 成为 OnDeck 后自旋到成功
+        └─ while(true) TrySpin()/park()    ← 竞争到锁, 清除 OnDeck
 ```
 
-**`unlock()` 的传承机制：**
+每一个加锁/解锁操作改的都是同一个字 —— `_LockWord.FullWord`。拿锁是 CAS `0 → _LBIT`，放锁是 `release_store(Bytes[0]=0)`，竞争入队是把 ParkEvent 地址写到高位同时保留 LockByte=1。
+
+**解锁与传承：**
 
 ```
 Monitor::unlock()
-  ├─ release_store(LockByte=0)   ← 释放锁 (字节存储, 比 CAS 轻量)
+  ├─ release_store(LockByte=0)   ← 释放锁 (字节存储, 只改 _LockWord.Bytes[0])
   ├─ _OnDeck 已有? → unpark(_OnDeck), return
   ├─ cxq + EntryList 双空? → return
-  └─ CAS 获取 OnDeck 内锁 (CAS null→_LBIT)
+  └─ 获取 OnDeck 内锁 (CAS null→_LBIT)
        ├─ EntryList 有线程 → 提取头部设为新 OnDeck, unpark
        ├─ EntryList 空 → CAS 批量搬迁 cxq 到 EntryList, 再提取头部
        └─ 双空 → 清理
@@ -873,7 +921,7 @@ Monitor::unlock()
 
 ---
 
-### 第 5 层：Mutex 和 Padded 变体
+### 第 4 层：Mutex 和 Padded 变体
 
 `Mutex` 继承 `Monitor`，把 `wait()`、`notify()`、`notify_all()` 全部覆盖为 `ShouldNotReachHere()`——拿了锁就只能干活、放锁，不能在里面等条件。JVM 里绝大多数锁都是 `Mutex`。
 
