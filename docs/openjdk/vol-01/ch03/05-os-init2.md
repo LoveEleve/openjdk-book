@@ -568,28 +568,22 @@ os::init_2() 其余步骤：
 
 PerfData 是 HotSpot 内置的性能监控数据区，`jstat`、`jcmd PerfCounter.print` 等命令通过它读取 JVM 运行指标。它的实现涉及四个 Linux 系统调用，先逐一铺垫。
 
-**`mmap` —— 把磁盘文件映射为内存**
+**`mmap` —— 两种用法，JVM 都用到了**
 
-man 手册 `mmap(2)` 的定义：
+man 手册 `mmap(2)`：
 
 > "mmap() creates a new mapping in the virtual address space of the calling process."
 
-给它一个文件描述符 `fd`，它把这个文件的内容映射到进程的虚拟地址空间。之后进程可以用指针直接读写这块内存——CPU 的 MMU 自动负责把内存访问翻译成文件 I/O：
+`mmap` 支持两种完全不同的用法，取决于是否传 `fd`：
 
-```
-进程视角:  char *p = mmap(fd, size, PROT_READ|PROT_WRITE, MAP_SHARED);
-            p[0] = 'A';                    // 写内存 → 内核自动写回文件
-            printf("%c\n", p[0]);          // 读内存 → 内核自动从文件读
+| 用法 | `fd` 参数 | 典型 flag | 用途 | JVM 哪里用 |
+|------|----------|----------|------|-----------|
+| 文件映射 | 有效 fd（`open()` 返回的） | `MAP_SHARED` | 把磁盘文件的内容映射到内存。对内存的修改最终写回文件，其他进程 `mmap` 同一个文件能读到同样的内容 | PerfData 共享内存 |
+| 匿名映射 | `-1`（或 `MAP_ANONYMOUS`） | `MAP_PRIVATE` | 分配一块纯内存，不关联任何文件。`fd` 传 -1，内核从 swap 空间分配物理页 | JVM 堆、code cache、metaspace |
 
-文件视角:  /tmp/hsperfdata_<user>/<pid>   // 磁盘上的真实文件
-            ↑ p 指向的地址就是文件内容的内存镜像
-```
+man 手册对两种映射的区别给出了具体说明：`MAP_ANONYMOUS` 创建的不是文件映射，其内容从零页初始化。PerfData 需要两个进程（`java` 和 `jstat`）都能读到同一个数据结构，所以用文件映射加上 `MAP_SHARED`。而 JVM 堆不能分享给 `jstat` 之类的外部进程，所以用匿名映射加 `MAP_PRIVATE`。
 
-PerfData 用 `MAP_SHARED` 标记创建映射。man 手册解释了这个标记的作用：
-
-> "Updates to the mapping are visible to other processes mapping the same region, and are carried through to the underlying file."
-
-这意味着 HotSpot 写 `p[0] = new_value` 之后，同时启动的 `jstat` 进程（它也对同一个文件做了 `mmap`）立刻就能读到新值——不需要任何 IPC 通信。
+PerfData 的实现（`perfMemory_linux.cpp`）：先 `open()` 创建 `/tmp/hsperfdata_<user>/<pid>` 文件，然后 `mmap(MAP_SHARED, fd)` 映射，之后 `close(fd)`（`mmap` 建立后 fd 可以关掉——内核通过 inode 引用计数保持文件存活）。外部工具 `jstat`、`jcmd` 打开同一个文件再 `mmap`，就能读 HotSpot 进程写入的 GC 次数等计数器。
 
 **`msync` —— 把内存变更强制刷回磁盘**
 
