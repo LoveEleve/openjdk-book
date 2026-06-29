@@ -430,19 +430,61 @@ if (UseNUMA) {
 
 这解释了为什么 `Arguments::adjust_after_os()` 必须放在 `os::init_2()` 之后——`os::init_2()` 可能改变 `UseNUMA`，`adjust_after_os()` 必须在最终值上做联动。
 
-### 1.3 其余步骤 —— 树形图略过
+### 1.3 线程创建锁 + 优先级策略
+
+`set_createThread_lock` 创建一个全局 Mutex，保护后续的线程创建操作：
+
+```c
+// === os_linux.cpp (os::init_2 中) ===
+Linux::set_createThread_lock(new Mutex(Mutex::leaf, "createThread_lock", false));
+```
+
+这个锁的类型是 `Mutex::leaf`——HotSpot 的锁层级中最底层的一种（不代表叶子节点，代表"不参与 safepoint 检查"）。`"createThread_lock"` 是锁名称，用于调试和日志。
+
+为什么需要这个锁？`os::create_thread()` 被 `os::init_2()` 之后的多个地方调用：启动 Java 线程、启动 CompilerThread、启动 ServiceThread……多线程并发创建线程时，`_createThread_lock` 互斥保护 `pthread_create` 的调用过程，防止内部状态竞争。
+
+`prio_init()` 初始化 Java 线程优先级到 OS 优先级的映射表：
+
+```c
+// === os_linux.cpp ===
+static int prio_init() {
+  if (ThreadPriorityPolicy == 1) {         // -XX:ThreadPriorityPolicy=1
+    if (geteuid() != 0) {                  // 不是 root 用户
+      if (!FLAG_IS_DEFAULT(ThreadPriorityPolicy)) {
+        warning("ThreadPriorityPolicy=1 may require system level permission, "
+                "e.g., being the root user.");
+      }
+    }
+  }
+  if (UseCriticalJavaThreadPriority) {     // -XX:+UseCriticalJavaThreadPriority
+    os::java_to_os_priority[MaxPriority] =
+        os::java_to_os_priority[CriticalPriority];
+  }
+  return 0;
+}
+```
+
+HotSpot 有一个预定义的映射表 `java_to_os_priority[]`，把 Java 的 1-10 优先级映射到 Linux 的 nice 值（-20 到 19）。`ThreadPriorityPolicy` 控制映射策略：
+
+| 值 | 含义 |
+|----|------|
+| 0 | 关闭：所有线程优先级相同，等价于所有 Java 线程都用 `nice=0` |
+| 1 | 激进：尝试使用实时调度策略（`SCHED_RR`），把 Java 线程映射到对应的 `nice` 值。需要 root 或 `CAP_SYS_NICE` |
+| 2 | 默认：仅当操作系统支持且 JVM 以特权用户运行时才映射优先级。Linux 上默认值 |
+
+`UseCriticalJavaThreadPriority` 打开时，`MaxPriority`（通常映射 nice=-10）被升级到 `CriticalPriority`（nice=-20），给 GC 线程这样的关键线程提供最高调度优先级。
+
+### 1.4 其余步骤 —— 树形图略过
 
 ```
 os::init_2() 其余步骤：
-├── Fast thread clock 初始化      -- Linux 特有优化，用 CLOCK_THREAD_CPUTIME_ID 替代昂贵系统调用
+├── Fast thread clock 初始化      -- Linux 特有优化，CLOCK_THREAD_CPUTIME_ID 替代系统调用
 ├── set_minimum_stack_sizes       -- 校验 -Xss 不小于 OS 允许的线程栈最小值
 ├── capture_initial_stack         -- 非 java launcher 场景下捕获原始线程栈地址
 ├── libpthread_init / sched_getcpu_init  -- dlsym 查找 pthread 函数指针
-├── glibc guard page 调整         -- __GLIBC__ 分支：调整 glibc 默认 guard page 对栈尺寸的影响
+├── glibc guard page 调整         -- __GLIBC__ 分支：调整 glibc guard page 对栈尺寸的影响
 ├── MaxFDLimit 处理              -- getrlimit/setrlimit 提升文件描述符上限
-├── new Mutex("createThread_lock") -- 线程创建互斥锁
 ├── atexit(perfMemory_exit_helper) -- 进程退出时清理性能监控共享内存
-├── prio_init()                  -- 线程优先级策略初始化（ThreadPriorityPolicy）
 └── set_coredump_filter()        -- core dump 过滤器（AllocateHeapAt/DAX 相关）
 ```
 
