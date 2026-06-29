@@ -704,7 +704,11 @@ HotSpot 读当前值、按位 OR 上去、再写回 `/proc/self/coredump_filter`
 
 HotSpot 不用裸 `pthread_mutex_t`，因为 JVM 需要三个 pthread 锁不具备的能力：
 
-1. **死锁检测**——给每个锁分配 rank，按 rank 从小到大加锁，违反顺序即 assert。pthread 做不到。
+1. **死锁检测**——给每个锁分配一个整数 rank，所有锁必须按 rank 从小到大的顺序获取。如果线程持有一个 rank=5 的锁后又尝试获取 rank=3 的锁，debug 构建直接 assert 失败。
+
+rank 的本质是一种**全序关系**（total ordering）。死锁的条件是"环形等待"——线程 A 持有锁 1 等锁 2，线程 B 持有锁 2 等锁 1。如果把所有锁排成一个线性顺序，规定只能从小往大拿，就永远不存在"A 等 B、B 等 A"的环。这是操作系统教科书里的标准死锁预防策略。
+
+rank 越小的锁性质越"危险"：`tty` (rank 最小) 是 tty 输出锁，`special` 是信号处理器相关的锁，`leaf` 是 createThread_lock 所在的层级——它们不应在持有大锁时被请求。rank 越大的锁越"普通"，如 `barrier`（Threads_lock 的层级）是大部分 Java 线程频繁使用的锁。debug 模式中，每个线程维护自己已持有锁的最大 rank，新加锁时必须大于这个值。
 2. **safepoint 协调**——`lock()` 过程自动检查是否有 safepoint 请求，检查到就主动阻塞让 GC 先执行。pthread 不知道什么是 safepoint。
 3. **JavaThread 状态管理**——`lock()` 如果发现 safepoint 正在进行中，会把 JavaThread 的状态从 `_thread_in_vm` 切换为 `_thread_blocked`，这样 safepoint 的 VMThread 就知道"这个线程虽然在 VM 内部，但它已经停下了，可以安全执行 GC"。JVM 的线程类型不仅有 Java 线程，也包括 CompilerThread、WatcherThread、GC 线程等。这些不同类型的线程加锁时 safepoint 的行为也不相同——Java 线程需要做状态转换，而 VMThread（负责协调 safepoint 的线程）需要走"不检查 safepoint"的路径，否则会死锁。
 
