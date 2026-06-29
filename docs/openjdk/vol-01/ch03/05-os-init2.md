@@ -690,7 +690,6 @@ Linux 内核在进程崩溃时生成 core dump 文件，默认包含该进程的
 | 8 | dump 共享 DAX 页面 | 0 |
 
 HotSpot 读当前值、按位 OR 上去、再写回 `/proc/self/coredump_filter`——选择性地增加需要 dump 的映射类型。`DumpPrivateMappingsInCore` 和 `DumpSharedMappingsInCore` 都是诊断 flag（默认 false），只在需要完整 core dump 分析内存布局时手动开启。
-```
 
 **小结**：`os::init_2()` 的核心产出是信号处理器注册——后续所有 SIGSEGV（空指针、栈溢出、安全点）都由这一个入口处理。附带验证了 NUMA 可用性，可能修改 `UseNUMA` 的值。
 
