@@ -1203,42 +1203,31 @@ jint Arguments::adjust_after_os() {
 
 **agent 转换与启动** —— Stage 3 末尾加载用户指定的原生 agent。
 
-`-agentlib:jdwp=transport=dt_socket,...`（IDE 远程调试）、`-agentpath:/path/to/libprofiler.so`（性能采样）、APM 探针——这些都指定了一个 `.so` 文件。`create_vm_init_agents()` 源码不长，直接看：
+但大多数情况下这里什么都不做。看 Stage 3 骨架中的两个 `if` 守卫：
 
 ```c
-// === thread.cpp ===
-void Threads::create_vm_init_agents() {
-  extern struct JavaVM_ main_vm;
-  AgentLibrary* agent;
-
-  JvmtiExport::enter_onload_phase();
-
-  for (agent = Arguments::agents(); agent != NULL; agent = agent->next()) {
-    OnLoadEntry_t on_load_entry = lookup_agent_on_load(agent);
-
-    if (on_load_entry != NULL) {
-      jint err = (*on_load_entry)(&main_vm, agent->options(), NULL);
-      if (err != JNI_OK) {
-        vm_exit_during_initialization("agent library failed to init", agent->name());
-      }
-    } else {
-      vm_exit_during_initialization("Could not find Agent_OnLoad function", agent->name());
-    }
-  }
-
-  JvmtiExport::enter_primordial_phase();
+if (Arguments::init_libraries_at_startup()) {    // _libraryList 非空才执行
+    convert_vm_init_libraries_to_agents();
+}
+if (Arguments::init_agents_at_startup()) {       // _agentList 非空才执行
+    create_vm_init_agents();
 }
 ```
 
-遍历 `Arguments::agents()` 返回的 agent 链表。每个 agent 做两件事：
+两者的实现只是检查链表是否为空（`arguments.hpp`）：
 
-1. `lookup_agent_on_load(agent)` —— 内部先 `dlopen(agent_path)` 加载 `.so`，再 `dlsym(handle, "Agent_OnLoad")` 找函数地址。找不到直接 `vm_exit_during_initialization` 终止 JVM。
+```c
+static bool init_libraries_at_startup()  { return !_libraryList.is_empty(); }
+static bool init_agents_at_startup()     { return !_agentList.is_empty(); }
+```
 
-2. `(*on_load_entry)(&main_vm, agent->options(), NULL)` —— 调 `Agent_OnLoad`。agent 拿到 `JavaVM*` 指针，注册 JVMTI capabilities、安装事件回调，返回 `JNI_OK` 表示成功。
+`_libraryList` 和 `_agentList` 是两个 `AgentLibrary` 链表。链表在 Stage 2 的 `parse_each_vm_init_arg()` 中构建——解析到 `-Xrun` 参数时往 `_libraryList` 里加节点，解析到 `-agentlib:xx` / `-agentpath:xx` 时往 `_agentList` 里加节点。正常 `java MyApp` 不传任何 agent 参数，两个链表都为空，`if` 不成立，整个 agent 部分跳过。
 
-前面还有一步 `convert_vm_init_libraries_to_agents()`：把 `-Xrun` 旧参数指定的库（没有 `JVM_OnLoad` 但有 `Agent_OnLoad` 的）迁移到 agent 链表——纯粹向后兼容。
+当链表非空时：
 
-没有传任何 agent 参数时 `Arguments::agents()` 返回空链表，for 循环不执行，跳过。
+1. `convert_vm_init_libraries_to_agents()` —— 遍历 `_libraryList`（`-Xrun` 旧参数）。对每个库，先 `dlopen` 找 `JVM_OnLoad`。如果没有 `JVM_OnLoad` 但有 `Agent_OnLoad`，把节点从 `_libraryList` 移除，追加到 `_agentList` 里——统一走 `Agent_OnLoad` 机制。
+
+2. `create_vm_init_agents()` —— 遍历 `_agentList`。对每个 agent，`dlopen` 加载 `.so` → `dlsym` 找 `Agent_OnLoad` → 调 `Agent_OnLoad(&main_vm, agent->options(), NULL)`。agent 拿到 `JavaVM*` 指针注册 JVMTI capabilities。找不到或返回非 `JNI_OK` 即 `vm_exit_during_initialization`。
 
 ---
 
