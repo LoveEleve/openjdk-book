@@ -858,6 +858,8 @@ Monitor
   └─ ParkEvent*  _WaitSet       ← 条件变量的等待集合（仅 Monitor 使用，Mutex 禁用）
 ```
 
+> **Monitor 和 Mutex 的区别：** `Monitor` 是完整版——有 `lock/unlock` 加 `wait/notify`（条件等待）。`Mutex` 是裁减版——把 `wait/notify` 覆盖为 `ShouldNotReachHere()`，调了就崩溃。JVM 里绝大多数锁都是 `Mutex`（包括 `createThread_lock`），只有少数需要"拿了锁之后等某个条件"的场景才直接用 `Monitor`。所以 `_WaitSet` 这个字段在 `Mutex` 上永远是空的——因为没人能调它的 `wait()`。
+
 关键设计：`_LockWord` 这一个整数同时记录了两件事——**锁状态**（最低位）和**排队队列的头指针**（高位）。为什么能这样？因为等待者的 ParkEvent 地址是 256 字节对齐的，低 8 位永远是 0。
 
 用具体数值演示完整过程。假设两个线程竞争同一个 Monitor：
