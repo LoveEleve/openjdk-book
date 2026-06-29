@@ -851,11 +851,11 @@ AQS 的结点有一个 `waitStatus` 状态机（`CANCELLED/SIGNAL/CONDITION/PROP
 
 ```
 Monitor
-  ├─ _LockWord    ← 一个 8 字节整数。最低位=锁状态(0空闲/1已锁)，高位=等待者链表头
-  ├─ _owner       ← 当前持有锁的线程（NULL=没人持有）
-  ├─ _EntryList   ← 等待获取锁的线程链表
-  ├─ _OnDeck      ← "下一个该拿锁的线程"（最多一个）
-  └─ _WaitSet     ← wait()/notify() 用的等待集合
+  ├─ SplitWord   _LockWord      ← 锁状态(最低位) + 等待队列指针(高位)
+  ├─ Thread*     _owner         ← 当前持有者 (NULL=空闲)
+  ├─ ParkEvent*  _EntryList     ← 等待获取锁的 ParkEvent 链表
+  ├─ ParkEvent*  _OnDeck        ← 下一个继承人 (最多一个)
+  └─ ParkEvent*  _WaitSet       ← wait()/notify() 的等待线程集合
 ```
 
 关键设计：`_LockWord` 这一个整数同时记录了两件事——**锁状态**（最低位）和**排队队列的头指针**（高位）。为什么能这样？因为等待者的 ParkEvent 地址是 256 字节对齐的，低 8 位永远是 0。
