@@ -1229,6 +1229,8 @@ static bool init_agents_at_startup()     { return !_agentList.is_empty(); }
 
 2. `create_vm_init_agents()` —— 遍历 `_agentList`。对每个 agent，`dlopen` 加载 `.so` → `dlsym` 找 `Agent_OnLoad` → 调 `Agent_OnLoad(&main_vm, agent->options(), NULL)`。agent 拿到 `JavaVM*` 指针注册 JVMTI capabilities。找不到或返回非 `JNI_OK` 即 `vm_exit_during_initialization`。
 
+> agent 的完整体系——`dlopen` 查找路径、`Agent_OnLoad` 的 JVMTI capabilities 注册、`-javaagent` 的 premain 机制、以及 JVMTI 生命周期的各个 phase——将在后续 JVMTI 和 agent 专题文章中详细讲解。这里只需知道 Stage 3 在启动流程中是 agent 最早被加载的位置。
+
 ---
 
 ## Stage 3 总结
