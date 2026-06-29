@@ -432,7 +432,12 @@ if (UseNUMA) {
 
 ### 1.3 线程创建锁 + 优先级策略
 
-`set_createThread_lock` 创建一个 HotSpot 的 `Mutex` 对象。
+`set_createThread_lock` 创建一个 HotSpot 的 `Mutex` 对象：
+
+```c
+// === os_linux.cpp (os::init_2 中) ===
+Linux::set_createThread_lock(new Mutex(Mutex::leaf, "createThread_lock", false));
+```
 
 但 `Mutex` 不是 `pthread_mutex_t`——它是 HotSpot 自己实现的锁，底层可能用 `pthread_mutex`、`futex` 或自旋锁，取决于平台。比 POSIX 锁多了三层 JVM 专属语义：
 
