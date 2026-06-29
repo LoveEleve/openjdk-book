@@ -955,7 +955,13 @@ AQS 只需要一个 CLH 队列。HotSpot 的 Monitor 和 ObjectMonitor 都需要
         下次有人 unlock 时，直接从 EntryList 取 C——不需要再搬 cxq。
 ```
 
-**关键就是一次 CAS 交接。** cxq→NULL 的 CAS 成功后，整条链就归释放者独占了——没有并发读写问题。之后释放者可以安全地遍历、排序、选人。AQS 没有这个"CXI 全部摘下来"的操作——它必须在并发读写的单一链表上工作，所以需要 `waitStatus` 状态机来标记每个节点的状态。
+**关键就是一次 CAS 交接。** cxq→NULL 的 CAS 成功后，整条链就归释放者独占了——没有并发读写问题。之后释放者可以安全地遍历、排序、选人。AQS 没有这个"cxq 全部摘下来"的操作——它必须在并发读写的单一链表上工作，所以需要 `waitStatus` 状态机来标记每个节点的状态。
+
+**补充两个容易混淆的点：**
+
+1. 两队列的根本目的就是**避免持有锁的线程（操作 EntryList）和获取锁失败的线程（CAS 写入 cxq）之间的并发冲突**。持有者独占 EntryList，失败者 CAS 写入 cxq——各写各的，互不干扰。
+
+2. 获取锁失败的线程**不是在 cxq 里阻塞的**。cxq 只是一个 ParkEvent 链表——记录"我在排队"。线程把自己 ParkEvent 推入 cxq 后，调用 `ParkEvent::park()`（底层 `pthread_cond_wait`）睡眠。阻塞发生在 park 里，不在 cxq 里。cxq 里只是排队记录。
 
 **ObjectMonitor 用了完全相同的双队列设计，但节点类型不同。** Monitor 的队列直接存 `ParkEvent*`——每个线程有私有的 `_MutexEvent`，锁竞争时拿它去排队。ObjectMonitor 的队列存的是 `ObjectWaiter*`——一个栈上分配的包装对象，内部包含了指向线程私有 ParkEvent 的指针（`ObjectWaiter::_event`）和前后链表指针。注释里写道 `"TODO: Eliminate ObjectWaiter and use ParkEvent instead"`——设计者自己也觉得两套节点应该统一，但 JVMTI 的 `GetObjectMonitorUsage` API 依赖 ObjectWaiter 结构暴露给外部工具，无法直接替换。
 
