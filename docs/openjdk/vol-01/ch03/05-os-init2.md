@@ -891,6 +891,8 @@ Monitor::unlock()
 
 3. **三队列公平调度** —— pthread_mutex 的等待队列是内核管理的，HotSpot 控制不了。自建的 cxq → EntryList → OnDeck 三队列让 JVM 可以控制唤醒顺序、支持"偷锁"（VMThread sneak）、精确追踪 JFR 锁竞争事件。
 
+> **注意：这是 HotSpot 的 C++ 内部锁，不是 Java `synchronized` 的底层实现。** Java 代码中 `synchronized(obj) { }` 使用的是另一个独立类 `ObjectMonitor`（`objectMonitor.hpp`，同样有 cxq/EntryList/WaitSet 结构但设计不同）。`ObjectMonitor` 的膨胀机制、偏向锁（BiasedLocking）、轻量级锁（BasicLock）以及 `synchronized` 的完整实现将在后续同步机制章节单独详细讲解。
+
 加锁使用 RAII 包装：
 
 ```c
