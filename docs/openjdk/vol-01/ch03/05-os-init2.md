@@ -918,6 +918,20 @@ B 被唤醒:
 
 整个过程里，`_LockWord` 这一个整数承载了全部同步状态。加锁是 CAS 把最低位从 0 改成 1，放锁是直接写最低位为 0，排队是把排队者地址写到高位。这就是 SplitWord 设计的全部意义——不需要独立的"锁状态"和"队列表头"，一个 CAS 操作原子地修改两者。
 
+### 为什么需要 cxq 和 EntryList 两个队列
+
+AQS 只需要一个 CLH 队列。HotSpot 的 Monitor 和 ObjectMonitor 都需要两个：cxq + EntryList。根本原因是**写入者和读取者是不同的人**，它们的并发需求冲突了。
+
+**cxq：无锁并发写的"收件箱"。** 任何线程在 `AcquireOrPush` 中都能把自己 CAS 推入 cxq 头部——不需要先获得任何锁。这是关键约束：一个等待线程已经拿不到外层锁了，不能再要求它先拿一把"内层锁"才能排队——它没锁可拿。
+
+**EntryList：独占写的"处理队列"。** 只有一个人操作它：释放锁的那个线程（`IUnlock`）。释放者先获取 inner lock（`CAS null→_LBIT, _OnDeck`），然后把整个 cxq 原子地摘下（`CAS swap cxq→NULL`），批量搬迁到 EntryList，再从 EntryList 选一个设为 `_OnDeck` 唤醒。没有人跟它竞争——独占操作，无需 CAS。
+
+**为什么要搬？直接唤醒 cxq 头不行吗？** 两个原因。第一，cxq 是 LIFO（头插入队），按入队顺序唤醒是反直觉的——后来的线程先拿到锁。搬迁时重新排列（EntryList 支持 FIFO 和 LIFO 两种策略），实现更公平的调度。第二，把"入队"和"出队"分离后，解锁时持有者可以在 inner lock 保护下安全操作链表——不需要 `waitStatus` 这样的复杂状态机来协调并发读写。
+
+**ObjectMonitor 用了完全相同的设计。** `ObjectMonitor::enter()` 中 `EnterI` 把 `ObjectWaiter` 推入 `_cxq`（`Atomic::cmpxchg(&node, &_cxq, nxt)`），`ObjectMonitor::exit()` 用 `Atomic::cmpxchg(NULL, &_cxq, w)` 原子摘下整个 cxq，然后追加或前置到 `_EntryList`，从 EntryList 中 `ExitEpilog` 唤醒一个。
+
+总结：cxq 是"收件箱"（多写者，无锁 CAS 入队），EntryList 是"处理队列"（单读者，独占搬迁排序）。AQS 用一个 CLH 队列同时做这两件事——靠 `waitStatus` 状态机协调读写——结构更简单但协议更复杂。HotSpot 选择多维护一个队列，换取更简单的并发协议。
+
 ---
 
 ### 第 4 层：Mutex 和 Padded 变体
