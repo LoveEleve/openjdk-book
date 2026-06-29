@@ -566,14 +566,65 @@ os::init_2() 其余步骤：
 
 ### 1.8 PerfData 共享内存退出清理
 
+PerfData 是 HotSpot 内置的性能监控数据区，`jstat`、`jcmd PerfCounter.print` 等命令通过它读取 JVM 运行指标。它的实现涉及四个 Linux 系统调用，先逐一铺垫。
+
+**`mmap` —— 把磁盘文件映射为内存**
+
+man 手册 `mmap(2)` 的定义：
+
+> "mmap() creates a new mapping in the virtual address space of the calling process."
+
+给它一个文件描述符 `fd`，它把这个文件的内容映射到进程的虚拟地址空间。之后进程可以用指针直接读写这块内存——CPU 的 MMU 自动负责把内存访问翻译成文件 I/O：
+
+```
+进程视角:  char *p = mmap(fd, size, PROT_READ|PROT_WRITE, MAP_SHARED);
+            p[0] = 'A';                    // 写内存 → 内核自动写回文件
+            printf("%c\n", p[0]);          // 读内存 → 内核自动从文件读
+
+文件视角:  /tmp/hsperfdata_<user>/<pid>   // 磁盘上的真实文件
+            ↑ p 指向的地址就是文件内容的内存镜像
+```
+
+PerfData 用 `MAP_SHARED` 标记创建映射。man 手册解释了这个标记的作用：
+
+> "Updates to the mapping are visible to other processes mapping the same region, and are carried through to the underlying file."
+
+这意味着 HotSpot 写 `p[0] = new_value` 之后，同时启动的 `jstat` 进程（它也对同一个文件做了 `mmap`）立刻就能读到新值——不需要任何 IPC 通信。
+
+**`msync` —— 把内存变更强制刷回磁盘**
+
+man 手册 `msync(2)`:
+
+> "msync() flushes changes made to the in-core copy of a file that was mapped into memory using mmap(2) back to the filesystem. Without use of this call, there is no guarantee that changes are written back before munmap(2) is called."
+
+`mmap` 的变更是"懒写入"的——内核可能延迟把脏页写回磁盘。进程退出时，如果直接 `munmap`，最近的一些计数器更新可能丢在页缓存里没落盘。`msync(MS_SYNC)` 强制立刻刷入。PerfData 在清理前会先 msync。
+
+**`munmap` —— 解除内存映射**
+
+释放 `mmap` 分配的虚拟地址空间，对应的物理页被回收。man 手册 `munmap(2)`：`"The munmap() system call deletes the mappings for the specified address range"`。
+
+**`unlink` —— 删除文件**
+
+`unlink(2)` 从文件系统中移除文件名。注意：即使 `unlink` 成功返回，文件内容不会立刻从磁盘消失——它只删除"目录项"（文件名到 inode 的链接）。如果仍有进程打开了这个文件（有 fd 或 mmap 映射），inode 和数据块会保留到最后一个引用关闭后才真正释放。这就是为什么先 msync → munmap → 再 unlink 的顺序不能颠倒。
+
+**`atexit` —— 注册进程退出回调**
+
+man 手册 `atexit(3)`:
+
+> "The atexit() function registers the given function to be called at normal process termination. Functions so registered are called in the reverse order of their registration."
+
+`exit()` 或 `main` 返回时，C 运行时库按注册的倒序依次调用所有 `atexit` 回调。PerfData 用这个机制确保不管 JVM 从哪个代码路径退出（正常退出、`System.exit()`、甚至某些信号触发的 `_exit`），清理函数都会被调用。
+
+有了这些基础，看 HotSpot 代码：
+
 ```c
 // === os_linux.cpp ===
 extern "C" {
   static void perfMemory_exit_helper() {
-    perfMemory_exit();
+    perfMemory_exit();              // → msync + munmap + unlink
   }
 }
-// ...
+
 if (PerfAllowAtExitRegistration) {
     if (atexit(perfMemory_exit_helper) != 0) {
         warning("os::init_2 atexit(perfMemory_exit_helper) failed");
@@ -581,14 +632,7 @@ if (PerfAllowAtExitRegistration) {
 }
 ```
 
-PerfData 是 HotSpot 内置的性能监控数据区。它在 `/tmp/hsperfdata_<user>/` 下创建文件，然后通过 `mmap(MAP_SHARED)` 映射到进程地址空间。映射之后 JVM 进程直接用内存指针（`PerfDataEntry*`）读写这块区域——不再走 `read()/write()` 系统调用。外部工具 `jstat`、`jcmd`、VisualVM 打开同一个文件并同样 `mmap` 它，从而"看到"同一块共享内存中的 GC 次数、堆使用量、编译统计等计数器。文件大小约 32KB。
-
-`atexit` 是 C 标准库函数——注册一个在进程正常退出时自动调用的回调函数。多个 `atexit` 注册的回调按注册先后顺序的倒序执行。这里注册的 `perfMemory_exit_helper` 会在进程退出时：
-1. 调用 `msync` 把共享内存的变更刷回文件
-2. 调用 `munmap` 解除内存映射
-3. 调用 `unlink` 删除 `/tmp/hsperfdata_<user>/<pid>` 文件
-
-不注册这个清理会导致 `/tmp` 下遗留孤立文件。`PerfAllowAtExitRegistration` 默认 true。
+`perfMemory_exit_helper` 只做一件事：调用 `perfMemory_exit()`。后者内部的清理顺序就是上面铺垫的 `msync` → `munmap` → `unlink`。`PerfAllowAtExitRegistration` 默认 true，生产环境总是注册这个清理回调。
 
 ### 1.9 coredump 过滤器
 
