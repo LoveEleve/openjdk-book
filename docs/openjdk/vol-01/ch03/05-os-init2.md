@@ -1085,14 +1085,18 @@ os::set_polling_page((address)(bad_page));                     // 存到 os::_po
 
 而线程自己读的是**私有的** `JavaThread._polling_page` 字段——每个 JavaThread 对象里都有一个指针，`arm_local_poll` 把它设为 `bad_page|8`，`disarm_local_poll` 把它恢复为 `good_page`。JIT 代码用 `mov r10, [r15 + offset]` 加载的是这个私有字段，不是全局变量。所有线程共享同一块 `bad_page` 内存，但每个线程有自己的指针独立切换。
 
-最后把页面地址和信息编码成 `void*`，存入静态变量。`poll_bit()` 返回值是 `8`，因为 bad_page 按 4KB 对齐（低 12 位全是 0），`| 8` 不冲突：
+最后把页面地址编码成 `void*`。用具体数值来说——假设 `mmap` 返回的 bad_page 地址是 `0x7f1234500000`（页对齐，低 12 位全是 0），good_page 紧跟其后是 `0x7f1234501000`：
 
 ```c
-_poll_armed_value    = (void*)((intptr_t)bad_page  | 8);  // 指向 bad_page
-_poll_disarmed_value = (void*)((intptr_t)good_page);      // 指向 good_page
+_poll_disarmed_value = (void*)0x7f1234501000;        // 指向 good_page
+_poll_armed_value    = (void*)0x7f1234500008;        // bad_page | 8
 ```
 
-**为什么需要 8？** `poll_bit()` 返回一个非零的位模式，使得 `_poll_armed_value` 的低位不等于 0。如果 armed 值是 0，当 JIT 编译器在 polling 位置读取它时，会匹配到 null 地址——和空指针异常的判断冲突。使用 `8` 配合 256 字节对齐的 ParkEvent 地址保证了 `armed_value` 的低位非零且不会在 bad_page 的起始地址内——区分了 bad_page 触发和 null pointer。
+线程被 arm 后，JIT 代码执行 `test QWORD PTR [0x7f1234500008], rax`——地址 `0x7f1234500008` 在 bad_page 范围内（`0x...0000` 到 `0x...0FFF`），被 `PROT_NONE` 保护，触发 SIGSEGV。信号处理器拿到 `si_addr = 0x7f1234500008`，调 `is_poll_address(0x7f1234500008)`——检查故障地址是否在 `[0x7f1234500000, 0x7f1234501000)` 区间内，在就说明这是安全点触发的，挂起线程。
+
+线程被 disarm 后，`test` 读的是 `0x7f1234501000`——good_page，`PROT_READ`，正常通过。
+
+**为什么是 8 而不是 0？** 如果 `_poll_armed_value = 0x7f1234500000`（不加 8），地址 `...0000` 和空指针 `0x0` 在信号处理器里难以快速区分——`is_poll_address` 需要额外的逻辑判断。加了 8 后，故障地址的低位一定会非零（0x...0008），处理起来更简单：`addr & ~0xF` 还原出 bad_page 基址，再判断范围。
 
 ### 2.3 arm/disarm —— 怎么让线程停下
 
