@@ -828,7 +828,22 @@ void gc_print(const char* msg) {
 | `LockSupport.unpark(thread)` | `PlatformEvent::unpark()` |
 | `AbstractQueuedSynchronizer.Node` | ParkEvent |
 
-`Monitor` 和 `ReentrantLock` 本质上做了同样的事：维护一个状态字（AQS 用 `int state`，Monitor 用 `_LockWord`），无竞争时 CAS 改状态直接拿锁，有竞争时把等待线程推入队列并 park 睡眠，释放时唤醒下一个。理解 `ReentrantLock` 就理解了 `Monitor` 的骨架。唯一区别：HotSpot 版多了 rank 死锁检测和 safepoint 协调——这些是 C++ 内嵌 JVM 才需要的额外约束。
+`Monitor` 和 `ReentrantLock` 本质上做了同样的事：一个状态字（AQS 用 `int state`，Monitor 用 `_LockWord`），无竞争时 CAS 改状态直接拿锁，有竞争时把等待线程推入队列并 park 睡眠，释放时唤醒下一个。理解 `ReentrantLock` 就理解了 `Monitor` 的骨架。
+
+但实现层面有九个重要差异，正是 JVM 场景特有的需求：
+
+| 设计点 | Java AQS (ReentrantLock) | HotSpot Monitor | 差异原因 |
+|--------|------------------------|-----------------|---------|
+| 状态表示 | `int state`，0=空闲，>0=持有/重入 | `_LockWord` 一个 8 字节字：最低位=锁(0/1)，高位=cxq 指针 | Monitor 不需要重入计数，但需要将锁状态和队列指针合并为一个 CAS 操作 |
+| 重入支持 | 支持，`state++` 计数 | **不支持**，再次 lock 同一 Monitor 会死锁 | JVM 内部锁没有重入需求——拿到 tty_lock 的代码不会再次请求 tty_lock |
+| 排队数据结构 | 单一 CLH 队列(head/tail 指针) | **三队列**：cxq(CAS 头插入队) → EntryList(批量搬运) → OnDeck(唯一候选人) | CLH 简单，但 unlock 时 AQS 唤醒后继者后大概率立即重新竞争，产生 futex 惊群；三队列让持有者控制"谁下一个"，避免不必要的唤醒 |
+| 自旋策略 | AQS 自身不自旋，留给调用方 | `TrySpin()` 指数退避自旋(20 轮)，中间检测 safepoint | JVM 内部锁持有时间极短(几微秒)，自旋成功率远高于 AQS 的 Java 业务场景 |
+| Safepoint 协调 | 不感知 safepoint | `lock()` 中检测 safepoint 请求，Java 线程主动 `ThreadBlockInVM` 状态切换，VMThread 用 `lock_without_safepoint_check` | JVM 的 GC 必须能暂停所有线程，锁等待期间也必须响应——AQS 没有这个需求 |
+| Rank 死锁检测 | 无 | 每个锁分配整数 rank，只能从小往大加锁，违反在 debug 构建 assert | 40+ 个全局锁的 JVM 需要预防 C++ 层死锁，AQS 只被业务代码按需使用 |
+| 线程唤醒策略 | `unparkSuccessor` 直接唤醒 head 的下一个 | **OnDeck 传承**：释放者选一个 OnDeck，被选者被唤醒后自己竞争 | 减少唤醒次数，同时让释放者可以"偷"锁(sneak) |
+| 伪共享防护 | AQS 无 | `PaddedMonitor/PaddedMutex` 加 cache line 填充 | JVM 内部大量锁对象相邻分配，不填充会导致 cache 颠簸 |
+| 节点生命周期 | AQS.Node 跟随线程创建/销毁 | ParkEvent 对象池复用，**从不销毁**(immortal) | 避免在信号处理器、safepoint 等无法分配内存的上下文中创建新对象 |
+| SplitWord 共享 | state 和 head/tail 独立字段 | **lockByte 和 cxq 在同一字**(利用 ParkEvent 256 对齐) | 单次 CAS 原子完成"检查锁空闲+入队"，无 TOCTOU 竞态 |
 
 现在看这个锁怎么实现的。`Monitor` 内部的全部状态就这几个字段：
 
