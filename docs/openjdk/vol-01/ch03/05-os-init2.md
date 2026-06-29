@@ -1199,7 +1199,14 @@ jint Arguments::adjust_after_os() {
 
 **`ostream_init_log()`** —— 唯一的作用是提前创建 `tty` 的日志文件（**如果有**）。
 
-先回答两个问题。
+先分清两个容易混淆的文件：
+
+| 文件 | 创建者 | 何时创建 |
+|------|--------|---------|
+| `hotspot_<pid>.log` | `has_log_file()` → `init_log()` → `open_file()` | 只在 `-XX:+LogVMOutput` / `-XX:+LogCompilation` 时 |
+| `hs_err_pid<pid>.log` | `VMError::report_and_die()` → `prepare_log_file()` | JVM 崩溃时**总是创建** |
+
+你日常 crash 看到的 `hs_err_pid<pid>.log` 是 `vmError.cpp` 创建的，和这里的 `ostream_init_log()` 完全无关。
 
 **`LogVMOutput` 和 `LogCompilation` 是什么？** 它们是两个 `diagnostic` 类型的 flag（`globals.hpp`），默认都是 `false`。`-XX:+LogVMOutput` 打开后，`tty` 的每次 `print_cr` 除了写 stdout，还会写一份到 XML 格式的日志文件。`-XX:+LogCompilation` 类似，但写入的是 JIT 编译器日志。两者都是 `diagnostic` flag——需要先 `-XX:+UnlockDiagnosticVMOptions` 才能使用，日常开发几乎不会开。
 
