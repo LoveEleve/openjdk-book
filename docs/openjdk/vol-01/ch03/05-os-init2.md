@@ -504,9 +504,40 @@ pthread_mutex_lock(&lock)
 
 释放时同理：`pthread_mutex_unlock` 先 CAS 把 `lock` 设回 0，如果之前有人在等（通过 `futex(FUTEX_WAKE)` 通知内核），唤醒一个等待者。整个过程里，`lock` 只是一个普通的 `int32_t` 变量——内核不关心它代表什么，只按地址查表。
 
-**HotSpot 在此之上的三层定制：**
+**HotSpot 内部锁的类层次：**
 
-HotSpot 的 `Monitor::lock()`（`mutex.cpp`）在这个基础上加了两层优化，然后才走 `pthread_mutex_lock`：
+HotSpot 没有直接用 `pthread_mutex_t`，而是自己实现了一套锁体系，类层次定义在 `mutex.hpp`：
+
+```
+ParkEvent                   ← 等待/唤醒的基本单元（park/unpark），等待链表节点
+  ↑
+Monitor                    ← 完整的"管程"：lock + wait/notify
+  │  ├─ _LockWord          ← SplitWord（CAS 操作的目标，无竞争时 TryFast 改的就是这个字）
+  │  ├─ _EntryList         ← 等待获取锁的线程链表
+  │  ├─ _WaitSet           ← 在条件变量上等待（wait）的线程集合
+  │  ├─ _OnDeck            ← 下一个将被授予锁的线程（简单公平性）
+  │  └─ _owner             ← 当前持有者 Thread*
+  │
+  ├── Mutex                ← 退化版 Monitor：**禁用了 wait/notify**（调用直接 ShouldNotReachHere）
+  │     └── PaddedMutex    ← Mutex + cache line 对齐（防止伪共享）
+  │
+  └── PaddedMonitor        ← Monitor + cache line 对齐
+```
+
+`Monitor` 是"管程"（monitor）概念的直接体现——持有锁的线程可以调用 `wait()` 主动释放锁并进入等待集，其他线程可以调用 `notify()` 唤醒等待者。这就是 Java 中 `synchronized` 的底层 C++ 对应物：每个 Java 对象的 `ObjectMonitor` 延伸了这套机制。
+
+`Mutex` 继承 `Monitor` 但把 `wait()`、`notify()`、`notify_all()` 全部覆盖为 `ShouldNotReachHere()`——拿了锁就只能干活、放锁，不能在里面等条件。JVM 里大部分锁都是 `Mutex`，只有真正需要条件等待的地方才用 `Monitor`。
+
+加锁时用的 RAII 包装：
+
+```c
+MutexLocker ml(some_mutex);       // 构造时 lock(), 析构时 unlock()
+MutexLockerEx mle(some_mutex, true);  // 同上, true=跳过 safepoint 检查
+```
+
+构造时自动调 `lock()`，离开作用域（return、异常、goto）自动调 `unlock()`——典型的 RAII，和 `std::lock_guard` 同义。
+
+**`TryFast` + `TrySpin` + `ILock` 在 Monitor::lock() 中怎么衔接：**
 
 ```
 Monitor::lock()
