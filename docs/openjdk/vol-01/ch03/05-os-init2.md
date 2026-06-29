@@ -205,8 +205,6 @@ JVM_handle_linux_signal(int sig, siginfo_t* info, void* ucVoid, ...) {
 
 `sa_mask` 的作用：如果 handler 执行期间不希望被某些信号打断（比如正在处理 SIGSEGV 时又来一个 SIGSEGV），把这些信号放进 `sa_mask`，内核自动屏蔽。`sa_flags = SA_SIGINFO` 是必须的——没有它，内核不填充 `siginfo_t`，handler 只能拿到信号号，拿不到 `si_addr`。
 
-**pthread_sigmask -- 修改当前线程的信号掩码（阻塞/解除阻塞）**
-
 **`pthread_sigmask` —— 修改当前线程的信号掩码（阻塞/解除阻塞）**
 
 ```c
