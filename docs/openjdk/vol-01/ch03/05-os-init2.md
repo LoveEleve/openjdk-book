@@ -568,22 +568,54 @@ os::init_2() 其余步骤：
 
 PerfData 是 HotSpot 内置的性能监控数据区，`jstat`、`jcmd PerfCounter.print` 等命令通过它读取 JVM 运行指标。它的实现涉及四个 Linux 系统调用，先逐一铺垫。
 
-**`mmap` —— 两种用法，JVM 都用到了**
+**`mmap` —— 虚拟内存映射**
 
-man 手册 `mmap(2)`：
+`mmap` 是 Linux 上最核心的内存分配原语，JVM 从堆、code cache 到 PerfData 共享内存全用它。man 手册 `mmap(2)` 给出了完整签名：
 
-> "mmap() creates a new mapping in the virtual address space of the calling process."
+```c
+void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
+```
 
-`mmap` 支持两种完全不同的用法，取决于是否传 `fd`：
+六个参数逐一拆解：
 
-| 用法 | `fd` 参数 | 典型 flag | 用途 | JVM 哪里用 |
-|------|----------|----------|------|-----------|
-| 文件映射 | 有效 fd（`open()` 返回的） | `MAP_SHARED` | 把磁盘文件的内容映射到内存。对内存的修改最终写回文件，其他进程 `mmap` 同一个文件能读到同样的内容 | PerfData 共享内存 |
-| 匿名映射 | `-1`（或 `MAP_ANONYMOUS`） | `MAP_PRIVATE` | 分配一块纯内存，不关联任何文件。`fd` 传 -1，内核从 swap 空间分配物理页 | JVM 堆、code cache、metaspace |
+**`addr`** —— 期望映射到哪个虚拟地址。传 `NULL` 让内核自己选（最常用）；传非 `NULL` 是 hint，内核会选一个接近的地址；加 `MAP_FIXED` 则强制精确地址。man 原文：*"If addr is NULL, then the kernel chooses the (page-aligned) address at which to create the mapping; this is the most portable method."*
 
-man 手册对两种映射的区别给出了具体说明：`MAP_ANONYMOUS` 创建的不是文件映射，其内容从零页初始化。PerfData 需要两个进程（`java` 和 `jstat`）都能读到同一个数据结构，所以用文件映射加上 `MAP_SHARED`。而 JVM 堆不能分享给 `jstat` 之类的外部进程，所以用匿名映射加 `MAP_PRIVATE`。
+**`length`** —— 映射的字节数。必须大于 0，内核会向上取整到页大小。
 
-PerfData 的实现（`perfMemory_linux.cpp`）：先 `open()` 创建 `/tmp/hsperfdata_<user>/<pid>` 文件，然后 `mmap(MAP_SHARED, fd)` 映射，之后 `close(fd)`（`mmap` 建立后 fd 可以关掉——内核通过 inode 引用计数保持文件存活）。外部工具 `jstat`、`jcmd` 打开同一个文件再 `mmap`，就能读 HotSpot 进程写入的 GC 次数等计数器。
+**`prot`** —— 页的访问权限，按位 OR 组合：
+
+| 值 | 含义 |
+|----|------|
+| `PROT_READ` | 可读 |
+| `PROT_WRITE` | 可写 |
+| `PROT_EXEC` | 可执行（JIT 编译的代码需要这个） |
+| `PROT_NONE` | 不可访问 |
+
+JVM 对 code cache 设置 `PROT_READ | PROT_WRITE | PROT_EXEC`（编译后先写代码再执行），对安全点页面 set `PROT_NONE`（故意让其不可访问来触发 SIGSEGV）。
+
+**`flags`** —— 控制映射行为的核心参数，分为两类：
+
+第一类是共享策略，**必须选其一**：
+
+| flag | 含义 | HotSpot 哪里用 |
+|------|------|---------------|
+| `MAP_SHARED` | 对映射的修改对其他进程可见，且写回底层文件。man："Updates to the mapping are visible to other processes mapping the same region" | PerfData 共享内存（`jstat` 进程需要读到 JVM 进程写的数据） |
+| `MAP_PRIVATE` | 私有写时复制（copy-on-write）。修改对其他进程不可见，不写回文件。man："Updates to the mapping are not visible to other processes" | JVM 堆、code cache、metaspace（不需要跨进程共享） |
+
+第二类是附加标志，可以 OR 在第一类之上：
+
+| flag | 含义 | HotSpot 哪里用 |
+|------|------|---------------|
+| `MAP_ANONYMOUS` | 不关联任何文件，`fd` 被忽略，内容初始化为零。man："The mapping is not backed by any file; its contents are initialized to zero." | 所有不需要文件支撑的内存分配（堆、code cache 等） |
+| `MAP_NORESERVE` | 不为映射预留 swap 空间。man："Do not reserve swap space for this mapping." | JVM 堆——避免为 GB 级堆预留 swap |
+| `MAP_HUGETLB` | 使用大页（2MB/1GB）。和 `MAP_HUGE_2MB` 等配合指定大小 | large page 堆（`-XX:+UseLargePages`） |
+| `MAP_FIXED` | 精确地址——强制在 addr 处映射，可能覆盖已有映射。man："place the mapping at exactly that address. If the specified address cannot be used, mmap() will fail." | code cache 需要固定地址的极少场景 |
+
+**`fd`** —— 文件描述符。如果是 `MAP_ANONYMOUS`，fd 被忽略（可传 -1）。手动 `mmap(2)` 原文：*"After the mmap() call has returned, the file descriptor, fd, can be closed immediately without invalidating the mapping."* —— mmap 返回后就可以 `close(fd)`，内核通过 inode 引用计数保持文件存活。
+
+**`offset`** —— 文件内的起始偏移，必须是页大小的倍数（`sysconf(_SC_PAGE_SIZE)`）。
+
+**PerfData 的用法：** 先 `open()` 创建 `/tmp/hsperfdata_<user>/<pid>`，然后 `mmap(NULL, 32KB, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0)`，然后立刻 `close(fd)`。`MAP_SHARED` 确保 JVM 写入的值对 `jstat` 的 `mmap` 可见。
 
 **`msync` —— 把内存变更强制刷回磁盘**
 
