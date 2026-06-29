@@ -445,7 +445,30 @@ Linux::set_createThread_lock(new Mutex(Mutex::leaf, "createThread_lock", false))
 
 先厘清两个容易混淆的词。
 
-**`pthread_mutex_lock(&lock)` 里的 `lock`** —— 类型是 `pthread_mutex_t`，一个 glibc 定义的结构体。它内部包含一个 `int __lock` 字段（32 位 futex word），外加锁类型标记（普通锁/递归锁/检错锁）、持有者线程 ID 等元数据。当你调 `pthread_mutex_lock(&m)` 时，glibc 实际上是在操作这个结构体内部的 `__lock` 字段——先 CAS 尝试从 0 改成 1，失败后才调 `futex(FUTEX_WAIT, &m.__lock, 1, NULL)`。
+**`pthread_mutex_lock(&lock)` 里的 `lock`** —— 类型是 `pthread_mutex_t`，glibc 定义在 `/usr/include/bits/struct_mutex.h`。它是一个 union 包装的结构体，在 x86_64 上长这样：
+
+```c
+// === /usr/include/bits/pthreadtypes.h ===
+typedef union {
+  struct __pthread_mutex_s __data;
+  char __size[__SIZEOF_PTHREAD_MUTEX_T];
+  long int __align;                           // 保证对齐
+} pthread_mutex_t;
+
+// === /usr/include/bits/struct_mutex.h (x86_64) ===
+struct __pthread_mutex_s {
+  int __lock;            // ← futex word (0=未锁定, 1=已锁定无等待者, 2=已锁定有等待者)
+  unsigned int __count;  // 递归锁的持有次数（普通锁固定 0）
+  int __owner;           // 持有者线程 TID（普通锁固定 0）
+  unsigned int __nusers; // 等待者数量
+  int __kind;            // 锁类型: PTHREAD_MUTEX_NORMAL / ERRORCHECK / RECURSIVE
+  short __spins;         // 自旋次数
+  short __elision;       // TSX/HLE 硬件锁消歧
+  __pthread_list_t __list; // 等待者链表
+};
+```
+
+`__lock` 是结构体的第一个字段，CAS 操作的就是它。默认的 `PTHREAD_MUTEX_DEFAULT` 就是 `PTHREAD_MUTEX_NORMAL`——一种不记录 owner、不检测死锁的"裸"锁，参数最少、跑得最快。
 
 **mutex vs futex** —— 是两个不同层面的概念：
 
