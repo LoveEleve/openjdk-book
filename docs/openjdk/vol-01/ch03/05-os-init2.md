@@ -578,11 +578,11 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
 
 六个参数逐一拆解：
 
-**`addr`** —— 期望映射到哪个虚拟地址。传 `NULL` 让内核自己选（最常用）；传非 `NULL` 是 hint，内核会选一个接近的地址；加 `MAP_FIXED` 则强制精确地址。man 原文：*"If addr is NULL, then the kernel chooses the (page-aligned) address at which to create the mapping; this is the most portable method."*
+`addr` —— 期望映射到哪个虚拟地址。传 `NULL` 让内核自己选（最常用）；传非 `NULL` 是 hint，内核会选一个接近的地址；加 `MAP_FIXED` 则强制精确地址。man 原文：*"If addr is NULL, then the kernel chooses the (page-aligned) address at which to create the mapping; this is the most portable method."*
 
-**`length`** —— 映射的字节数。必须大于 0，内核会向上取整到页大小。
+`length` —— 映射的字节数。必须大于 0，内核会向上取整到页大小。
 
-**`prot`** —— 页的访问权限，按位 OR 组合：
+`prot` —— 页的访问权限，按位 OR 组合：
 
 | 值 | 含义 |
 |----|------|
@@ -593,7 +593,7 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
 
 JVM 对 code cache 设置 `PROT_READ | PROT_WRITE | PROT_EXEC`（编译后先写代码再执行），对安全点页面 set `PROT_NONE`（故意让其不可访问来触发 SIGSEGV）。
 
-**`flags`** —— 控制映射行为的核心参数，分为两类：
+`flags` —— 控制映射行为的核心参数，分为两类：
 
 第一类是共享策略，**必须选其一**：
 
@@ -611,9 +611,9 @@ JVM 对 code cache 设置 `PROT_READ | PROT_WRITE | PROT_EXEC`（编译后先写
 | `MAP_HUGETLB` | 使用大页（2MB/1GB）。和 `MAP_HUGE_2MB` 等配合指定大小 | large page 堆（`-XX:+UseLargePages`） |
 | `MAP_FIXED` | 精确地址——强制在 addr 处映射，可能覆盖已有映射。man："place the mapping at exactly that address. If the specified address cannot be used, mmap() will fail." | code cache 需要固定地址的极少场景 |
 
-**`fd`** —— 文件描述符。如果是 `MAP_ANONYMOUS`，fd 被忽略（可传 -1）。手动 `mmap(2)` 原文：*"After the mmap() call has returned, the file descriptor, fd, can be closed immediately without invalidating the mapping."* —— mmap 返回后就可以 `close(fd)`，内核通过 inode 引用计数保持文件存活。
+`fd` —— 文件描述符。如果是 `MAP_ANONYMOUS`，fd 被忽略（可传 -1）。手动 `mmap(2)` 原文：*"After the mmap() call has returned, the file descriptor, fd, can be closed immediately without invalidating the mapping."* —— mmap 返回后就可以 `close(fd)`，内核通过 inode 引用计数保持文件存活。
 
-**`offset`** —— 文件内的起始偏移，必须是页大小的倍数（`sysconf(_SC_PAGE_SIZE)`）。
+`offset` —— 文件内的起始偏移，必须是页大小的倍数（`sysconf(_SC_PAGE_SIZE)`）。
 
 **PerfData 的用法：** 先 `open()` 创建 `/tmp/hsperfdata_<user>/<pid>`，然后 `mmap(NULL, 32KB, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0)`，然后立刻 `close(fd)`。`MAP_SHARED` 确保 JVM 写入的值对 `jstat` 的 `mmap` 可见。
 
