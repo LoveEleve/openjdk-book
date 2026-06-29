@@ -920,17 +920,41 @@ B 被唤醒:
 
 ### 为什么需要 cxq 和 EntryList 两个队列
 
-AQS 只需要一个 CLH 队列。HotSpot 的 Monitor 和 ObjectMonitor 都需要两个：cxq + EntryList。根本原因是**写入者和读取者是不同的人**，它们的并发需求冲突了。
+AQS 只需要一个 CLH 队列。HotSpot 的 Monitor 和 ObjectMonitor 都需要两个：cxq + EntryList。为什么？用三个线程同时竞争一把锁的场景来看。
 
-**cxq：无锁并发写的"收件箱"。** 任何线程在 `AcquireOrPush` 中都能把自己 CAS 推入 cxq 头部——不需要先获得任何锁。这是关键约束：一个等待线程已经拿不到外层锁了，不能再要求它先拿一把"内层锁"才能排队——它没锁可拿。
+```
+时刻 0: 锁被线程 A 持有。_LockWord = 0x...01, _owner = A, cxq 空, EntryList 空
 
-**EntryList：独占写的"处理队列"。** 只有一个人操作它：释放锁的那个线程（`IUnlock`）。释放者先获取 inner lock（`CAS null→_LBIT, _OnDeck`），然后把整个 cxq 原子地摘下（`CAS swap cxq→NULL`），批量搬迁到 EntryList，再从 EntryList 选一个设为 `_OnDeck` 唤醒。没有人跟它竞争——独占操作，无需 CAS。
+时刻 1: 线程 B、线程 C、线程 D 同时调 lock()，TryFast 全部失败
+        它们需要排队。但 B、C、D 谁都没拿到锁——不能要求它们"先拿把内层锁再去排队"。
+        所以它们只能 CAS: 把自己的 ParkEvent 推入 _LockWord 的高位。
 
-**为什么要搬？直接唤醒 cxq 头不行吗？** 两个原因。第一，cxq 是 LIFO（头插入队），按入队顺序唤醒是反直觉的——后来的线程先拿到锁。搬迁时重新排列（EntryList 支持 FIFO 和 LIFO 两种策略），实现更公平的调度。第二，把"入队"和"出队"分离后，解锁时持有者可以在 inner lock 保护下安全操作链表——不需要 `waitStatus` 这样的复杂状态机来协调并发读写。
+时刻 2: B 的 CAS 先成功。_LockWord 高位指向 B。
+        C 的 CAS 接着成功。_LockWord 高位指向 C（C.ListNext = B）。
+        D 的 CAS 接着成功。_LockWord 高位指向 D（D.ListNext = C）。
+        
+        此时 cxq: D → C → B （后到的排前面，LIFO）
 
-**ObjectMonitor 用了完全相同的设计。** `ObjectMonitor::enter()` 中 `EnterI` 把 `ObjectWaiter` 推入 `_cxq`（`Atomic::cmpxchg(&node, &_cxq, nxt)`），`ObjectMonitor::exit()` 用 `Atomic::cmpxchg(NULL, &_cxq, w)` 原子摘下整个 cxq，然后追加或前置到 `_EntryList`，从 EntryList 中 `ExitEpilog` 唤醒一个。
+时刻 3: 线程 A 调 unlock()
+        A 看到 cxq 非空，需要选一个人唤醒。
+        
+        问题: 如果从 D 唤醒（cxq 头部=LIFO，D 最近到的），
+        B 最先到却最后被唤醒——不公平。
+        而且 A 操作 cxq 时，E、F 可能还在 CAS 往 cxq 头部推自己——
+        A 需要 CAS 摘下整个 cxq 才能安全遍历。这就是批量搬迁的动机。
 
-总结：cxq 是"收件箱"（多写者，无锁 CAS 入队），EntryList 是"处理队列"（单读者，独占搬迁排序）。AQS 用一个 CLH 队列同时做这两件事——靠 `waitStatus` 状态机协调读写——结构更简单但协议更复杂。HotSpot 选择多维护一个队列，换取更简单的并发协议。
+时刻 4: A 用 CAS 把 cxq 从 D 改成 NULL（原子摘下整条链）。
+        现在 cxq 归 A 独占了——不会再有其他线程往里面写。
+        A 把 D→C→B 整条链搬到 EntryList，在 EntryList 里重新排序（FIFO: B→C→D），
+        设 B 为 _OnDeck，unpark(B)。
+
+时刻 5: B 被唤醒，抢到锁。EntryList 里还有 C 和 D。
+        下次有人 unlock 时，直接从 EntryList 取 C——不需要再搬 cxq。
+```
+
+**关键就是一次 CAS 交接。** cxq→NULL 的 CAS 成功后，整条链就归释放者独占了——没有并发读写问题。之后释放者可以安全地遍历、排序、选人。AQS 没有这个"CXI 全部摘下来"的操作——它必须在并发读写的单一链表上工作，所以需要 `waitStatus` 状态机来标记每个节点的状态。
+
+**ObjectMonitor 用了完全相同的设计。** `ObjectMonitor::enter()` 中 `EnterI` 把 `ObjectWaiter` 推入 `_cxq`（CAS），`ObjectMonitor::exit()` 用 `Atomic::cmpxchg(NULL, &_cxq, w)` 原子摘下整个 cxq，追加到 `_EntryList`，然后从 EntryList 中 `ExitEpilog` 唤醒一个。
 
 ---
 
