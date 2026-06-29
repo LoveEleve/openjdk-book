@@ -1197,31 +1197,40 @@ jint Arguments::adjust_after_os() {
 
 ## 4. 收尾步骤 ★
 
-**`ostream_init_log()`** —— 唯一的作用是提前创建 `tty` 的日志文件。
+**`ostream_init_log()`** —— 唯一的作用是提前创建 `tty` 的日志文件（如果有）。
 
-正常情况下 `tty` 往 stdout/stderr 写。但 `defaultStream`（`tty` 的内部实现）还有一个可选的 `_log_file` 成员——如果用户传了 `-XX:LogFile=hotspot.log`，`tty` 的每次输出也会写一份到这个文件。这个文件的创建原本是**惰性**的——第一次真正需要写日志时才 `fopen`。
+正常情况下 `tty` 往 stdout/stderr 写。`defaultStream` 还有一个可选的 `_log_file` 成员——如果开了 `-XX:+LogVMOutput` 或 `-XX:+LogCompilation`，`tty` 的每次 `print_cr` 也会同时写一份到 XML 格式的日志文件。但这两个 flag 默认都是 `false`，所以正常启动时 `has_log_file()` 什么也不做，直接返回。
 
-问题在于：如果 VM 在惰性创建之前就崩溃了，fatal error handler 调 `tty->print_cr` 写 crash 信息时，文件还没打开，crash 信息就丢了。
+如果 flag 开启了，`has_log_file()` 调用 `init()` → `init_log()`。`init_log()` 内部：
 
-`has_log_file()` 在这里主动触发惰性初始化。它的调用链（`ostream.cpp`）：
+1. 构造文件名——如果用户没有用 `-XX:LogFile` 指定，默认为 `"hotspot_%p.log"`（`%p` 会被展开为进程 PID，`%t` 被展开为时间字符串）
+2. `open_file()` 先尝试在当前工作目录用 `fopen(name, "w")` 创建文件
+3. 如果失败，再尝试在 `/tmp` 下创建同名文件
+4. 如果 `/tmp` 也失败，`LogVMOutput` 被设为 false，放弃日志文件
+5. 成功后，文件流被包装成一个 `xmlStream` 对象，`start_log()` 写入 XML 头部：
 
+```xml
+<?xml version='1.0' encoding='UTF-8'?>
+<hotspot_log version='160 1' process='12345' time_ms='234'>
+  <vm_version>
+    <name>OpenJDK 64-Bit Server VM</name>
+    <release>11.0.31</release>
+    <info>mixed mode</info>
+  </vm_version>
+  <vm_arguments>
+    <flags>...</flags>
+    <args>...</args>
+    <command>MyApplication</command>
+  </vm_arguments>
+  <tty>
+    ...后续所有 tty 输出在这里 ...
+  </tty>
+</hotspot_log>
 ```
-has_log_file()
-  ├─ 如果 VM 已崩溃（VMError::is_error_reported()）→ 直接返回 false
-  ├─ 如果还没初始化：
-  │     init() → init_log()
-  │       └─ open_file(LogFile ? LogFile : "hotspot_%p.log")
-  │            └─ fopen(log_name, "w")          ← 提前创建文件
-  │            └─ 如果成功: new xmlStream(file)  ← 日志写 XML 格式
-  │            └─ 如果失败: LogVMOutput = false  ← 放弃日志文件
-  └─ 返回 _log_file != NULL
-```
 
-用户可以传 `-XX:LogFile=myapp.log` 指定日志文件名，不传的话默认名是 `hotspot_<pid>.log`。但这里有一个前提——`init()` 里先检查了 `if (LogVMOutput || LogCompilation)`，而这两个 flag 默认都是 `false`。所以**不传 flag 的话 `init_log()` 根本不会被调用，文件不会凭空出现**。只有用户显式传了 `-XX:+LogVMOutput` 或 `-XX:+LogCompilation`，`has_log_file()` 才真正执行 `init_log() → fopen`。
+后续 `tty->print_cr(...)` 写 stdout 的同时，也会通过 `defaultStream::write()` 里 `has_log_file()` 的检查写入同一份 xml 日志。进程正常退出时 `finish_log()` 关闭 XML 标签保证完整性。
 
-`ostream_init_log` 还有第一行 CDS 相关的代码：`DumpLoadedClassList` 是 CDS（Class Data Sharing）训练阶段用的 flag——先跑一次 JVM 把加载过的类列表 dump 出来，再用这个列表创建共享归档。**默认不传，这个 `if` 直接跳过。** 真正的核心就一行：`has_log_file()`。
-
-两个动作：如果用户传了 `-XX:DumpLoadedClassList=<file>`（CDS 类列表 dump），创建对应的文件流；然后调 `defaultStream::instance->has_log_file()` 主动触发日志文件的惰性初始化——在 VM 崩溃前把文件打开，避免崩溃后 fatal error handler 因惰性初始化而出错。
+`ostream_init_log` 的第一行是 CDS 相关: 如果 `DumpLoadedClassList` 非空（`-XX:DumpLoadedClassList=<file>`），创建类列表文件。默认不传，跳过。
 
 **agent 转换与启动** —— `convert_vm_init_libraries_to_agents()` 遍历 `-Xrun` 库，有 `Agent_OnLoad` 无 `JVM_OnLoad` 的转为 agent（历史兼容）。`create_vm_init_agents()` 调用所有 agent 的 `Agent_OnLoad(JavaVM*, options, NULL)`。两个 `if` 守卫保证只有用户显式传了 `-Xrun`/`-agentlib`/`-agentpath` 时才执行，通常路径直接跳过。
 
