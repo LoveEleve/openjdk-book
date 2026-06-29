@@ -845,6 +845,8 @@ void gc_print(const char* msg) {
 | 节点生命周期 | AQS.Node 跟随线程创建/销毁 | ParkEvent 对象池复用，**从不销毁**(immortal) | 避免在信号处理器、safepoint 等无法分配内存的上下文中创建新对象 |
 | SplitWord 共享 | state 和 head/tail 独立字段 | **lockByte 和 cxq 在同一字**(利用 ParkEvent 256 对齐) | 单次 CAS 原子完成"检查锁空闲+入队"，无 TOCTOU 竞态 |
 
+AQS 的结点有一个 `waitStatus` 状态机（`CANCELLED/SIGNAL/CONDITION/PROPAGATE`），用于协调唤醒。Monitor 没有这个——它通过 `_OnDeck` 直接指定"下一个该拿锁的是谁"，不靠 waitStatus 传递信号。这是两种唤醒策略的根本差异：AQS 让等待者自己标记"我准备好了被唤醒"（`SIGNAL`），Monitor 让释放者直接选定下一个（`OnDeck`）。
+
 现在看这个锁怎么实现的。`Monitor` 内部的全部状态就这几个字段：
 
 ```
