@@ -855,7 +855,7 @@ Monitor
   ├─ Thread*     _owner         ← 当前持有者 (NULL=空闲)
   ├─ ParkEvent*  _EntryList     ← 等待获取锁的 ParkEvent 链表
   ├─ ParkEvent*  _OnDeck        ← 下一个继承人 (最多一个)
-  └─ ParkEvent*  _WaitSet       ← wait()/notify() 的等待线程集合
+  └─ ParkEvent*  _WaitSet       ← 条件变量的等待集合（仅 Monitor 使用，Mutex 禁用）
 ```
 
 关键设计：`_LockWord` 这一个整数同时记录了两件事——**锁状态**（最低位）和**排队队列的头指针**（高位）。为什么能这样？因为等待者的 ParkEvent 地址是 256 字节对齐的，低 8 位永远是 0。
