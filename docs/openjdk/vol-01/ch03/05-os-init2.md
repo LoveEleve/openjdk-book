@@ -500,18 +500,37 @@ if (Posix::set_minimum_stack_sizes() == JNI_ERR) {
 
 **Linux 底层机制：** 每个 Linux 线程的栈由 `pthread_create` 调用时 `clone(CLONE_VM|CLONE_FS|...)` 系统调用分配。glibc 维护一个线程栈缓存池——线程退出后栈空间被回收重用，避免频繁的 `mmap/munmap`。HotSpot 计算的最小值就是在和 glibc 协商"给我至少这么大的空间，不然守卫区放不下"。
 
-### 1.5 捕获原始线程栈 — 嵌入式 JVM 的必需品
+### 1.5 获取当前线程的栈边界
 
 ```c
 // === os_linux.cpp ===
-if (!Arguments::created_by_java_launcher()) {    // 非标准 launcher 启动
+if (!Arguments::created_by_java_launcher()) {   // 不是标准 java 命令启动
     Linux::capture_initial_stack(JavaThread::stack_size_at_create());
 }
 ```
 
-当 Java 通过 `java` 命令启动时，原始线程（main 线程）的栈信息在 Stage 1 的 `os::init()` 阶段已经捕获。但如果 JVM 被嵌入到另一个 C 程序里（如 Tomcat 的 jsvc、IDE 的 JVM 插件），调用 `JNI_CreateJavaVM()` 的线程不是"自己创建的"——HotSpot 不知道这个线程的栈有多大、栈顶在哪。
+Stage 2 的 `init_before_ergo` 已经算好了栈守卫区的大小，但那些值要能工作，必须先知道当前线程的栈到底在哪——从哪个地址开始，到哪个地址结束。这个问题看似简单，实际上分成两种情况：
 
-`capture_initial_stack` 通过 `/proc/self/maps` 读取进程的虚拟内存映射，扫描 `[stack]` 段获取栈基址；通过 `getrlimit(RLIMIT_STACK)` 获取栈的软限制（`ulimit -s` 的值）。还有一个兼容性 workaround：glibc 的 `ld.so` 会把自身的 `.data` 段重定位到原始栈的低端（bug 6308388），所以需要从栈底减去 2 页以防止守卫页覆盖 `ld.so` 的数据。
+**标准 `java` 启动时：** 进程是 `java` 命令，`main` 线程是第一个线程。Stage 1 的 `os::init()` 阶段已经通过 `record_stack_base_and_size()` 拿到了栈的起止地址（当时程序刚启动，栈指针就在栈顶附近，直接读 `%rsp` 即可）。这里不需要再捕获，直接跳过。
+
+**非标准启动时：** 进程可能是 Tomcat（C 程序内加载 libjvm.so）、可能是 IDE（内嵌 JVM 插件）、可能是 `jsvc`（daemon 方式启动）。调用 `JNI_CreateJavaVM()` 的线程根本不是 `java` 命令的主线程——HotSpot 不知道这个线程的栈有多大，但后续必须在这上面画守卫区、做溢出检测。
+
+`capture_initial_stack` 就是解决这个问题的。它要得到两个值：栈的**顶部**（起始地址，高地址端）和栈的**大小**。大小相对简单——直接 `getrlimit(RLIMIT_STACK)` 读当前进程的栈软限制（`ulimit -s`）。难的是找栈顶部，源码（`os_linux.cpp`）按三层优先级尝试：
+
+```
+1. dlsym(RTLD_DEFAULT, "__libc_stack_end")
+     ↑ glibc 的私有变量, 进程启动时保存了初始栈指针位置
+
+2. 如果 __libc_stack_end 为空:
+     解析 /proc/self/stat 的 start_stack 字段(第 28 个字段)
+     ↑ 内核记录的这个进程的 stack_start, 和真正的栈顶非常接近
+
+3. 如果 /proc 也没挂载(如 chroot 环境):
+     直接用当前栈指针 %rsp + RLIMIT_STACK 估算
+     ↑ 最简单也最不可靠的 fallback, 但在大部分情况够用
+```
+
+拿到栈顶后还要做一个兼容性处理：glibc 的 `ld.so`（动态链接器）有个 bug（JDK bug 6308388）——它会把自身的 `.data` 段重定位到原始栈的低端。如果 HotSpot 直接在栈底画守卫页（`mprotect(PROT_NONE)`），可能会把 `ld.so` 的数据页一起保护掉，导致进程崩溃。所以实测栈大小减去 2 页再做保护。减去 2 页是因为 ld.so 的重定位数据和 guard page 顶多占用这么多空间。
 
 ### 1.6 glibc 守卫页兼容性 — HotSpot 与 glibc 的协商
 
