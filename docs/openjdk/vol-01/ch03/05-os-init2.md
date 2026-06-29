@@ -1203,13 +1203,42 @@ jint Arguments::adjust_after_os() {
 
 **agent 转换与启动** —— Stage 3 末尾加载用户指定的原生 agent。
 
-`-agentlib:jdwp=transport=dt_socket,...`（IDE 远程调试，开发场景）、`-agentpath:/path/to/libprofiler.so`（性能采样）、APM 厂商的探针——这些都指定了一个需要加载的原生共享库（.so）。这里分两步处理：
+`-agentlib:jdwp=transport=dt_socket,...`（IDE 远程调试）、`-agentpath:/path/to/libprofiler.so`（性能采样）、APM 探针——这些都指定了一个 `.so` 文件。`create_vm_init_agents()` 源码不长，直接看：
 
-1. `convert_vm_init_libraries_to_agents()` —— 遍历 `-Xrun` 库（JDK 1.x 旧参数），没有 `JVM_OnLoad` 但有 `Agent_OnLoad` 的库，从 library 列表迁移到 agent 列表。向后兼容。
+```c
+// === thread.cpp ===
+void Threads::create_vm_init_agents() {
+  extern struct JavaVM_ main_vm;
+  AgentLibrary* agent;
 
-2. `create_vm_init_agents()` —— 对每个 agent，`lookup_on_load` 做三件事：`dlopen` 加载 `.so` 文件 → `dlsym` 找 `Agent_OnLoad` 函数 → 调 `Agent_OnLoad(&main_vm, agent->options(), NULL)`。agent 在这个回调里拿到 `JavaVM*` 指针，注册 JVMTI capabilities、安装事件回调。如果 `dlopen` 或 `dlsym` 失败，`vm_exit_during_initialization` 直接终止 JVM。
+  JvmtiExport::enter_onload_phase();
 
-没有传任何 agent 参数时两个 `if` 都不成立，跳过。
+  for (agent = Arguments::agents(); agent != NULL; agent = agent->next()) {
+    OnLoadEntry_t on_load_entry = lookup_agent_on_load(agent);
+
+    if (on_load_entry != NULL) {
+      jint err = (*on_load_entry)(&main_vm, agent->options(), NULL);
+      if (err != JNI_OK) {
+        vm_exit_during_initialization("agent library failed to init", agent->name());
+      }
+    } else {
+      vm_exit_during_initialization("Could not find Agent_OnLoad function", agent->name());
+    }
+  }
+
+  JvmtiExport::enter_primordial_phase();
+}
+```
+
+遍历 `Arguments::agents()` 返回的 agent 链表。每个 agent 做两件事：
+
+1. `lookup_agent_on_load(agent)` —— 内部先 `dlopen(agent_path)` 加载 `.so`，再 `dlsym(handle, "Agent_OnLoad")` 找函数地址。找不到直接 `vm_exit_during_initialization` 终止 JVM。
+
+2. `(*on_load_entry)(&main_vm, agent->options(), NULL)` —— 调 `Agent_OnLoad`。agent 拿到 `JavaVM*` 指针，注册 JVMTI capabilities、安装事件回调，返回 `JNI_OK` 表示成功。
+
+前面还有一步 `convert_vm_init_libraries_to_agents()`：把 `-Xrun` 旧参数指定的库（没有 `JVM_OnLoad` 但有 `Agent_OnLoad` 的）迁移到 agent 链表——纯粹向后兼容。
+
+没有传任何 agent 参数时 `Arguments::agents()` 返回空链表，for 循环不执行，跳过。
 
 ---
 
