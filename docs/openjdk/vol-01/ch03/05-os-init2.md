@@ -502,6 +502,8 @@ if (Posix::set_minimum_stack_sizes() == JNI_ERR) {
 
 ### 1.5 获取当前线程的栈边界
 
+> **正常流程下这里什么都不做。** 标准 `java MyClass` 启动时，`Arguments::created_by_java_launcher()` 返回 true，`if` 条件不成立，这段代码直接跳过。只有当 JVM 被嵌入到其他 C 程序（Tomcat jsvc、IDE 插件等）时才需要执行。以下内容了解即可。
+
 ```c
 // === os_linux.cpp ===
 if (!Arguments::created_by_java_launcher()) {   // 不是标准 java 命令启动
