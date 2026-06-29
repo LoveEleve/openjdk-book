@@ -1160,7 +1160,9 @@ void SafepointMechanism::initialize_serialize_page() {
 
 ## 3. Arguments::adjust_after_os() —— 最终 flag 调整 ★★
 
-`os::init_2()` 可能修改 `UseNUMA`（本机就被改成了 false），所以 flag 的最终调整必须放在它之后。函数只有 22 行：
+> **标准 JDK 11（无 NUMA）下，此函数是空函数。** 本机只有 1 个 NUMA node，`os::init_2()` 中 `UseNUMA` 已设为 false，`if (UseNUMA)` 条件不成立，直接 `return JNI_OK`。以下代码仅当机器有多 NUMA node 时才执行——但不影响理解下面的 flag 联动逻辑。
+
+`os::init_2()` 可能修改 `UseNUMA`，flag 的最终调整必须放在它之后：
 
 ```c
 /* === src/hotspot/share/runtime/arguments.cpp === */
@@ -1195,7 +1197,23 @@ jint Arguments::adjust_after_os() {
 
 ## 4. 收尾步骤 ★
 
-**`ostream_init_log()`** —— 和第 3.4 节 Stage 2 的 `LogConfiguration::initialize()` 互补。Stage 2 初始化了 UL（统一日志框架）的 `StdoutLog/StderrLog`，这里初始化的是通用输出（`tty`/`defaultStream`）的日志文件。触发 `defaultStream::instance->has_log_file()` 完成惰性初始化，确保 VM 崩溃时日志文件已就绪。
+**`ostream_init_log()`** —— 和 Stage 2 的 `LogConfiguration::initialize()` 互补。Stage 2 初始化了 UL（统一日志框架）的 `StdoutLog/StderrLog` 输出端，这里初始化的是通用输出（`tty`/`defaultStream`）的日志**文件**。
+
+```c
+// === ostream.cpp ===
+void ostream_init_log() {
+  // Note: this must be called AFTER ostream_init()
+  if (DumpLoadedClassList != NULL) {
+    // -XX:DumpLoadedClassList=<file> → 创建文件输出流
+    classlist_file = new fileStream(make_log_name(DumpLoadedClassList, NULL));
+  }
+  // 触发 tty 日志文件的惰性初始化——在 VM 崩溃前主动把日志文件创建出来，
+  // 避免 fatal error handler 在崩溃时因惰性初始化而出错。
+  defaultStream::instance->has_log_file();
+}
+```
+
+两个动作：如果用户传了 `-XX:DumpLoadedClassList=<file>`（CDS 类列表 dump），创建对应的文件流；然后调 `defaultStream::instance->has_log_file()` 主动触发日志文件的惰性初始化——在 VM 崩溃前把文件打开，避免崩溃后 fatal error handler 因惰性初始化而出错。
 
 **agent 转换与启动** —— `convert_vm_init_libraries_to_agents()` 遍历 `-Xrun` 库，有 `Agent_OnLoad` 无 `JVM_OnLoad` 的转为 agent（历史兼容）。`create_vm_init_agents()` 调用所有 agent 的 `Agent_OnLoad(JavaVM*, options, NULL)`。两个 `if` 守卫保证只有用户显式传了 `-Xrun`/`-agentlib`/`-agentpath` 时才执行，通常路径直接跳过。
 
