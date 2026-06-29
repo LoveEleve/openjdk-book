@@ -1203,13 +1203,13 @@ jint Arguments::adjust_after_os() {
 
 **agent 转换与启动** —— Stage 3 末尾加载用户指定的原生 agent。
 
-`-agentlib:jdwp=transport=dt_socket,...`（IDE 远程调试，开发场景）、`-agentpath:/path/to/libprofiler.so`（性能采样）、APM 厂商的探针——这些都是原生 agent，在此刻加载。加载分两步：
+`-agentlib:jdwp=transport=dt_socket,...`（IDE 远程调试，开发场景）、`-agentpath:/path/to/libprofiler.so`（性能采样）、APM 厂商的探针——这些都指定了一个需要加载的原生共享库（.so）。这里分两步处理：
 
-1. `convert_vm_init_libraries_to_agents()` —— 遍历 `-Xrun` 库（JDK 1.x 时代的旧参数），有 `Agent_OnLoad` 而无 `JVM_OnLoad` 的，从 library 列表移到 agent 列表。纯粹向后兼容。
+1. `convert_vm_init_libraries_to_agents()` —— 遍历 `-Xrun` 库（JDK 1.x 旧参数），没有 `JVM_OnLoad` 但有 `Agent_OnLoad` 的库，从 library 列表迁移到 agent 列表。向后兼容。
 
-2. `create_vm_init_agents()` —— 遍历所有 agent（来自 `-agentlib`、`-agentpath`、以及上一步转换来的 `-Xrun`），依次调用 `Agent_OnLoad(JavaVM *vm, char *options, void *reserved)`。agent 在这个回调里注册 JVMTI capabilities、安装回调函数。加载失败的 agent 导致 `vm_exit_during_initialization`。
+2. `create_vm_init_agents()` —— 对每个 agent，`lookup_on_load` 做三件事：`dlopen` 加载 `.so` 文件 → `dlsym` 找 `Agent_OnLoad` 函数 → 调 `Agent_OnLoad(&main_vm, agent->options(), NULL)`。agent 在这个回调里拿到 `JavaVM*` 指针，注册 JVMTI capabilities、安装事件回调。如果 `dlopen` 或 `dlsym` 失败，`vm_exit_during_initialization` 直接终止 JVM。
 
-两个 `if` 守卫保证没有传任何 agent 参数时直接跳过——`java MyApp` 的正常启动就是如此。
+没有传任何 agent 参数时两个 `if` 都不成立，跳过。
 
 ---
 
