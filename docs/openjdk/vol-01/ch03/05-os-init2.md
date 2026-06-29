@@ -443,36 +443,43 @@ Linux::set_createThread_lock(new Mutex(Mutex::leaf, "createThread_lock", false))
 
 具体锁的使用方式还需根据后续章节中锁的实际调用路径来观察，但不在此刻展开。
 
-`prio_init()` 初始化 Java 线程优先级到 OS 优先级的映射表：
+`prio_init()` 初始化 Java 线程优先级到 OS 优先级的映射表。
+
+先补一点 Linux 的背景。Linux 调度器用 nice 值控制线程的相对优先级，man 手册 `nice(1)` 的定义：
+
+> "Niceness values range from -20 (most favorable to the process) to 19 (least favorable to the process)."
+
+nice 越小，调度器分给线程的 CPU 时间片越多。普通线程默认 `nice=0`，root 用户可以把线程降到 `nice=-20`（最高优先级）。HotSpot 预定义了这条映射表，`os_linux.cpp`：
 
 ```c
 // === os_linux.cpp ===
-static int prio_init() {
-  if (ThreadPriorityPolicy == 1) {         // -XX:ThreadPriorityPolicy=1
-    if (geteuid() != 0) {                  // 不是 root 用户
-      if (!FLAG_IS_DEFAULT(ThreadPriorityPolicy)) {
-        warning("ThreadPriorityPolicy=1 may require system level permission, "
-                "e.g., being the root user.");
-      }
-    }
-  }
-  if (UseCriticalJavaThreadPriority) {     // -XX:+UseCriticalJavaThreadPriority
-    os::java_to_os_priority[MaxPriority] =
-        os::java_to_os_priority[CriticalPriority];
-  }
-  return 0;
-}
+int os::java_to_os_priority[CriticalPriority + 1] = {
+  19,   //  0  Entry (未使用)
+   4,   //  1  MinPriority        ← Java 最低优先级映射
+   3,   //  2
+   2,   //  3
+   1,   //  4
+   0,   //  5  NormPriority       ← Java 普通优先级 = nice 0
+  -1,   //  6
+  -2,   //  7
+  -3,   //  8
+  -4,   //  9  NearMaxPriority
+  -5,   // 10  MaxPriority        ← Java 最高优先级 = nice -5
+  -5    // 11  CriticalPriority   ← 和 MaxPriority 相同（nice -5）
+};
 ```
 
-HotSpot 有一个预定义的映射表 `java_to_os_priority[]`，把 Java 的 1-10 优先级映射到 Linux 的 nice 值（-20 到 19）。`ThreadPriorityPolicy` 控制映射策略：
+`ThreadPriorityPolicy` 控制这套映射是否生效：
 
-| 值 | 含义 |
-|----|------|
-| 0 | 关闭：所有线程优先级相同，等价于所有 Java 线程都用 `nice=0` |
-| 1 | 激进：尝试使用实时调度策略（`SCHED_RR`），把 Java 线程映射到对应的 `nice` 值。需要 root 或 `CAP_SYS_NICE` |
-| 2 | 默认：仅当操作系统支持且 JVM 以特权用户运行时才映射优先级。Linux 上默认值 |
+| 值 | 含义 | 生产环境用吗？ |
+|----|------|--------------|
+| 0 | 关闭：所有线程优先级相同（`nice=0`）。最安全，没有权限问题 | 极少用，吞吐量可能下降 |
+| 1 | 激进：直接使用上表映射，对 Java 线程调 `setpriority()` 设置 nice 值。需要 root 或 `CAP_SYS_NICE` | 只在专用物理机上`以 root 运行 JVM 时使用` |
+| 2 | **默认**：只在操作系统支持且当前用户有权限时才启用映射。Linux 上非 root 用户运行等价于策略 0 | **绝大多数生产环境就是此值** |
 
-`UseCriticalJavaThreadPriority` 打开时，`MaxPriority`（通常映射 nice=-10）被升级到 `CriticalPriority`（nice=-20），给 GC 线程这样的关键线程提供最高调度优先级。
+`UseCriticalJavaThreadPriority`（flag `-XX:+UseCriticalJavaThreadPriority`，默认 false）打开时，`MaxPriority` 被升级到 `CriticalPriority` 的值——两者默认都是 nice=-5，所以开启后 MaxPriority 不变。但如果管理员手动调高了 `CriticalPriority`（比如 nice=-10），GC 线程、CompilerThread 等关键线程就能获得更高调度优先级。
+
+**生产环境上的实际情况**：绝大多数部署直接用默认 `ThreadPriorityPolicy=2`。非 root 下映射不生效，所有 Java 线程都是 `nice=0`。只有在以 root 运行的专用 JVM 上（比如某些金融交易系统、高频计算场景），管理员才会手动设 `-XX:ThreadPriorityPolicy=1`，让垃圾收集线程获得更高的 CPU 调度优先级。
 
 ### 1.4 最小栈尺寸 — 和 Stage 2 的栈守卫区联动
 
