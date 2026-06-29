@@ -1181,7 +1181,7 @@ jint Arguments::adjust_after_os() {
 }
 ```
 
-三个决策全部在 `UseNUMA=true` 的前提下才执行——本机 `UseNUMA=false`，这个函数直接 return，什么也不做。
+三个决策全部在 `UseNUMA=true` 的前提下才执行——本机只有 1 个 NUMA node（`os::init_2()` 中 `numa_max_node() < 1` 导致 `UseNUMA` 被设为 false），所以 `if (UseNUMA)` 条件不成立，整个函数直接 `return JNI_OK`，一行都没执行。标准 JDK 11 部署场景（无 NUMA）下，这里就是一个空函数，了解即可。
 
 | 变量 | 设置条件 | 值 |
 |------|---------|-----|
