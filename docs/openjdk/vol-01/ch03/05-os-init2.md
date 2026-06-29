@@ -560,15 +560,65 @@ glibc 的 `pthread_create` 会在每个线程栈底自动加一个 guard page（
 
 ```
 os::init_2() 其余步骤：
-├── fast_thread_clock_init        -- 用 CLOCK_THREAD_CPUTIME_ID 替代 clock_gettime(CLOCK_THREAD_CPUTIME_ID)
-│                                    获取线程 CPU 时间，比 /proc/self/stat 快 10 倍以上
-├── libpthread_init               -- dlsym(RTLD_DEFAULT, "pthread_condattr_setclock") 查找函数指针
-├── sched_getcpu_init             -- dlsym(RTLD_DEFAULT, "sched_getcpu") 查找函数指针，
-│                                    用于获取当前 CPU 在哪个 NUMA node
-├── MaxFDLimit 处理              -- 通过 setrlimit(RLIMIT_NOFILE) 把文件描述符上限提到硬限制
-├── atexit(perfMemory_exit_helper) -- C 标准库的 atexit() 注册进程退出回调，
-│                                    负责清理 /tmp/hsperfdata_<user>/<pid> 共享内存文件
-└── set_coredump_filter()         -- 通过写 /proc/self/coredump_filter 控制 core dump 包含哪些内存映射
+
+```
+os::init_2() 其余步骤：
+├── fast_thread_clock_init        -- 用 CLOCK_THREAD_CPUTIME_ID 替代 clock_gettime, 快 10 倍以上
+├── libpthread_init               -- dlsym(RTLD_DEFAULT) 查找 pthread_condattr_setclock
+├── sched_getcpu_init             -- dlsym(RTLD_DEFAULT) 查找 sched_getcpu, 用于 NUMA node 判断
+├── MaxFDLimit 处理              -- setrlimit(RLIMIT_NOFILE) 把文件描述符上限提到硬限制
+```c
+// === os_linux.cpp ===
+extern "C" {
+  static void perfMemory_exit_helper() {
+    perfMemory_exit();
+  }
+}
+// ...
+if (PerfAllowAtExitRegistration) {
+    if (atexit(perfMemory_exit_helper) != 0) {
+        warning("os::init_2 atexit(perfMemory_exit_helper) failed");
+    }
+}
+```
+
+PerfData 是 HotSpot 内置的性能监控数据区。它不是磁盘文件——而是在 `/tmp/hsperfdata_<user>/` 下通过 `mmap(MAP_SHARED)` 创建的一块共享内存，大小约 32KB，存放 GC 次数、堆使用量、编译统计等计数器。外部工具 `jstat`、`jcmd`、VisualVM 通过读这个共享内存文件来获取 JVM 运行指标。
+
+`atexit` 是 C 标准库函数——注册一个在进程正常退出时自动调用的回调函数。多个 `atexit` 注册的回调按注册先后顺序的倒序执行。这里注册的 `perfMemory_exit_helper` 会在进程退出时：
+1. 调用 `msync` 把共享内存的变更刷回文件
+2. 调用 `munmap` 解除内存映射
+3. 调用 `unlink` 删除 `/tmp/hsperfdata_<user>/<pid>` 文件
+
+不注册这个清理会导致 `/tmp` 下遗留孤立文件。`PerfAllowAtExitRegistration` 默认 true。
+
+### 1.9 coredump 过滤器
+
+```c
+if (DumpPrivateMappingsInCore) {
+    set_coredump_filter(FILE_BACKED_PVT_BIT);
+}
+if (DumpSharedMappingsInCore) {
+    set_coredump_filter(FILE_BACKED_SHARED_BIT);
+}
+```
+
+Linux 内核在进程崩溃时生成 core dump 文件，默认包含该进程的大部分内存映射。但 JVM 进程的内存占用通常很大（GB 级别的堆、code cache、metaspace），全量 core dump 不仅慢，还占用巨大磁盘空间。
+
+`/proc/self/coredump_filter` 是一个按位控制的过滤器，man 手册 `core(5)` 逐项定义了每一位的含义：
+
+| bit | 含义 | 默认值 |
+|-----|------|--------|
+| 0 | dump 匿名私有映射（JVM 堆、栈） | 1（默认 dump） |
+| 1 | dump 匿名共享映射 | 1 |
+| 2 | dump 文件映射私有映射 | 1 |
+| 3 | dump 文件映射共享映射 | 1 |
+| 4 | dump ELF 头 | 1 |
+| 5 | dump 私有大页（HugeTLB） | 1 |
+| 6 | dump 共享大页 | 1 |
+| 7 | dump 私有 DAX 页面 | 0 |
+| 8 | dump 共享 DAX 页面 | 0 |
+
+HotSpot 读当前值、按位 OR 上去、再写回 `/proc/self/coredump_filter`——选择性地增加需要 dump 的映射类型。`DumpPrivateMappingsInCore` 和 `DumpSharedMappingsInCore` 都是诊断 flag（默认 false），只在需要完整 core dump 分析内存布局时手动开启。
 ```
 
 **小结**：`os::init_2()` 的核心产出是信号处理器注册——后续所有 SIGSEGV（空指针、栈溢出、安全点）都由这一个入口处理。附带验证了 NUMA 可用性，可能修改 `UseNUMA` 的值。
