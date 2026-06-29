@@ -1083,20 +1083,24 @@ os::set_polling_page((address)(bad_page));                     // 存到 os::_po
 
 `os::_polling_page` 是一个**全局变量**，但它的作用不是让线程直接读——它只用于信号处理器的**范围校验**。当 SIGSEGV 到达时，`is_poll_address(addr)` 检查故障地址是否在 `[_polling_page, _polling_page + page_size)` 内，判断这个 SIGSEGV 是不是碰了安全点轮询页。
 
-而线程自己读的是**私有的** `JavaThread._polling_page` 字段——每个 JavaThread 对象里都有一个指针，`arm_local_poll` 把它设为 `bad_page|8`，`disarm_local_poll` 把它恢复为 `good_page`。JIT 代码用 `mov r10, [r15 + offset]` 加载的是这个私有字段，不是全局变量。所有线程共享同一块 `bad_page` 内存，但每个线程有自己的指针独立切换。
+而线程自己读的是**私有的** `JavaThread._polling_page` 字段——每个 JavaThread 对象里有一个 `void*` 指针，`arm_local_poll` 把它设为 `bad_page|8`，`disarm_local_poll` 把它恢复为 `good_page`。JIT 代码用 `mov r10, [r15 + offset]` 加载的是这个私有字段，不是全局变量。所有线程共享同一块 `bad_page` 内存，但每个线程有自己的指针独立切换。
 
-最后把页面地址编码成 `void*`。用具体数值来说——假设 `mmap` 返回的 bad_page 地址是 `0x7f1234500000`（页对齐，低 12 位全是 0），good_page 紧跟其后是 `0x7f1234501000`：
+`_poll_armed_value` 和 `_poll_disarmed_value` 是两个**全局静态变量**——它们是模板。"armed 时指针该设成什么值"存在 `_poll_armed_value` 里，"disarmed 时指针该设成什么值"存在 `_poll_disarmed_value` 里。每个线程的私有指针在这两个值之间切换。
+
+用具体数值来讲。假设 `mmap` 返回的 bad_page 地址是 `0x7f1234500000`（页对齐，低 12 位全是 0），good_page 紧跟其后是 `0x7f1234501000`：
 
 ```c
-_poll_disarmed_value = (void*)0x7f1234501000;        // 指向 good_page
-_poll_armed_value    = (void*)0x7f1234500008;        // bad_page | 8
+_poll_disarmed_value = (void*)0x7f1234501000;        // 全局模板：disarmed 状态
+_poll_armed_value    = (void*)0x7f1234500008;        // 全局模板：armed 状态
 ```
 
-线程被 arm 后，JIT 代码执行 `test QWORD PTR [0x7f1234500008], rax`——地址 `0x7f1234500008` 在 bad_page 范围内（`0x...0000` 到 `0x...0FFF`），被 `PROT_NONE` 保护，触发 SIGSEGV。信号处理器拿到 `si_addr = 0x7f1234500008`，调 `is_poll_address(0x7f1234500008)`——检查故障地址是否在 `[0x7f1234500000, 0x7f1234501000)` 区间内，在就说明这是安全点触发的，挂起线程。
+某线程 A 被 `arm_local_poll(A)` 调用后，A 的私有 `polling_page` 字段被写成 `0x7f1234500008`。A 继续执行，在方法返回处遇到 JIT 插入的 `test` 指令——CPU 尝试读地址 `0x7f1234500008`。这个地址处在 bad_page（`0x...0000` 到 `0x...0FFF`）内，被 `PROT_NONE` 保护。MMU 报告页错误，内核投递 SIGSEGV 给线程 A。
 
-线程被 disarm 后，`test` 读的是 `0x7f1234501000`——good_page，`PROT_READ`，正常通过。
+**这里直接连回了第 1.1 节注册的信号处理器。** 线程 A 的 `signalHandler`（第 1.1 节 `install_signal_handlers()` 注册的）被调用。`JVM_handle_linux_signal` 拿到 `si_addr = 0x7f1234500008`，调用 `is_poll_address(0x7f1234500008)`——检查故障地址是否落在 `[bad_page, bad_page + page_size)` 也就是 `[0x7f1234500000, 0x7f1234501000)` 区间内。在这个区间内 → 这是安全点触发，不是空指针，也不是栈溢出。走 `SafepointSynchronize::block()` 挂起自己。
 
-**为什么是 8 而不是 0？** 如果 `_poll_armed_value = 0x7f1234500000`（不加 8），地址 `...0000` 和空指针 `0x0` 在信号处理器里难以快速区分——`is_poll_address` 需要额外的逻辑判断。加了 8 后，故障地址的低位一定会非零（0x...0008），处理起来更简单：`addr & ~0xF` 还原出 bad_page 基址，再判断范围。
+"范围检查"的作用正好在此处体现——SIGSEGV 的来源有三种（空指针、栈溢出、安全点），唯一的区分手段就是逐个检查 `si_addr` 落在哪个范围内。
+
+当 A 被 `disarm_local_poll(A)` 恢复后，A 的私有指针换回 `0x7f1234501000`。后续 `test` 指令读这个地址——good_page 是 `PROT_READ`，读成功，线程继续运行。
 
 ### 2.3 arm/disarm —— 怎么让线程停下
 
