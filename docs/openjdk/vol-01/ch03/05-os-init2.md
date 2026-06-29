@@ -1201,7 +1201,7 @@ jint Arguments::adjust_after_os() {
 
 > 注意：JVM 崩溃时生成的 `hs_err_pid<pid>.log` 是 `VMError::report_and_die()` 创建的，和这里的 `ostream_init_log()` 毫无关系，不要混淆。
 
-**agent 转换与启动** —— `convert_vm_init_libraries_to_agents()` 遍历 `-Xrun` 库，有 `Agent_OnLoad` 无 `JVM_OnLoad` 的转为 agent（历史兼容）。`create_vm_init_agents()` 调用所有 agent 的 `Agent_OnLoad(JavaVM*, options, NULL)`。两个 `if` 守卫保证只有用户显式传了 `-Xrun`/`-agentlib`/`-agentpath` 时才执行，通常路径直接跳过。
+**agent 转换与启动** —— `-Xrun` 是 JDK 1.x 时代的 native 库加载方式，`-agentlib`/`-agentpath` 是 JVMTI 引入后的新方式。`convert_vm_init_libraries_to_agents()` 把旧的 `-Xrun` 库转为 agent 处理（向后兼容），`create_vm_init_agents()` 调用所有 agent 的 `Agent_OnLoad`。正常 `java MyApp` 启动不传任何 agent 参数，两个 `if` 条件都不成立，直接跳过。
 
 ---
 
