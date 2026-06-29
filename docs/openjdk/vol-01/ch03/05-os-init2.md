@@ -1217,11 +1217,9 @@ has_log_file()
   └─ 返回 _log_file != NULL
 ```
 
-用户可以传 `-XX:LogFile=myapp.log` 指定日志文件名，不传的话默认名是 `hotspot_<pid>.log`。不过大部分生产环境从不传 `-XX:LogFile`，所以 `open_file(log_name)` 会尝试打开默认文件——打开失败就放弃，不影响正常运行。
+用户可以传 `-XX:LogFile=myapp.log` 指定日志文件名，不传的话默认名是 `hotspot_<pid>.log`。`fopen(name, "w")` 会创建这个文件——所以 `os::init_2()` 执行完毕后，当前工作目录下会多一个空的 `hotspot_<pid>.log` 文件（约 0 字节）。后续任何 `tty->print_cr(...)` 输出都会同时写一份到这个文件里。如果 `fopen` 失败（比如没有写权限），`_log_file` 保持 NULL，`LogVMOutput` 被设为 false，后续输出不写文件，也不影响正常运行。
 
 `ostream_init_log` 还有第一行 CDS 相关的代码：`DumpLoadedClassList` 是 CDS（Class Data Sharing）训练阶段用的 flag——先跑一次 JVM 把加载过的类列表 dump 出来，再用这个列表创建共享归档。**默认不传，这个 `if` 直接跳过。** 真正的核心就一行：`has_log_file()`。
-}
-```
 
 两个动作：如果用户传了 `-XX:DumpLoadedClassList=<file>`（CDS 类列表 dump），创建对应的文件流；然后调 `defaultStream::instance->has_log_file()` 主动触发日志文件的惰性初始化——在 VM 崩溃前把文件打开，避免崩溃后 fatal error handler 因惰性初始化而出错。
 
