@@ -673,6 +673,8 @@ if (DumpSharedMappingsInCore) {
 
 Linux 内核在进程崩溃时生成 core dump 文件，默认包含该进程的大部分内存映射。但 JVM 进程的内存占用通常很大（GB 级别的堆、code cache、metaspace），全量 core dump 不仅慢，还占用巨大磁盘空间。
 
+> Linux 的 core dump 完整机制——信号如何触发内核生成 core、`kernel.core_pattern` 如何配置输出路径、systemd-coredump 如何处理、以及 JVM 自身的 `hs_err_pid<pid>.log` 和 core dump 的关系——将在后续 Linux 内核与 JVM 联动章节单独详细讲解。这里只需了解 HotSpot 如何通过 `/proc/self/coredump_filter` 控制被 dump 的内存映射类型。
+
 `/proc/self/coredump_filter` 是一个按位控制的过滤器，man 手册 `core(5)` 逐项定义了每一位的含义：
 
 | bit | 含义 | 默认值 |
