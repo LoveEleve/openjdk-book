@@ -439,7 +439,46 @@ if (UseNUMA) {
 Linux::set_createThread_lock(new Mutex(Mutex::leaf, "createThread_lock", false));
 ```
 
-`Mutex` 不是裸调 `pthread_mutex_lock`。HotSpot 在 Linux 上的实现（`mutex.cpp`）是三层叠加：先 CAS 抢锁（`TryFast`），抢不到就短时间自旋（`TrySpin`），再抢不到才掉到 `pthread_mutex_lock` + `pthread_cond_wait` 的慢路径。比 POSIX 锁多了三层 JVM 专属语义：
+`Mutex` 不是直接封装 `pthread_mutex_t`——但理解它的关键在理解 Linux 上的锁是怎么工作的。
+
+**铺垫：Linux 上 `pthread_mutex_lock` 的 futex 机制**
+
+Linux 内核提供 `futex`（fast userspace mutex）系统调用，用来实现用户态的锁。它的核心思路是把"快速路径"留在用户态，只有"需要等待"时才进内核。典型流程：
+
+```
+pthread_mutex_lock(&lock)
+  │
+  ├─→ 原子 CAS 尝试: 如果 lock == 0 (未锁定), 设成 1, 返回成功
+  │       ↑ 这一步只在用户态, 不走系统调用, 极快
+  │
+  └─→ CAS 失败(锁被其他线程持有)
+        └─→ futex(FUTEX_WAIT, &lock, 1): 告诉内核"我在等 lock 变成不是 1"
+              │       ↑ 系统调用, 线程进入睡眠
+              │
+              └─→ 持有者调 pthread_mutex_unlock
+                    └─→ CAS 把 lock 设回 0
+                          └─→ 如果有人在等: futex(FUTEX_WAKE, &lock, 1): 唤醒一个等待者
+```
+
+一句话概括：无竞争时一次 CAS 搞定，有竞争时通过 `futex` 在内核睡眠。`futex` 的值 `lock` 是一个用户态变量——内核不认识"这是锁"，内核只认"这个地址上的值"，用 `FUTEX_WAIT` 检查值匹配再睡眠，用 `FUTEX_WAKE` 唤醒等待者。
+
+**HotSpot 在此之上的三层定制：**
+
+HotSpot 的 `Monitor::lock()`（`mutex.cpp`）在这个基础上加了两层优化，然后才走 `pthread_mutex_lock`：
+
+```
+Monitor::lock()
+  │
+  ├─ TryFast(): 原子 CAS 尝试抢锁 (类似 futex 的快速路径, 但跳过 pthread 层)
+  │
+  ├─ TrySpin(): CAS 失败后短时间自旋等待 (几十个 CPU 周期循环重试)
+  │     ↑ 适合锁持有时间极短的场景, 避免 futex WAIT 的系统调用开销
+  │
+  └─ 还抢不到 → ILock(): 最终掉到 pthread_mutex_lock + pthread_cond_wait
+        ↑ 真正的 futex(FUTEX_WAIT) 在内核睡眠
+```
+
+HotSpot 自己做了 CAS 和自旋，是因为它知道锁的使用场景——JVM 内部的锁很多是"拿一下马上放"，自旋比掉进内核睡眠更高效。比 POSIX 锁多了三层 JVM 专属控制：
 
 **第一层：锁级别（rank），用于死锁检测。** HotSpot 给每个锁分配一个整数 rank，锁必须以 rank 从低到高的顺序获取。在 debug 构建中违反此规则直接 assert。rank 的层级 `mutex.hpp` 定义了：
 
