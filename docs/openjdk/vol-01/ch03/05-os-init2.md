@@ -1060,7 +1060,9 @@ class SafepointMechanism : public AllStatic {
 
 JDK 11 默认开启 `ThreadLocalHandshakes`（JEP 312）——每个线程有独立的轮询指针，不再共用一个全局页面。`default_initialize()` 做的第一件事就是分配这个轮询页。
 
-`set_uses_thread_local_poll()` 设 `_polling_type = _thread_local_poll`。后续每创建一个 `JavaThread`，`initialize_header()` 把该线程的 polling page 指针初始化为 disarmed 状态。
+`set_uses_thread_local_poll()` 设 `_polling_type = _thread_local_poll`。后续每创建一个 `JavaThread`，`initialize_header()` 把该线程的 polling page 指针初始化为 "disarmed" 状态。
+
+"disarmed 状态"就是指针指向 `good_page`——这一页被 `mprotect(PROT_READ)` 保护，可以正常读取。JIT 编译的代码在读它时不会触发信号，线程正常运行。相对的 "armed 状态"是指针指向 `bad_page|8`——不可读，一碰就 SIGSEGV，线程被停住。类比安防系统：disarmed = 关警，armed = 开警。新线程初始一定 disarmed——刚创建的线程还没开始干活，不需要被 GC 拦截。
 
 接下来分配两页内存。`os::reserve_memory` 内部调用 `mmap(NULL, 8KB, ..., MAP_ANONYMOUS|MAP_PRIVATE, -1, 0)` 预留虚拟地址空间，`os::commit_memory_or_exit` 内部调 `mprotect` 提交物理页。两页共 8KB，前 4KB 是 `bad_page`，后 4KB 是 `good_page`。直接读分配结果的代码：
 
