@@ -796,128 +796,94 @@ class ParkEvent : public os::PlatformEvent {
 
 ---
 
-### 第 3 层：Monitor 与 SplitWord —— 完整管程的核心
+### 第 3 层：Monitor —— 这把锁到底在锁什么
 
-前面两个零件（PlatformEvent 负责睡眠、ParkEvent 负责链接），现在把它们组装成完整管程。
+先回答最基本的问题"HotSpot 内部使用的锁是什么意思"——具体例子。
 
-`Monitor`（`mutex.hpp`）有五样东西：
+JVM 启动时有好几条线程同时跑：Java 业务线程在解释字节码，CompilerThread 在后台把热点方法编译成机器码。如果一条线程用 `tty->print_cr("[GC info]")` 往 stdout 打印日志，另一条线程也在同一时刻打印编译日志——两行输出会搅在一起，变成乱码。
+
+所以 `tty` 对象内部有一个 Monitor 锁：
+
+```c
+// JVM 代码中：
+void gc_print(const char* msg) {
+    MutexLocker ml(tty_lock);     // 获取锁 —— 同一时刻只有一条线程能进
+    tty->print_cr("%s", msg);     // 安全打印
+}                                  // ml 析构, 自动释放锁
+```
+
+`tty_lock` 就是这个 `Monitor` 的实例。100 个 Monitor 保护 100 个共享资源——stdout 一个、线程列表一个、代码缓存一个、符号表一个。JVM 代码里满屏的 `MutexLocker xxx(some_lock)` 就是在说"我要动这个资源了，别人别碰"。
+
+现在看这个锁怎么实现的。`Monitor` 内部的全部状态就这几个字段：
 
 ```
 Monitor
-  ├─ SplitWord _LockWord       ← 锁状态 + 竞争队列 (cxq) 共享一个机器字
-  ├─ ParkEvent* _EntryList      ← 等待获取锁的线程链表
-  ├─ ParkEvent* _OnDeck         ← 下一任锁持有者 (最多一个)
-  ├─ ParkEvent* _WaitSet        ← wait() 中的线程集合
-  └─ Thread*    _owner          ← 当前持有者
+  ├─ _LockWord    ← 一个 8 字节整数。最低位=锁状态(0空闲/1已锁)，高位=等待者链表头
+  ├─ _owner       ← 当前持有锁的线程（NULL=没人持有）
+  ├─ _EntryList   ← 等待获取锁的线程链表
+  ├─ _OnDeck      ← "下一个该拿锁的线程"（最多一个）
+  └─ _WaitSet     ← wait()/notify() 用的等待集合
 ```
 
-关键是 `_LockWord`——它是一个 `SplitWord` 联合体：
+关键设计：`_LockWord` 这一个整数同时记录了两件事——**锁状态**（最低位）和**排队队列的头指针**（高位）。为什么能这样？因为等待者的 ParkEvent 地址是 256 字节对齐的，低 8 位永远是 0。
 
-```c
-union SplitWord {
-  volatile intptr_t FullWord;     // 整个字（x86_64 上 8 字节）
-  volatile jbyte   Bytes[sizeof(intptr_t)];  // 按字节访问
-};
+用具体数值演示完整过程。假设两个线程竞争同一个 Monitor：
 
-#define _LBIT 1
-#define _LSBINDEX 0                 // 小端：最低字节在数组索引 0
-```
-
-ParkEvent 按 256 字节对齐分配，地址的低 8 位永远是 0。所以 `_LockWord` 的**最低字节**可以存放锁状态（0=空闲，1=已锁定），**高 7 个字节**存放 cxq 的头指针。这就是 SplitWord 设计的目的——用一次 CAS 同时操作锁状态和 cxq。
-
-**解锁只看最低字节（`_LockWord.Bytes[0]`）。** `IUnlock` 用 `release_store` 把它写回 0——不需要 CAS，因为只有持有者会解锁：
-
-```c
-void Monitor::IUnlock(bool RelaxAssert) {
-  OrderAccess::release_store(&_LockWord.Bytes[_LSBINDEX], jbyte(0));
-  // ... 然后处理 _OnDeck / _EntryList / cxq 的传承 ...
-}
-```
-
-**加锁先试最低字节（TryFast），失败再同时操作锁+cxq（AcquireOrPush）：**
-
-```c
-// === mutex.cpp ===
-int Monitor::TryFast() {
-  // 乐观路径: CAS(0 → _LBIT), 期望 FullWord == 0 (锁空闲 + cxq 空)
-  intptr_t v = Atomic::cmpxchg(_LBIT, &_LockWord.FullWord, (intptr_t)0);
-  if (v == 0) return 1;         // FullWord 原本是 0, CAS 成功, 拿到锁
-
-  for (;;) {
-    if ((v & _LBIT) != 0) return 0;   // 锁已被持有, TryFast 放弃
-    // 锁空闲但 cxq 非空 → CAS 把 LockByte 从 0 设成 1, 同时保留 cxq 指针不变
-    const intptr_t u = Atomic::cmpxchg(v | _LBIT, &_LockWord.FullWord, v);
-    if (v == u) return 1;
-    v = u;
-  }
-}
-
-inline int Monitor::AcquireOrPush(ParkEvent * ESelf) {
-  intptr_t v = _LockWord.FullWord;
-  for (;;) {
-    if ((v & _LBIT) == 0) {
-      // 锁空闲 → CAS 把 LockByte 从 0 设成 1, 同时保留 cxq 指针不变
-      const intptr_t u = Atomic::cmpxchg(v | _LBIT, &_LockWord.FullWord, v);
-      if (u == v) return 1;
-      v = u;
-    } else {
-      // 锁被持有 → 把自己 ParkEvent 推入 cxq 头部
-      ESelf->ListNext = (ParkEvent *)(v & ~_LBIT);  // 链接旧 cxq
-      // CAS: 把 FullWord 设成 (self | _LBIT), 同时保留 LockByte=1
-      const intptr_t u = Atomic::cmpxchg(intptr_t(ESelf) | _LBIT,
-                                          &_LockWord.FullWord, v);
-      if (u == v) return 0;        // 入队成功
-      v = u;
-    }
-  }
-}
-```
-
-`AcquireOrPush` 用一次 CAS 原子的完成了两个动作：要么拿锁（LockByte 0→1），要么入队（旧 cxq → ListNext，自己 → LockWord 高位）。如果 CAS 失败（LockWord 被其他线程改了），重试循环。
-
-**`Monitor::lock()` 的完整路径：**
+**线程 A 获取锁：**
 
 ```
-Monitor::lock()
-  ├─ TryFast()                ← CAS(0→_LBIT), 改的是 _LockWord.Bytes[0]
-  ├─ TrySpin()                ← TryFast 失败后自旋重试
-  ├─ ThreadBlockInVM           ← 转换 JavaThread 状态 (_thread_in_vm → _thread_blocked)
-  └─ ILock()
-        ├─ TryFast() → TrySpin() 再试
-        ├─ AcquireOrPush()     ← 还是拿不到? CAS 把自己推入 cxq(_LockWord 高位)
-        ├─ while(_OnDeck != self) park()   ← 等待被选为 OnDeck
-        └─ while(true) TrySpin()/park()    ← 竞争到锁, 清除 OnDeck
+Monitor 初始状态:  _LockWord = 0x0000000000000000   (空闲, 没人排队)
+                   _owner    = NULL
+
+A 调 lock() → TryFast():
+   CAS: 把 _LockWord 从 0 改成 1
+        成功! _LockWord 变成 0x0000000000000001
+        _owner = A
+
+此时 Monitor:     _LockWord = 0x0000000000000001   (最低位=1, 表示被 A 持有)
+                   _owner    = A
 ```
 
-每一个加锁/解锁操作改的都是同一个字 —— `_LockWord.FullWord`。拿锁是 CAS `0 → _LBIT`，放锁是 `release_store(Bytes[0]=0)`，竞争入队是把 ParkEvent 地址写到高位同时保留 LockByte=1。
-
-**解锁与传承：**
+**线程 B 尝试获取锁（被阻塞）：**
 
 ```
-Monitor::unlock()
-  ├─ release_store(LockByte=0)   ← 释放锁 (字节存储, 只改 _LockWord.Bytes[0])
-  ├─ _OnDeck 已有? → unpark(_OnDeck), return
-  ├─ cxq + EntryList 双空? → return
-  └─ 获取 OnDeck 内锁 (CAS null→_LBIT)
-       ├─ EntryList 有线程 → 提取头部设为新 OnDeck, unpark
-       ├─ EntryList 空 → CAS 批量搬迁 cxq 到 EntryList, 再提取头部
-       └─ 双空 → 清理
+B 调 lock() → TryFast():
+   CAS: 想把 _LockWord 从 0 改成 1
+        失败! _LockWord 已经是 1 (被 A 持有)
+   
+   TrySpin() 自旋 20 圈... 还是拿不到
+
+   AcquireOrPush(B 的 ParkEvent):
+     B 的 ParkEvent 地址 = 0x7f1234567800 (256 对齐)
+     CAS: 把 _LockWord 从 0x0000000000000001 
+          改成        0x7f1234567801     (地址 + 最低位=1)
+          成功!
+
+此时 Monitor:     _LockWord = 0x7f1234567801   (最低位=1, 高位指向 B 的排队记录)
+                   _owner    = A              (A 还没放锁)
+                   cxq 头    = B
 ```
 
-释放者不唤醒所有等待线程——只设一个 `_OnDeck`。被选为 OnDeck 的线程被唤醒后自己竞争锁，避免惊群。
-
-**三队列模型：**
+**线程 A 释放锁，B 获得锁：**
 
 ```
-[cxq] ──批量搬迁──▶ [_EntryList] ──选一个──▶ [_OnDeck] ──获取──▶ [Owner]
- 竞争队列            等待队列              继承者              持有者
+A 调 unlock():
+   release_store: 把 _LockWord.Bytes[0] 从 1 改成 0   (只清最低位)
+                   _LockWord 变成 0x7f1234567800
+ 
+   发现 cxq 里有 B 在等 → B 设为 _OnDeck → unpark(B)
+
+此时 Monitor:     _LockWord = 0x7f1234567800   (锁空闲, 指针还在原位)
+                   _OnDeck   = B
+
+B 被唤醒:
+   TrySpin() 看到 _LockWord 最低位=0 → CAS 把它设成 1
+         成功! _LockWord = 0x7f1234567801
+         _owner = B
+         _OnDeck = NULL
 ```
 
-| 队列 | 性质 | 操作者 |
-|------|------|--------|
-| cxq | 无锁 CAS 头插，多线程并发入队 | 任何竞争线程 |
-| _EntryList | 排队有序，单线程操作 | 持有 OnDeck 锁的线程 |
-| _OnDeck | 最多一个，唯一候选 | 从 EntryList 选出 |
+整个过程里，`_LockWord` 这一个整数承载了全部同步状态。加锁是 CAS 把最低位从 0 改成 1，放锁是直接写最低位为 0，排队是把排队者地址写到高位。这就是 SplitWord 设计的全部意义——不需要独立的"锁状态"和"队列表头"，一个 CAS 操作原子地修改两者。
 
 ---
 
