@@ -1197,11 +1197,17 @@ jint Arguments::adjust_after_os() {
 
 ## 4. 收尾步骤 ★
 
-**`ostream_init_log()`** —— 唯一的作用是提前创建 `tty` 的日志文件（如果有）。
+**`ostream_init_log()`** —— 唯一的作用是提前创建 `tty` 的日志文件（**如果有**）。
 
-正常情况下 `tty` 往 stdout/stderr 写。`defaultStream` 还有一个可选的 `_log_file` 成员——如果开了 `-XX:+LogVMOutput` 或 `-XX:+LogCompilation`，`tty` 的每次 `print_cr` 也会同时写一份到 XML 格式的日志文件。但这两个 flag 默认都是 `false`，所以正常启动时 `has_log_file()` 什么也不做，直接返回。
+先回答两个问题。
 
-如果 flag 开启了，`has_log_file()` 调用 `init()` → `init_log()`。`init_log()` 内部：
+**`LogVMOutput` 和 `LogCompilation` 是什么？** 它们是两个 `diagnostic` 类型的 flag（`globals.hpp`），默认都是 `false`。`-XX:+LogVMOutput` 打开后，`tty` 的每次 `print_cr` 除了写 stdout，还会写一份到 XML 格式的日志文件。`-XX:+LogCompilation` 类似，但写入的是 JIT 编译器日志。两者都是 `diagnostic` flag——需要先 `-XX:+UnlockDiagnosticVMOptions` 才能使用，日常开发几乎不会开。
+
+**`hotspot_<pid>.log` 什么时候创建？** 只有开了上述 flag 时，`has_log_file()` 才会走到 `init()` → `init_log()` → `open_file()` → `fopen(name, "w")`。**正常启动不传 flag 的话，`init()` 只做 `_inited = true`，`init_log()` 不会执行，文件不会创建。**
+
+`has_log_file()` 的设计目的就是"提前触发惰性初始化"——日志文件原本是第一次写日志时才惰性 `fopen` 的。但如果 VM 在第一次写日志前就崩溃了，crash 日志写不进文件。所以在 Stage 3 这里主动调一次，确保**如果 flag 开了**，文件现在就能打开。flag 没开的话，这行就是 nop。
+
+如果 flag 开了，`init_log()` 做以下事情：
 
 1. 构造文件名——如果用户没有用 `-XX:LogFile` 指定，默认为 `"hotspot_%p.log"`（`%p` 会被展开为进程 PID，`%t` 被展开为时间字符串）
 2. `open_file()` 先尝试在当前工作目录用 `fopen(name, "w")` 创建文件
