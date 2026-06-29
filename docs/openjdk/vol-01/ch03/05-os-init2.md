@@ -1225,7 +1225,7 @@ static bool init_agents_at_startup()     { return !_agentList.is_empty(); }
 
 当链表非空时：
 
-1. `convert_vm_init_libraries_to_agents()` —— 遍历 `_libraryList`（`-Xrun` 旧参数）。对每个库，先 `dlopen` 找 `JVM_OnLoad`。如果没有 `JVM_OnLoad` 但有 `Agent_OnLoad`，把节点从 `_libraryList` 移除，追加到 `_agentList` 里——统一走 `Agent_OnLoad` 机制。
+1. `convert_vm_init_libraries_to_agents()` —— 向后兼容代码。`-Xrun` 是 JDK 1.x 的旧接口，JDK 5 引入 JVMTI 后被 `-agentlib`/`-agentpath` 取代。生产环境从不使用 `-Xrun`，这个函数在正常流程中不会执行。它的逻辑：遍历 `_libraryList`，对每个库 `dlopen` 找 `JVM_OnLoad`，没有的话找 `Agent_OnLoad`，找到后把节点从 `_libraryList` 移到 `_agentList`——统一走现代 `Agent_OnLoad` 机制。
 
 2. `create_vm_init_agents()` —— 遍历 `_agentList`。对每个 agent，`dlopen` 加载 `.so` → `dlsym` 找 `Agent_OnLoad` → 调 `Agent_OnLoad(&main_vm, agent->options(), NULL)`。agent 拿到 `JavaVM*` 指针注册 JVMTI capabilities。找不到或返回非 `JNI_OK` 即 `vm_exit_during_initialization`。
 
