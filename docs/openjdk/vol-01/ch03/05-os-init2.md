@@ -441,7 +441,23 @@ Linux::set_createThread_lock(new Mutex(Mutex::leaf, "createThread_lock", false))
 
 `Mutex` 不是直接封装 `pthread_mutex_t`——但理解它的关键在理解 Linux 上的锁是怎么工作的。
 
-**铺垫：Linux 上 `pthread_mutex_lock` 的 futex 机制**
+**铺垫：mutex 和 futex 是什么关系**
+
+先厘清两个容易混淆的词。
+
+**`pthread_mutex_lock(&lock)` 里的 `lock`** —— 类型是 `pthread_mutex_t`，一个 glibc 定义的结构体。它内部包含一个 `int __lock` 字段（32 位 futex word），外加锁类型标记（普通锁/递归锁/检错锁）、持有者线程 ID 等元数据。当你调 `pthread_mutex_lock(&m)` 时，glibc 实际上是在操作这个结构体内部的 `__lock` 字段——先 CAS 尝试从 0 改成 1，失败后才调 `futex(FUTEX_WAIT, &m.__lock, 1, NULL)`。
+
+**mutex vs futex** —— 是两个不同层面的概念：
+
+| | mutex（互斥锁） | futex（fast userspace mutex） |
+|---|---|---|
+| 是什么 | 一个抽象概念/同步原语：保证同一时刻只有一个线程进入临界区 | Linux 内核提供的一种**具体实现机制**：把等待/唤醒操作交给内核，但快速路径留在用户态 |
+| 谁实现 | POSIX 标准定义了 `pthread_mutex_t` 的接口，glibc 实现了它 | Linux 内核的系统调用 `syscall(SYS_futex, ...)` |
+| 关系 | glibc 的 `pthread_mutex_lock` 在 Linux 上**用 futex 来实现** | futex 是实现 mutex 的底层机制，也可以用来实现读写锁、信号量、条件变量等 |
+
+简化理解：**mutex 是"做什么"（互斥），futex 是"怎么做"（内核协助的用户态锁）。** man 手册 `futex(2)` 第一行写的就是 "fast user-space locking"——它就是为了高效实现 mutex 而设计的。
+
+**Linux 上 `pthread_mutex_lock` 的 futex 机制**
 
 Linux 内核提供 `futex()`（fast userspace mutex）系统调用。man 手册 `futex(2)` 的名字本身就说明了设计理念——"fast user-space locking"。核心思路是：
 
