@@ -1201,7 +1201,15 @@ jint Arguments::adjust_after_os() {
 
 > 注意：JVM 崩溃时生成的 `hs_err_pid<pid>.log` 是 `VMError::report_and_die()` 创建的，和这里的 `ostream_init_log()` 毫无关系，不要混淆。
 
-**agent 转换与启动** —— `-Xrun` 是 JDK 1.x 时代的 native 库加载方式，`-agentlib`/`-agentpath` 是 JVMTI 引入后的新方式。`convert_vm_init_libraries_to_agents()` 把旧的 `-Xrun` 库转为 agent 处理（向后兼容），`create_vm_init_agents()` 调用所有 agent 的 `Agent_OnLoad`。正常 `java MyApp` 启动不传任何 agent 参数，两个 `if` 条件都不成立，直接跳过。
+**agent 转换与启动** —— Stage 3 末尾加载用户指定的原生 agent。
+
+命令行参数 `-agentlib:jdwp=transport=dt_socket,...`（IDE 远程调试）、`-agentpath:/path/to/libprofiler.so`（async-profiler）、APM 工具的探针——这些都是原生 agent，在此刻加载。加载分两步：
+
+1. `convert_vm_init_libraries_to_agents()` —— 遍历 `-Xrun` 库（JDK 1.x 时代的旧参数），有 `Agent_OnLoad` 而无 `JVM_OnLoad` 的，从 library 列表移到 agent 列表。纯粹向后兼容。
+
+2. `create_vm_init_agents()` —— 遍历所有 agent（来自 `-agentlib`、`-agentpath`、以及上一步转换来的 `-Xrun`），依次调用 `Agent_OnLoad(JavaVM *vm, char *options, void *reserved)`。agent 在这个回调里注册 JVMTI capabilities、安装回调函数。加载失败的 agent 导致 `vm_exit_during_initialization`。
+
+两个 `if` 守卫保证没有传任何 agent 参数时直接跳过——`java MyApp` 的正常启动就是如此。
 
 ---
 
