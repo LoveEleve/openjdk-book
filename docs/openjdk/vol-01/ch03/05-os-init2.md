@@ -887,7 +887,8 @@ B 调 lock() → TryFast():
    TrySpin() 自旋 20 圈... 还是拿不到
 
    AcquireOrPush(B 的 ParkEvent):
-     B 的 ParkEvent 地址 = 0x7f1234567800 (256 对齐)
+     B 持有的 ParkEvent 是从 Thread 对象里来的—每个线程创建时预分配一个 `_MutexEvent`,
+     终身绑定。地址 0x7f1234567800（ParkEvent 强制 256 字节对齐）
      CAS: 把 _LockWord 从 0x0000000000000001 
           改成        0x7f1234567801     (地址 + 最低位=1)
           成功!
