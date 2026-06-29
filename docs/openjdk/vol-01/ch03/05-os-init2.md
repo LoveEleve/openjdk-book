@@ -1203,7 +1203,7 @@ jint Arguments::adjust_after_os() {
 
 **agent 转换与启动** —— Stage 3 末尾加载用户指定的原生 agent。
 
-命令行参数 `-agentlib:jdwp=transport=dt_socket,...`（IDE 远程调试）、`-agentpath:/path/to/libprofiler.so`（async-profiler）、APM 工具的探针——这些都是原生 agent，在此刻加载。加载分两步：
+`-agentlib:jdwp=transport=dt_socket,...`（IDE 远程调试，开发场景）、`-agentpath:/path/to/libprofiler.so`（性能采样）、APM 厂商的探针——这些都是原生 agent，在此刻加载。加载分两步：
 
 1. `convert_vm_init_libraries_to_agents()` —— 遍历 `-Xrun` 库（JDK 1.x 时代的旧参数），有 `Agent_OnLoad` 而无 `JVM_OnLoad` 的，从 library 列表移到 agent 列表。纯粹向后兼容。
 
