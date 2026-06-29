@@ -1199,27 +1199,27 @@ jint Arguments::adjust_after_os() {
 
 **`ostream_init_log()`** —— 唯一的作用是提前创建 `tty` 的日志文件。
 
-在 Stage 2 的 `LogConfiguration::initialize()` 中，UL（统一日志框架）的 `StdoutLog/StderrLog` 已经初始化好了。这里的 `ostream_init_log` 处理的是另一套输出——通用输出 `tty`/`defaultStream` 的日志文件。
+正常情况下 `tty` 往 stdout/stderr 写。但 `defaultStream`（`tty` 的内部实现）还有一个可选的 `_log_file` 成员——如果用户传了 `-XX:LogFile=hotspot.log`，`tty` 的每次输出也会写一份到这个文件。这个文件的创建原本是**惰性**的——第一次真正需要写日志时才 `fopen`。
 
-正常情况下 `tty` 往 stdout/stderr 写，但如果用户传了 `-XX:LogFile=hotspot.log`，`tty` 的输出也会写一份到文件。这个日志文件的创建是**惰性**的——只有第一次真正需要写日志时才 `fopen`。问题是：如果 VM 在惰性创建之前就崩溃了，fatal error handler 调 `tty->print_cr` 写 crash 日志时，文件还没打开，crash 信息就丢了。
+问题在于：如果 VM 在惰性创建之前就崩溃了，fatal error handler 调 `tty->print_cr` 写 crash 信息时，文件还没打开，crash 信息就丢了。
 
-`has_log_file()` 主动触发这次惰性初始化，确保文件在 VM 崩溃前已经打开：
+`has_log_file()` 在这里主动触发惰性初始化。它的调用链（`ostream.cpp`）：
 
-```c
-// === ostream.cpp ===
-void ostream_init_log() {
-  if (DumpLoadedClassList != NULL) {
-    // CDS 训练模式：-XX:DumpLoadedClassList=<文件>，
-    // 把加载过的类列表写入指定文件，用于后续创建共享归档（CDS）。
-    // 默认不传这个参数，此分支跳过。
-    classlist_file = new fileStream(make_log_name(DumpLoadedClassList, NULL));
-  }
-  // 核心动作：提前创建 tty 的日志文件
-  defaultStream::instance->has_log_file();
-}
+```
+has_log_file()
+  ├─ 如果 VM 已崩溃（VMError::is_error_reported()）→ 直接返回 false
+  ├─ 如果还没初始化：
+  │     init() → init_log()
+  │       └─ open_file(LogFile ? LogFile : "hotspot_%p.log")
+  │            └─ fopen(log_name, "w")          ← 提前创建文件
+  │            └─ 如果成功: new xmlStream(file)  ← 日志写 XML 格式
+  │            └─ 如果失败: LogVMOutput = false  ← 放弃日志文件
+  └─ 返回 _log_file != NULL
 ```
 
-`DumpLoadedClassList` 是 CDS（Class Data Sharing）训练阶段用的 flag——先跑一次 JVM 把加载过的类列表 dump 出来，再用这个列表创建共享归档。**默认不传，这个 `if` 直接跳过。** 真正的核心就一行：`has_log_file()`。
+用户可以传 `-XX:LogFile=myapp.log` 指定日志文件名，不传的话默认名是 `hotspot_<pid>.log`。不过大部分生产环境从不传 `-XX:LogFile`，所以 `open_file(log_name)` 会尝试打开默认文件——打开失败就放弃，不影响正常运行。
+
+`ostream_init_log` 还有第一行 CDS 相关的代码：`DumpLoadedClassList` 是 CDS（Class Data Sharing）训练阶段用的 flag——先跑一次 JVM 把加载过的类列表 dump 出来，再用这个列表创建共享归档。**默认不传，这个 `if` 直接跳过。** 真正的核心就一行：`has_log_file()`。
 }
 ```
 
