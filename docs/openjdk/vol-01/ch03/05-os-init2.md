@@ -1217,7 +1217,7 @@ has_log_file()
   └─ 返回 _log_file != NULL
 ```
 
-用户可以传 `-XX:LogFile=myapp.log` 指定日志文件名，不传的话默认名是 `hotspot_<pid>.log`。`fopen(name, "w")` 会创建这个文件——注意文件名是相对路径，所以文件创建在 JVM 进程的**当前工作目录**下（即你敲 `java` 命令的那个目录），和 JDK 安装目录无关。
+用户可以传 `-XX:LogFile=myapp.log` 指定日志文件名，不传的话默认名是 `hotspot_<pid>.log`。但这里有一个前提——`init()` 里先检查了 `if (LogVMOutput || LogCompilation)`，而这两个 flag 默认都是 `false`。所以**不传 flag 的话 `init_log()` 根本不会被调用，文件不会凭空出现**。只有用户显式传了 `-XX:+LogVMOutput` 或 `-XX:+LogCompilation`，`has_log_file()` 才真正执行 `init_log() → fopen`。
 
 `ostream_init_log` 还有第一行 CDS 相关的代码：`DumpLoadedClassList` 是 CDS（Class Data Sharing）训练阶段用的 flag——先跑一次 JVM 把加载过的类列表 dump 出来，再用这个列表创建共享归档。**默认不传，这个 `if` 直接跳过。** 真正的核心就一行：`has_log_file()`。
 
