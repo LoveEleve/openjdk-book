@@ -581,7 +581,7 @@ if (PerfAllowAtExitRegistration) {
 }
 ```
 
-PerfData 是 HotSpot 内置的性能监控数据区。它不是磁盘文件——而是在 `/tmp/hsperfdata_<user>/` 下通过 `mmap(MAP_SHARED)` 创建的一块共享内存，大小约 32KB，存放 GC 次数、堆使用量、编译统计等计数器。外部工具 `jstat`、`jcmd`、VisualVM 通过读这个共享内存文件来获取 JVM 运行指标。
+PerfData 是 HotSpot 内置的性能监控数据区。它在 `/tmp/hsperfdata_<user>/` 下创建文件，然后通过 `mmap(MAP_SHARED)` 映射到进程地址空间。映射之后 JVM 进程直接用内存指针（`PerfDataEntry*`）读写这块区域——不再走 `read()/write()` 系统调用。外部工具 `jstat`、`jcmd`、VisualVM 打开同一个文件并同样 `mmap` 它，从而"看到"同一块共享内存中的 GC 次数、堆使用量、编译统计等计数器。文件大小约 32KB。
 
 `atexit` 是 C 标准库函数——注册一个在进程正常退出时自动调用的回调函数。多个 `atexit` 注册的回调按注册先后顺序的倒序执行。这里注册的 `perfMemory_exit_helper` 会在进程退出时：
 1. 调用 `msync` 把共享内存的变更刷回文件
