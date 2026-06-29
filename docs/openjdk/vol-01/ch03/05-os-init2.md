@@ -955,7 +955,9 @@ AQS 只需要一个 CLH 队列。HotSpot 的 Monitor 和 ObjectMonitor 都需要
 
 **关键就是一次 CAS 交接。** cxq→NULL 的 CAS 成功后，整条链就归释放者独占了——没有并发读写问题。之后释放者可以安全地遍历、排序、选人。AQS 没有这个"CXI 全部摘下来"的操作——它必须在并发读写的单一链表上工作，所以需要 `waitStatus` 状态机来标记每个节点的状态。
 
-**ObjectMonitor 用了完全相同的设计。** `ObjectMonitor::enter()` 中 `EnterI` 把 `ObjectWaiter` 推入 `_cxq`（CAS），`ObjectMonitor::exit()` 用 `Atomic::cmpxchg(NULL, &_cxq, w)` 原子摘下整个 cxq，追加到 `_EntryList`，然后从 EntryList 中 `ExitEpilog` 唤醒一个。
+**ObjectMonitor 用了完全相同的双队列设计，但节点类型不同。** Monitor 的队列直接存 `ParkEvent*`——每个线程有私有的 `_MutexEvent`，锁竞争时拿它去排队。ObjectMonitor 的队列存的是 `ObjectWaiter*`——一个栈上分配的包装对象，内部包含了指向线程私有 ParkEvent 的指针（`ObjectWaiter::_event`）和前后链表指针。注释里写道 `"TODO: Eliminate ObjectWaiter and use ParkEvent instead"`——设计者自己也觉得两套节点应该统一，但 JVMTI 的 `GetObjectMonitorUsage` API 依赖 ObjectWaiter 结构暴露给外部工具，无法直接替换。
+
+`ObjectMonitor::enter()` 中 `EnterI` 把 `ObjectWaiter` 推入 `_cxq`（CAS），`ObjectMonitor::exit()` 用 `Atomic::cmpxchg(NULL, &_cxq, w)` 原子摘下整个 cxq，追加到 `_EntryList`，然后从 EntryList 中 `ExitEpilog` 唤醒一个。
 
 ---
 
