@@ -558,13 +558,14 @@ glibc 的 `pthread_create` 会在每个线程栈底自动加一个 guard page（
 
 ```
 os::init_2() 其余步骤：
-
-```
-os::init_2() 其余步骤：
 ├── fast_thread_clock_init        -- 用 CLOCK_THREAD_CPUTIME_ID 替代 clock_gettime, 快 10 倍以上
 ├── libpthread_init               -- dlsym(RTLD_DEFAULT) 查找 pthread_condattr_setclock
 ├── sched_getcpu_init             -- dlsym(RTLD_DEFAULT) 查找 sched_getcpu, 用于 NUMA node 判断
 ├── MaxFDLimit 处理              -- setrlimit(RLIMIT_NOFILE) 把文件描述符上限提到硬限制
+```
+
+### 1.8 PerfData 共享内存退出清理
+
 ```c
 // === os_linux.cpp ===
 extern "C" {
