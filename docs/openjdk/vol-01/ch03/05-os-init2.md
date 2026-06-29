@@ -437,9 +437,29 @@ if (UseNUMA) {
 Linux::set_createThread_lock(new Mutex(Mutex::leaf, "createThread_lock", false));
 ```
 
-这个锁后续在 `os::create_thread()` 中被 `MutexLocker` RAII 包装使用，互斥保护多线程并发创建线程时 `pthread_create` 的内部状态。关于 HotSpot 内部锁的完整体系——Monitor/Mutex 类层次、rank 死锁检测、TryFast/TrySpin 加速路径、三队列（cxq/EntryList/OnDeck）传承机制——见本章末尾的"HotSpot 内部锁机制"独立一节。
+`Mutex` 的构造函数（`mutex.cpp`）：
 
-具体锁的使用方式还需根据后续章节中锁的实际调用路径来观察，但不在此刻展开。
+```c
+Mutex::Mutex(int Rank, const char * name, bool allow_vm_block,
+             SafepointCheckRequired safepoint_check_required) {
+  ClearMonitor((Monitor *) this, name);   // 清零全部字段, 设锁名
+#ifdef ASSERT
+  _allow_vm_block = allow_vm_block;       // VMThread 能否阻塞在此锁上
+  _rank           = Rank;                 // 死锁检测的 rank
+  NOT_PRODUCT(_safepoint_check_required = safepoint_check_required;)
+#endif
+}
+```
+
+三个参数逐一解释：
+
+| 参数 | 传入值 | 含义 |
+|------|--------|------|
+| `Rank` | `Mutex::leaf` | rank = leaf（约 15），位于 `suspend_resume` 和 `safepoint` 之间。debug 构建中，持有此锁后只能获取 rank > leaf 的锁。 |
+| `allow_vm_block` | `false` | VMThread 不允许在此锁上阻塞。防止 safepoint 期间 VMThread 等锁、锁持有者在等 safepoint 的死锁。 |
+| `safepoint_check_required` | `_safepoint_check_always`（默认） | 加锁时强制检查 safepoint——如果 GC 正在进行，Java 线程会主动停下。VMThread 用 `lock_without_safepoint_check()` 跳过。 |
+
+构造函数内部调用 `ClearMonitor` 把整个 `Monitor` 清空——包括 `_LockWord=0`（锁空闲、无人排队）、`_owner=NULL`、`_EntryList/_WaitSet` 全部空。之后这个锁就可以用了：`MutexLocker ml(lock)` 拿锁干活，析构自动释放。
 
 `prio_init()` 初始化 Java 线程优先级到 OS 优先级的映射表。
 
