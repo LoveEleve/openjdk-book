@@ -439,7 +439,7 @@ if (UseNUMA) {
 Linux::set_createThread_lock(new Mutex(Mutex::leaf, "createThread_lock", false));
 ```
 
-但 `Mutex` 不是 `pthread_mutex_t`——它是 HotSpot 自己实现的锁，底层可能用 `pthread_mutex`、`futex` 或自旋锁，取决于平台。比 POSIX 锁多了三层 JVM 专属语义：
+`Mutex` 不是裸调 `pthread_mutex_lock`。HotSpot 在 Linux 上的实现（`mutex.cpp`）是三层叠加：先 CAS 抢锁（`TryFast`），抢不到就短时间自旋（`TrySpin`），再抢不到才掉到 `pthread_mutex_lock` + `pthread_cond_wait` 的慢路径。比 POSIX 锁多了三层 JVM 专属语义：
 
 **第一层：锁级别（rank），用于死锁检测。** HotSpot 给每个锁分配一个整数 rank，锁必须以 rank 从低到高的顺序获取。在 debug 构建中违反此规则直接 assert。rank 的层级 `mutex.hpp` 定义了：
 
