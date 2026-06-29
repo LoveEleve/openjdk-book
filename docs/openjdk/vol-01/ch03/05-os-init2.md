@@ -895,7 +895,9 @@ B 调 lock() → TryFast():
 
 此时 Monitor:     _LockWord = 0x7f1234567801   (最低位=1, 高位指向 B 的排队记录)
                    _owner    = A              (A 还没放锁)
-                   cxq 头    = B
+
+cxq 不是一个独立的字段——它就是 `_LockWord` 的高 56 位。这里只有 B 一个在排队,
+所以高位指向 B 的 ParkEvent,B 既是头也是尾。
 ```
 
 **线程 A 释放锁，B 获得锁：**
