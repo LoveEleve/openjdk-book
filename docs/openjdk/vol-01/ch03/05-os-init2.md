@@ -1079,6 +1079,10 @@ os::protect_memory(good_page, page_size, os::MEM_PROT_READ);  // 可读→正常
 os::set_polling_page((address)(bad_page));                     // 存到 os::_polling_page
 ```
 
+`os::_polling_page` 是一个**全局变量**，但它的作用不是让线程直接读——它只用于信号处理器的**范围校验**。当 SIGSEGV 到达时，`is_poll_address(addr)` 检查故障地址是否在 `[_polling_page, _polling_page + page_size)` 内，判断这个 SIGSEGV 是不是碰了安全点轮询页。
+
+而线程自己读的是**私有的** `JavaThread._polling_page` 字段——每个 JavaThread 对象里都有一个指针，`arm_local_poll` 把它设为 `bad_page|8`，`disarm_local_poll` 把它恢复为 `good_page`。JIT 代码用 `mov r10, [r15 + offset]` 加载的是这个私有字段，不是全局变量。所有线程共享同一块 `bad_page` 内存，但每个线程有自己的指针独立切换。
+
 最后把页面地址和信息编码成 `void*`，存入静态变量。`poll_bit()` 返回值是 `8`，因为 bad_page 按 4KB 对齐（低 12 位全是 0），`| 8` 不冲突：
 
 ```c
