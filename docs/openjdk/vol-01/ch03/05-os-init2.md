@@ -1058,95 +1058,57 @@ class SafepointMechanism : public AllStatic {
 
 ### 2.2 核心：分配受保护的安全点页面
 
-只展示 JDK 11 默认的 `ThreadLocalHandshakes=true` 路径：
+JDK 11 默认开启 `ThreadLocalHandshakes`（JEP 312）——每个线程有独立的轮询指针，不再共用一个全局页面。`default_initialize()` 做的第一件事就是分配这个轮询页。
+
+`set_uses_thread_local_poll()` 设 `_polling_type = _thread_local_poll`。后续每创建一个 `JavaThread`，`initialize_header()` 把该线程的 polling page 指针初始化为 disarmed 状态。
+
+接下来分配两页内存。`os::reserve_memory` 内部调用 `mmap(NULL, 8KB, ..., MAP_ANONYMOUS|MAP_PRIVATE, -1, 0)` 预留虚拟地址空间，`os::commit_memory_or_exit` 内部调 `mprotect` 提交物理页。两页共 8KB，前 4KB 是 `bad_page`，后 4KB 是 `good_page`。直接读分配结果的代码：
 
 ```c
-void SafepointMechanism::default_initialize() {
-  if (ThreadLocalHandshakes) {
-    set_uses_thread_local_poll();         // 设 _polling_type = _thread_local_poll
-    intptr_t poll_armed_value   = poll_bit();  // = 8
-    intptr_t poll_disarmed_value = 0;
-
-    // 分配 2 页：bad_page (PROT_NONE) + good_page (PROT_READ)
-    const size_t page_size = os::vm_page_size();            // 本机 4096
-    const size_t allocation_size = 2 * page_size;           // 8192
-    char* polling_page = os::reserve_memory(allocation_size, NULL, page_size);
-    os::commit_memory_or_exit(polling_page, allocation_size, false, ...);
-
-    char* bad_page  = polling_page;
-    char* good_page = polling_page + page_size;
-
-    os::protect_memory(bad_page,  page_size, os::MEM_PROT_NONE);
-    os::protect_memory(good_page, page_size, os::MEM_PROT_READ);
-
-    os::set_polling_page((address)(bad_page));
-
-    poll_armed_value    |= reinterpret_cast<intptr_t>(bad_page);
-    poll_disarmed_value |= reinterpret_cast<intptr_t>(good_page);
-
-    _poll_armed_value    = reinterpret_cast<void*>(poll_armed_value);
-    _poll_disarmed_value = reinterpret_cast<void*>(poll_disarmed_value);
-  }
-}
+char* polling_page = os::reserve_memory(2 * page_size, NULL, page_size);
+os::commit_memory_or_exit(polling_page, 2 * page_size, false, ...);
+char* bad_page  = polling_page;
+char* good_page = polling_page + page_size;
 ```
 
-逐层解释：
+然后分别设保护属性。`os::protect_memory(MEM_PROT_NONE)` 底层是 `mprotect(PROT_NONE)`——和第 3.4 节 Stage 2 的 `create_stack_guard_pages()` 完全相同的系统调用。区别在于 Stage 2 保护的是栈底页（检测栈溢出），这里保护的是独立分配的页（检测安全点）：
 
-**`set_uses_thread_local_poll()`** —— 设 `_polling_type = _thread_local_poll`。后续每创建一个 `JavaThread`，`initialize_header()` 把该线程的 polling page 指针初始化为 disarmed 状态（指向 good_page）。JDK 11 之前的安全点是用全局单一的轮询页——所有线程都读同一个地址。`ThreadLocalHandshakes` 之后每个线程有自己独立的轮询指针，互不干扰。
+```c
+os::protect_memory(bad_page,  page_size, os::MEM_PROT_NONE);   // 不可读→触发 SIGSEGV
+os::protect_memory(good_page, page_size, os::MEM_PROT_READ);  // 可读→正常通过
+os::set_polling_page((address)(bad_page));                     // 存到 os::_polling_page
+```
 
-**`os::reserve_memory` 和 `os::commit_memory_or_exit` —— 底层是 `mmap`。** `reserve_memory` 预留 8KB 虚拟地址空间（调用 `mmap(NULL, 8KB, ..., MAP_ANONYMOUS|MAP_PRIVATE, -1, 0)`），`commit_memory_or_exit` 提交物理页（调用 `mprotect` 把这段虚拟地址映射到物理页）。预留和提交分两步，是因为内存管理策略——JVM 可以预留大段虚拟地址但只提交实际使用的部分。
+最后把页面地址和信息编码成 `void*`，存入静态变量。`poll_bit()` 返回值是 `8`，因为 bad_page 按 4KB 对齐（低 12 位全是 0），`| 8` 不冲突：
 
-**`os::protect_memory(MEM_PROT_NONE)` —— 底层是 `mprotect(PROT_NONE)`。** 这和第 3.4 节 Stage 2 的 `create_stack_guard_pages()` 用的是同一个系统调用。区别在于 Stage 2 保护栈底页检测栈溢出，这里保护 bad_page 检测安全点。调用链：`os::protect_memory(MEM_PROT_NONE)` → `linux_mprotect(addr, size, PROT_NONE)` → 系统调用 `mprotect(addr, size, PROT_NONE)`。
+```c
+_poll_armed_value    = (void*)((intptr_t)bad_page  | 8);  // 指向 bad_page
+_poll_disarmed_value = (void*)((intptr_t)good_page);      // 指向 good_page
+```
 
-**`poll_bit() = 8` —— JIT 编译器的协议约定。** 当线程需要被停止时，`arm_local_poll` 把该线程的 polling page 指针设为 `bad_page_addr | 0x8`。JIT 编译器在方法返回处和循环回边处生成 `test` 指令检查这个值：
+**为什么需要 8？** `poll_bit()` 返回一个非零的位模式，使得 `_poll_armed_value` 的低位不等于 0。如果 armed 值是 0，当 JIT 编译器在 polling 位置读取它时，会匹配到 null 地址——和空指针异常的判断冲突。使用 `8` 配合 256 字节对齐的 ParkEvent 地址保证了 `armed_value` 的低位非零且不会在 bad_page 的起始地址内——区分了 bad_page 触发和 null pointer。
+
+### 2.3 arm/disarm —— 怎么让线程停下
+
+现在有了好页和坏页。JIT 编译器在方法返回处和循环回边插入检查指令。在 x86-64 上大致是：
 
 ```asm
-mov  r10, QWORD PTR [r15 + offset_of_polling_page]   ; 读线程的轮询指针
-test QWORD PTR [r10], rax                              ; 检查地址是否可读
+mov  r10, QWORD PTR [r15 + offset_in_thread]   ; 加载本线程的 polling page 地址
+test QWORD PTR [r10], rax                        ; 尝试读这个地址
 ```
 
-如果轮询指针是 `good_page_addr`（`_poll_disarmed_value`），读操作成功，线程继续执行。如果轮询指针被设成了 `bad_page_addr | 0x8`（`_poll_armed_value`），`test` 指令读取 bad_page 时触发 SIGSEGV——因为 bad_page 被 `PROT_NONE` 保护。
-
-**触发后的完整链路：**
-
-```
-GC 需要 Stop-The-World
-  ├── arm_local_poll(所有 JavaThread)    ← 把 polling_page 指针改为 bad_page_addr|0x8
-  │
-  ├── 线程继续执行, 到达方法返回处
-  │     └── test 指令读 bad_page → SIGSEGV（因为 PROT_NONE）
-  │
-  ├── 内核投递 SIGSEGV 到当前线程
-  │     └── signalHandler → JVM_handle_linux_signal
-  │           └── os::is_poll_address(addr) → 是! 这是安全点
-  │                 └── SafepointSynchronize::block() → 线程挂起
-  │
-  └── GC 完成
-        └── disarm_local_poll(所有线程)   ← 恢复为 good_page_addr
-              └── 线程醒来, test 指令成功 → 继续执行
-```
-
-`is_poll_address` 通过检查故障地址是否在 `[bad_page, bad_page + page_size)` 范围内来判断。`SafepointSynchronize::block()` 内部用 `Threads_lock`+`Safepoint_lock` 排他，让目标线程切状态 `_thread_in_vm/_thread_in_Java → _thread_blocked`，并通知 VMThread "我已被阻塞"。GC 结束后 VMThread 解锁 `Threads_lock`，所有阻塞的线程依次恢复原状态。
-
-**为什么是 8？** `poll_armed_value` 的低 4 位必须是非零值，这样 `test` 指令的操作数不会是 null——JIT 编译器保证在 safe point 的 check 指令前计算出的轮询指针一定不是零。这也让信号处理器和其他可能产生 null 指针异常的代码区分开——0x0 附近的地址对应 null 指针，这个地址在非零页。
-
-`bad_page_addr | 0x8` 中的 `0x8` 可以和 `bad_page_addr` 组合——bad_page 地址按页对齐（低 12 位是 0），所以 `| 0x8` 不破坏任何有效地址。信号处理器在检查时通过 `addr & ~0xF` 获得实际的 bad_page 起始地址，再判断是否在轮询范围。
-
-### 2.3 arm/disarm 机制
-
-安全点的工作流用两个 inline 方法控制：
+HotSpot 用两个 inline 方法控制切换：
 
 ```c
-// === safepointMechanism.inline.hpp ===
 void SafepointMechanism::arm_local_poll(JavaThread* thread) {
-  thread->set_polling_page(poll_armed_value());     // 指向 bad_page
+  thread->set_polling_page(_poll_armed_value);     // 换成 bad_page→SIGSEGV
 }
 void SafepointMechanism::disarm_local_poll(JavaThread* thread) {
-  thread->set_polling_page(poll_disarmed_value());   // 指向 good_page
+  thread->set_polling_page(_poll_disarmed_value);   // 换回 good_page→正常
 }
 ```
 
-**完整工作流**：JVM 需要 GC --> `arm_local_poll(所有 JavaThread)` --> 线程下次检查时读取 bad_page --> SIGSEGV --> 信号处理器识别为安全点 --> `SafepointSynchronize::block()` --> GC 完成 --> `disarm_local_poll(所有线程)` --> 线程读取 good_page --> 正常通过。
+如果轮询指针是 `good_page`（_poll_disarmed_value），内存读成功，线程继续执行。如果轮询指针被改成 `bad_page|8`（_poll_armed_value），读触发 SIGSEGV——因为 `bad_page` 用 `mprotect(PROT_NONE)` 保护了。`is_poll_address` 检查故障地址是否在 `[_polling_page, _polling_page + page_size)` 内，是的话说明轮询页被碰触，调用 `SafepointSynchronize::block()` 挂起线程。
 
 ### 2.4 内存序列化页
 
