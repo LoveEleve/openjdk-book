@@ -1197,19 +1197,29 @@ jint Arguments::adjust_after_os() {
 
 ## 4. 收尾步骤 ★
 
-**`ostream_init_log()`** —— 和 Stage 2 的 `LogConfiguration::initialize()` 互补。Stage 2 初始化了 UL（统一日志框架）的 `StdoutLog/StderrLog` 输出端，这里初始化的是通用输出（`tty`/`defaultStream`）的日志**文件**。
+**`ostream_init_log()`** —— 唯一的作用是提前创建 `tty` 的日志文件。
+
+在 Stage 2 的 `LogConfiguration::initialize()` 中，UL（统一日志框架）的 `StdoutLog/StderrLog` 已经初始化好了。这里的 `ostream_init_log` 处理的是另一套输出——通用输出 `tty`/`defaultStream` 的日志文件。
+
+正常情况下 `tty` 往 stdout/stderr 写，但如果用户传了 `-XX:LogFile=hotspot.log`，`tty` 的输出也会写一份到文件。这个日志文件的创建是**惰性**的——只有第一次真正需要写日志时才 `fopen`。问题是：如果 VM 在惰性创建之前就崩溃了，fatal error handler 调 `tty->print_cr` 写 crash 日志时，文件还没打开，crash 信息就丢了。
+
+`has_log_file()` 主动触发这次惰性初始化，确保文件在 VM 崩溃前已经打开：
 
 ```c
 // === ostream.cpp ===
 void ostream_init_log() {
-  // Note: this must be called AFTER ostream_init()
   if (DumpLoadedClassList != NULL) {
-    // -XX:DumpLoadedClassList=<file> → 创建文件输出流
+    // CDS 训练模式：-XX:DumpLoadedClassList=<文件>，
+    // 把加载过的类列表写入指定文件，用于后续创建共享归档（CDS）。
+    // 默认不传这个参数，此分支跳过。
     classlist_file = new fileStream(make_log_name(DumpLoadedClassList, NULL));
   }
-  // 触发 tty 日志文件的惰性初始化——在 VM 崩溃前主动把日志文件创建出来，
-  // 避免 fatal error handler 在崩溃时因惰性初始化而出错。
+  // 核心动作：提前创建 tty 的日志文件
   defaultStream::instance->has_log_file();
+}
+```
+
+`DumpLoadedClassList` 是 CDS（Class Data Sharing）训练阶段用的 flag——先跑一次 JVM 把加载过的类列表 dump 出来，再用这个列表创建共享归档。**默认不传，这个 `if` 直接跳过。** 真正的核心就一行：`has_log_file()`。
 }
 ```
 
