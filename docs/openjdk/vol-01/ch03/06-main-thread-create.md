@@ -265,23 +265,44 @@ template <size_t bufsz>
 class FormatStringLogMessage : public FormatBuffer<bufsz> {};
 ```
 
-`FormatStringLogMessage<256>` 就是 `FormatBuffer<256>` 的子类——什么也不加，只是换了个名字。但 `FormatBuffer<bufsz>` 本身才是关键，看它的定义（`formatBuffer.hpp:51-66`）：
+`FormatStringLogMessage<256>` 就是 `FormatBuffer<256>` 的子类——什么也不加，只是换了个名字。`FormatBuffer<bufsz>` 的定义（`formatBuffer.hpp:51-70`）分上下两层。
+
+上层是一个轻量基类 `FormatBufferBase`，只存一个 `char*` 指针，没有实际存储空间：
 
 ```cpp
-template <size_t bufsz = FormatBufferBase::BufferSize>
-class FormatBuffer : public FormatBufferBase {
- public:
-  void printv(const char* format, va_list ap);  // vsnprintf 写入 _buffer
-  char* buffer() { return _buf; }
-  int   size()   { return bufsz; }
- private:
-  char _buffer[bufsz];     // ★ 真正存事件文本的地方——栈上的一小块 char 数组
+class FormatBufferBase {
+  char* _buf;                        // 指向实际缓冲区的指针
+  inline FormatBufferBase(char* buf) : _buf(buf) {}  // 构造时接收指针
+  static const int BufferSize = 256; // 模板默认值——FormatBuffer<> 等价于 FormatBuffer<256>
 };
 ```
 
-`char _buffer[bufsz]` 是 C++ 的**变长数组成员**——不是 `malloc` 出来的堆内存，是对象内的一个固定大小字符数组。`bufsz=256` 时就是 `char _buffer[256]`，占用 256 个字节直接嵌入在 `FormatBuffer` 对象内部。`printv(format, ap)` 内部调用 `vsnprintf(_buffer, bufsz, format, ap)`——和标准 C 的 `vsnprintf` 一模一样，只是缓冲区大小由模板参数决定。
+下层是真正的 `FormatBuffer<bufsz>` 模板，嵌着实际的 `char` 数组。默认构造函数的实现（`formatBuffer.hpp:69-88`）：
 
-所以 `EventLogBase<FormatBuffer<256>>` 最终展开为：环形缓冲区里每条记录的 `data` 字段内部嵌着一块 256 字节的 `char _buffer`——当 `Events::log(thread, "Thread added: %p", p)` 写入时，`format` 字符串和参数被 `vsnprintf` 格式化到这 256 字节里。512 字节的 `Extended` 版本道理一样，只是 `_buffer` 大一倍。
+```cpp
+template <size_t bufsz>
+class FormatBuffer : public FormatBufferBase {
+  char _buffer[bufsz];               // ★ 真正存文本的地方——栈上的一小块 char 数组
+ protected:
+  inline FormatBuffer() : FormatBufferBase(_buffer) {
+    _buf[0] = '\0';                  // 空字符串
+  }
+};
+```
+
+关键在初始化列表 `: FormatBufferBase(_buffer)`。`_buffer` 是 256 字节的 `char` 数组，位于 `FormatBuffer` 对象内部（对象大小 = 指针 + 256 字节 ≈ 264 字节）。`FormatBufferBase(_buffer)` 这把 `_buffer` 的地址传给了基类的 `_buf` 指针——所以 `_buf` 永远指向 `_buffer[0]`。
+
+两层分拆的设计意图：`FormatBufferBase` 只有指针、没有存储，因为还有另一种使用场景——`FormatBufferResource` 接收的是 ResourceArea 分配的 `char*`，不需要自带存储。`FormatBuffer<bufsz>` 则是"自带存储"的版本，256/512 字节直接嵌在对象内，不需要外部分配。
+
+`printv(format, ap)` 内部就是一行标准 C（`formatBuffer.hpp:99-100`）：
+
+```cpp
+void FormatBuffer<bufsz>::printv(const char* format, va_list ap) {
+  jio_vsnprintf(_buf, bufsz, format, ap);   // 写入 _buf ← _buffer[0]
+}
+```
+
+所以 `EventLogBase<FormatBuffer<256>>` 的 `_records` 数组中，每个 `EventRecord` 内的 `data` 字段是一个 264 字节的 `FormatBuffer` 对象——内嵌 `char _buffer[256]`，所有事件文本都直接写在这 256 字节里。
 
 现在回看 `new StringEventLog("Events")` 的完整构造链，每一步标出 C++ 机制：
 
