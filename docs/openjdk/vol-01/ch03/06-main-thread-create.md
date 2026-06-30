@@ -162,6 +162,10 @@ void C(TRAPS) {
 | **性能** | 零成本（除非真的 throw） | 每个调用点一次 NULL 检查（比 return 开销大一点） |
 | **主要用途** | C++ 程序的运行时错误 | 将 Java 异常对象从 C++ 代码传到 Java 代码 |
 
+> **Java 异常对象是谁创建的？** 答案是 C++ 代码——两种情况都是。Java 代码中的 `throw new NullPointerException()` 通过 `new` 字节码触发 C++ 分配系统创建对象，之后 `athrow` 字节码走解释执行路径分发。而 JVM 内部检测到异常条件时（如 SIGSEGV → NullPointerException），C++ 代码直接通过 `Exceptions::_throw_msg` 创建 Java 堆上的异常对象，走 `_pending_exception` 侧信道传回。两种触发方式都是 C++ 做分配——因为 Java 堆上的一切对象最终都经过 C++ 分配系统。区别只是谁来触发、以及编译器/解释器谁来分发。
+>
+> `athrow` 字节码的完整分发流程将在解释器/执行引擎章节单独展开。SIGSEGV → NullPointerException 的信号处理链路将在信号处理专题章节详解。这里只需要知道：`_pending_exception` 是 C++→Java 异常传播的"侧信道"，`new JavaThread()` 构造函数把它初始化为 NULL——线程刚诞生，没有残留异常。
+
 `THREAD_AND_LOCATION` 宏传递 `(线程指针, __FILE__, __LINE__)`，确保每个异常都能追溯到 C++ 源码位置——这也是 `_exception_file` 和 `_exception_line` 的来源。
 
 另外，`ThreadShadow` 还包含一个空虚拟函数 `unused_initial_virtual()`——它不执行任何操作，唯一目的是强制编译器为 `ThreadShadow` 生成 vtable，确保 `Thread` 的内存布局从 `ThreadShadow` 的偏移 0 开始。`vm_init_globals()` 中的 `check_ThreadShadow()` 会验证 `_pending_exception` 的偏移是否正确。
