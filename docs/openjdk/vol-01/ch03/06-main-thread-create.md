@@ -2,11 +2,19 @@
 
 Stage 3 结束时，JVM 的 OS 层基础设施已经全部就绪——信号处理器注册完成、安全点轮询页分配完成、200+ 个 flag 全部锁定。但所有这些基础设施都是"悬浮在空中"的——没有线程来承载它们。
 
-在此之前，整个进程只有一个线程——shell 通过 `fork + exec` 启动 `java` 命令时内核创建的第一个线程（primordial thread）。`_start → main() → JLI_Launch → JNI_CreateJavaVM → Threads::create_vm` 这一整条调用链都跑在这一个线程上。现在的问题是：这个 OS 线程还没有在 JVM 内部"登记"——JVM 不知道它的栈边界在哪、它是什么状态、它的 ParkEvent 分配了没有。
+**当前执行到这里的线程是谁？** 回顾 3.1 的"此刻的进程与线程"——JLI 层在进入 JVM 之前做了 `pthread_create`，此时进程中有两个 OS 线程：
 
-从 `Threads::create_vm` 的 9 阶段骨架[^1]来看，下一步的使命很明确：给这个已经存在的 OS 主线程穿上 JVM 的外衣——创建 JVM 的第一个 `JavaThread` 对象，把主线程在 JVM 内部完成登记。
+```
+Java 进程 (PID=xxx)
+├─ 原始线程 (LWP-1)           ← 阻塞在 pthread_join
+└─ 新 pthread (LWP-2)         ← 正在执行 Threads::create_vm（就是我们）
+```
 
-> **澄清：`new JavaThread()` 不是创建新的 OS 线程。** 它只是创建一个 C++ 对象来"包装/描述"当前正在运行的 OS 线程。OS 主线程从进程诞生那一刻就存在了，`new JavaThread()` 之后也只有这一个线程在执行。后面 `pthread_create` 创建的是额外的子线程（如 CompilerThread、GC 线程）——那些在 ch04 的 `init_globals()` 阶段才会出现。
+LWP-2 是由 `CallJavaMainInNewThread()` 中的 `pthread_create` 创建的。它是调用 `JavaMain()` → `InitializeJVM()` → `JNI_CreateJavaVM()` → `Threads::create_vm()` 的线程，也将是 Java 程序员眼中的"main 线程"——最终它会执行 `main(String[] args)`。LWP-1 永远不会变成 `JavaThread`，它唯一的使命是 `pthread_join` 等 LWP-2 结束。
+
+现在的问题是：LWP-2 这个 OS 线程还没有在 JVM 内部"登记"——JVM 不知道它的栈边界在哪、它是什么状态、它的 ParkEvent 分配了没有。从 `Threads::create_vm` 的 9 阶段骨架[^1]来看，下一步的使命很明确：给 LWP-2 穿上 JVM 的外衣——创建 JVM 的第一个 `JavaThread` 对象，把当前线程在 JVM 内部完成登记。
+
+> **澄清：`new JavaThread()` 不是创建新的 OS 线程。** 它只是创建一个 C++ 对象来"包装/描述"当前正在运行的 OS 线程（LWP-2）。`new JavaThread()` 之后也只有这一个线程在 `Threads::create_vm` 中执行。后面 `pthread_create` 创建的是额外的子线程（如 CompilerThread、GC 线程）——那些在 ch04 的 `init_globals()` 阶段才会出现。
 
 [^1]: 骨架见 [3.2 Stage 1-9 全貌](../02-threads-create-vm)
 
@@ -189,7 +197,7 @@ void C(TRAPS) {
 
 构造时暂为 NULL/0——这是 HotSpot 的设计惯例：构造函数不读 OS 信息，留到 `record_stack_base_and_size()` 统一处理。
 
-主线程的栈在 `new JavaThread()` 时完全可以读到——本进程正运行在它上面。但 HotSpot 选择了"延迟读取"的惯例：主线程的栈地址在 Stage 1 的 `os::init()`（参阅 3.3 的 `capture_initial_stack`）中已经通过 `/proc/self/stat` + `/proc/self/maps` 提前捕获，保存在 `os::Linux` 的静态变量中，由 `record_stack_base_and_size()` 取出写入。对线程（pthread_create 创建的子线程）来说，`JavaThread` 对象构造时 OS 线程还不存在（先 new JavaThread，再 os::create_thread 调 pthread_create），构造函数里根本没栈可读。两套初始化在一个统一的"先构造对象、后读栈"的序列中，由 `record_stack_base_and_size()` 统一写入真实值。`stack_end() = _stack_base - _stack_size` 是所有栈操作的基础。
+当前线程（LWP-2，由 JLI 层的 `pthread_create` 创建）的栈在 `new JavaThread()` 时完全可以读到——本代码正运行在它上面。但 HotSpot 选择了"延迟读取"的惯例：LWP-2 的栈地址在 Stage 1 的 `os::init()`（参阅 3.3 的 `capture_initial_stack`）中已经通过 `/proc/self/stat` + `/proc/self/maps` 提前捕获，保存在 `os::Linux` 的静态变量中，由 `record_stack_base_and_size()` 取出写入。对于 HotSpot 自己的 `pthread_create` 创建的子线程（如 CompilerThread、GC 线程，在 ch04 的 `init_globals()` 阶段创建）来说，`JavaThread` 对象构造时 OS 线程还不存在（先 new JavaThread，再 os::create_thread 调 pthread_create），构造函数里根本没栈可读。两套初始化在一个统一的"先构造对象、后读栈"的序列中，由 `record_stack_base_and_size()` 统一写入真实值。`stack_end() = _stack_base - _stack_size` 是所有栈操作的基础。
 
 **② 内存管理**——线程本地的临时内存池和 GC 句柄区：
 
