@@ -350,6 +350,48 @@ this->_records[index].data.printv(format, ap); // 格式化写入 _buffer
 
 JVM 中约 100 处调用 `Events::log(thread, "Thread added: %p", p)` 写入 `_messages`。崩溃时 `VMError::report()` → `Events::print_all()` → 遍历 `_logs` 链表 → `print_log_on()` dump 到 `hs_err_pid<pid>.log`。
 
+#### StringEventLog 对象的内存布局
+
+递归展开后，一个 `new StringEventLog("Events")` 在堆上的完整布局如下。从外层往里读——左边是 C++ 字段名，右边是字段类型和值：
+
+```
+new StringEventLog("Events")
+│
+├── EventLog                                    ← 基类 1
+│   └── _next = NULL                             ← EventLog* (等构造函数链入链表后指向下一个)
+│
+├── EventLogBase< FormatBuffer<256> >            ← 基类 2
+│   ├── _name   = "Events"                       ← const char*
+│   ├── _length = 20                             ← int
+│   ├── _count  = 0                              ← int
+│   ├── _index  = 0                              ← int
+│   ├── _mutex  = Mutex(Mutex::event, "Events")  ← Mutex 对象 (大小 ≈ 48 字节)
+│   │
+│   └── _records → 堆上另外分配的一块内存        ← EventRecord<FormatBuffer<256>>* 指针
+│                   │
+│                   └── 20 个连续槽位, 每个槽位:
+│                       ┌─────────────────────────────────────────────────────────┐
+│                       │ EventRecord<FormatBuffer<256>>                          │
+│                       │ ┌─────────────────────────────────────────────────────┐ │
+│                       │ │ FormatBuffer<256>                          (264 字节)│ │
+│                       │ │ ┌───────────────────────────────────────────┐       │ │
+│                       │ │ │ FormatBufferBase                          │       │ │
+│                       │ │ │  _buf → 指向 _buffer[0]  (8 字节指针)     │       │ │
+│                       │ │ ├───────────────────────────────────────────┤       │ │
+│                       │ │ │ char _buffer[256]  (256 字节, 嵌在对象内)  │       │ │
+│                       │ │ └───────────────────────────────────────────┘       │ │
+│                       │ └─────────────────────────────────────────────────────┘ │
+│                       │ timestamp  (8 字节 double, 初始 0.0)                   │
+│                       │ thread     (8 字节 Thread*, 初始 NULL)                 │
+│                       └─────────────────────────────────────────────────────────┘
+│
+└── FormatStringEventLog<256>                     ← 最外层子类 (无额外成员)
+```
+
+几点值得注意。`StringEventLog` 不是 `new` 一个单独的对象加上数组——`_records` 是 `EventRecord*` **指针**，指向堆上另外分配的 20 个连续槽位。每个 `EventRecord` 内部嵌着一个完整的 `FormatBuffer<256>` 对象（264 字节），所以 20 个槽位总共约 `20 × (264 + 8 + 8) = 5600` 字节，和 `StringEventLog` 对象本身分开存放。
+
+`FormatBuffer` 的 264 字节不是 `malloc` 出来的——`char _buffer[256]` 直接嵌在 `FormatBuffer` 对象内部，而 `FormatBuffer` 又嵌在 `EventRecord` 内部，`EventRecord` 又嵌在 `_records` 数组中。三层嵌套——所有内存都是一次 `new EventRecord<T>[20]` 分配的连续块。
+
 ### mutex_init — 约 80 把全局锁的全序系统
 
 `mutex_init()`（`mutexLocker.cpp:195-355`）用 `def()` 宏批量创建约 80 个全局锁。先看 `def` 宏的展开：
