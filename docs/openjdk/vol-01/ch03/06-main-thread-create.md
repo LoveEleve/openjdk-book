@@ -402,7 +402,7 @@ class Events {
 ```
 Events::_logs → [_deopt_messages] → [_redefinitions] → [_exceptions] → [_messages] → NULL
 ```
-
+![四条记录器的链表构造顺序](assets/eventlog-chain.png)
 **链表是在什么时候链上的？** 看 `new FormatStringEventLog<256>("Events")` 的完整 C++ 构造顺序——列出每一步，链入发生在**第一步**：
 
 ```
