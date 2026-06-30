@@ -185,7 +185,7 @@ BasicType type2wfield[T_CONFLICT+1] = {
 
 第三张表 `type2wfield` 是 GC 和栈 banging 用的——不关心栈上放的是 `boolean` 还是 `int`，统一按 `T_INT`（4 字节）对齐。JIT 编译后在方法入口检查栈空间时不会在乎"这一格是 boolean"，它只看有没有足够的 HeapWord 槽位。
 
-`basic_types_init()` 本身在 product 构建下几乎什么都不做——整个函数体除最后 6 行外全在 `#ifdef ASSERT` 里。但函数验证的三张表是 JVM 运行时真正在用的基础设施，编译时就造好了。
+`basic_types_init()` 中 `#ifdef ASSERT` 包围的断言全跳过。product 构建下这个函数做两件实事：
 
 ```cpp
 void basic_types_init() {
@@ -193,17 +193,31 @@ void basic_types_init() {
   // assert(jint==4字节) + assert(type2char可逆) + assert(type2field规则) —— 全跳过
 #endif
 
-  // product 构建下只执行这三行：把 -XX:JavaPriority* 映射到 OS 线程优先级
+  // 第一件：把 -XX:JavaPriority1..10 映射到 OS 线程优先级数组
   if (JavaPriority1_To_OSPriority != -1)
     os::java_to_os_priority[1] = JavaPriority1_To_OSPriority;
-  if (JavaPriority2_To_OSPriority != -1)
-    os::java_to_os_priority[2] = JavaPriority2_To_OSPriority;
-  if (JavaPriority3_To_OSPriority != -1)
-    os::java_to_os_priority[3] = JavaPriority3_To_OSPriority;
+  // ... JavaPriority2~10 同理，共 10 行 ...
+
+  // 第二件：根据 UseCompressedOops 设置对象引用的大小
+  if (UseCompressedOops) {
+    heapOopSize        = jintSize;      // 4 字节
+    LogBytesPerHeapOop = LogBytesPerInt;
+    BytesPerHeapOop    = BytesPerInt;
+  } else {
+    heapOopSize        = oopSize;       // 8 字节
+    LogBytesPerHeapOop = LogBytesPerWord;
+    BytesPerHeapOop    = BytesPerWord;
+  }
+  _type2aelembytes[T_OBJECT] = heapOopSize;
+  _type2aelembytes[T_ARRAY]  = heapOopSize;
 }
 ```
 
-所以 `basic_types_init()` 的实质贡献不是"初始化"什么——三张表编译时就存在了——而是作为 **debug 构建下的第一道防线**，确保基础类型系统没有偏差。product 构建下它就是一个空的占位符。
+第一件没什么可讲的——用户通过 `-XX:JavaPriority1=5` 调线程优先级时生效。
+
+第二件才是重点。`UseCompressedOops` 是 Stage 2 参数解析中确定的全局开关（默认 true，64 位 heap < 32GB 时自动开启）。如果开启压缩指针，`heapOopSize = 4`——对象引用在 Java 堆中占 4 字节（而非原生指针的 8 字节），32GB 以下的堆能省一半内存。`_type2aelembytes` 是数组元素字节数表——`T_OBJECT` 和 `T_ARRAY` 的元素大小都设为 `heapOopSize`，后面 GC 的 oop 遍历和 JIT 编译器的数组边界检查都读这张表。
+
+所以 `basic_types_init()` 的 product 构建版本实际上设置了 JVM 对象模型的基础参数——所有后续代码通过 `heapOopSize` 和 `_type2aelembytes` 判断"一个引用占几个字节"。
 
 ### eventlog_init — 崩溃事件日志
 
