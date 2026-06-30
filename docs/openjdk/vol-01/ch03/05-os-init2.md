@@ -578,13 +578,54 @@ glibc 的 `pthread_create` 会在每个线程栈底自动加一个 guard page（
 
 ### 1.7 其余步骤
 
+`capture_initial_stack` 之后，`os::init_2()` 还有四个收尾步骤。下面逐个展开。
+
+#### 1.7.1 libpthread_init — 记录 glibc/pthread 版本号
+
+```cpp
+void os::Linux::libpthread_init() {
+  size_t n = confstr(_CS_GNU_LIBC_VERSION, NULL, 0);
+  char *str = (char *)malloc(n, mtInternal);
+  confstr(_CS_GNU_LIBC_VERSION, str, n);
+  os::Linux::set_libc_version(str);
+
+  n = confstr(_CS_GNU_LIBPTHREAD_VERSION, NULL, 0);
+  str = (char *)malloc(n, mtInternal);
+  confstr(_CS_GNU_LIBPTHREAD_VERSION, str, n);
+  os::Linux::set_libpthread_version(str);
+}
 ```
-os::init_2() 其余步骤：
-├── fast_thread_clock_init        -- 用 CLOCK_THREAD_CPUTIME_ID 替代 clock_gettime, 快 10 倍以上
-├── libpthread_init               -- dlsym(RTLD_DEFAULT) 查找 pthread_condattr_setclock
-├── sched_getcpu_init             -- dlsym(RTLD_DEFAULT) 查找 sched_getcpu, 用于 NUMA node 判断
-├── MaxFDLimit 处理              -- setrlimit(RLIMIT_NOFILE) 把文件描述符上限提到硬限制
+
+`confstr` 是一个 glibc 扩展函数——传配置名 `_CS_GNU_LIBC_VERSION` 就能读到运行时刻的 glibc 版本号（如 `"glibc 2.17"`），`_CS_GNU_LIBPTHREAD_VERSION` 同理读 pthread 版本。`confstr(name, NULL, 0)` 先问"字符串多长"，再 `malloc` 分配、第二次调用拿内容，最后保存在 `os::Linux` 的静态字符串中。
+
+用途纯粹是诊断——`os::init_2()` 末尾（本机也打印）用 `log_info(os)` 输出 `"HotSpot is running with glibc 2.17, NPTL 2.17"`。
+
+#### 1.7.2 sched_getcpu_init — 获取当前 CPU ID 的函数指针
+
+```cpp
+void os::Linux::sched_getcpu_init() {
+  set_sched_getcpu(CAST_TO_FN_PTR(sched_getcpu_func_t,
+                                  dlsym(RTLD_DEFAULT, "sched_getcpu")));
+
+  if (sched_getcpu() == -1) {
+    set_sched_getcpu(CAST_TO_FN_PTR(sched_getcpu_func_t,
+                                    (void*)&sched_getcpu_syscall));
+  }
+
+  if (sched_getcpu() == -1) {
+    vm_exit_during_initialization("getcpu(2) system call not supported by kernel");
+  }
+}
 ```
+
+两阶段回退：
+1. `dlsym(RTLD_DEFAULT, "sched_getcpu")` → 从 libc 里找到 `sched_getcpu(3)` 的地址
+2. 如果 libc 没有（某些旧版本），用汇编直接调 `getcpu(2)` 系统调用（`sched_getcpu_syscall`）
+3. 如果两个都失败，退出——系统不支持
+
+`sched_getcpu()` 返回当前线程在哪个 CPU 核上运行，NUMA 感知内存分配（`os::numa_get_group_id`）用它来判断线程所在 NUMA 节点的拓扑位置。线程迁移到另一个 NUMA 节点时，通过这个接口动态感知。
+
+`fast_thread_clock_init()`（用 `CLOCK_THREAD_CPUTIME_ID` 替代通用 `clock_gettime`，快 10 倍以上）和 `setrlimit(RLIMIT_NOFILE)`（把文件描述符上限提到硬限制）是两个纯诊断/调优收尾——前者让未来调用 `os::elapsed_counter()` 更快，后者解除默认的 1024 fd 上限。
 
 ### 1.8 PerfData 共享内存退出清理
 
