@@ -460,6 +460,8 @@ new FormatStringEventLog<256>("Events") 的 C++ 构造顺序：
 
 所有写入路径的最终落点都是环形缓冲区——20 个槽位，写满后覆盖最旧的。如果 JVM 在任意时刻崩溃，`hs_err_pid.log` 会按 `_logs` 链表顺序 dump 全部四条记录器，包含崩溃前最后 20 条各类事件。
 
+20 条会不会太少？`LogEventsBufferEntries`（默认 20）可以往上调——`-XX:+UnlockDiagnosticVMOptions -XX:LogEventsBufferEntries=1000`。但 20 条已经是深思熟虑的设计：EventLog 不是用来做长期历史记录的（那是 JFR / UL 日志的职责），它唯一的用途是崩溃后让你看到崩溃前的最后几件事——就像飞机黑匣子只保留最后两小时的驾驶舱录音。崩溃前刚创建了一个线程、GC 刚启动——这 20 条足够了。
+
 因为是 C++ 继承链——`EventLog` 是最顶层的基类，它的构造函数体**最先**执行。后面 `EventLogBase` 的 init list 和函数体、`FormatStringEventLog` 的 init list 都是之后的事。也就是说，`EventLog` 构造函数在对象的字段还没初始化完之前，就已经把还没有完全构造的对象的指针塞进了全局链表。
 
 四条记录器各存不同内容，写入入口也不一样。JVM 运行时约 100 处调了这四个方法：
