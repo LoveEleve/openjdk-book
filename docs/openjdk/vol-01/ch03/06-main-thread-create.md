@@ -234,22 +234,33 @@ void Events::init() {
 }
 ```
 
-`LogEvents` 是 diagnostic 类型 flag（`globals.hpp:554`），默认 true，但在 product 构建下需要 `-XX:+UnlockDiagnosticVMOptions` 才能关。四条记录器在构造时自动链入全局链表 `_logs_list`。
+`LogEvents` 是 diagnostic 类型 flag，默认 true。
 
-整个 Event 系统的类层次：
+`StringEventLog` 是 `FormatStringEventLog<256>` 的 typedef（`events.hpp:169-170`）。`ExtendedStringEventLog` 是 `FormatStringEventLog<512>`。一行 `new` 背后的实际构造链如下：
 
 ```
-EventLog                      ← 基类, 含 _next 指针, 构造时链入全局 _logs_list
- └── EventLogBase<T>          ← 环形缓冲区, 含 EventRecord[T]数组+Mutex保护
-       └── FormatStringEventLog<256>  ← StringEventLog, 单条最大 256 字节
-       └── FormatStringEventLog<512>  ← ExtendedStringEventLog, 512 字节（异常栈）
+new StringEventLog("Events")
+  = new FormatStringEventLog<256>("Events")
+    → 构造 EventLogBase<FormatStringLogMessage<256>>("Events", 20)
+
+// 展开后的构造函数（events.hpp:88-94）：
+_name    = "Events";              // dump 到 hs_err 时的标题
+_length  = 20;                    // LogEventsBufferEntries 默认值
+_count   = 0;                     // 当前条目数为 0
+_index   = 0;                     // 下一个写入位置为 0
+_mutex   = Mutex(Mutex::event, "Events", false, _safepoint_check_never);
+                                   //   ↑ rank=0（最低），不参与 safepoint 检查
+_records = new EventRecord<FormatBuffer<256>>[20];
+                                   //   ↑ 堆上分配 20 个槽位，每个槽含 {timestamp, thread, data}
 ```
 
-每个 `EventRecord` 存储：时间戳（`os::elapsedTime()`）+ 线程指针 + 格式化消息。`_records` 数组长度由 `LogEventsBufferEntries`（默认 20）决定。写入时拿 `Mutex::event` 锁 → 计算 `_index` 位置 → 写入 timestamp+thread+format → `_index` 递增。写满后覆盖最旧的记录。
+`ExtendedStringEventLog` 的构造完全同理，只是模板参数换成 `<512>`——异常栈信息比普通事件长，需要 512 字节缓冲区。`_records` 数组分配 20 个 `EventRecord<FormatBuffer<512>>`。
 
-JVM 中约 100 处调用 `Events::log()`/`log_exception()`/`log_deopt_message()`/`log_redefinition()`——线程创建退出、GC 阶段、JIT 编译完成、去优化触发时写事件。
+四条记录器在 `EventLog` 构造函数中把自己链入全局链表 `_logs_list`——这是崩溃时自动 dump 的前提。每个 `EventRecord` 存储三样东西：`double timestamp`（`os::elapsedTime()` 的秒数）、`Thread* thread`（写入线程的指针，可为 NULL）、`FormatBuffer<N>`（定长格式化字符串，N=256 或 512）。
 
-崩溃时 `VMError::report()` 遍历 `_logs_list` 链表，依次调用 `print_log_on()` dump 全部四条记录器到 `hs_err_pid<pid>.log` 文件。初始化这么早是因为崩溃随时可能发生——如果 eventlog_init 晚于任何记录事件的代码，hs_err 报告中就会丢失关键线索。
+写入时拿 `Mutex::event` 锁 → 调用 `compute_log_index()` 拿当前 `_index` 并推进 → 把 `timestamp+thread+format` 写入 `_records[index]`。写满 20 条后 `_index` 绕回 0，覆盖最旧的记录。
+
+JVM 中约 100 处调用 `Events::log(thread, "Thread added: %p", p)` 写入 `_messages`，`Events::log_exception(...)` 写入 `_exceptions`，`Events::log_deopt_message(...)` 写入 `_deopt_messages`，`Events::log_redefinition(...)` 写入 `_redefinitions`。崩溃时 `VMError::report()` 遍历 `_logs_list`，依次调用 `print_log_on()` dump 四条记录器到 `hs_err_pid<pid>.log`。
 
 ### mutex_init — 约 80 把全局锁的全序系统
 
