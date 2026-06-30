@@ -236,10 +236,114 @@ void Events::init() {
 
 `LogEvents` 是 diagnostic 类型 flag，默认 true。
 
+#### C++ 语法基础——嵌套模板类与访问控制
+
+这里涉及的 C++ 语法较多，在深入构造链之前集中讲解一遍。`Events::init()` 里四个 `new StringEventLog(...)` 最终触发的类型系统出自 `events.hpp:71-85`：
+
 ```cpp
-typedef FormatStringEventLog<256>  StringEventLog;          // 声明
-typedef FormatStringEventLog<512>  ExtendedStringEventLog;  // 声明
+template <class T> class EventLogBase : public EventLog {
+  template <class X> class EventRecord : public CHeapObj<mtInternal> {
+   public:
+    double  timestamp;
+    Thread* thread;
+    X       data;
+  };
+  EventRecord<T>* _records;   // 用外层 T 实例化内层 X
+};
 ```
+
+`template <class T>` 声明外层模板，`template <class X>` 声明嵌套在里面的内层模板。`T` 和 `X` 是两个独立的模板参数——但 `_records` 的类型固定为 `EventRecord<T>*`，用外层 T 替代内层 X。`EventRecord` 嵌在 `EventLogBase` 内部是为了语义封装——一种日志的记录格式不应暴露到类外。
+
+`CHeapObj<mtInternal>` 是 HotSpot 的内存分配基类模板。继承它意味着 `EventLog` 和 `EventRecord` 的 `operator new` 走 `os::malloc`（C-Heap 分配），`mtInternal` 是 NMT 的内存分类标签，区别于 `mtGC`、`mtCompiler` 等。
+
+`EventRecord` 用了 `class` 但所有字段都在 `public:` 下——和 `struct` 完全等价。C++ 中 `struct` 和 `class` 的唯一区别是默认访问控制：`struct` 默认 `public`，`class` 默认 `private`。
+
+`friend class Events`（`events.hpp:175`）是双向朋友——`Events` 声明了 `friend class EventLog`，使得 `EventLog` 的构造函数可以访问 `Events::_logs` 这个 private 静态成员：
+
+```cpp
+EventLog::EventLog() {
+  ThreadCritical tc;
+  _next = Events::_logs;      // 头插法：新节点 → 旧头
+  Events::_logs = this;        // 头指针 → 新节点
+}
+```
+
+`ThreadCritical` 是一个全局互斥锁的 RAII 包装——构造时加锁，析构时释放。注释说"通常此时只有单线程，但如果某个 EventLog 构造得晚，这个锁保证安全"。
+
+#### C++ 语法基础——构造函数初始化列表
+
+`FormatStringEventLog` 的构造函数（`events.hpp:148`）：
+
+```cpp
+template <size_t bufsz>
+class FormatStringEventLog : public EventLogBase< FormatStringLogMessage<bufsz> > {
+  FormatStringEventLog(const char* name, int count = LogEventsBufferEntries)
+    : EventLogBase< FormatStringLogMessage<bufsz> >(name, count) {}
+};
+```
+
+`: EventLogBase<...>(name, count)` 是**构造函数初始化列表**——进入 `{}` 之前先调用父类构造函数，把 `name` 和 `count` 传进去。`{}` 是空的，因为子类没有自己的成员——全部委托给父类。
+
+父类 `EventLogBase` 的构造函数做了实际工作：
+
+```cpp
+EventLogBase<T>(const char* name, int length = LogEventsBufferEntries):
+    _name(name), _length(length), _count(0), _index(0),
+    _mutex(Mutex::event, name, false, Monitor::_safepoint_check_never) {
+  _records = new EventRecord<T>[length];  // new 数组，堆上分配 length 个槽位
+}
+```
+
+初始化顺序由成员在类中的**声明顺序**决定，不是初始化列表中的书写顺序。`virtual void print_log_on(...) = 0` 中的 `= 0` 声明纯虚函数——抽象类不可被 `new` 实例化。`virtual` 打开 vtable 分发：遍历 `EventLog*` 链表时自动调用各子类的版本。
+
+#### C++ 语法基础——环形缓冲区算法
+
+```cpp
+int compute_log_index() {
+  int index = _index;
+  if (_count < _length) _count++;
+  _index++;
+  if (_index >= _length) _index = 0;
+  return index;
+}
+```
+
+用 `if` 分支而非 `%` 取模——`_length` 不是编译时常量，编译器无法优化 `%` 为位与。`%` 本质是整数除法（20-80 周期），而分支预测器可训练到"几乎不绕回"（1-2 周期）。溢出后用两个 for 循环按时间序读：
+
+```cpp
+if (_count < _length) {
+  for (int i = 0; i < _count; i++) { print(out, _records[i]); }
+} else {
+  for (int i = _index; i < _length; i++) { print(out, _records[i]); }  // 旧半段
+  for (int i = 0; i < _index; i++) { print(out, _records[i]); }         // 新半段
+}
+```
+
+满时 `_index` 同时是"下一个写入位置"和"最旧元素位置"——绕回后覆盖的正是最旧的。
+
+#### C++ 语法基础——va_list 可变参数与 RAII 锁
+
+写入事件文本（`events.hpp:158`）涉及多段语法：
+
+```cpp
+this->_records[index].data.printv(format, ap);
+```
+
+`data` 是 `FormatBuffer<256>`，`printv(format, ap)` 接收 `va_list`（`<stdarg.h>` 的可变参数列表类型）。调用链：
+
+```cpp
+Events::log(thread, "Thread added: %p", p)    // ... 参数
+  → va_start(ap, format)                       // ap 指向 format 之后的内存位置
+  → _messages->logv(thread, format, ap)        // 转发 va_list
+    → data.printv(format, ap)                  // FormatBuffer 的 va_list 接口
+      → jio_vsnprintf(_buf, 256, format, ap)   // 标准 C: format+ap → _buf[256]
+```
+
+`Events::log` 带 `...` 做用户接口，`logv` 带 `va_list` 做内部实现——分两层是因为同一个 `va_list` 可被转发给多个记录器，`va_start/va_end` 只需在顶层配对一次。
+
+`logv` 中的 `MutexLockerEx ml(&this->_mutex, Mutex::_no_safepoint_check_flag)` 是 RAII 锁守卫。构造时 `lock_without_safepoint_check()`，析构时自动 `unlock()`。`_no_safepoint_check_flag = true`——事件写入极快，不能让 GC 打断。
+
+`typedef FormatStringEventLog<256> StringEventLog`——`<256>` 编译时替代 `bufsz`，生成一个专门处理 256 字节消息的类。`FormatStringEventLog<256>` 和 `FormatStringEventLog<512>` 是两个**完全独立**的类——有自己的 `_records` 数组类型、自己的 vtable。这和 Java 泛型的类型擦除完全不同。
 
 `typedef A B` 是 C++ 的类型别名语法——`B` 可以用在任何需要 `A` 的地方。`FormatStringEventLog<256>` 是一个模板类，尖括号 `<256>` 是模板参数，编译时把 `256` 代入模板定义中的 `bufsz` 参数，生成一个专门处理 256 字节消息的类。类似 Java 的泛型，但 C++ 模板在编译时展开——`FormatStringEventLog<256>` 和 `FormatStringEventLog<512>` 是两个完全独立的类，有各自的 `_records` 数组类型。
 
