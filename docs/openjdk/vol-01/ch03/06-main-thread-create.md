@@ -201,7 +201,7 @@ void C(TRAPS) {
 
 `capture_initial_stack()` 是为嵌入式 JVM 场景预留的——当 JVM 被嵌入到其他 C 程序（Tomcat jsvc、IDE 插件），调用 `JNI_CreateJavaVM()` 的线程就是程序的原始线程，此时 `is_primordial_thread()` 才返回 true，栈信息通过 `/proc/self/stat` + `/proc/self/maps` 捕获。
 
-对于 HotSpot 自己的 `pthread_create` 创建的子线程（CompilerThread、GC 线程，ch04 创建），`JavaThread` 对象构造时 OS 线程还不存在（先 new JavaThread，再 os::create_thread 调 pthread_create），构造函数里根本没栈可读。两套初始化在 `record_stack_base_and_size()` 中统一处理，`_stack_end() = _stack_base - _stack_size` 是所有栈操作的基础。
+对于 HotSpot 后续创建的子线程（CompilerThread、GC 线程等，ch04 创建），时序是相反的：`new JavaThread()` 先于 `pthread_create`——构造 C++ 对象时 OS 线程还不存在，构造函数里根本没栈可读。LWP-2 和这些子线程虽然都是 `pthread_create` 创建的，但 LWP-2 的 `pthread_create` 发生在本章之前（JLI 层），所以 `new JavaThread()` 时 OS 线程已经在运行。两种时序最终在 `record_stack_base_and_size()` 中统一处理——`stack_end() = _stack_base - _stack_size` 是所有栈操作的基础。
 
 **② 内存管理**——线程本地的临时内存池和 GC 句柄区：
 
