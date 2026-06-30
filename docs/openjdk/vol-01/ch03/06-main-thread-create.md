@@ -306,6 +306,15 @@ class EventLogBase<FormatBuffer<256>> : public EventLog {
   {
     _records = new EventRecord[length];   // 堆上分配 20 个连续槽位
   }
+```
+
+`new EventRecord[20]` 调了 20 次 `EventRecord` 的默认构造函数。`EventRecord` 是 C++ struct，编译器生成的默认构造**不会初始化** `timestamp` 和 `thread`——gdb 验证这两个字段的初始值是 debug 构建的哨兵 `0xf1f1...`（`CHeapObj::operator new` 填入的内存模式），不是 `0.0` 和 `NULL`。只有 `data` 字段（类型 `FormatBuffer<256>`）有自己的构造函数，把 `_buf` 指向 `_buffer` 首地址并把 `_buffer[0]` 设为 `'\0'`。因此刚创建完每个槽位的实际状态是：
+
+```
+{ timestamp = 垃圾,  thread = 哨兵值(0xf1...),  data = { _buf→_buffer,  _buffer[0]='\0',  _buffer[1..255]=垃圾 } }
+```
+
+`timestamp` 和 `thread` 要等到 `logv()` 第一次写入时才被赋真实值。
 
   int compute_log_index() {
     int index = _index;
