@@ -441,8 +441,8 @@ void SuspendibleThreadSet_init() {
 这和 `_SR_lock`（suspend/resume）是**两个不同的暂停机制**。_SR_lock 是抢占式——VMThread 用信号 12（SR_signum）直接打断目标线程，Monitor 协调状态转换，用于线程挂起/恢复操作。STS 是协作式——线程主动声明"我准备好了"，用于 safepoint 协调。两个机制独立运作。
 
 > `vm_init_globals()` 只是 VM 线程侧的前置基础设施。同文件下方的 `init_globals()` 才是 ch04 的核心——它依次初始化 management、bytecodes、classLoader、codeCache、VM_Version、universe、interpreter 等 20+ 个子系统。不要混淆两个函数。
----
 
+---
 ## 3. Attach the main thread to this os thread ★★★
 
 从 `new JavaThread()` 到 `create_stack_guard_pages()`，这一段源码给 LWP-2 穿上 JVM 的外衣。在展开每行的具体实现之前，先明确 `new JavaThread()` 在创建什么。
@@ -470,15 +470,6 @@ new JavaThread()
 ```
 
 `ThreadShadow` 是 `Thread` 的直接父类，只有三个字段——`_pending_exception`（`oop`）、`_exception_file`、`_exception_line`。HotSpot 内部 C++ 代码不能用 C++ 的 `throw` 来传播 Java 异常（C++ 异常对象和 Java 堆上的 `oop` 类型完全不兼容），所以通过 `THROW_MSG` 宏把 Java 异常对象写入 `_pending_exception`，然后逐层 `return`。每个调用点用 `CHECK` 宏检查——如果 `_pending_exception != NULL`，立即 `return`。构造时初始化为 NULL——线程刚诞生，没有残留异常。完整的 C++ 异常 vs Java 异常机制对比将在后续异常处理章节详细展开。
-
-构造函数体本身只有一行：
-
-```
-new JavaThread()
-  → Thread::Thread()              // 基类构造：栈/内存/系统监控/ParkEvent
-  → JavaThread::initialize()      // 派生类初始化：执行引擎/栈守卫/异常/统计
-  → pd_initialize()               // 平台相关初始化（Linux 上为空）
-```
 
 构造函数体本身只有一行：
 
@@ -697,7 +688,7 @@ ThreadSafepointState*       _safepoint_state; // ThreadSafepointState::create(th
 | `_stack_guard_state` | `stack_guard_unused` | 守卫区未启用 |
 
 ---
-### 4. initialize_thread_current() —— TLS 绑定 ★★
+### 3.2 initialize_thread_current() —— TLS 绑定 ★★
 
 `Thread::initialize_thread_current()` 把当前 JavaThread 对象绑定到当前 OS 线程的 TLS（Thread-Local Storage）槽——这样后续任何代码调用 `Thread::current()` 都能直接拿回本线程的 `JavaThread*` 指针。
 
@@ -740,7 +731,7 @@ void ThreadLocalStorage::set_thread(Thread* thread) {
 这套 TLS 绑定是后续所有阶段的基础——信号处理器收到 SIGSEGV 时需要 `Thread::current()` 判断"哪个线程触发了栈溢出"，GC 线程需要`Thread::current()`访问当前线程的安全点状态。没有 TLS 绑定，这些全部无法工作。
 
 ---
-### 5. record_stack_base_and_size() —— 记录栈边界 ★★
+### 3.3 record_stack_base_and_size() —— 记录栈边界 ★★
 
 TLS 绑定完成后，立刻捕获当前线程的栈边界：
 
@@ -785,7 +776,7 @@ void Thread::record_stack_base_and_size() {
 * NMT 注册——`register_thread_stack_with_NMT()` 在 Native Memory Tracking 中登记这段栈内存
 
 ---
-### 6. set_active_handles() —— JNI 局部引用块 ★
+### 3.4 set_active_handles() —— JNI 局部引用块 ★
 
 ```cpp
 main_thread->set_active_handles(JNIHandleBlock::allocate_block());
@@ -805,7 +796,7 @@ JNIHandleBlock
 GC 通过遍历每个线程的 `_active_handles` 链表来标记这些局部引用为 GC 根——确保 native 方法返回前，其创建的 JNI 局部引用不会被 GC 回收。
 
 ---
-### 7. set_as_starting_thread() —— 主线程附着 ★
+### 3.5 set_as_starting_thread() —— 主线程附着 ★
 
 ```cpp
 if (!main_thread->set_as_starting_thread()) { ... return JNI_ENOMEM; }
@@ -827,11 +818,11 @@ JavaThread::set_as_starting_thread()
 `set_as_starting_thread` 这个名字容易让人以为有一个对应的 `is_starting_thread()` 方法——并不存在。概念上最接近的是 `os::is_primordial_thread()`，它通过检查当前线程的栈地址是否落在 Stage 1 保存的 `initial_thread_stack_bottom()` 范围内来判断"我是不是原始线程"。
 
 ---
-### 8. create_stack_guard_pages() —— 栈守卫区 ★★★
+### 3.6 create_stack_guard_pages() —— 栈守卫区 ★★★
 
 这是 Stage 4 最核心的部分。它承接 Stage 2 `init_before_ergo()` 算好的四个守卫区大小，在栈底真正画上 `PROT_NONE` 保护页。Java 线程在方法调用导致栈过深时，碰触这些保护页触发 SIGSEGV——信号处理器根据触发区域决定是抛 `StackOverflowError` 还是直接崩溃。
 
-### 8.1 源码与守卫条件
+#### 源码与守卫条件
 
 ```cpp
 void JavaThread::create_stack_guard_pages() {
@@ -864,7 +855,7 @@ void JavaThread::create_stack_guard_pages() {
 
 `DisablePrimordialThreadGuardPages && os::is_primordial_thread()` 是一个调试开关（`-XX:+DisablePrimordialThreadGuardPages`）——关闭主线程的栈守卫。某些 JNI 代码的 native 方法会大量用栈，但正常 Java 模式下主线程的栈守卫是必须的。`DisablePrimordialThreadGuardPages` 默认 false。
 
-### 8.2 两步操作
+#### 两步操作
 
 `low_addr = stack_end()` 取第 5 步 `record_stack_base_and_size()` 中算出的栈底地址。`len = stack_guard_zone_size()` 返回 `red + yellow + reserved` 三个区的总长度——Stage 2 已经算好了。
 
@@ -890,7 +881,7 @@ if (os::guard_memory((char*)low_addr, len)) {
 
 这里必须强调：`mprotect` **不是分配新内存**——是在已有页面上修改权限。栈本身由 `pthread_create`（子线程）或 OS（主线程）在创建线程时分配，`mprotect` 只是把其中一段的权限改成 `PROT_NONE`。这和 Stage 3 第 1.1 节中用 `mprotect(PROT_NONE)` 保护安全点 bad_page 是完全相同的机制——只是保护的对象不同。
 
-### 8.3 守卫区内存布局
+#### 守卫区内存布局
 
 四个颜色区的来源是 Stage 2 `init_before_ergo()` 设置的四个 `JavaThread` 静态成员：
 
@@ -924,7 +915,7 @@ if (os::guard_memory((char*)low_addr, len)) {
 
 Shadow Zone 不是保护区——它只是用于 `banging` 探测的间隙区。当 Java 方法被调用时，JIT 生成的代码在方法入口处执行 "stack banging"——尝试写入影子区的高地址端。如果写入成功说明还剩足够栈空间，可以安全执行方法。如果写入触发了 SIGSEGV（因为栈已经用到了影子区内部），说明栈快用完了，信号处理器判断为 `StackOverflowError`。
 
-### 8.4 OS 层 PROT_NONE vs Java 层颜色区
+#### OS 层 PROT_NONE vs Java 层颜色区
 
 在 OS 层面，Red/Yellow/Reserved 三个区域全部是 `PROT_NONE`——MMU 无法区分"这是红区还是黄区"。区别发生在信号处理器中。当线程碰触 `[stack_end(), stack_end() + 16K)` 中的某个地址时，SIGSEGV 触发 `signalHandler` → `JVM_handle_linux_signal`（第 3.5 节第 1.1 步注册）：
 
