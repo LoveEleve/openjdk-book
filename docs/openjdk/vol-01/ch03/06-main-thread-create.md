@@ -88,11 +88,169 @@ CHeapObj<mtThread>
 JavaThread 和 NonJavaThread 是两条完全独立的继承线，分别维护各自的线程链表。
 ```
 
-`Thread` 基类提供所有线程共用的基础设施：每个线程预分配 4 个 ParkEvent（用于 `synchronized` 等待、`Thread.sleep`、内部 Mutex 排队、低层 mux 同步），以及 ResourceArea（临时内存池）、HandleArea（GC 句柄区）、`_SR_lock`（suspend/resume 锁）和栈元数据（`_stack_base`、`_stack_size`）。
-
-`JavaThread` 在基类之上增加了 Java 执行引擎需要的能力——关联 Java 层的 `java.lang.Thread` 对象（`_threadObj`）、维护 10 个状态的线程状态机、持有 `ThreadSafepointState`（用于 GC 的安全点协调）、绑定 JNI 函数表。
-
 `NonJavaThread` 继承了 Thread 的基础设施但没有 Java 执行引擎的任何字段——没有 StackOverflowError、没有 JNI、没有去优化、不抛异常。它的构造函数自动将自身链入 `NonJavaThread` 的独立链表。
+
+### Thread 基类与 JavaThread 的关键字段
+
+本篇的任务是创建第一个 `JavaThread`——理解构造函数在初始化哪些字段，是阅读 `new JavaThread()` 源码的前提。下面按功能分组梳理 Thread 基类的核心字段和 JavaThread 的专有字段。
+
+#### Thread 基类字段
+
+`Thread` 的构造函数（`thread.cpp:220-323`）初始化约 50 个字段，按功能分 6 组：
+
+**① 栈元数据**——记录线程栈的边界：
+
+| 字段 | 类型 | 初始值 | 说明 |
+|------|------|--------|------|
+| `_stack_base` | `address` | NULL | 栈顶（高地址，x86 栈向下增长） |
+| `_stack_size` | `size_t` | 0 | 栈大小 |
+
+构造时暂为 NULL/0，后续 `record_stack_base_and_size()` 写入真实值。`stack_end() = _stack_base - _stack_size` 是所有栈操作的基础。
+
+**② 内存管理**——线程本地的临时内存池和 GC 句柄区：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `_resource_area` | `ResourceArea*` | Arena 风格的临时内存池，线程生命周期内快速分配小块内存 |
+| `_handle_area` | `HandleArea*` | GC 句柄区——VM 代码通过 Handle 包装 Java 对象，防止 GC 期间对象被移动 |
+| `_metadata_handles` | `GrowableArray<Metadata*>*` | 元数据句柄表（Klass/Method 等） |
+| `_active_handles` | `JNIHandleBlock*` | JNI 局部引用链表头（构造时 NULL，后续 `set_active_handles` 赋值） |
+| `_free_handle_block` | `JNIHandleBlock*` | 空闲 JNI 句柄块链（加速分配） |
+
+全部在 C-Heap 分配（`new`/`malloc`），不在 Java 堆。GC 通过遍历每个线程的 `_active_handles` 链表标记 JNI 局部引用为 GC 根。
+
+**③ 线程间通信——Suspend/Resume**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `_SR_lock` | `Monitor*` | Suspend/Resume 操作的 Monitor（不是 `synchronized` 那个 ObjectMonitor） |
+| `_suspend_flags` | `volatile uint32_t` | 挂起标志位（0=正常运行，非 0=需要挂起） |
+
+`_SR_lock` 和 Stage 3 注册的 `SR_signum`（信号 12）配合工作——信号负责打断目标线程，Monitor 负责协调挂起/恢复的状态一致性。
+
+**④ ParkEvent 四件套**——线程私有的阻塞原语容器：
+
+```cpp
+_ParkEvent   = ParkEvent::Allocate(this);  // synchronized() 等待锁
+_SleepEvent  = ParkEvent::Allocate(this);  // Thread.sleep() 超时等待
+_MutexEvent  = ParkEvent::Allocate(this);  // 内部 Mutex/Monitor 排队
+_MuxEvent    = ParkEvent::Allocate(this);  // 低层 mux 同步（Parker）
+```
+
+每个 `ParkEvent` 继承 `PlatformEvent`，底层封装 `pthread_mutex_lock` + `pthread_cond_wait`。分配时强制 256 字节对齐——地址低 8 位恒为 0，这是 05 中 SplitWord 设计工作的前提。
+
+**⑤ 并发安全——Hazard Pointer**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `_threads_hazard_ptr` | `ThreadsList* volatile` | hazard pointer——"我正在读哪个线程列表快照" |
+| `_threads_list_ptr` | `SafeThreadsListPtr*` | 指向当前有效的线程链表快照 |
+| `_nested_threads_hazard_ptr_cnt` | `uint` | 嵌套引用计数 |
+
+Thread-SMR 机制的核心——读完后再释放指针，通知正在等待删除的线程。
+
+**⑥ Hash 种子**——线程本地的伪随机数生成器：
+
+```cpp
+_hashStateX = os::random();   // 随机种子
+_hashStateY = 842502087;      // Marsaglia XorShift 固定常量
+_hashStateZ = 0x8767;
+_hashStateW = 273326509;
+```
+
+HotSpot 使用 Marsaglia XorShift 算法生成线程本地的伪随机数，无需全局锁。
+
+#### JavaThread 专有字段
+
+`JavaThread::initialize()`（`thread.cpp:1594-1684`）在基类构造之后初始化约 50 个 JavaThread 专有字段：
+
+**⑦ 执行引擎与 JNI**：
+
+| 字段 | 类型 | 初始值 | 说明 |
+|------|------|--------|------|
+| `_threadObj` | `oop` | NULL | Java 层 `java.lang.Thread` 对象引用（尚未绑定） |
+| `_entry_point` | `address` | NULL | 线程启动后执行的第一个方法入口 |
+| `_jni_environment` | `JNIEnv` | 含 `jni_functions()` | JNI 环境块，内含全局 JNI 函数表指针 |
+| `_callee_target` | `Method*` | NULL | i2c adapter 握手的 Method* |
+| `_vm_result` | `oop` | NULL | VM 调用返回值传递 |
+
+此刻 Java 堆尚未初始化，`_threadObj` 为 NULL。`_jni_environment.functions = jni_functions()` 已在构造时绑定——线程构造完成即可调用 JNI。
+
+**⑧ 去优化（Deoptimization）**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `_vframe_array_head/last` | `vframeArray*` | Java 帧栈快照链表 |
+| `_deopt_nmethod` | `CompiledMethod*` | 当前正在去优化的编译方法 |
+| `_must_deopt_id` | `intptr_t*` | 必须去优化的 frame id |
+
+当 JIT 编译的假设被打破时，需要把编译帧"解构"回解释器帧。`_vframe_array` 链表保存被解构帧的元信息。
+
+**⑨ 存储守卫——承接 Stage 2 的栈保护机制**：
+
+| 字段 | 类型 | 初始值 | 说明 |
+|------|------|--------|------|
+| `_stack_guard_state` | `StackGuardState` | `stack_guard_unused` | 守护区状态（未启用 → 已启用） |
+| `_reserved_stack_activation` | `address` | NULL | @ReservedStackAccess 注解方法可用的最高地址 |
+| `_stack_overflow_limit` | `address` | 后续计算 | JIT 汇编直接与 SP 比较的溢出阈值 |
+
+Stage 2 确定了 `_stack_red_zone_size` 等四个守卫区大小，但此刻这些值尚未应用于保护页。`create_stack_guard_pages()` 才真正调用 `mprotect(PROT_NONE)` 画上保护页。
+
+**⑩ 异常处理**：
+
+| 字段 | 类型 | 初始值 | 说明 |
+|------|------|--------|------|
+| `_exception_oop` | `volatile oop` | NULL | 当前待处理的异常对象 |
+| `_exception_pc` | `volatile address` | 0 | 异常发生时的程序计数器 |
+| `_exception_handler_pc` | `volatile address` | 0 | 异常处理器的入口地址 |
+| `_is_method_handle_return` | `volatile int` | 0 | MethodHandle 返回标记 |
+
+当 Java 代码抛出异常时，JVM 将异常对象写入 `_exception_oop`，记录发生位置和处理入口，然后跳转至异常处理逻辑。
+
+**⑪ 调试与编译器控制（JVMTI/JVMC）**：
+
+| 字段 | 类型 | 初始值 | 说明 |
+|------|------|--------|------|
+| `_jvmti_thread_state` | `JvmtiThreadState*` | NULL | JVMTI 调试器状态（无调试器时为 NULL） |
+| `_interp_only_mode` | `int` | 0 | 0=正常，非 0=强制解释执行（调试器单步跟踪用） |
+| `_special_runtime_exit_condition` | `AsyncRequests` | `_no_async_condition` | 异步退出条件（如 Thread.stop()） |
+| `_pending_async_exception` | `oop` | NULL | 待异步抛出的异常 |
+| `_popframe_condition` | `int` | `popframe_inactive` | JVMTI PopFrame 是否激活 |
+
+**⑫ 统计与同步**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `_thread_stat` | `ThreadStatistics*` | TLAB 填充量、退优化次数、编译次数等运营数据 |
+| `_parker` | `Parker*` | `Unsafe.park()`/`Unsafe.unpark()` 的底层实现 |
+| `_safepoint_state` | `ThreadSafepointState*` | 线程级安全点状态（GC 用于协调 Stop-The-World） |
+| `_java_call_counter` | `int` | Java 方法调用计数器（触发 JIT 编译的判断依据） |
+
+**⑬ 生命周期**：
+
+| 字段 | 类型 | 初始值 | 说明 |
+|------|------|--------|------|
+| `_thread_state` | `volatile JavaThreadState` | `_thread_new` | 线程执行状态（下文状态机详讲） |
+| `_terminated` | `volatile TerminatedTypes` | `_not_terminated` | 终止状态 |
+| `_on_thread_list` | `bool` | false | 是否已加入 Threads::_thread_list |
+| `_next` | `JavaThread*` | NULL | 链表中的下一个 JavaThread |
+| `_jni_attach_state` | `volatile JNIAttachStates` | `_not_attaching_via_jni` | JNI 附加标记（主线程为 false） |
+
+#### 字段归属总结
+
+```
+Thread 基类（6 组，所有线程共享）           JavaThread 专有（7 组）
+─────────────────────────────────         ──────────────────────────
+① 栈元数据：_stack_base, _stack_size        ⑦ 执行引擎：_threadObj, JNI 函数表
+② 内存管理：ResourceArea, HandleArea       ⑧ 去优化：vframeArray, deopt_nmethod
+③ Suspend/Resume：_SR_lock, suspend_flags   ⑨ 存储守卫：_stack_guard_state
+④ ParkEvent×4：_ParkEvent, _SleepEvent...   ⑩ 异常处理：_exception_oop, _pc
+⑤ Hazard Pointer：_threads_hazard_ptr        ⑪ 调试控制：JVMTI, interp_only
+⑥ Hash 种子：XorShift 四元组              ⑫ 统计同步：_parker, SafepointState
+                                           ⑬ 生命周期：_thread_state, _terminated
+```
+
+> 上面这个纵览对理解 `new JavaThread()` 至关重要：构造函数体只有一行 `initialize()`，但 `Thread()` 基类构造和 `initialize()` 内部初始化了全部 13 组字段。下一节展开构造函数时会看到每组字段的具体赋值。
 
 ### JavaThread vs NonJavaThread 判定
 
