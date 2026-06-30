@@ -395,6 +395,32 @@ class Events {
 Events::_logs → [_deopt_messages] → [_redefinitions] → [_exceptions] → [_messages] → NULL
 ```
 
+四条记录器各存不同内容，写入入口也不一样。JVM 运行时约 100 处调了这四个方法：
+
+| 记录器 | 入口方法 | 存什么内容 | 缓冲 |
+|--------|---------|-----------|------|
+| `_messages` | `Events::log(thread, fmt, ...)` | 线程创建/退出、GC 阶段开始、JIT 编译完成——所有通用事件 | 256 字节 |
+| `_exceptions` | `Events::log_exception(thread, fmt, ...)` | JVM 内部抛出的异常（NullPointerException 等在 C++ 层被 detect 的时刻） | 512 字节 |
+| `_redefinitions` | `Events::log_redefinition(thread, fmt, ...)` | 类重定义事件——Instrumentation retransform 时触发 | 256 字节 |
+| `_deopt_messages` | `Events::log_deopt_message(thread, fmt, ...)` | JIT 去优化（优化的假设被打破，编译帧拆回解释器帧的原因） | 256 字节 |
+
+`_exceptions` 用 512 字节缓冲是因为异常栈信息可能很长——256 字节会截断关键调用链。其余三类事件通常只有一行 `"Thread added: 0x7f..."` 这种格式，256 足够。
+
+#### `_next` 和链表——`Events::init()` 只调用一次
+
+`vm_init_globals()` 只调用一次，所以 `Events::init()` 也只执行一次——这四个 `new` 就是 JVM 整个生命周期内全部的事件记录器，之后再也不会创建新的 `FormatStringEventLog`。
+
+构造时 `EventLog()` 构造函数把每个新对象链入 `Events::_logs` 链表。按 `init()` 中的 `new` 顺序——`_messages` 最先创建、`_deopt_messages` 最后创建——链表状态是：
+
+| new 顺序 | 创建后 _next 指向 | 链表中的位置 |
+|---------|------------------|------------|
+| 1. `_messages` | NULL（此时 `_logs` 还是 NULL） | 链表末尾 |
+| 2. `_exceptions` | `_messages` | 倒数第二 |
+| 3. `_redefinitions` | `_exceptions` | 正数第二 |
+| 4. `_deopt_messages` | `_redefinitions` | 链表头 |
+
+所以只有 `_messages` 的 `_next` 是 NULL，其他三个的 `_next` 都指向先于自己创建的那个。
+
 崩溃时 `VMError::report()` → `Events::print_all()` 遍历此链表 dump 到 `hs_err_pid<pid>.log`。
 
 #### 对象内存布局
