@@ -20,7 +20,7 @@
   </summary>
   <div class="section-content">
 
-* [总览 — 按出现顺序的语法索引](openjdk/vol-00/cxx/README.md)
+* [总览 — 按出现顺序的语法索引](openjdk/vol-cxx/README.md)
 
   </div>
 </details>
