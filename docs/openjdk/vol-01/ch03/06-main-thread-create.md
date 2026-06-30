@@ -186,7 +186,7 @@ void C(TRAPS) {
 
 #### Thread 基类字段
 
-`Thread` 的构造函数（`thread.cpp:220-323`）初始化约 50 个字段。一个线程对象至少要记住几件事：自己的栈在哪、有哪些内存池可以用、被阻塞时睡在哪。
+`Thread` 的构造函数（`thread.cpp:220-323`）初始化约 50 个字段，`JavaThread::initialize()` 又加了约 50 个。下面只展开当前阶段会用到或在后续章节会反复出现的核心字段。其余字段——比如 JFR 事件记录器、CICompilerCount 决定的编译任务列表、biased locking 的撤销计数器——将在各自的功能章节随用法一同讲解。
 
 **栈在哪里。** `_stack_base`（`address`）和 `_stack_size`（`size_t`）记录线程栈的顶部和大小。构造时都是 0——HotSpot 刻意不在构造函数里读 OS 信息，留到 `record_stack_base_and_size()` 统一处理。当前线程（LWP-2，由 JLI 层的 `pthread_create` 在调用 `JNI_CreateJavaVM` 之前创建）已经在运行，栈完全可以读到。但 HotSpot 选择了"延迟读取"的惯例——标准 java 命令启动时，`os::init_2()` 中的 `capture_initial_stack` 被 `Arguments::created_by_java_launcher()=true` 跳过，LWP-2 和普通 pthread 一样走 `pthread_getattr_np()` 获取栈信息。`capture_initial_stack`（通过 `/proc/self/stat` + `/proc/self/maps` 解析，存入 `os::Linux` 的静态变量）是为嵌入式 JVM（Tomcat jsvc、IDE 插件）预留的。而 HotSpot 后续自己 `pthread_create` 的子线程（CompilerThread、GC 线程，ch04 创建）更晚——那时 `JavaThread` 对象构造时 OS 线程还不存在，先 new JavaThread，再 os::create_thread 调 pthread_create。三种情况最终都在 `record_stack_base_and_size()` 中统一处理。`stack_end() = _stack_base - _stack_size` 是所有栈操作的基础。
 
