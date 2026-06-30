@@ -181,7 +181,7 @@ void C(TRAPS) {
 | `_stack_base` | `address` | NULL | 栈顶（高地址，x86 栈向下增长） |
 | `_stack_size` | `size_t` | 0 | 栈大小 |
 
-构造时暂为 NULL/0，后续 `record_stack_base_and_size()` 写入真实值。`stack_end() = _stack_base - _stack_size` 是所有栈操作的基础。
+构造时暂为 NULL/0。之所以不在构造函数中直接读取栈地址，是因为 `new JavaThread()` 只是创建了 C++ 对象，此时还不知道它会绑定到哪个 OS 线程——对主线程来说，栈地址在 Stage 1 的 `os::init()` 中已经通过 `/proc/self/stat` + `/proc/self/maps` 提前捕获，保存在 `os::Linux` 的静态变量中，本节后面通过 `record_stack_base_and_size()` 取出写入；对将来 `pthread_create` 创建的子线程来说，`JavaThread` 对象构造时 OS 线程还不存在（先 new JavaThread，再 os::create_thread 调 pthread_create）。两种场景下构造函数都不适合读栈地址，所以统一留空——后续 `record_stack_base_and_size()` 写入真实值。`stack_end() = _stack_base - _stack_size` 是所有栈操作的基础。
 
 **② 内存管理**——线程本地的临时内存池和 GC 句柄区：
 
