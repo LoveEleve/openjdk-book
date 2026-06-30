@@ -332,19 +332,39 @@ _number_of_threads = 0;
 _number_of_non_daemon_threads = 0;
 ```
 
-这三个是 `Threads` 类的静态成员。`Threads` 类继承 `AllStatic`——一个空基类，标记这个类的所有成员都是静态的，不存在实例。三个字段的 C++ 声明（`thread.hpp`）：
+Stage 3 结束时，信号处理器、安全点轮询页、200+ 个 flag 全部就位——但 JVM 的线程管理表还是一片空白。这三行源代码做的事很简单：把线程管理体系的三根支柱全部清零。
+
+`Threads` 是继承 `AllStatic` 的纯静态类——构造函数和析构函数都声明为 `ShouldNotCallThis()`，确保任何人不创建 `Threads` 实例。它的所有成员都是 `static`，整个 JVM 进程中只有一份。
 
 ```cpp
-class Threads: AllStatic {
-  static JavaThread* _thread_list;           // JavaThread 链表头指针
-  static int         _number_of_threads;     // 活跃线程总数
-  static int         _number_of_non_daemon_threads; // 非守护线程数
-};
+static JavaThread* _thread_list;
 ```
 
-`_thread_list` 是 `JavaThread` 链表的头指针——JVM 用 `JavaThread::_next` 字段把所有的 `JavaThread` 对象串成单链表。`_number_of_threads` 记录当前有多少个线程在 JVM 里跑（包括守护线程），`_number_of_non_daemon_threads` 只计数非守护线程——当这个计数降到 0，JVM 知道没有非守护线程在跑了，触发退出。
+`_thread_list` 是 JVM 中所有 `JavaThread` 对象的链表头指针。每个 `JavaThread` 通过自己的 `_next` 字段（`JavaThread*`）串在链表中，构成一个单向链表。头插法——最后加入的线程在最前面：
 
-此刻全部归零——这是整个 JVM 线程管理体系启动前的零状态。
+```
+_thread_list → [最新加入的 JavaThread] → [上一个] → ... → [最早的] → NULL
+```
+
+此刻设为 NULL，表示链表中一个线程都没有。后面 `Threads::add()` 会用头插法把 `main_thread` 推进来。
+
+```cpp
+static int _number_of_threads;
+```
+
+`_number_of_threads` 记录链表中有多少个 `JavaThread`。每次 `Threads::add()` 时 ++，`Threads::remove()` 时 --。此刻为 0。
+
+但这个数字只算 `JavaThread`——NonJavaThread（VMThread、WatcherThread 等）不计在内。它们有自己独立的 `NonJavaThread::_the_list`。
+
+```cpp
+static int _number_of_non_daemon_threads;
+```
+
+`_number_of_non_daemon_threads` 记录链表中非守护线程的数量。daemon 线程的判断来自 Java 层的 `Thread.isDaemon()`——`threadObj->bool_field(daemon_offset)`。此刻为 0。
+
+这个计数器直接决定 JVM 何时退出：`Threads::destroy_vm()` 在 `Threads_lock` 上循环等待 `number_of_non_daemon_threads() > 1`，当只剩 shutdown 线程自己（计数降到 1）时才继续退出流程。守护线程不阻止 JVM 退出——所有 daemon 线程会被强制终止。
+
+此刻 JVM 里没有任何线程在名单上。三行代码之后，这张空白名单将开始接收它的第一个成员。
 
 ---
 ## 2. vm_init_globals() ★★
