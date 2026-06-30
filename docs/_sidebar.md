@@ -10,4 +10,4 @@
     * [3.3 Stage 1 前置初始化](openjdk/vol-01/ch03/03-preamble-init.md)
     * [3.4 Stage 2 参数解析](openjdk/vol-01/ch03/04-args-parse.md)
     * [3.5 Stage 3 OS 后初始化](openjdk/vol-01/ch03/05-os-init2.md)
-    * [3.6 Stage 4 主线程创建](openjdk/vol-01/ch03/06-main-thread-create.md)
+    * [3.6 第一个 JavaThread：主线程登记](openjdk/vol-01/ch03/06-main-thread-create.md)

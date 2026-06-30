@@ -53,7 +53,7 @@
   * [3.3 前置初始化](openjdk/vol-01/ch03/03-preamble-init.md)
   * [3.4 参数解析](openjdk/vol-01/ch03/04-args-parse.md)
   * [3.5 OS 后初始化](openjdk/vol-01/ch03/05-os-init2.md)
-  * [3.6 Stage 4 主线程创建](openjdk/vol-01/ch03/06-main-thread-create.md)
+  * [3.6 第一个 JavaThread：主线程登记](openjdk/vol-01/ch03/06-main-thread-create.md)
 * [第四章 — vm_init_globals](openjdk/vol-01/ch04.md) - 7 项全局基础设施 + 主线程绑定
 * [第五章 — mutex_init](openjdk/vol-01/ch05.md) - ~90 锁 + 10 级 ranking 系统
 * [第六章 — CodeCache](openjdk/vol-01/ch06.md) - 三段 JIT 代码内存
