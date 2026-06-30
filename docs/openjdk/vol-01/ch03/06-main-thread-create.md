@@ -242,18 +242,35 @@ void Events::init() {
 }
 ```
 
-`LogEvents` 是一个 `diagnostic` 类型的 JVM flag（`globals.hpp:554`），默认 `true`。JVM 的 flag 分四类：
+`LogEvents` 是一个 `diagnostic` 类型的 JVM flag（`globals.hpp:554`），默认 `true`。JVM 的 `-XX` flag 按可配性分四类。前两类最常用：
 
-| 类型 | 定义关键字 | 能不能改 | 条件 |
-|------|-----------|---------|------|
-| product | `product(...)` | 随便改 | `-XX:+/-FlagName` 直接生效 |
-| diagnostic | `diagnostic(...)` | 需要先解锁 | `-XX:+UnlockDiagnosticVMOptions` 之后才能改 |
-| develop | `develop(...)` | 只在 debug 构建 | product 构建下编译不过 |
-| experimental | `experimental(...)` | 需要先解锁 | `-XX:+UnlockExperimentalVMOptions` |
+**`product` 类型**——谁都能改，不加任何锁。`-XX:+PrintGCDetails`、`-XX:MaxHeapSize=4g` 都是 product 类型，直接在命令行上写就行：
 
-「需要解锁」的意思是用户只写 `-XX:-LogEvents` 不行——JVM 会拒绝启动并提示 `Unrecognized VM option`。必须先开 `-XX:+UnlockDiagnosticVMOptions` 把 diagnostic 类 flag 的门锁打开。这是 HotSpot 的安全机制：diagnostic 级别的选项用于诊断和调试，随意关掉可能导致崩溃时丢失关键日志。
+```
+java -XX:+PrintGCDetails MyApp
+```
 
-顺便，`LogEventsBufferEntries`（默认 20）也是 diagnostic 类型——控制每个环形缓冲区存多少条记录。
+**`diagnostic` 类型**——默认生效，但想关掉它必须先"开锁"。"锁"本身也是一个 flag：`UnlockDiagnosticVMOptions`。不加锁就关 diagnostic flag，JVM 直接拒绝启动：
+
+```
+# 这样不行——JVM 报错 Unrecognized VM option
+java -XX:-LogEvents MyApp
+
+# 必须加锁才行
+java -XX:+UnlockDiagnosticVMOptions -XX:-LogEvents MyApp
+```
+
+`UnlockDiagnosticVMOptions` 也是 diagnostic 类型（在 debug 构建下默认 true，product 构建默认 false）。所以你在生产环境想关 `LogEvents`，命令就是 `-XX:+UnlockDiagnosticVMOptions -XX:-LogEvents`。
+
+**`experimental` 类型**——和 diagnostic 同理，锁叫 `UnlockExperimentalVMOptions`。`UseZGC`、`UseShenandoahGC` 是 experimental 类型：
+
+```
+java -XX:+UnlockExperimentalVMOptions -XX:+UseZGC MyApp
+```
+
+**`develop` 类型**——只在 debug/slowdebug 构建的 JVM 中存在，product 构建的 `java` 命令根本没有这些 flag。
+
+`LogEvents` 和 `LogEventsBufferEntries`（默认 20，控制每个环形缓冲区存多少条记录）都是 diagnostic 类型。
 
 JVM 运行时，各处代码通过 `Events::log(thread, "Thread added: %p", p)` 写入事件——线程创建时写、GC 阶段开始时写、JIT 编译完成时写。环形缓冲区写满后覆盖最旧的记录。
 
