@@ -149,47 +149,91 @@ void check_ThreadShadow() {
 
 ### basic_types_init — 基本类型映射表
 
-JVM 运行时要用字符代号区分栈上的槽位里放的是什么——`int` 还是对象引用、`long` 还是 `float`。这些映射表在 `globalDefinitions.cpp` 中定义成三个全局数组，在 JVM 启动前就编译好了：
+JVM 的字节码解释器在操作栈时，必须知道每个槽位里放的是什么——`iload` 知道栈顶是个 `int`（4 字节），`lload` 知道是个 `long`（8 字节），`aload` 知道是个对象引用。这需要一套从 BasicType 枚举到签名字符再到内存布局的映射。
+
+三张关键的全局数组在 `globalDefinitions.cpp` 中编译时就已经造好：
 
 ```cpp
-// 字符映射表：BasicType → JVM 类型签名字符
+// ①: BasicType → JVM 类型签名字符
 char type2char_tab[T_CONFLICT+1] = {
-  0, 0, 0, 0,           // 0-3 未使用
-  'Z', 'C', 'F', 'D',   // 4=T_BOOLEAN, 5=T_CHAR, 6=T_FLOAT, 7=T_DOUBLE
-  'B', 'S', 'I', 'J',   // 8=T_BYTE, 9=T_SHORT, 10=T_INT, 11=T_LONG
-  'L', '[', 'V',         // 12=T_OBJECT, 13=T_ARRAY, 14=T_VOID
-  0, 0, 0, 0, 0         // 15-19 (T_ADDRESS 等无对应字符)
+  0, 0, 0, 0,           // 0-3: 未使用
+  'Z', 'C', 'F', 'D',   // 4=boolean, 5=char, 6=float, 7=double
+  'B', 'S', 'I', 'J',   // 8=byte, 9=short, 10=int, 11=long
+  'L', '[', 'V',         // 12=object, 13=array, 14=void
 };
-```
 
-`type2char_tab` 把 HotSpot 内部的 `T_INT=10` 映射成字节码签名用的 `'I'`。解释器遇到 `iload` 字节码时，用 `'I'` 判断当前栈槽位放的是 4 字节 int——不能按 8 字节的 long 处理，也不能当对象引用拿去做 GC 标记。`char2type` 是反方向——签名字符映射回枚举值。
-
-```cpp
-// 布局类型表：BasicType → 在内存中的布局类型
+// ②: BasicType → 在栈/内存中的布局类型
 BasicType type2field[T_CONFLICT+1] = {
-  (BasicType)0, (BasicType)0, (BasicType)0, (BasicType)0,  // 0-3
-  T_BOOLEAN, T_CHAR, T_FLOAT, T_DOUBLE,   // 4-7: 自映射
-  T_BYTE, T_SHORT, T_INT, T_LONG,         // 8-11: 自映射
-  T_OBJECT, T_OBJECT, T_VOID,             // 12-14: T_ARRAY→T_OBJECT (栈上存的是引用)
-  T_ADDRESS, T_NARROWOOP, T_METADATA,      // 15-17
-  T_NARROWKLASS, T_CONFLICT                // 18-19
+  0, 0, 0, 0,
+  T_BOOLEAN, T_CHAR, T_FLOAT, T_DOUBLE,     // 4-7: 自映射
+  T_BYTE, T_SHORT, T_INT, T_LONG,           // 8-11: 自映射
+  T_OBJECT, T_OBJECT, T_VOID,               // 12-14: array→object
+  T_ADDRESS, T_NARROWOOP, T_METADATA, T_NARROWKLASS, T_CONFLICT // 15-19: 自映射
+};
+
+// ③: 按 HeapWord 对齐后的"宽"布局类型（栈 banging 用）
+BasicType type2wfield[T_CONFLICT+1] = {
+  0,0,0,0, T_INT,T_INT,T_FLOAT,T_DOUBLE, T_INT,T_INT,T_INT,T_LONG,
+  T_OBJECT, T_OBJECT, T_VOID, T_ADDRESS, T_NARROWOOP, T_METADATA,
+  T_NARROWKLASS, T_CONFLICT
 };
 ```
 
-`type2field` 回答的问题是"`T_ARRAY` 在栈上存的是什么"。答案是 `T_OBJECT`——数组引用和普通对象引用一样，都是 8 字节（压缩时 4 字节）的指针。T_BOOLEAN 映射到自身——布尔值在内存中就是 1 字节的 `jbyte`。
+第一张表 `type2char_tab` 回答了"一个 BasicType 在 JVM 规范里对应的签名字符是什么"。`T_INT=10` → `'I'`，`T_LONG=11` → `'J'`。JVM 规范里 `long` 的签名字符就是 `J`（因为 `L` 被对象引用占了）。反向查询 `char2type` 是同一张表的逆映射。
+
+第二张表 `type2field` 回答了"这个类型在栈槽位里实际占什么布局"。大部分类型自映射——`T_INT` → `T_INT`，`T_DOUBLE` → `T_DOUBLE`。例外是 `T_ARRAY` → `T_OBJECT`——数组引用和普通对象引用在栈上存的是一样的指针（都是 oop），不需要区分。
+
+第三张表 `type2wfield` 是 GC 和栈 banging 用的——不关心栈上放的是 `boolean` 还是 `int`，统一按 `T_INT`（4 字节）对齐。JIT 编译后在方法入口检查栈空间时不会在乎"这一格是 boolean"，它只看有没有足够的 HeapWord 槽位。
+
+`basic_types_init()` 的完整代码（`globalDefinitions.cpp:53-143`）：
 
 ```cpp
-// 双字宽度布局表：BasicType → 按 HeapWord 对齐的"宽"类型
-BasicType type2wfield[T_CONFLICT+1] = {
-  T_INT,  T_INT,  T_FLOAT,  T_DOUBLE,   // 4-5:  boolean/char 按 int 处理
-  T_INT,  T_INT,  T_INT,    T_LONG,     // 8-10: byte/short/int 按 int
-  ...
-};
+void basic_types_init() {
+#ifdef ASSERT
+  // ── 第一轮：检查 sizeof ──
+  assert(1 == sizeof(jbyte),   "wrong size");
+  assert(2 == sizeof(jchar),   "wrong size");
+  assert(4 == sizeof(jint),    "wrong size");
+  assert(8 == sizeof(jlong),   "wrong size");
+  // ... 还有 jfloat(4), jdouble(8), jboolean(1), u1/u2/u4 等
+
+  // ── 第二轮：验证 type2char ↔ char2type 可逆 ──
+  int num_type_chars = 0;
+  for (int i = 0; i < 99; i++) {
+    if (type2char((BasicType)i) != 0) {
+      assert(char2type(type2char((BasicType)i)) == i, "proper inverses");
+      num_type_chars++;
+    }
+  }
+  assert(num_type_chars == 11, "must have exactly 11 type chars");
+
+  // ── 第三轮：验证 type2field 的布局类型规则 ──
+  for (int i = T_BOOLEAN; i <= T_CONFLICT; i++) {
+    BasicType vt = (BasicType)i;
+    BasicType ft = type2field[vt];           // 布局类型
+    if (vt 是布局类型) {
+      assert(vt == ft, "");                  // 布局类型必须自映射
+    } else {
+      assert(vt != ft, "");                  // 非布局类型必须映射到不同的布局类型
+      assert(ft == type2field[ft], "");      // 映射目标必须是布局类型
+    }
+    assert(type2size[vt] == type2size[ft], ""); // 大小必须一致
+  }
+#endif
+
+  // ── product 构建下也执行的代码 ──
+  if (JavaPriority1_To_OSPriority != -1)
+    os::java_to_os_priority[1] = JavaPriority1_To_OSPriority;
+  if (JavaPriority2_To_OSPriority != -1)
+    os::java_to_os_priority[2] = JavaPriority2_To_OSPriority;
+  if (JavaPriority3_To_OSPriority != -1)
+    os::java_to_os_priority[3] = JavaPriority3_To_OSPriority;
+}
 ```
 
-`type2wfield` 是栈 banging 用的——JIT 编译器在方法入口检查栈空间时，不关心栈上是 boolean 还是 int，统一按 HeapWord（至少 4 字节）对齐。所以 T_BOOLEAN 和 T_BYTE 都映射到 T_INT。
+函数做了三轮检查：第一轮——`jint` 真的占 4 字节、`jlong` 真的占 8 字节。如果编译器分配错了，启动时就毙掉。第二轮——遍历 0 到 98，对 11 个有签名字符的类型验证 `char2type(type2char(i)) == i`，确保字符映射可逆。第三轮——遍历 T_BOOLEAN 到 T_CONFLICT，验证每个类型的布局映射规则：布局类型自己映射到自己，非布局类型（比如 `T_ILLEGAL`）必须映射到某个合法的布局类型，且大小要一致。
 
-`basic_types_init()` 本身做的事很简单——遍历 0 到 98，对每个有签名字符的类型验证 `char2type(type2char(i)) == i`（可逆），验证 layout 类型 `type2field[T_INT]` 必须等于 `T_INT` 自身（非布局类型映射到合法布局类型），验证大小一致性——`type2size[vt] == type2size[type2field[vt]]`。这些全在 `#ifdef ASSERT` 里，product 构建下整个函数体为空。
+所有三轮都在 `#ifdef ASSERT` 里（也就是只有 debug/slowdebug 构建才执行），只有最后 6 行——Java to OS 优先级映射——在 product 构建下也运行。
 
 ### eventlog_init — 崩溃事件日志
 
