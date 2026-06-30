@@ -113,7 +113,11 @@ static int _number_of_non_daemon_threads;
 
 此刻 JVM 里没有任何线程在名单上。三行代码之后，这张空白名单将开始接收它的第一个成员。
 
-回头想一个问题：当一个线程正在遍历 `_thread_list` 时，另一个线程可能正在删除链表中的一个节点——遍历者会读到已释放的内存。HotSpot 用 Thread-SMR（Safe Memory Reclamation）解决这个问题：每个 `JavaThread` 持有一个 `_threads_hazard_ptr`（hazard pointer），表示"我正在读这个线程对象"；删除线程时不立即释放内存，而是等所有持有其 hazard pointer 的线程释放后才回收。这个机制是后续 GC 在 safepoint 时能无锁遍历所有线程的基础——没有它，每次 GC 都得拿全局 Threads_lock。
+回头想一个问题：将来 JVM 里跑着多个 Java 线程时，GC 需要遍历 `_thread_list` 找到所有线程的 Java 栈帧作为 GC 根。但这时候可能恰巧另一个 Java 线程执行完毕，正在 `Threads::remove()` 把自己从链表中摘除——如果 GC 正遍历到被删节点的 `_next` 指针，读到的就是已释放的内存。
+
+HotSpot 用 Thread-SMR（Safe Memory Reclamation）解决这个问题。核心思路很简单：**不直接遍历原始的 `_thread_list` 链表，而是维护一份不可变的数组快照。** 每次有线程加入或移除时，不是原地改链表，而是创建一个新的快照数组（Copy-On-Write）——旧快照留在原地不动。遍历线程（如 GC）拿到旧快照的指针后，把这个指针写入自己 `_thread` 内的 `_threads_hazard_ptr` 字段——相当于宣告"这份快照我正在读，别释放"。删除线程要等到**所有线程**的 `_threads_hazard_ptr` 都不再指向这份旧快照时，才真正释放它的内存。
+
+> 用生活中的例子：图书馆闭馆时要销毁一批旧书。管理员不是直接烧——而是先看所有阅览室的登记表（hazard pointer），确认"没有人在读这本书"，才来销毁。有人还拿着，就等着。
 
 ---
 ## 2. vm_init_globals() ★★
