@@ -185,43 +185,15 @@ BasicType type2wfield[T_CONFLICT+1] = {
 
 第三张表 `type2wfield` 是 GC 和栈 banging 用的——不关心栈上放的是 `boolean` 还是 `int`，统一按 `T_INT`（4 字节）对齐。JIT 编译后在方法入口检查栈空间时不会在乎"这一格是 boolean"，它只看有没有足够的 HeapWord 槽位。
 
-`basic_types_init()` 的完整代码（`globalDefinitions.cpp:53-143`）：
+`basic_types_init()` 本身在 product 构建下几乎什么都不做——整个函数体除最后 6 行外全在 `#ifdef ASSERT` 里。但函数验证的三张表是 JVM 运行时真正在用的基础设施，编译时就造好了。
 
 ```cpp
 void basic_types_init() {
 #ifdef ASSERT
-  // ── 第一轮：检查 sizeof ──
-  assert(1 == sizeof(jbyte),   "wrong size");
-  assert(2 == sizeof(jchar),   "wrong size");
-  assert(4 == sizeof(jint),    "wrong size");
-  assert(8 == sizeof(jlong),   "wrong size");
-  // ... 还有 jfloat(4), jdouble(8), jboolean(1), u1/u2/u4 等
-
-  // ── 第二轮：验证 type2char ↔ char2type 可逆 ──
-  int num_type_chars = 0;
-  for (int i = 0; i < 99; i++) {
-    if (type2char((BasicType)i) != 0) {
-      assert(char2type(type2char((BasicType)i)) == i, "proper inverses");
-      num_type_chars++;
-    }
-  }
-  assert(num_type_chars == 11, "must have exactly 11 type chars");
-
-  // ── 第三轮：验证 type2field 的布局类型规则 ──
-  for (int i = T_BOOLEAN; i <= T_CONFLICT; i++) {
-    BasicType vt = (BasicType)i;
-    BasicType ft = type2field[vt];           // 布局类型
-    if (vt 是布局类型) {
-      assert(vt == ft, "");                  // 布局类型必须自映射
-    } else {
-      assert(vt != ft, "");                  // 非布局类型必须映射到不同的布局类型
-      assert(ft == type2field[ft], "");      // 映射目标必须是布局类型
-    }
-    assert(type2size[vt] == type2size[ft], ""); // 大小必须一致
-  }
+  // assert(jint==4字节) + assert(type2char可逆) + assert(type2field规则) —— 全跳过
 #endif
 
-  // ── product 构建下也执行的代码 ──
+  // product 构建下只执行这三行：把 -XX:JavaPriority* 映射到 OS 线程优先级
   if (JavaPriority1_To_OSPriority != -1)
     os::java_to_os_priority[1] = JavaPriority1_To_OSPriority;
   if (JavaPriority2_To_OSPriority != -1)
@@ -231,9 +203,7 @@ void basic_types_init() {
 }
 ```
 
-函数做了三轮检查：第一轮——`jint` 真的占 4 字节、`jlong` 真的占 8 字节。如果编译器分配错了，启动时就毙掉。第二轮——遍历 0 到 98，对 11 个有签名字符的类型验证 `char2type(type2char(i)) == i`，确保字符映射可逆。第三轮——遍历 T_BOOLEAN 到 T_CONFLICT，验证每个类型的布局映射规则：布局类型自己映射到自己，非布局类型（比如 `T_ILLEGAL`）必须映射到某个合法的布局类型，且大小要一致。
-
-所有三轮都在 `#ifdef ASSERT` 里（也就是只有 debug/slowdebug 构建才执行），只有最后 6 行——Java to OS 优先级映射——在 product 构建下也运行。
+所以 `basic_types_init()` 的实质贡献不是"初始化"什么——三张表编译时就存在了——而是作为 **debug 构建下的第一道防线**，确保基础类型系统没有偏差。product 构建下它就是一个空的占位符。
 
 ### eventlog_init — 崩溃事件日志
 
