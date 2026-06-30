@@ -242,7 +242,18 @@ void Events::init() {
 }
 ```
 
-`LogEvents` 是 diagnostic 类型 flag，默认 true。所以默认情况下 product 构建也执行四个 `new`，创建四个独立的环形缓冲区（每个缓冲区默认 20 条记录，单条最大 250 字节，异常类 512 字节）。
+`LogEvents` 是一个 `diagnostic` 类型的 JVM flag（`globals.hpp:554`），默认 `true`。JVM 的 flag 分四类：
+
+| 类型 | 定义关键字 | 能不能改 | 条件 |
+|------|-----------|---------|------|
+| product | `product(...)` | 随便改 | `-XX:+/-FlagName` 直接生效 |
+| diagnostic | `diagnostic(...)` | 需要先解锁 | `-XX:+UnlockDiagnosticVMOptions` 之后才能改 |
+| develop | `develop(...)` | 只在 debug 构建 | product 构建下编译不过 |
+| experimental | `experimental(...)` | 需要先解锁 | `-XX:+UnlockExperimentalVMOptions` |
+
+「需要解锁」的意思是用户只写 `-XX:-LogEvents` 不行——JVM 会拒绝启动并提示 `Unrecognized VM option`。必须先开 `-XX:+UnlockDiagnosticVMOptions` 把 diagnostic 类 flag 的门锁打开。这是 HotSpot 的安全机制：diagnostic 级别的选项用于诊断和调试，随意关掉可能导致崩溃时丢失关键日志。
+
+顺便，`LogEventsBufferEntries`（默认 20）也是 diagnostic 类型——控制每个环形缓冲区存多少条记录。
 
 JVM 运行时，各处代码通过 `Events::log(thread, "Thread added: %p", p)` 写入事件——线程创建时写、GC 阶段开始时写、JIT 编译完成时写。环形缓冲区写满后覆盖最旧的记录。
 
