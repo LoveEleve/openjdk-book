@@ -96,22 +96,6 @@
   * [30.3 最后一步——return JNI_OK](openjdk/vol-01/ch30-post/03-final-steps.md)
 
   </div>
-</ul>
-</details></li>
-<li><a href="openjdk/vol-01/ch27.md">第二十七章 — Intrinsic 桩 Phase 2</a> - 50+ 硬件加速入口</li>
-<li><a href="openjdk/vol-01/ch28.md">第二十八章 — MH 适配器</a> - invokedynamic 的桥梁</li>
-<li><a href="openjdk/vol-01/ch29.md">第二十九章 — Post-init (上)</a> - VMThread + java.lang 类加载</li>
-<li><details><summary>第三十章 — Post-init：编译器线程 -> JNI_OK</summary>
-<ul>
-<li><a href="openjdk/vol-01/ch30-post/01-compiler-threads.md">30.1 编译器线程创建</a></li>
-<li><a href="openjdk/vol-01/ch30-post/02-modules.md">30.2 模块系统初始化</a></li>
-<li><a href="openjdk/vol-01/ch30-post/03-final-steps.md">30.3 最后一步——return JNI_OK</a></li>
-</ul>
-</details></li>
-
-</ul>
-
-  </div>
 </details>
 
 <details class="home-section">
