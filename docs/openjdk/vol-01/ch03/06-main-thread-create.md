@@ -360,14 +360,22 @@ void logv(Thread* thread, const char* format, va_list ap) {
 #### EventLog 基类和 Events 类群
 
 ```cpp
+// events.hpp —— 类声明
 class EventLog : public CHeapObj<mtInternal> {
  private:
   EventLog* _next;
  public:
-  EventLog() { _next = Events::_logs; Events::_logs = this; }  // 头插法链入
-  virtual void print_log_on(outputStream* out) = 0;             // 纯虚函数
+  EventLog();                                    // 只声明, 没有函数体
+  virtual void print_log_on(outputStream* out) = 0;
   friend class Events;
 };
+
+// events.cpp —— 构造函数实现
+EventLog::EventLog() {
+  ThreadCritical tc;                              // 单线程保护 (CM: 启动阶段不需要, 但保险)
+  _next = Events::_logs;                          // 新节点 next → 旧链表头
+  Events::_logs = this;                           // 链表头 → 新节点
+}
 
 class Events {
  public:
@@ -394,6 +402,33 @@ class Events {
 ```
 Events::_logs → [_deopt_messages] → [_redefinitions] → [_exceptions] → [_messages] → NULL
 ```
+
+**链表是在什么时候链上的？** 看 `new FormatStringEventLog<256>("Events")` 的完整 C++ 构造顺序——列出每一步，链入发生在**第一步**：
+
+```
+new FormatStringEventLog<256>("Events") 的 C++ 构造顺序：
+
+第 1 步: EventLog::EventLog()             ← ★ 链表在这里建立
+  ThreadCritical tc;
+  this->_next = Events::_logs;              // 新节点 next → 当前链表头
+  Events::_logs = this;                     // 链表头 → 新节点
+
+第 2 步: EventLogBase 初始化列表
+  _name = "Events", _length = 20, _count = 0, _index = 0
+  _mutex = Mutex(...)
+
+第 3 步: EventLogBase 函数体
+  _records = new EventRecord[20];           // 每个 EventRecord 内部:
+                                              //   data._buf = data._buffer
+                                              //   data._buffer[0] = '\0'
+
+第 4 步: FormatStringEventLog 初始化列表
+  EventLogBase(...)                         // 已在上一步完成
+
+第 5 步: FormatStringEventLog 函数体       // 空
+```
+
+因为是 C++ 继承链——`EventLog` 是最顶层的基类，它的构造函数体**最先**执行。后面 `EventLogBase` 的 init list 和函数体、`FormatStringEventLog` 的 init list 都是之后的事。也就是说，`EventLog` 构造函数在对象的字段还没初始化完之前，就已经把还没有完全构造的对象的指针塞进了全局链表。
 
 四条记录器各存不同内容，写入入口也不一样。JVM 运行时约 100 处调了这四个方法：
 
