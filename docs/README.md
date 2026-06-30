@@ -16,6 +16,17 @@
 
 <details class="home-section" open>
   <summary>
+    <span class="section-title">C++ 语法速查</span>
+  </summary>
+  <div class="section-content">
+
+* [总览 — 按出现顺序的语法索引](openjdk/vol-00/cxx/README.md)
+
+  </div>
+</details>
+
+<details class="home-section" open>
+  <summary>
     <span class="section-title">卷 0 · 地基</span>
   </summary>
   <div class="section-content">
