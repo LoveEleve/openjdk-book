@@ -812,7 +812,7 @@ class ParkEvent : public os::PlatformEvent {
 };
 ```
 
-每个线程在创建时预先分配一个 ParkEvent（`Thread::_MutexEvent`）。锁竞争时，这个 ParkEvent 被插入 Monitor 的等待队列中。256 字节对齐是后面的 `SplitWord` 能够工作的关键前提。
+每个线程在创建时预先分配 4 个 ParkEvent——`_ParkEvent`（synchronized 等待）、`_SleepEvent`（Thread.sleep）、`_MutexEvent`（内部 Mutex 等待）、`_MuxEvent`（低层 mux 同步）。在 Mutex 锁竞争的语境下，使用的是 `_MutexEvent`——锁竞争时这个 ParkEvent 被插入 Monitor 的等待队列中。256 字节对齐是后面的 `SplitWord` 能够工作的关键前提。4 个 ParkEvent 的完整分配细节见 [3.6 Stage 4 主线程创建](../06-main-thread-create) 的第 3.5 节。
 
 ---
 
@@ -919,7 +919,7 @@ B 调 lock() → TryFast():
    TrySpin() 自旋 20 圈... 还是拿不到
 
    AcquireOrPush(B 的 ParkEvent):
-     B 持有的 ParkEvent 是从 Thread 对象里来的—每个线程创建时预分配一个 `_MutexEvent`,
+     B 持有的 ParkEvent 是从 Thread 对象里来的——每个线程创建时预分配 4 个 ParkEvent，其中 `_MutexEvent` 用于 Mutex 锁竞争，
      终身绑定。地址 0x7f1234567800（ParkEvent 强制 256 字节对齐）
      CAS: 把 _LockWord 从 0x0000000000000001 
           改成        0x7f1234567801     (地址 + 最低位=1)
