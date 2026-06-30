@@ -213,7 +213,7 @@ void basic_types_init() {
 }
 ```
 
-第一件没什么可讲的——用户通过 `-XX:JavaPriority1=5` 调线程优先级时生效。
+第一件平常不执行——10 个 flag 的默认值都是 `-1`。用户显式传了 `-XX:JavaPriority1_To_OSPriority=N` 才触发映射，绝大多数启动场景下这 10 行全是死代码。
 
 第二件才是重点。`UseCompressedOops` 是 Stage 2 参数解析中确定的全局开关（默认 true，64 位 heap < 32GB 时自动开启）。如果开启压缩指针，`heapOopSize = 4`——对象引用在 Java 堆中占 4 字节（而非原生指针的 8 字节），32GB 以下的堆能省一半内存。`_type2aelembytes` 是数组元素字节数表——`T_OBJECT` 和 `T_ARRAY` 的元素大小都设为 `heapOopSize`，后面 GC 的 oop 遍历和 JIT 编译器的数组边界检查都读这张表。
 
