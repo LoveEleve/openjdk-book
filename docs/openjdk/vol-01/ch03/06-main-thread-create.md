@@ -236,27 +236,53 @@ void Events::init() {
 
 `LogEvents` 是 diagnostic 类型 flag，默认 true。
 
-`StringEventLog` 是 `FormatStringEventLog<256>` 的 typedef（`events.hpp:169-170`）。`ExtendedStringEventLog` 是 `FormatStringEventLog<512>`。一行 `new` 背后的实际构造链如下：
+```cpp
+typedef FormatStringEventLog<256>  StringEventLog;          // 声明
+typedef FormatStringEventLog<512>  ExtendedStringEventLog;  // 声明
+```
+
+`typedef A B` 是 C++ 的类型别名语法——`B` 可以用在任何需要 `A` 的地方。`FormatStringEventLog<256>` 是一个模板类，尖括号 `<256>` 是模板参数，编译时把 `256` 代入模板定义中的 `bufsz` 参数，生成一个专门处理 256 字节消息的类。类似 Java 的泛型，但 C++ 模板在编译时展开——`FormatStringEventLog<256>` 和 `FormatStringEventLog<512>` 是两个完全独立的类，有各自的 `_records` 数组类型。
+
+一行 `new StringEventLog("Events")` 的实际构造链，每一步展开：
 
 ```
 new StringEventLog("Events")
-  = new FormatStringEventLog<256>("Events")
-    → 构造 EventLogBase<FormatStringLogMessage<256>>("Events", 20)
-
-// 展开后的构造函数（events.hpp:88-94）：
-_name    = "Events";              // dump 到 hs_err 时的标题
-_length  = 20;                    // LogEventsBufferEntries 默认值
-_count   = 0;                     // 当前条目数为 0
-_index   = 0;                     // 下一个写入位置为 0
-_mutex   = Mutex(Mutex::event, "Events", false, _safepoint_check_never);
-                                   //   ↑ rank=0（最低），不参与 safepoint 检查
-_records = new EventRecord<FormatBuffer<256>>[20];
-                                   //   ↑ 堆上分配 20 个槽位，每个槽含 {timestamp, thread, data}
+  = new FormatStringEventLog<256>("Events")              ← typedef 展开
+    → 构造 EventLogBase<FormatBuffer<256>>("Events", 20)  ← 模板继承链展开
 ```
 
-`ExtendedStringEventLog` 的构造完全同理，只是模板参数换成 `<512>`——异常栈信息比普通事件长，需要 512 字节缓冲区。`_records` 数组分配 20 个 `EventRecord<FormatBuffer<512>>`。
+最终落到 `EventLogBase` 的构造函数（`events.hpp:88-94`），每个成员字段的初始值：
 
-四条记录器在 `EventLog` 构造函数中把自己链入全局链表 `_logs_list`——这是崩溃时自动 dump 的前提。每个 `EventRecord` 存储三样东西：`double timestamp`（`os::elapsedTime()` 的秒数）、`Thread* thread`（写入线程的指针，可为 NULL）、`FormatBuffer<N>`（定长格式化字符串，N=256 或 512）。
+```
+_name    = "Events";                                      // dump 到 hs_err 时的段落标题
+_length  = 20;    // ← 来自 LogEventsBufferEntries，编译时模板常量
+_count   = 0;     // 当前条目数，还没人写
+_index   = 0;     // 下一个写入的槽位编号
+
+_mutex   = Mutex(Mutex::event, "Events", false, _safepoint_check_never);
+//               rank ↑          名称     ↑VM阻塞  ↑safepoint检查策略
+//                             构造一个 Mutex 对象传值给 _mutex 成员变量
+
+_records = new EventRecord<FormatBuffer<256>>[20];
+//         ↑ C++ 数组 new——在堆上分配 20 个连续的对象
+//         ↑ EventRecord 是 EventLogBase 内部定义的嵌套模板类
+//         ↑ FormatBuffer<256> 是固定 256 字节的格式化字符串缓冲区
+```
+
+`EventRecord<FormatBuffer<256>>` 这个嵌套模板类是理解整段代码的关键。看它的定义（`events.hpp:72-77`）：
+
+```cpp
+template <class X> class EventRecord : public CHeapObj {
+ public:
+  double  timestamp;   // os::elapsedTime() 的秒数，精确到毫秒
+  Thread* thread;      // 谁写的？可为 NULL
+  X       data;        // X = FormatBuffer<256>，一个固定 256 字节的字符串
+};
+```
+
+所以 `_records` 这个数组的实际内存布局是 20 组 `{double, Thread*, FormatBuffer<256>}` 连续排列。`ExtendedStringEventLog` 的构造完全同理，只是 `X = FormatBuffer<512>`——异常栈信息可能很长，需要 512 字节的缓冲区。
+
+四条记录器构造完成后，`EventLog` 基类构造函数把自己链入全局链表 `_logs_list`——后续崩溃时按这个链表顺序 dump。
 
 写入时拿 `Mutex::event` 锁 → 调用 `compute_log_index()` 拿当前 `_index` 并推进 → 把 `timestamp+thread+format` 写入 `_records[index]`。写满 20 条后 `_index` 绕回 0，覆盖最旧的记录。
 
