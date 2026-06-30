@@ -147,25 +147,49 @@ void check_ThreadShadow() {
 
 这是内联函数，仅做编译时断言——验证 `_pending_exception` 在 ThreadShadow 对象中的偏移量确实等于 JVM 硬编码的预期值。ThreadShadow 通过一个空虚拟函数 `unused_initial_virtual()` 强制编译器生成 vtable，确保内存布局的可预测性。如果编译器不生成 vtable，`check_ThreadShadow` 会在编译时捕获布局偏差（通过 `STATIC_ASSERT`）——这是 `vm_init_globals` 中最先执行的检查，防止整个 JVM 基于错位的内存布局运行。
 
-### basic_types_init — 编译时类型的运行时验证
+### basic_types_init — 基本类型映射表
 
-HotSpot 内部用 `BasicType` 枚举表示 Java 基本类型。这些值在编译时就已经确定（`globalDefinitions.hpp:626-644`），不是在 `basic_types_init()` 里赋的：
+JVM 运行时要用字符代号区分栈上的槽位里放的是什么——`int` 还是对象引用、`long` 还是 `float`。这些映射表在 `globalDefinitions.cpp` 中定义成三个全局数组，在 JVM 启动前就编译好了：
 
+```cpp
+// 字符映射表：BasicType → JVM 类型签名字符
+char type2char_tab[T_CONFLICT+1] = {
+  0, 0, 0, 0,           // 0-3 未使用
+  'Z', 'C', 'F', 'D',   // 4=T_BOOLEAN, 5=T_CHAR, 6=T_FLOAT, 7=T_DOUBLE
+  'B', 'S', 'I', 'J',   // 8=T_BYTE, 9=T_SHORT, 10=T_INT, 11=T_LONG
+  'L', '[', 'V',         // 12=T_OBJECT, 13=T_ARRAY, 14=T_VOID
+  0, 0, 0, 0, 0         // 15-19 (T_ADDRESS 等无对应字符)
+};
 ```
-T_BOOLEAN=4  T_CHAR=5   T_FLOAT=6   T_DOUBLE=7
-T_BYTE=8     T_SHORT=9  T_INT=10    T_LONG=11
-T_OBJECT=12  T_ARRAY=13 T_VOID=14
-T_ADDRESS=15 T_NARROWOOP=16 T_METADATA=17 T_NARROWKLASS=18
-T_CONFLICT=19 T_ILLEGAL=99
+
+`type2char_tab` 把 HotSpot 内部的 `T_INT=10` 映射成字节码签名用的 `'I'`。解释器遇到 `iload` 字节码时，用 `'I'` 判断当前栈槽位放的是 4 字节 int——不能按 8 字节的 long 处理，也不能当对象引用拿去做 GC 标记。`char2type` 是反方向——签名字符映射回枚举值。
+
+```cpp
+// 布局类型表：BasicType → 在内存中的布局类型
+BasicType type2field[T_CONFLICT+1] = {
+  (BasicType)0, (BasicType)0, (BasicType)0, (BasicType)0,  // 0-3
+  T_BOOLEAN, T_CHAR, T_FLOAT, T_DOUBLE,   // 4-7: 自映射
+  T_BYTE, T_SHORT, T_INT, T_LONG,         // 8-11: 自映射
+  T_OBJECT, T_OBJECT, T_VOID,             // 12-14: T_ARRAY→T_OBJECT (栈上存的是引用)
+  T_ADDRESS, T_NARROWOOP, T_METADATA,      // 15-17
+  T_NARROWKLASS, T_CONFLICT                // 18-19
+};
 ```
 
-`basic_types_init()` 的实际实现（`globalDefinitions.cpp:53-135`）全是 `#ifdef ASSERT` 包裹的断言——验证型校验，product 构建下整个函数体被编译成空。校验三件事：
+`type2field` 回答的问题是"`T_ARRAY` 在栈上存的是什么"。答案是 `T_OBJECT`——数组引用和普通对象引用一样，都是 8 字节（压缩时 4 字节）的指针。T_BOOLEAN 映射到自身——布尔值在内存中就是 1 字节的 `jbyte`。
 
-1. **基本大小不差**：`assert(4 == sizeof(jint))`、`assert(8 == sizeof(jlong))`——如果编译器给 jint 分配的不是 4 字节，JVM 启动时就崩溃，比后续类型混乱更难排查。
-2. **类型字符映射可逆**：`type2char(T_INT)` 返回 `'i'`，`char2type('i')` 返回 `T_INT`——字节码解释器和 JIT 编译器靠这个双向映射表工作。函数跑完 0-98 共 11 个类型验证。
-3. **布局类型自映射**：`type2field[T_INT]` 必须等于 `T_INT` 自身——因为 int 就是 int，不需要转换为另一种布局类型。而非布局类型（`T_ILLEGAL`）映射到合法布局类型。
+```cpp
+// 双字宽度布局表：BasicType → 按 HeapWord 对齐的"宽"类型
+BasicType type2wfield[T_CONFLICT+1] = {
+  T_INT,  T_INT,  T_FLOAT,  T_DOUBLE,   // 4-5:  boolean/char 按 int 处理
+  T_INT,  T_INT,  T_INT,    T_LONG,     // 8-10: byte/short/int 按 int
+  ...
+};
+```
 
-product 构建下 `basic_types_init()` 什么也不做。但它确实是一条防线——如果 HotSpot 被移植到 int 不是 4 字节的平台，`basic_types_init` 在 slowdebug 构建下直接毙掉，避免后续所有计算全部跑偏。
+`type2wfield` 是栈 banging 用的——JIT 编译器在方法入口检查栈空间时，不关心栈上是 boolean 还是 int，统一按 HeapWord（至少 4 字节）对齐。所以 T_BOOLEAN 和 T_BYTE 都映射到 T_INT。
+
+`basic_types_init()` 本身做的事很简单——遍历 0 到 98，对每个有签名字符的类型验证 `char2type(type2char(i)) == i`（可逆），验证 layout 类型 `type2field[T_INT]` 必须等于 `T_INT` 自身（非布局类型映射到合法布局类型），验证大小一致性——`type2size[vt] == type2size[type2field[vt]]`。这些全在 `#ifdef ASSERT` 里，product 构建下整个函数体为空。
 
 ### eventlog_init — 崩溃事件日志
 
