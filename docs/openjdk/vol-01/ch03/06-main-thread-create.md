@@ -197,7 +197,16 @@ void C(TRAPS) {
 
 构造时暂为 NULL/0——这是 HotSpot 的设计惯例：构造函数不读 OS 信息，留到 `record_stack_base_and_size()` 统一处理。
 
-当前线程（LWP-2，由 JLI 层的 `pthread_create` 创建）的栈在 `new JavaThread()` 时完全可以读到——本代码正运行在它上面。但 HotSpot 选择了"延迟读取"的惯例：LWP-2 的栈地址在 Stage 1 的 `os::init()`（参阅 3.3 的 `capture_initial_stack`）中已经通过 `/proc/self/stat` + `/proc/self/maps` 提前捕获，保存在 `os::Linux` 的静态变量中，由 `record_stack_base_and_size()` 取出写入。对于 HotSpot 自己的 `pthread_create` 创建的子线程（如 CompilerThread、GC 线程，在 ch04 的 `init_globals()` 阶段创建）来说，`JavaThread` 对象构造时 OS 线程还不存在（先 new JavaThread，再 os::create_thread 调 pthread_create），构造函数里根本没栈可读。两套初始化在一个统一的"先构造对象、后读栈"的序列中，由 `record_stack_base_and_size()` 统一写入真实值。`stack_end() = _stack_base - _stack_size` 是所有栈操作的基础。
+当前线程（LWP-2）的栈在 `new JavaThread()` 时完全可以读到——本代码正运行在它上面。但 HotSpot 选择了"延迟读取"的惯例：LWP-2 的栈地址在 Stage 1 的 `os::init()` 内部已经通过 `capture_initial_stack()` 提前捕获。
+
+`capture_initial_stack()` 的实现（`os_linux.cpp:1217-1421`）分三步：
+1. `getrlimit(RLIMIT_STACK)` → 取系统栈大小限制，钳制为 8MB
+2. `dlsym("__libc_stack_end")` → 失败后回落 `/proc/self/stat` 第 28 字段 → 栈顶近似地址
+3. `find_vma()` 读取 `/proc/self/maps` → 找包含栈顶地址的 VMA，取其 high 为精确栈顶
+
+结果存入 `os::Linux` 的两个静态变量——`_initial_thread_stack_bottom` 和 `_initial_thread_stack_size`——后续 `record_stack_base_and_size()` 通过 `is_primordial_thread()` 检查，直接读这两个变量写入 `_stack_base` 和 `_stack_size`。
+
+对于 HotSpot 自己的 `pthread_create` 创建的子线程（CompilerThread、GC 线程，ch04 创建），`JavaThread` 对象构造时 OS 线程还不存在，走 `pthread_getattr_np()` 实时查询。两套路径在 `record_stack_base_and_size()` 中统一处理，`_stack_end() = _stack_base - _stack_size` 是所有栈操作的基础。
 
 **② 内存管理**——线程本地的临时内存池和 GC 句柄区：
 
