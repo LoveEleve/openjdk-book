@@ -236,48 +236,126 @@ void Events::init() {
 
 `LogEvents` 是 diagnostic 类型 flag，默认 true。
 
-> 本节涉及的 C++ 语法 ——嵌套模板类、构造函数初始化列表、`va_list` 可变参数、RAII 锁守卫、环形缓冲区、`typedef` 模板别名—— 已移至 [C++ 语法速查](../../vol-cxx/README.md) 卷统一讲解。
+`Events::init()` 四个 `new` 调用背后发生了什么？每行拆开看 C++ 语法，并用 Java 代码对比——两种语言的对应关系一目了然。
 
-一行 `new StringEventLog("Events")` 背后有两个模板类的定义。先看 `FormatStringEventLog` 的完整源码（`events.hpp:145-148`）：
+#### `new StringEventLog("Events")` —— typedef 与模板实例化
 
 ```cpp
-template <size_t bufsz>
-class FormatStringEventLog : public EventLogBase< FormatStringLogMessage<bufsz> > {
+typedef FormatStringEventLog<256> StringEventLog;          // C++：类型别名
+typedef FormatStringEventLog<512> ExtendedStringEventLog;
+```
+
+`typedef 原名 别名` 的意思是——`别名` 这个单词可以用在任何需要 `原名` 的地方。这里的"原名"不是普通的类名，而是一个**模板实例化后的具体类型**。`FormatStringEventLog<256>` 是模板 `FormatStringEventLog<bufsz>` 把 `bufsz=256` 代入后产生的类。Java 里没有 `typedef`，最接近的概念是 Kotlin 的 `typealias` 或者 Lombok 的缩写注解，或者干脆在 Java 代码中每次手写全名。
+
+```java
+// Java 中没有 typedef，每次写全名
+class StringEventLog extends FormatStringEventLog<256> { ... }
+// 每次使用都要写：new FormatStringEventLog<256>("Events")
+```
+
+```cpp
+new StringEventLog("Events")          // typedef 展开
+= new FormatStringEventLog<256>("Events")  // bufSz=256 代入模板
+```
+
+#### FormatStringEventLog 的构造函数 —— 初始化列表
+
+```cpp
+template <size_t bufsz>                                        // ← 声明：bufSz 是编译时常量
+class FormatStringEventLog : public EventLogBase<FormatStringLogMessage<bufsz>> {
  public:
   FormatStringEventLog(const char* name, int count = LogEventsBufferEntries)
-    : EventLogBase< FormatStringLogMessage<bufsz> >(name, count) {}
+    : EventLogBase<FormatStringLogMessage<bufsz>>(name, count) {}  // ← 初始化列表
 };
 ```
 
-逐行解释 C++ 语法。`template <size_t bufsz>` 声明这是一个模板类——`bufsz` 是编译时常量，`new StringEventLog` 实际变成 `new FormatStringEventLog<256>`，`<256>` 替代 `bufsz`。`: public EventLogBase< FormatStringLogMessage<bufsz> >` 是继承声明——`FormatStringEventLog` 继承自 `EventLogBase`，父类的模板参数是 `FormatStringLogMessage<bufsz>`，不是一个裸类型而是一个**带模板参数的内层模板实例**。
+C++ 构造函数的花括号 `{}` 之前、冒号 `:` 之后是**初始化列表**。它让子类在进入函数体 `{}` 之前，先调用父类的构造函数——参数 `name` 和 `count` 从这里传进去。`{}` 是空的，因为子类没有自己的成员需要初始化。
 
-构造函数的 `: EventLogBase<...>(name, count)` 是 C++ 的**初始化列表**——在进入构造函数的 `{}` 花括号体之前，先调用父类 `EventLogBase` 的构造函数，把 `name` 和 `count` 传给父类。`{}` 里面是空的——因为子类没有任何自己的成员要初始化，全部交给父类。
+Java 中没有初始化列表语法。必须在子类构造函数体的第一行调用 `super(name, count)`。效果相同，但 Java 版本是运行时调用，C++ 版本是编译时绑定。
 
-再展开 `FormatStringLogMessage` 的定义（`events.hpp:139-140`）：
-
-```cpp
-template <size_t bufsz>
-class FormatStringLogMessage : public FormatBuffer<bufsz> {};
+```java
+// Java 等价写法——用 super() 第一行替代初始化列表
+class FormatStringEventLog<BufSz extends Integer> extends EventLogBase<...> {
+    FormatStringEventLog(String name, int count) {
+        super(name, count);  // ← C++ : EventLogBase<...>(name, count)
+    }
+}
 ```
 
-`FormatStringLogMessage<256>` 就是 `FormatBuffer<256>` 的子类——什么也不加，只是换了个名字。`FormatBuffer<bufsz>` 的定义（`formatBuffer.hpp:51-70`）分上下两层。
-
-上层是一个轻量基类 `FormatBufferBase`，只存一个 `char*` 指针，没有实际存储空间：
+#### EventLogBase 的构造函数 —— 成员初始化
 
 ```cpp
-class FormatBufferBase {
-  char* _buf;                        // 指向实际缓冲区的指针
-  inline FormatBufferBase(char* buf) : _buf(buf) {}  // 构造时接收指针
-  static const int BufferSize = 256; // 模板默认值——FormatBuffer<> 等价于 FormatBuffer<256>
+EventLogBase<T>(const char* name, int length = LogEventsBufferEntries):
+    _name(name),
+    _length(length),
+    _count(0),
+    _index(0),
+    _mutex(Mutex::event, name, false, Monitor::_safepoint_check_never) {
+  _records = new EventRecord<T>[length];          // 堆上分配 length 个槽位
+}
+```
+
+`: _name(name), _count(0), ...` 是**成员初始化列表**——直接调每个成员的构造函数，省去"先默认构造再赋值"的多余工作。C++ 规定初始化顺序由类中声明的顺序决定，不是列表中写的顺序。`_records = new EventRecord<T>[length]` 相当于 Java 的 `new ArrayList<>(20)` 预分容量。
+
+Java 对比——这里最关键的一点：**C++ 可以用 `new T[20]` 在堆上分配 20 个连续的对象**。Java 中搞环形缓冲区必须用数组加包装类：
+
+```java
+// Java 等价写法——数组 new + RingBuffer 包装类
+class EventLogBase<T> {
+    final String name;          // _name
+    final int length;           // _length, 默认 20
+    int count = 0;             // _count
+    int index = 0;             // _index
+    ReentrantLock mutex = new ReentrantLock();  // _mutex (简化, C++中是Monitor)
+    EventRecord<T>[] records = new EventRecord[20];  // _records
+
+    EventLogBase(String name, int length) {
+        this.name = name;
+        this.length = length;
+    }
+}
+```
+
+#### EventRecord —— 每条日志记录的存储
+
+```cpp
+template <class T> class EventLogBase : public EventLog {
+  template <class X> class EventRecord : public CHeapObj<mtInternal> {
+   public:
+    double  timestamp;
+    Thread* thread;
+    X       data;       // X = FormatBuffer<256> → 内嵌 256 字节 char 数组
+  };
+  EventRecord<T>* _records;   // 用外层 T 实例化内层 X
 };
 ```
 
-下层是真正的 `FormatBuffer<bufsz>` 模板，嵌着实际的 `char` 数组。默认构造函数的实现（`formatBuffer.hpp:69-88`）：
+`EventRecord` 是嵌套在 `EventLogBase<T>` 里面的**第二个模板类**——外层模板参数是 `T`，内层模板参数是 `X`。`_records` 的类型固定为 `EventRecord<T>*`，即用外层 `T` 绑定了内层 `X`。内层 `EventRecord` 嵌在外层 `EventLogBase` 里面是语义封装——一种日志记录格式属于该日志类定义的一部分，不暴露给外部。
+
+每个 `EventRecord` 存三样东西：时间戳（`double`，秒数）、线程指针（`Thread*`）、数据（`X`）。当 `T=FormatBuffer<256>` 时，每个槽位 = `{ double timestamp; Thread* thread; char _buffer[256]; }`——所有事件文本都写在这 256 字节里。
+
+Java 对比——Java 的数组是引用数组，每个元素需要单独 new，和 C++ 的连续内存分配不同：
+
+```java
+// Java 等价——注意每个 Element 需要单独 new
+class EventLogBase<T extends FormatBuffer> {
+    class EventRecord {
+        double timestamp;
+        Thread thread;
+        T data;
+    }
+    EventRecord[] records = new EventRecord[20];  // Java: 引用数组, 需逐个 new
+}
+// 在构造函数中初始化每个元素
+for (int i = 0; i < 20; i++) records[i] = new EventRecord();
+```
+
+#### FormatBuffer —— 自带存储的字符串缓冲区
 
 ```cpp
-template <size_t bufsz>
+template <size_t bufsz = FormatBufferBase::BufferSize>  // 默认 256
 class FormatBuffer : public FormatBufferBase {
-  char _buffer[bufsz];               // ★ 真正存文本的地方——栈上的一小块 char 数组
+  char _buffer[bufsz];               // ★ 真正存文本的地方
  protected:
   inline FormatBuffer() : FormatBufferBase(_buffer) {
     _buf[0] = '\0';                  // 空字符串
@@ -285,69 +363,109 @@ class FormatBuffer : public FormatBufferBase {
 };
 ```
 
-关键在初始化列表 `: FormatBufferBase(_buffer)`。`_buffer` 是 256 字节的 `char` 数组，位于 `FormatBuffer` 对象内部（对象大小 = 指针 + 256 字节 ≈ 264 字节）。`FormatBufferBase(_buffer)` 这把 `_buffer` 的地址传给了基类的 `_buf` 指针——所以 `_buf` 永远指向 `_buffer[0]`。
+`char _buffer[bufsz]` 是 C++ 的"数组成员"——不是堆上 `malloc` 出来的，是直接嵌在对象内部的固定大小字符数组。`bufsz=256` 时就是 `char _buffer[256]`。`FormatBufferBase(_buffer)` 在初始化列表中把 `_buffer` 地址传给基类的 `_buf` 指针——所以 `_buf` 始终指向 `_buffer[0]`。
 
-两层分拆的设计意图：`FormatBufferBase` 只有指针、没有存储，因为还有另一种使用场景——`FormatBufferResource` 接收的是 ResourceArea 分配的 `char*`，不需要自带存储。`FormatBuffer<bufsz>` 则是"自带存储"的版本，256/512 字节直接嵌在对象内，不需要外部分配。
+Java 中用 `byte[]` 或 `char[]` 做内嵌缓冲区，概念更直白（Java 没有栈内嵌对象自动布局，成员数组本身就是引用）：
 
-`printv(format, ap)` 内部就是一行标准 C（`formatBuffer.hpp:99-100`）：
+```java
+// Java 等价写法
+class FormatBuffer {
+    char[] buffer = new char[256];  // _buffer[bufsz]
+    int bufSz = 256;
 
-```cpp
-void FormatBuffer<bufsz>::printv(const char* format, va_list ap) {
-  jio_vsnprintf(_buf, bufsz, format, ap);   // 写入 _buf ← _buffer[0]
+    void printv(String format, Object... args) {
+        String s = String.format(format, args);   // jio_vsnprintf 的 Java 等价
+        char[] src = s.toCharArray();
+        System.arraycopy(src, 0, buffer, 0, Math.min(src.length, bufSz));
+    }
 }
 ```
 
-所以 `EventLogBase<FormatBuffer<256>>` 的 `_records` 数组中，每个 `EventRecord` 内的 `data` 字段是一个 264 字节的 `FormatBuffer` 对象——内嵌 `char _buffer[256]`，所有事件文本都直接写在这 256 字节里。
+#### 环形缓冲区写入逻辑
 
-现在回看 `new StringEventLog("Events")` 的完整构造链，每一步标出 C++ 机制：
-
-```
-new StringEventLog("Events")
-│
-├─ [typedef 展开] new FormatStringEventLog<256>("Events")
-│    │  template 参数 bufsz=256 代入
-│    │
-│    └─ [初始化列表] : EventLogBase< FormatStringLogMessage<256> >("Events", 20)
-│         │  FormatStringLogMessage<256> = FormatBuffer<256>（typedef 展开）
-│         │  "Events" 传给 name, 20 是 LogEventsBufferEntries 默认值
-│         │
-│         └─ [父类构造] EventLogBase< FormatBuffer<256> >("Events", 20)
-│              展开后各字段初始值（events.hpp:88-94）：
-│              _name    = "Events"    // const char*
-│              _length  = 20         // int
-│              _count   = 0          // int
-│              _index   = 0          // int
-│              _mutex   = Mutex(Mutex::event, "Events", false, _safepoint_check_never)
-│              _records = new EventRecord< FormatBuffer<256> >[20]
-│                         // ↑ C++ 数组 new，堆上分配 20 个 EventRecord 对象
-│              _records[i] = { double timestamp; Thread* thread; FormatBuffer<256> data; }
-│                         // ↑ 每个槽位含时间戳、线程指针、256 字节字符串
+```cpp
+int compute_log_index() {
+  int index = _index;
+  if (_count < _length) _count++;
+  _index++;
+  if (_index >= _length) _index = 0;
+  return index;
+}
 ```
 
-`ExtendedStringEventLog` 的构造完全同理，`bufsz=512` 代入——每个 `EventRecord` 的 `data` 字段是 `FormatBuffer<512>`，异常栈信息可能很长。
+初始 `_index=0`，前 20 次写入 `_count` 从 0 递增到 20，`_index` 从 0 到 19。第 21 次写入时 `_count=20`、`_index` 绕回 0——覆盖最旧的槽位。此时 `_index` 同时是"下一个写入位置"和"最旧元素位置"。
 
-写入时拿 `Mutex::event` 锁 → 调用 `compute_log_index()` 拿当前 `_index` 并推进 → 把 `timestamp+thread+format` 写入 `_records[index]`。写满 20 条后 `_index` 绕回 0，覆盖最旧的记录。
+```java
+// Java 等价写法——ArrayDeque 自动处理环形逻辑
+class RingBuffer<T> {
+    T[] records = (T[]) new Object[20];
+    int index = 0;
+    int count = 0;
 
-`ExtendedStringEventLog` 的构造完全同理，`bufsz=512` 代入——每个 `EventRecord` 的 `data` 字段是 `FormatBuffer<512>`。
+    void add(T record) {
+        records[index] = record;
+        if (count < 20) count++;
+        index++;
+        if (index >= 20) index = 0;       // 绕回
+    }
+}
+```
 
-四条记录器在构造时还悄悄把自己链入了全局链表。`EventLog` 构造函数的实现（`events.cpp:42-49`）：
+#### 写入事件文本——va_list + MutexLockerEx
+
+```cpp
+// Events::log() —— 用户接口，接收 ... 参数
+void Events::log(Thread* thread, const char* format, ...) {
+  va_list ap;
+  va_start(ap, format);               // ap 指向 format 之后的内存位置
+  _messages->logv(thread, format, ap); // 转发 va_list
+  va_end(ap);
+}
+```
+
+`va_list` 是 C 的可变参数机制——通过栈帧指针定位函数调用时传入的额外参数。`va_start(ap, format)` 让 `ap` 指向 `format` 参数之后的内存（即第一个 `...` 参数的位置）。`logv` 中的 `MutexLockerEx ml(&_mutex, ...)` 是 RAII 锁——构造时 lock，析构时自动 unlock。
+
+```java
+// Java 等价——String.format + synchronized
+static void log(Thread thread, String format, Object... args) {
+    String msg = String.format(format, args);  // va_list + vsnprintf 的 Java 等价
+    synchronized (mutex) {                     // MutexLockerEx RAII 的 Java 等价
+        records[index] = new EventRecord(thread, msg);
+        // compute_log_index()...
+    }
+}  // synchronized 块结束 = MutexLockerEx 析构自动 unlock
+```
+
+#### EventLog 构造函数 —— 头插法链表
 
 ```cpp
 EventLog::EventLog() {
-  ThreadCritical tc;               // 单线程保护
-  _next = Events::_logs;           // 头插法：新节点指向原先的头
-  Events::_logs = this;            // 更新全局链表头
+  ThreadCritical tc;
+  _next = Events::_logs;      // 新节点 next → 旧头
+  Events::_logs = this;        // 链表头 → 新节点
 }
 ```
 
-`Events::_logs` 是 `static EventLog*`，所有 EventLog 对象通过它串成单链表。四条记录器构造完后的链表：
+四条记录器构造完后——最后 new 的在最前面：
 
 ```
 Events::_logs → [_deopt_messages] → [_redefinitions] → [_exceptions] → [_messages] → NULL
-                 最后 new 的在最前（头插法）
 ```
 
-JVM 中约 100 处调用 `Events::log(thread, "Thread added: %p", p)` 写入 `_messages`，`Events::log_exception(...)` 写入 `_exceptions`，`Events::log_deopt_message(...)` 写入 `_deopt_messages`，`Events::log_redefinition(...)` 写入 `_redefinitions`。崩溃时 `VMError::report()` → `Events::print_all()` → 遍历 `_logs` 链表 → `print_log_on()` dump 到 `hs_err_pid<pid>.log`。
+```java
+// Java 等价——LinkedList.addFirst()
+class EventLog {
+    EventLog next;
+    static EventLog logs = null;  // Events::_logs
+
+    EventLog() {
+        next = logs;     // 新节点 next → 旧头
+        logs = this;     // 链表头 → 新节点
+    }
+}
+```
+
+写入时拿 `Mutex::event` 锁 → 调用 `compute_log_index()` 拿当前 `_index` 并推进 → 把 `timestamp+thread+format` 写入 `_records[index]`。写满 20 条后 `_index` 绕回 0。JVM 中约 100 处调用 `Events::log(thread, "Thread added: %p", p)` 写入 `_messages`。崩溃时 `VMError::report()` → `Events::print_all()` → 遍历 `_logs` 链表 → `print_log_on()` dump 到 `hs_err_pid<pid>.log`。
 
 ### mutex_init — 约 80 把全局锁的全序系统
 
