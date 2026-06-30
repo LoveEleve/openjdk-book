@@ -524,16 +524,18 @@ if (Posix::set_minimum_stack_sizes() == JNI_ERR) {
 
 ```c
 // === os_linux.cpp ===
-if (!Arguments::created_by_java_launcher()) {   // 不是标准 java 命令启动
+suppress_primordial_thread_resolution = Arguments::created_by_java_launcher();
+if (!suppress_primordial_thread_resolution) {                     // 嵌入式 JVM 才需要
     Linux::capture_initial_stack(JavaThread::stack_size_at_create());
 }
+#endif
 ```
 
-Stage 2 的 `init_before_ergo` 已经算好了栈守卫区的大小，但那些值要能工作，必须先知道当前线程的栈到底在哪——从哪个地址开始，到哪个地址结束。这个问题看似简单，实际上分成两种情况：
+Stage 2 的 `init_before_ergo` 已经算好了栈守卫区的大小，但那些值要能工作，必须先知道当前线程的栈到底在哪——从哪个地址开始，到哪个地址结束。
 
-**标准 `java` 启动时：** 进程是 `java` 命令，`main` 线程是第一个线程。Stage 1 的 `os::init()` 阶段已经通过 `record_stack_base_and_size()` 拿到了栈的起止地址（当时程序刚启动，栈指针就在栈顶附近，直接读 `%rsp` 即可）。这里不需要再捕获，直接跳过。
+**标准 `java` 启动时：** `Arguments::created_by_java_launcher()` 返回 true（因为 `_sun_java_launcher` 被设为 `"SUN_STANDARD"`，与默认值 `"generic"` 不同），`suppress_primordial_thread_resolution = true`，`if` 条件不成立，`capture_initial_stack` 被跳过。当前线程（LWP-2，由 JLI 层 `pthread_create` 创建）不需要 /proc 解析——它就是一个普通 pthread，后续 Stage 4 的 `record_stack_base_and_size()` 会通过 `pthread_getattr_np()` 查询栈信息。
 
-**非标准启动时：** 进程可能是 Tomcat（C 程序内加载 libjvm.so）、可能是 IDE（内嵌 JVM 插件）、可能是 `jsvc`（daemon 方式启动）。调用 `JNI_CreateJavaVM()` 的线程根本不是 `java` 命令的主线程——HotSpot 不知道这个线程的栈有多大，但后续必须在这上面画守卫区、做溢出检测。
+**非标准启动时：** 调用 `JNI_CreateJavaVM()` 的线程是程序的原始线程（primordial thread），不是 `pthread_create` 创建的。HotSpot 不知道这个线程的栈有多大，但后续必须在这上面画守卫区、做溢出检测。
 
 `capture_initial_stack` 就是解决这个问题的。它要得到两个值：栈的**顶部**（起始地址，高地址端）和栈的**大小**。大小相对简单——直接 `getrlimit(RLIMIT_STACK)` 读当前进程的栈软限制（`ulimit -s`）。难的是找栈顶部，源码（`os_linux.cpp`）按三层优先级尝试：
 
