@@ -428,6 +428,38 @@ new FormatStringEventLog<256>("Events") 的 C++ 构造顺序：
 第 5 步: FormatStringEventLog 函数体       // 空
 ```
 
+#### 四条记录器由谁在什么时候写
+
+四个记录器在 `eventlog_init()` 中创建后，在整个 JVM 运行期间被不同模块写入。写入流程都是 `Events::xxx(thread, format, ...)` → `va_start` → `_xxx->logv(...)` → 加锁 → 环形写入。区别只是调用方不同：
+
+**`_messages`（通用事件）—— 线程管理、代码管理**
+
+调用者：
+- `Threads::add()` 写 `"Thread added: 0x..."`（`thread.cpp:4485`）
+- `Threads::remove()` 写 `"Thread exited: 0x..."`（`thread.cpp:4536`）
+- `nmethod::make_not_entrant()` 写 `"flushing nmethod ..."`（`nmethod.cpp:1302`）
+- `EventMark` 构造/析构写 `"Compilation of ..."`、`"GC phase ..."` 等
+
+**`_exceptions`（内部异常）—— C++ 层 detect 到 Java 异常时**
+
+调用者：
+- `Exceptions::_throw()` 写异常类名和 C++ 源码位置（`exceptions.cpp:170`）
+- `SharedRuntime::throw_StackOverflowError()` 写 `"StackOverflowError at 0x..."`（`sharedRuntime.cpp:828`）
+- `SharedRuntime::throw_NullPointerException()` 写 `"NullPointerException at vtable entry..."`（`sharedRuntime.cpp:851`）
+
+**`_deopt_messages`（去优化事件）—— JIT 编译帧被拆回解释器时**
+
+调用者：
+- `Deoptimization::unpack_frames()` 写 `"DEOPT UNPACKING pc=... sp=... mode=..."`（`deoptimization.cpp:647`）
+- `Deoptimization::uncommon_trap()` 写 `"Uncommon trap: reason=... action=... pc=..."`（`deoptimization.cpp:1646`）
+
+**`_redefinitions`（类重定义）—— JVMTI Instrumentation 触发时**
+
+调用者：
+- `VM_RedefineClasses::redefine_single_class()` 写 `"redefined class name=..., count=..."`（`jvmtiRedefineClasses.cpp:4180`）
+
+所有写入路径的最终落点都是环形缓冲区——20 个槽位，写满后覆盖最旧的。如果 JVM 在任意时刻崩溃，`hs_err_pid.log` 会按 `_logs` 链表顺序 dump 全部四条记录器，包含崩溃前最后 20 条各类事件。
+
 因为是 C++ 继承链——`EventLog` 是最顶层的基类，它的构造函数体**最先**执行。后面 `EventLogBase` 的 init list 和函数体、`FormatStringEventLog` 的 init list 都是之后的事。也就是说，`EventLog` 构造函数在对象的字段还没初始化完之前，就已经把还没有完全构造的对象的指针塞进了全局链表。
 
 四条记录器各存不同内容，写入入口也不一样。JVM 运行时约 100 处调了这四个方法：
