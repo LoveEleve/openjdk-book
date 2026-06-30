@@ -197,7 +197,7 @@ void C(TRAPS) {
 
 构造时暂为 NULL/0——这是 HotSpot 的设计惯例：构造函数不读 OS 信息，留到 `record_stack_base_and_size()` 统一处理。
 
-当前线程（LWP-2）的栈在 `new JavaThread()` 时完全可以读到——本代码正运行在它上面。但 HotSpot 选择了"延迟读取"的惯例：LWP-2 的栈地址在 Stage 1 的 `os::init()` 内部已经通过 `capture_initial_stack()` 提前捕获。
+当前线程（LWP-2）的栈在 `new JavaThread()` 时完全可以读到——本代码正运行在它上面。但 HotSpot 选择了"延迟读取"的惯例：LWP-2 的栈地址在 Stage 1 的 `os::init_2()` 内部已经通过 `capture_initial_stack()` 提前捕获。
 
 `capture_initial_stack()` 的实现（`os_linux.cpp:1217-1421`）分三步：
 1. `getrlimit(RLIMIT_STACK)` → 取系统栈大小限制，钳制为 8MB
