@@ -94,17 +94,77 @@ JavaThread 和 NonJavaThread 是两条完全独立的继承线，分别维护各
 
 本篇的任务是创建第一个 `JavaThread`——理解构造函数在初始化哪些字段，是阅读 `new JavaThread()` 源码的前提。下面按功能分组梳理 Thread 基类的核心字段和 JavaThread 的专有字段。
 
-#### ThreadShadow 基类字段
+#### ThreadShadow 基类字段 —— Java 与 C++ 异常之间的桥梁
 
-`ThreadShadow`（`exceptions.hpp:60-95`）是 `Thread` 的直接父类。字段很少，但承担 JVM 异常传播的核心机制：
+`ThreadShadow`（`exceptions.hpp:60-95`）是 `Thread` 的直接父类，字段很少但职责很重。
+
+核心矛盾：HotSpot 是 **C++ 程序**，但它的职责是**执行 Java 代码**。Java 有自己的异常机制——`throw new NullPointerException()` 会在 Java 调用栈上传播一个 `java.lang.NullPointerException` 对象（Java 堆上的 `oop`）。但 HotSpot 内部的 C++ 代码不能使用 C++ 的 `throw` 来表示 Java 异常——C++ 的异常对象是 C++ 类的实例，与 Java 堆上的 `oop` 完全不兼容。
+
+`ThreadShadow` 解决这个问题：在 C++ 代码中，不是"抛出"一个 Java 异常，而是把异常对象**写入线程的 `_pending_exception` 字段**，然后通过 `return` 逐层向上传播。
 
 | 字段 | 类型 | 初始值 | 说明 |
 |------|------|--------|------|
-| `_pending_exception` | `oop` | NULL | 待处理的异常对象——VM 代码中抛出异常时先写入此字段，回到 Java 边界时再正式抛给 Java 层 |
-| `_exception_file` | `const char*` | NULL | 异常发生时的文件名（仅调试版本） |
-| `_exception_line` | `int` | 0 | 异常发生时的行号（仅调试版本） |
+| `_pending_exception` | `oop` | NULL | 待处理的 Java 异常对象——C++ 代码在此字段"存放"一个 Java 异常对象 |
+| `_exception_file` | `const char*` | NULL | 异常发生时的文件名（调试信息） |
+| `_exception_line` | `int` | 0 | 异常发生时的行号（调试信息） |
 
-`_pending_exception` 是 HotSpot 内部异常传播的"中转站"。Java 代码的异常通过字节码的 `athrow` 指令正常处理，而 JVM 内部的 C++ 代码通过 `THROW_MSG(vmSymbols::java_lang_NullPointerException(), "...")` 宏写入 `_pending_exception`。`ThreadShadow` 还包含一个虚拟函数 `unused_initial_virtual()`，其存在的唯一目的是强制 C++ 编译器为 `ThreadShadow` 生成 vtable——确保 `Thread` 的内存布局从 `ThreadShadow` 的偏移 0 开始，而不是被编译器优化到偏移 4（在 Thread 自己的 vtable 之后）。`vm_init_globals()` 中的 `check_ThreadShadow()` 正是验证这个偏移是否正确。
+写端和读端的两个宏展示这套机制的完整流程：
+
+```cpp
+// === 写端：THROW_MSG 宏 ===
+#define THROW_MSG(name, message) \
+  { Exceptions::_throw_msg(THREAD_AND_LOCATION, name, message); return; }
+
+// 展开后等价于：
+//   set_pending_exception(null_pointer_exception_oop, __FILE__, __LINE__);
+//   return;  ← 不是 throw！是 return！
+
+// === 读端：CHECK 宏 ===
+#define CHECK  THREAD); if (HAS_PENDING_EXCEPTION) return; (void)(0
+
+// 使用方式（典型的 JVM 内部函数调用模式）：
+//   some_function(args, CHECK);
+// 翻译成人话：调用 some_function。它返回后，检查当前线程的 _pending_exception
+// 是否非 NULL——如果是，立即 return，把异常向上层传播。
+```
+
+来看一个具体的函数调用例子——假设 C++ 函数 `A()` 调用 `B()`，`B()` 调用 `C()`：
+
+```cpp
+void A(TRAPS) {
+  B(CHECK);    // A 调用 B，如果 B 设置了 pending exception，立即 return
+  printf("xxx");   // ← 这行不会执行（如果 B 或 C 设置了异常）
+}
+
+void B(TRAPS) {
+  C(CHECK);    // B 调用 C，如果 C 设置了 pending exception，立即 return
+}
+
+void C(TRAPS) {
+  Handle exc = ...; // 在 Java 堆上创建 NullPointerException 对象
+  THROW_OOP(exc);   // 把 exc 写入 _pending_exception，然后 return
+}
+```
+
+执行过程：
+1. `C()` 在 Java 堆上分配 `NullPointerException` 对象，写进当前线程的 `_pending_exception`，`return`
+2. `B()` 中的 `CHECK` 宏检测到 `_pending_exception != NULL`，立即 `return`
+3. `A()` 中的 `CHECK` 宏同样检测到，立即 `return`
+4. 异常逐层传出，最终到达 Java 边界（解释器或 JIT 代码的调用点），JVM 检查 `_pending_exception` 非 NULL，将其转换为 Java 层的 `athrow`
+
+与 C++ 异常的对比：
+
+| | C++ 异常 (`throw`) | JVM 异常传播 (`_pending_exception`) |
+|---|---|---|
+| **传播方式** | 栈展开（stack unwinding） | 逐层 `return`（手动传播） |
+| **异常对象存储位置** | 临时对象的析构内存 | Java 堆上的 `oop`（GC 管理） |
+| **显式性** | 隐式（catch 捕获取） | 每个调用点写 `CHECK`（必须显式检查） |
+| **性能** | 零成本（除非真的 throw） | 每个调用点一次 NULL 检查（比 return 开销大一点） |
+| **主要用途** | C++ 程序的运行时错误 | 将 Java 异常对象从 C++ 代码传到 Java 代码 |
+
+`THREAD_AND_LOCATION` 宏传递 `(线程指针, __FILE__, __LINE__)`，确保每个异常都能追溯到 C++ 源码位置——这也是 `_exception_file` 和 `_exception_line` 的来源。
+
+另外，`ThreadShadow` 还包含一个空虚拟函数 `unused_initial_virtual()`——它不执行任何操作，唯一目的是强制编译器为 `ThreadShadow` 生成 vtable，确保 `Thread` 的内存布局从 `ThreadShadow` 的偏移 0 开始。`vm_init_globals()` 中的 `check_ThreadShadow()` 会验证 `_pending_exception` 的偏移是否正确。
 
 #### Thread 基类字段
 
