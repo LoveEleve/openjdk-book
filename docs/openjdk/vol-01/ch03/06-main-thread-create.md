@@ -147,19 +147,25 @@ void check_ThreadShadow() {
 
 这是内联函数，仅做编译时断言——验证 `_pending_exception` 在 ThreadShadow 对象中的偏移量确实等于 JVM 硬编码的预期值。ThreadShadow 通过一个空虚拟函数 `unused_initial_virtual()` 强制编译器生成 vtable，确保内存布局的可预测性。如果编译器不生成 vtable，`check_ThreadShadow` 会在编译时捕获布局偏差（通过 `STATIC_ASSERT`）——这是 `vm_init_globals` 中最先执行的检查，防止整个 JVM 基于错位的内存布局运行。
 
-### basic_types_init — 基本类型注册
+### basic_types_init — 编译时类型的运行时验证
 
-```cpp
-void basic_types_init() {
-  T_BOOLEAN = 4; T_CHAR = 5; T_FLOAT = 6; T_DOUBLE = 7;
-  T_BYTE = 8; T_SHORT = 9; T_INT = 10; T_LONG = 11;
-  T_OBJECT = 12; T_ARRAY = 13; T_VOID = 15;
-  T_ADDRESS = 16; T_NARROWOOP = 17; T_METADATA = 18;
-  T_NARROWKLASS = 19; T_CONFLICT = 20; T_ILLEGAL = 99;
-}
+HotSpot 内部用 `BasicType` 枚举表示 Java 基本类型。这些值在编译时就已经确定（`globalDefinitions.hpp:626-644`），不是在 `basic_types_init()` 里赋的：
+
+```
+T_BOOLEAN=4  T_CHAR=5   T_FLOAT=6   T_DOUBLE=7
+T_BYTE=8     T_SHORT=9  T_INT=10    T_LONG=11
+T_OBJECT=12  T_ARRAY=13 T_VOID=14
+T_ADDRESS=15 T_NARROWOOP=16 T_METADATA=17 T_NARROWKLASS=18
+T_CONFLICT=19 T_ILLEGAL=99
 ```
 
-HotSpot 用整数常量（T_INT=10, T_OBJECT=12 等）在内部表示 Java 基本类型——后续字节码解释器、JIT 编译器的类型系统、GC 的 oop 遍历都靠这组常量区分"这个栈槽位存的是 int 还是对象引用"。不区分就会把 4 字节的 int 当成 oop 去 GC 标记——直接崩溃。
+`basic_types_init()` 的实际实现（`globalDefinitions.cpp:53-135`）全是 `#ifdef ASSERT` 包裹的断言——验证型校验，product 构建下整个函数体被编译成空。校验三件事：
+
+1. **基本大小不差**：`assert(4 == sizeof(jint))`、`assert(8 == sizeof(jlong))`——如果编译器给 jint 分配的不是 4 字节，JVM 启动时就崩溃，比后续类型混乱更难排查。
+2. **类型字符映射可逆**：`type2char(T_INT)` 返回 `'i'`，`char2type('i')` 返回 `T_INT`——字节码解释器和 JIT 编译器靠这个双向映射表工作。函数跑完 0-98 共 11 个类型验证。
+3. **布局类型自映射**：`type2field[T_INT]` 必须等于 `T_INT` 自身——因为 int 就是 int，不需要转换为另一种布局类型。而非布局类型（`T_ILLEGAL`）映射到合法布局类型。
+
+product 构建下 `basic_types_init()` 什么也不做。但它确实是一条防线——如果 HotSpot 被移植到 int 不是 4 字节的平台，`basic_types_init` 在 slowdebug 构建下直接毙掉，避免后续所有计算全部跑偏。
 
 ### eventlog_init — 崩溃事件日志
 
