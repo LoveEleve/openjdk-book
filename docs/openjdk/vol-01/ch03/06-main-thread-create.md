@@ -272,17 +272,42 @@ java -XX:+UnlockExperimentalVMOptions -XX:+UseZGC MyApp
 
 `LogEvents` 和 `LogEventsBufferEntries`（默认 20，控制每个环形缓冲区存多少条记录）都是 diagnostic 类型。
 
-JVM 运行时，各处代码通过 `Events::log(thread, "Thread added: %p", p)` 写入事件——线程创建时写、GC 阶段开始时写、JIT 编译完成时写。环形缓冲区写满后覆盖最旧的记录。
+#### Events 系统的四层结构
 
-这四个缓冲区最关键的用途是**崩溃诊断**。当 JVM 崩溃时，`hs_err_pid<pid>.log` 文件中会依次 dump 这四段缓冲区：
+四个 `StringEventLog` 对象是通过 `new` 创建的 C++ 对象，它们的类型层次从上到下分四层。
+
+**EventLog 链表。** `EventLog`（`events.hpp:49-63`）是最基础层，含一个 `_next` 指针。构造函数把自己链入全局链表 `_logs_list`。崩溃时 `vmError::report()` 遍历 `_logs_list`，依次调用每个 EventLog 的 `print_log_on()` dump 到 `hs_err` 文件。
+
+**EventLogBase 环形缓冲区。** `EventLogBase<T>` 加了环形缓冲区的实现。每条记录是 `EventRecord<T>`，存储三样东西：
+
+```
+EventRecord
+├── double  timestamp    // os::elapsedTime() 的时间戳
+├── Thread* thread       // 哪个线程写的（可为 NULL）
+└── T       data         // 内容（字符串）
+```
+
+`_records` 数组长度由 `LogEventsBufferEntries` 决定（默认 20）。写入位置通过 `_index` 和 `_count` 管理——写满后覆盖最旧的。所有写入用 `Mutex::event` 保护。
+
+**StringEventLog 记录器。** `StringEventLog` = `EventLogBase<FormatBuffer<256>>`。`ExtendedStringEventLog` = `EventLogBase<FormatBuffer<512>>`（异常栈较深，需要更大缓冲区）。每次写入调用 `logv()`：拿 `os::elapsedTime()` 时间戳、拿 `Mutex::event` 锁、计算 `_index` 位置、写入 `timestamp+thread+format`——一次函数调用完成。
+
+**Events 类四条记录器。** `Events` 是纯静态类，提供四个公开方法作为写入入口：
+
+```cpp
+Events::log(thread, "Thread added: %p", p)              // → _messages
+Events::log_exception(thread, "Internal exception...")   // → _exceptions
+Events::log_deopt_message(thread, "Deopt reason...")     // → _deopt_messages
+Events::log_redefinition(thread, "Class redefined...")   // → _redefinitions
+```
+
+JVM 中约 100 处调用了这四个方法——线程创建/退出时写事件、GC 阶段开始时写事件、JIT 编译完成时写事件——环形写满后覆盖最旧记录。崩溃时 `hs_err` 文件末尾会按创建顺序 dump 全部四个记录器：
 
 ```
 Event: 0.028 Thread added: 0x00007f1234000800
 Event: 0.029 Thread added: 0x00007f1234001800
-...
 ```
 
-初始化这么早是因为崩溃随时可能发生——如果 `eventlog_init` 晚于某个记录事件的代码，崩溃报告中就会缺少关键线索。
+初始化这么早是因为崩溃随时可能发生——如果 `eventlog_init` 晚于任何记录事件的代码，`hs_err` 报告中就会丢失关键线索。
 
 ### mutex_init — 锁的全序系统
 
