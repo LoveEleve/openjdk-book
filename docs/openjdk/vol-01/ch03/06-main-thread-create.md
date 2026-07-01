@@ -411,7 +411,7 @@ class Events {
 ```
 Events::_logs → [_deopt_messages] → [_redefinitions] → [_exceptions] → [_messages] → NULL
 ```
-![四条记录器的链表构造顺序](assets/eventlog-chain.png)
+
 **链表是在什么时候链上的？** 看 `new FormatStringEventLog<256>("Events")` 的完整 C++ 构造顺序——列出每一步，链入发生在**第一步**：
 
 ```
@@ -502,8 +502,6 @@ new FormatStringEventLog<256>("Events") 的 C++ 构造顺序：
 崩溃时 `VMError::report()` → `Events::print_all()` 遍历此链表 dump 到 `hs_err_pid<pid>.log`。
 
 #### 对象内存布局
-
-![StringEventLog 对象内存布局](assets/eventlog-layout.png)
 
 ### mutex_init — 约 80 把全局锁的全序系统
 
@@ -630,7 +628,6 @@ class Chunk : CHeapObj<mtChunk> {
 一个 Chunk 的物理布局——已分配区域、撞针位置、剩余空间三部分：
 
 ![Chunk 物理布局](assets/chunk-layout.png)
-
 `_hwm` 从 `bottom()` 开始，每次 `Amalloc(x)` 把 `_hwm` 往前推 `x` 字节。推到 `_max`（即 `top()`）时这个 Chunk 满了——Arena 调 `grow()` 从 ChunkPool 取一个新 Chunk，旧 Chunk 的 `_next` 指向新 Chunk，`_hwm` 跳到新 Chunk 的 `bottom()` 继续撞针。
 
 关键：`Chunk` 既是"存放内存的容器"又是"链表节点"。`_next` 串起链表，`bottom()/top()` 划出可用区间。**`bottom()` 和 `top()` 不是存着的字段——它们是计算出来的。** `bottom()` 是 `((char*)this) + sizeof(Chunk)` 对齐后的地址——跳过 Chunk 头部，直接落到数据区的起始位置。`top()` 是 `bottom() + _len`——数据区的终点。数据区没有独立的 `_data` 成员——Chunk 分配的内存比 `sizeof(Chunk)` 多了 `_len` 字节，这多出来的部分**就是**数据区。这是一种 C 风格的内存布局技巧——在单一 `malloc` 返回的空间内，把头部和数据区紧凑排列。
@@ -759,7 +756,13 @@ new (mtThread) ResourceArea()
   │      → 返回 1000 字节的原始内存
   │
   ├─ 6. Chunk 构造函数在这块内存上执行:
-  │      _len = 984, _next = NULL（Chunk 头部 16 字节后面紧跟 984 字节数据区）
+  │      _len = 984, _next = NULL
+  │      内存布局:
+  │      ┌───────────┬───────────────────────────────────┐
+  │      │ Chunk头部  │ 数据区 (984 字节, 全部空闲)        │
+  │      │ _next=NULL │                                   │
+  │      │ _len=984   │                                   │
+  │      └───────────┴───────────────────────────────────┘
   │
   ├─ 7. Arena 设置三个指针:
   │      _first = _chunk = 这个 Chunk 的地址
@@ -872,17 +875,7 @@ HandleArea 的首个 Chunk 更小——`HandleArea(HandleArea* prev) : Arena(mtT
  │    链表: _first → Chunk1 → Chunk2 → Chunk3 ← _chunk
  │
 
- _first                          _chunk
-  |                               |
-  v                               v
-┌─────────┐   ┌───────────┐   ┌───────────┐
-│ Chunk1   │──→│  Chunk2   │──→│  Chunk3   │──→ NULL
-│ 984字节  │   │ 32728字节 │   │ 32728字节 │
-│ small_p  │   │ large_p   │   │ large_p   │
-└─────────┘   └───────────┘   └───────────┘
-     ↑                              ↑
-   构造时                        grow() × N
-   碰针在此开始                  当前撞针在此
+![Arena 生命周期](assets/arena-lifecycle.png)
 
 同一个 Arena 的链表中混着不同大小的 Chunk：首个 984 字节，grow 创建的 Chunk 用 `MAX2(x, Chunk::size)` 至少 32728 字节——所以正常场景下后续全是 32728 字节。
 
@@ -980,11 +973,9 @@ class ResourceMark : public StackObj {
 - **没 grow**：`_chunk->next() == NULL`，只拨回 `_hwm`——旧数据仍在物理内存中，撞针倒退后下次 `Amalloc` 直接覆盖
 - **grow 过**：`_chunk->next() != NULL`，先删后续 Chunk（归还 ChunkPool），再拨回撞针
 
-#### 具体例子——一段代码的完整生命周期
+#### 撞针回滚示例
 
 ![ResourceMark 撞针回滚示例](assets/resourcemark-rollback.png)
-
-构造 `ResourceMark rm` 后做三次 `Amalloc(128)`、`Amalloc(256)`、`Amalloc(512)`——第三次触发 `grow()`。`rm` 析构时撞针回退到快照位置，grow 出的 Chunk 归还 ChunkPool。零次 `free`，零次系统调用。
 
 #### ResourceMark 在真实 JVM 代码中什么时候用
 
@@ -1035,6 +1026,8 @@ ChunkPool reuse 比每次 `os::malloc` 快 10-100 倍。
 | 空闲管理 | 无（不回退单个对象） | 多种 free list | per-slab free list |
 | 释放 | 批量回滚（ResourceMark） | 逐个 free + 合并 | 逐个 free 回 slab |
 | 适用场景 | 生命周期一致的临时数据 | 通用场景 | 固定大小内核对象 |
+
+
 
 ### perfMemory_init — jstat 共享内存
 
