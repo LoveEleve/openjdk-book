@@ -652,8 +652,8 @@ os::malloc(1000) 返回的内存:
 ```cpp
 class ChunkPool : public CHeapObj<mtInternal> {
   Chunk*       _first;        // 空闲 Chunk 链表头
-  size_t       _num_chunks;   // 池里有多少空闲块
-  size_t       _num_used;     // 当前借出多少块
+  size_t       _num_chunks;   // 池里有多少空闲块（初始 0）
+  size_t       _num_used;     // 当前借出多少块（初始 0）
   const size_t _size;         // 池中所有块统一大小（含 Chunk 头部）
 ```
 
