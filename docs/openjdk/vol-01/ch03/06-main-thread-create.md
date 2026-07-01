@@ -856,7 +856,11 @@ void Chunk::chop() {
 }
 ```
 
-`Chunk::operator delete` 按 `length` 大小归还到对应的 ChunkPool——不是 `os::free`。此后其他 Arena 可以复用这些 Chunk。
+Arena 析构时 `_first->chop()` 遍历整个 Chunk 链表，逐个 `delete k`。`Chunk::operator delete` 按 `length` 大小归还到对应的池——984 字节回 `small_pool`、32728 字节回 `large_pool`、216 字节回 `tiny_pool`。不同大小的 Chunk 绝不可能串池。
+
+之后其他 Arena 可直接复用这些 Chunk。
+
+HandleArea 的首个 Chunk 更小——`HandleArea(HandleArea* prev) : Arena(mtThread, Chunk::tiny_size)` 传入 216 字节，从 `tiny_pool` 取。
 
 #### 完整生命周期图
 
