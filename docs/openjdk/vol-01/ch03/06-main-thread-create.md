@@ -643,7 +643,7 @@ os::malloc(1000) 返回的内存:
 
 `_hwm` 从 `bottom()` 开始，每次 `Amalloc(x)` 把 `_hwm` 往前推 `x` 字节。推到 `_max`（即 `top()`）时这个 Chunk 满了——Arena 调 `grow()` 从 ChunkPool 取一个新 Chunk，旧 Chunk 的 `_next` 指向新 Chunk，`_hwm` 跳到新 Chunk 的 `bottom()` 继续撞针。
 
-关键：`Chunk` 既是"存放内存的容器"又是"链表节点"。`_next` 串起链表，`bottom()/top()` 划出可用区间。
+关键：`Chunk` 既是"存放内存的容器"又是"链表节点"。`_next` 串起链表，`bottom()/top()` 划出可用区间。**`bottom()` 和 `top()` 不是存着的字段——它们是计算出来的。** `bottom()` 是 `((char*)this) + sizeof(Chunk)` 对齐后的地址——跳过 Chunk 头部，直接落到数据区的起始位置。`top()` 是 `bottom() + _len`——数据区的终点。数据区没有独立的 `_data` 成员——Chunk 分配的内存比 `sizeof(Chunk)` 多了 `_len` 字节，这多出来的部分**就是**数据区。这是一种 C 风格的内存布局技巧——在单一 `malloc` 返回的空间内，把头部和数据区紧凑排列。
 
 #### ChunkPool —— Chunk 对象的缓存池
 
