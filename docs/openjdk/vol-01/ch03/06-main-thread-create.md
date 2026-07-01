@@ -409,7 +409,6 @@ class Events {
 四条记录器构造完毕后——最后 `new` 的在链表最前面（头插法）：
 
 ![四条记录器的链表构造顺序](assets/eventlog-chain.png)
-![alt text](image-1.png)
 ```
 Events::_logs → [_deopt_messages] → [_redefinitions] → [_exceptions] → [_messages] → NULL
 ```
@@ -440,7 +439,7 @@ new FormatStringEventLog<256>("Events") 的 C++ 构造顺序：
 ```
 
 ![StringEventLog 对象内存布局](assets/eventlog-layout.png)
-![alt text](image.png)
+
 因为是 C++ 继承链——`EventLog` 是最顶层的基类，它的构造函数体**最先**执行。后面 `EventLogBase` 的 init list 和函数体、`FormatStringEventLog` 的 init list 都是之后的事。也就是说，`EventLog` 构造函数在对象的字段还没初始化完之前，就已经把还没有完全构造的对象的指针塞进了全局链表。
 
 #### 四条记录器由谁在什么时候写
