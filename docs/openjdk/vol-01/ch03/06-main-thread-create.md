@@ -667,7 +667,7 @@ class ChunkPool : public CHeapObj<mtInternal> {
 };
 ```
 
-##### chunkpool_init() 做的事
+#### chunkpool_init() 做的事
 
 ```cpp
 void ChunkPool::initialize() {
@@ -680,7 +680,7 @@ void ChunkPool::initialize() {
 
 每个池构造时 `_first = NULL; _num_chunks = _num_used = 0`——**初始是空的，零预分配**。首次请求必然触发 `os::malloc`。
 
-##### allocate() —— 借出一个 Chunk
+#### allocate() —— 借出一个 Chunk
 
 ```cpp
 void* allocate(size_t bytes, AllocFailType alloc_failmode) {
@@ -699,7 +699,7 @@ void* allocate(size_t bytes, AllocFailType alloc_failmode) {
 
 `get_first()` 是 O(1) 头取法——摘 `_first` 并返回。池空才 `os::malloc`。`ThreadCritical` 是比 `Mutex` 更底层的全局锁——这里不能用 Mutex 因为 ChunkPool 被 Mutex 构造之前就需要（循环依赖）。
 
-##### free() —— 归还一个 Chunk
+#### free() —— 归还一个 Chunk
 
 ```cpp
 void free(Chunk* chunk) {
@@ -713,7 +713,7 @@ void free(Chunk* chunk) {
 
 归还时不 `os::free`——插回 `_first` 链表头（LIFO，最近归还的最热，可能还在 CPU 缓存里）。
 
-##### 清理
+#### 清理
 
 `ChunkPoolCleaner` 每 5000ms 触发一次 `clean()`，每池最多保留 5 个空闲块，多余的 `os::free` 还给 OS。这个周期任务由 **WatcherThread** 执行——JVM 中唯一的定时任务线程。
 
@@ -742,7 +742,7 @@ class Arena : public CHeapObj<mtNone> {
 };
 ```
 
-##### `new (mtThread) ResourceArea()` —— 这行源码到底干了什么
+#### `new (mtThread) ResourceArea()` —— 这行源码到底干了什么
 
 这是 `Thread::Thread()` 构造函数中的一行。完整拆开，按 C++ 构造顺序：
 
@@ -791,7 +791,7 @@ new (mtThread) ResourceArea()
 
 注意 `(mtThread)` 只标注 Arena 对象本身的 48 字节属于线程内存——它不控制 Chunk 的分配。Chunk 走的是 `mtChunk` 标记（在 `os::malloc` 参数里）。两笔 NMT 分开记录。
 
-##### Amalloc() —— 撞针前进
+#### Amalloc() —— 撞针前进
 
 ```cpp
 void* Amalloc(size_t x) {
@@ -807,7 +807,7 @@ void* Amalloc(size_t x) {
 
 快速路径：比较 `_hwm + x` 和 `_max`，不超就直接推进——约 10 条 CPU 指令。超出则 `grow()`。
 
-##### grow() —— 申请新 Chunk
+#### grow() —— 申请新 Chunk
 
 ```cpp
 void* Arena::grow(size_t x, AllocFailType afm) {
@@ -837,7 +837,7 @@ Arena::grow()
 
 所以 **grow() 说"我要一个新块"，allocate() 提供这个块**——不是两个独立的分配操作，而是同一条调用链的上下层。
 
-##### 析构——所有 Chunk 归还 ChunkPool
+#### 析构——所有 Chunk 归还 ChunkPool
 
 ```cpp
 Arena::~Arena() {
@@ -858,7 +858,7 @@ void Chunk::chop() {
 
 `Chunk::operator delete` 按 `length` 大小归还到对应的 ChunkPool——不是 `os::free`。此后其他 Arena 可以复用这些 Chunk。
 
-##### 完整生命周期图
+#### 完整生命周期图
 
 ```
 一个 Arena 的生命周期:
@@ -921,7 +921,7 @@ void* Chunk::operator new(size_t requested_size, AllocFailType afm, size_t lengt
 
 #### ResourceArea 与 ResourceMark —— 线程的临时内存栈
 
-##### 为什么每个线程需要自己的 Arena？ChunkPool 不是共享的吗？
+#### 为什么每个线程需要自己的 Arena？ChunkPool 不是共享的吗？
 
 `Thread::Thread()` 构造函数给每个线程分配一个 `ResourceArea`——每个线程都有自己的 `_hwm` 撞针，各自在各自的 Arena 上推。`ChunkPool` 是全局共享的，但共享争用只发生在两个场景：
 
@@ -932,7 +932,7 @@ void* Chunk::operator new(size_t requested_size, AllocFailType afm, size_t lengt
 
 所以设计上两层分工：**撞针部分（Arena）无锁，ChunkPool 部分偶尔短暂加锁**。类比 Java 的 TLAB——每个线程在自己私有的 Chunk 上撞针分配，碰了才去 ChunkPool 领新块，领完继续在私有 Chunk 上无锁撞。
 
-##### ResourceArea 与 ResourceMark 是什么关系
+#### ResourceArea 与 ResourceMark 是什么关系
 
 `ResourceArea`（`resourceArea.hpp:42-58`）继承自 `Arena`，**没有新增任何产品字段**（只在 debug 模式加了个 `_nesting` 计数器）。`ResourceArea` 和 `Arena` 的内存布局完全相同——之所以起了另一个名字，是因为它声明了 `friend class ResourceMark`，允许外部的栈变量 `ResourceMark` 访问 Arena 的 private 字段来拍快照和回滚。直接 `new Arena()` 也行——但没有朋友帮你回滚撞针。
 
@@ -950,7 +950,7 @@ set_resource_area(new (mtThread) ResourceArea());   // init_size=984, 从 small_
 set_handle_area(new (mtThread) HandleArea(NULL));   // init_size=216, 从 tiny_pool 取
 ```
 
-##### ResourceMark —— 撞针的快照/回滚机制
+#### ResourceMark —— 撞针的快照/回滚机制
 
 `ResourceMark` 是一个**栈对象**（继承 `StackObj`，禁止在堆上 `new`）。构造时拍下 `(_chunk, _hwm, _max)` 的快照，析构时拨回撞针。`StackObj` 确保它只能在栈上创建——作用域结束时必定析构，析构时必定回滚。
 
@@ -990,7 +990,7 @@ class ResourceMark : public StackObj {
 - **没 grow**：`_chunk->next() == NULL`，只拨回 `_hwm`——旧数据仍在物理内存中，撞针倒退后下次 `Amalloc` 直接覆盖
 - **grow 过**：`_chunk->next() != NULL`，先删后续 Chunk（归还 ChunkPool），再拨回撞针
 
-##### 具体例子——一段代码的完整生命周期
+#### 具体例子——一段代码的完整生命周期
 
 ```
 ① ResourceMark rm;          // 拍快照: 保存 _hwm = P0
@@ -1036,7 +1036,7 @@ class ResourceMark : public StackObj {
 
 三次 `Amalloc` 分配了约 1000 字节，但析构时撞针一个回退全清——零次 `free`，零次系统调用。
 
-##### ResourceMark 在真实 JVM 代码中什么时候用
+#### ResourceMark 在真实 JVM 代码中什么时候用
 
 JVM 源码中任何需要临时内存的函数都以这一行开头：
 
@@ -1046,7 +1046,7 @@ ResourceMark rm(THREAD);
 
 然后该函数内所有 `Amalloc` 分配的内存在 `rm` 析构时（函数返回时）全部回滚。`ResourceMark rm(THREAD)` 在 HotSpot 源码中出现超过 500 次。
 
-##### HandleMark —— GC 句柄的 ResourceMark
+#### HandleMark —— GC 句柄的 ResourceMark
 
 除了 `ResourceArea`，HotSpot 还有一个 `HandleArea`——也是 `Arena`，但专门存 **GC 句柄**（`oop*` 指针）。VM 代码操作 Java 对象时不是直接拿着 `oop`，而是通过 `Handle` 包装——`Handle` 对象内部有一个 `oop*` 指针指向 `HandleArea` 的槽位。GC 发生时扫描 `HandleArea` 数组来更新这些引用，防止对象被移动后访问到旧地址。
 
@@ -1066,7 +1066,7 @@ class HandleArea : public Arena {
 
 `ResourceMark` 和 `HandleMark` 本质相同——都是 RAII 撞针快照/回滚。区别是管的东西不同：一个管通用临时内存，一个管 GC 句柄。
 
-##### 性能对比
+#### 性能对比
 
 | 操作 | Arena（撞针） | glibc malloc |
 |------|-------------|-------------|
@@ -1077,7 +1077,7 @@ class HandleArea : public Arena {
 
 ChunkPool reuse 比每次 `os::malloc` 快 10-100 倍。
 
-##### 和 buddy/slab 的对比总结
+#### 和 buddy/slab 的对比总结
 
 | | HotSpot Arena | buddy | slab |
 |--|-------------|-------|------|
