@@ -983,7 +983,7 @@ class ResourceMark : public StackObj {
 
   void reset_to_mark() {
     if (_chunk->next()) {                // 拍快照之后，有人 grow 了？
-      _chunk->next_chop();               // 删除快照之后的全部 Chunk
+      _chunk->next_chop();               // 删除快照之后的全部 Chunk（归还对应大小的 ChunkPool）
     }
     _area->_chunk = _chunk;              // 拨回当前 Chunk
     _area->_hwm = _hwm;                  // 拨回撞针
