@@ -896,6 +896,8 @@ void Chunk::chop() {
    构造时                        grow() × N
    碰针在此开始                  当前撞针在此
 
+同一个 Arena 的链表中混着不同大小的 Chunk：首个 984 字节（够大多数短函数），grow 之后全是 32728 字节。
+
  ── Arena 析构
       遍历链表，delete 每个 Chunk
       → ChunkPool 回收: _num_chunks++ (最多保留 5 个)
