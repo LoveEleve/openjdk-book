@@ -1358,7 +1358,9 @@ set_handle_area(new (mtThread) HandleArea(NULL));
 
 `_resource_area` 的构造链和 `_handle_area` 的首 Chunk 尺寸差异已在第 2 节 `chunkpool_init` 的 ["`new (mtThread) ResourceArea()` 的构造链"](#_67) 中完整讲解——本节只展示构造函数调用点，不重复撞针分配逻辑。
 
-接着分配四个句柄/元数据管理字段：
+接着分配四个句柄/元数据管理字段。
+
+> **前置概念**：以下几节涉及 HotSpot 中互相独立的三套 Handle 体系——oop Handle（HandleArea/HandleMark/Handle）、Metadata Handle（methodHandle/constantPoolHandle）、JNIHandleBlock。如果直接看这四行代码感觉不知所云，请先阅读[前置概念：HotSpot 的三套 Handle 体系](#/openjdk/vol-01/ch03/background/handles-all)。
 
 ```cpp
 set_metadata_handles(new (ResourceObj::C_HEAP, mtClass)
