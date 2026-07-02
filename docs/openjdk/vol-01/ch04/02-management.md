@@ -33,83 +33,82 @@ void management_init() {
 
 ---
 
-## 背景：JMX 与 JMM 规范
+## 背景：这些计数器最终是给谁用的？
 
-在深入四个 `init()` 之前，先梳理 JMX 子系统的整体架构。理解这个架构才能明白 `management_init` 在其中扮演的角色。
+上一节说 management_init 注册的 22 个 PerfData 计数器会被写入共享内存，`jstat` 和 `jcmd PerfCounter.print` 可以直接读取。但日常开发中更常用的是 Java 代码里的 `ManagementFactory.getThreadMXBean()`、`RuntimeMXBean.getUptime()` 这样的 API——它们返回的不是原始计数器，而是结构化的 Java 对象。那 Java 层是怎么读到 HotSpot C++ 侧注册的这些数据的？
 
-### JSR 174 与 java.lang.management 包
+这就需要梳理 JMX 监控体系的完整架构，理解 management_init 在其中的位置。
 
-**JSR 174**（Java Management Monitor，JMM）规范定义了 `java.lang.management` 包，是 JMX（JSR 3）的监控子集。它提供 9 个标准 MXBean 接口，让用户代码和外部工具能查询 JVM 运行时状态：
+### 三层架构
 
-| MXBean 接口 | ObjectName | 用途 |
-|-------------|-----------|------|
-| `ClassLoadingMXBean` | `java.lang:type=ClassLoading` | 类加载/卸载统计 |
-| `MemoryMXBean` | `java.lang:type=Memory` | 堆/非堆内存使用 |
-| `ThreadMXBean` | `java.lang:type=Threading` | 线程数/CPU时间/死锁检测 |
-| `RuntimeMXBean` | `java.lang:type=Runtime` | 启动时间/uptime/输入参数 |
-| `OperatingSystemMXBean` | `java.lang:type=OperatingSystem` | CPU核数/系统负载 |
-| `CompilationMXBean` | `java.lang:type=Compilation` | JIT编译时间 |
-| `GarbageCollectorMXBean` | `java.lang:type=GarbageCollector,name=*` | GC次数/时间 |
-| `MemoryManagerMXBean` | `java.lang:type=MemoryManager,name=*` | 内存管理器 |
-| `MemoryPoolMXBean` | `java.lang:type=MemoryPool,name=*` | 内存池使用量/阈值 |
+整个 JMX 监控体系分为三层：
 
-用户代码通过 `ManagementFactory.getClassLoadingMXBean()` 等静态方法获取这些 MXBean。
+```
+┌─────────────────────────────────────────────────────────┐
+│  外部工具层                                              │
+│  jstat / jcmd / jconsole / VisualVM / JMC               │
+│  ├── jstat, jcmd PerfCounter.print: 直接读 PerfData     │
+│  │   共享内存(零开销,不需要 JVM 配合)                    │
+│  └── jconsole, VisualVM: 走 JMX 远程协议(RMI)           │
+└─────────────────────────────────────────────────────────┘
+                    ▲
+                    │ JNI 边界
+                    ▼
+┌─────────────────────────────────────────────────────────┐
+│  Java 层                                                 │
+│  java.lang.management 包                                 │
+│  ├── ThreadMXBean     ← 用户调 getThreadCount()         │
+│  ├── RuntimeMXBean    ← 用户调 getUptime()              │
+│  ├── ClassLoadingMXBean ← 用户调 getLoadedClassCount()  │
+│  ├── MemoryMXBean / MemoryPoolMXBean / ...              │
+│  └── ManagementFactory.getXxxMXBean()                   │
+│      ↓ native 调用                                       │
+│  libmanagement.so (JNI) ← jmm_interface 函数表         │
+└─────────────────────────────────────────────────────────┘
+                    ▲
+                    │ jmm_interface 函数指针
+                    │
+┌─────────────────────────────────────────────────────────┐
+│  HotSpot C++ 层                                          │
+│  management_init() 注册的:                              │
+│  ├── 22 个 PerfData 计数器 → PerfData 共享内存          │
+│  ├── 9 个能力位 (jmmOptionalSupport)                   │
+│  ├── 40+ DCmd 诊断命令                                 │
+│  └── jmm_interface 函数表 ← libmanagement.so 拿走指针  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**关键点**：C++ 侧有两条数据出口：
+
+1. **PerfData 共享内存** — jstat/jcmd 直接 mmap 读取，不经过 Java 层。这条路径 management_init 只是往共享内存写数据，不需要做任何额外工作。
+
+2. **jmm_interface 函数表** — Java 层的 `libmanagement.so` 在 `JNI_OnLoad` 时调用 `JVM_GetManagement(JMM_VERSION)` 拿到这个函数表指针，之后 Java 层的 MXBean 方法都走这个表里的函数指针回调 HotSpot。
+
+management_init 同时为这两条路径做准备：注册 PerfData 计数器（给路径 1）、初始化能力位和 DCmd（给路径 2）。
+
+### JSR 174 与 9 个标准 MXBean
+
+**JSR 174**（Java Management Monitor）规范定义了 `java.lang.management` 包，是 JMX（JSR 3）的监控子集。它提供 9 个标准 MXBean 接口，让用户代码和外部工具能查询 JVM 运行时状态：
+
+| MXBean 接口 | 对应的 HotSpot C++ 类 | management_init 注册的计数器 |
+|-------------|----------------------|----------------------------|
+| `ClassLoadingMXBean` | `ClassLoadingService` | `java.cls.loadedClasses` 等 9 个 |
+| `ThreadMXBean` | `ThreadService` | `java.threads.live` 等 4 个 |
+| `RuntimeMXBean` | `RuntimeService` | `sun.rt.safepoints` 等 6 个 |
+| `MemoryMXBean` | `MemoryService`（在 universe_post_init 注册） | — |
+| `MemoryPoolMXBean` | `MemoryPool`（在 universe_post_init 注册） | — |
+| `GarbageCollectorMXBean` | `MemoryService` 注册的 GC manager | — |
+| `MemoryManagerMXBean` | `MemoryManager` | — |
+| `CompilationMXBean` | `CompileBroker`（在 compileBroker_init 注册） | — |
+| `OperatingSystemMXBean` | `os` 模块 | — |
+
+注意右列：management_init 只负责前 3 个 Service 的注册（ClassLoading/Thread/Runtime）。Memory 和 Compilation 相关的 MXBean 在后续的 `universe_post_init` 和 `compileBroker_init` 里注册——management_init 只是开了个头，不是 JMX 的全部。
+
+用户代码通过 `ManagementFactory.getClassLoadingMXBean()` 等静态方法获取这些 MXBean。这些 MXBean 的方法底层走 `libmanagement.so` → `jmm_interface` 函数表 → HotSpot C++ 侧的 Service 类。例如 `ThreadMXBean.getThreadCount()` 最终调用的是 `jmm_GetLongAttribute(JMM_THREAD_COUNT)`，后者读取 `ThreadService::_live_threads_count` 这个 PerfData 计数器。
 
 ### jmm.h — HotSpot 内部接口
 
-`jmm.h` 是 HotSpot 与 `libmanagement.so` 之间的**私有接口**（注释明确写着 "private interface used by JDK for JVM monitoring and management"），不属于公开 Java API。它定义在 `src/hotspot/share/include/jmm.h`，核心是一个包含约 40 个函数指针的结构体 `jmmInterface_1_`：
-
-```cpp
-/* === src/hotspot/share/include/jmm.h === */
-
-const struct jmmInterface_1_ jmm_interface = {
-  NULL,
-  jmm_GetOneThreadAllocatedMemory,
-  jmm_GetVersion,
-  jmm_GetOptionalSupport,
-  jmm_GetThreadInfo,           // 获取线程信息（含栈轨迹）
-  jmm_GetMemoryPools,          // 获取内存池列表
-  jmm_GetMemoryManagers,       // 获取内存管理器列表
-  jmm_GetMemoryUsage,          // 获取内存使用量
-  jmm_GetLongAttribute,        // 获取长整型属性（线程数/GC次数等）
-  jmm_GetBoolAttribute,        // 获取布尔属性（verbose开关等）
-  jmm_SetBoolAttribute,        // 设置布尔属性
-  jmm_GetLongAttribute,        // ...
-  jmm_GetVMGlobals,            // 获取 VM flag
-  jmm_SetVMGlobal,             // 设置 VM flag
-  jmm_GetThreadCpuTimeWithKind,// 线程 CPU 时间
-  jmm_DumpHeap0,               // 堆转储
-  jmm_FindDeadlocks,           // 死锁检测
-  jmm_DumpThreads,             // 线程转储
-  jmm_GetDiagnosticCommands,           // 获取 DCmd 列表
-  jmm_GetDiagnosticCommandInfo,        // 获取 DCmd 详情
-  jmm_GetDiagnosticCommandArgumentsInfo,
-  jmm_ExecuteDiagnosticCommand,        // 执行 DCmd
-  jmm_SetDiagnosticFrameworkNotificationEnabled,
-  // ... 更多
-};
-```
-
-Java 侧的 `libmanagement.so` 在 `JNI_OnLoad` 时通过 `JVM_GetManagement(JMM_VERSION)` 获取这个函数表指针：
-
-```
-HotSpot C++ 侧                    Java 侧
-─────────────────────────────────────────────────────────────
-jmm_interface (management.cpp)    libmanagement.so
-  ↑                                 ↑  JNI_OnLoad
-  │  JVM_GetManagement(version)      │  jmm_interface = JVM_GetManagement(JMM_VERSION)
-  └─────────────────────────────────┘
-                                    ↓
-                                    VMManagementImpl.java (native 方法)
-                                    ↓
-                                    ClassLoadingImpl / ThreadImpl / MemoryImpl 等
-                                    ↓
-                                    java.lang.management.*MXBean 接口
-                                    ↓
-                                    ManagementFactory.getXxxMXBean()
-                                    ↓
-                                    用户代码
-```
+`jmm.h` 是 HotSpot 与 `libmanagement.so` 之间的**私有接口**（注释明确写着 "private interface used by JDK for JVM monitoring and management"），不属于公开 Java API。它定义在 `src/hotspot/share/include/jmm.h`，核心是一个包含约 40 个函数指针的结构体 `jmmInterface_1_`。
 
 `JMM_VERSION` 当前是 `JMM_VERSION_2 = 0x20020000`（JDK 10+），用于 ABI 兼容协商。注意 `JMM_VERSION_*` 是版本号枚举，不是能力位——能力位是 `jmmOptionalSupport` 结构体的 9 个布尔字段。
 
