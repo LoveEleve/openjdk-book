@@ -1404,24 +1404,13 @@ new HandleMark(this);
 
 `HandleMark::initialize()` 做了两件事：`set_previous_handle_mark(thread->last_handle_mark())`（此时为 NULL），然后 `thread->set_last_handle_mark(this)`（指向自己）。`set_last_handle_mark(NULL)` 只是初始化变量，紧随其后的 `new HandleMark(this)` 立即创建第一个 Mark 并覆盖——两者不矛盾。后续再 `new HandleMark(thread)` 时构成**栈式链表**——后进先出，层层叠放。
 
-> **为什么 HandleMark 要串成栈？** 因为 C++ 的作用域天然就是嵌套的。考虑这种代码：
+> **为什么 HandleMark 要串成栈？** 先澄清一点：**回滚本身不依赖链**。每个 HandleMark 构造时自己保存了 `_area->_chunk / _hwm / _max / _size_in_bytes` 四个水位值（`handles.cpp:127-130`），析构时直接把这四个值写回 `_area`（`handles.cpp:158-160`）——不管别的 Mark 在做什么。C++ 作用域的 LIFO 特性已经保证了析构顺序，每个 Mark 各自回滚自己的水位就能正确工作。
 >
-> ```cpp
-> void outer() {
->   HandleMark hm1;              // 外层画线：当前水位 = 100
->   Handle h1(THREAD, obj1);     // 分配槽位 100，h1._handle → &slot[100]
->   {
->     HandleMark hm2;            // 内层画线：当前水位 = 104（h1 占了 4 字节）
->     Handle h2(THREAD, obj2);   // 分配槽位 104
->     // ... 这里可能发生 GC，h1 和 h2 都需要被 GC 看到
->   }                            // hm2 析构：回滚到 104 → h2 失效，h1 仍有效
->   h1()->foo();                 // 必须还能用
-> }                              // hm1 析构：回滚到 100 → h1 也失效
-> ```
+> 那为什么还要串成链？**纯粹为了 debug 追查**。`_previous_handle_mark` 把所有 Mark 串起来，product 构建也保留（不像 `ResourceMark` 只在 `DEBUG_ONLY` 保留）。原因是 HandleArea 里存的是 GC 根指针——如果 Arena 回滚出错（比如嵌套不平衡、某个 Mark 忘了析构），GC 会扫到已释放的内存里的野指针，直接 crash 整个 JVM。保留链表后，hs_err 文件能追查"哪个 HandleMark 没正常析构"，帮助定位问题。
 >
-> 如果不是栈式（比如数组或链表随便删），内层 `hm2` 析构时可能把外层 `hm1` 创建的 `h1` 也一起回滚了——`h1()` 就会读到已释放的内存，crash。栈式"后进先出"保证了**内层析构只撕掉自己画线之后的内容**，外层 Handle 不受影响。
+> **为什么 ResourceMark 只在 DEBUG 保留链？** `ResourceMark` 是同样的 Arena 回滚机制（`ResourceArea` 也是 Arena 子类），回滚也靠 `_chunk/_hwm/_max`，链同样不是功能必需。但 `ResourceArea` 存的是 C++ 临时对象（不是 GC 根），回滚出错最多段错误（可控的进程内错误），不会像 HandleArea 那样把野指针暴露给 GC 导致连锁 crash。所以 `ResourceMark` 的 `_previous_resource_mark` 链只在 `DEBUG_ONLY` 里——product 不需要这个开销。
 >
-> 这也是 `_previous_handle_mark` 字段存在的原因——析构时通过它把 `_last_handle_mark` 回退到外层 Mark，让外层 Mark 重新成为"栈顶"。前置文档 [三套 Handle 体系](#/openjdk/vol-01/ch03/background/handles-all) 讲了三件套（HandleArea / HandleMark / Handle）的完整背景，本节不重复。
+> 完整的三件套（HandleArea / HandleMark / Handle）背景在 [前置概念：三套 Handle 体系](#/openjdk/vol-01/ch03/background/handles-all) 已详细讲过。
 
 **三概念辨析**：`HandleArea` 是草稿纸（Arena），`HandleMark` 是纸上画的水位线（RAII——构造画线记当前位置，析构把那线之后的内容撕掉），`Handle` 是纸上写的一个词（`oop*` 薄包装，构造时在 HandleArea 中分配槽位）。出代码块时 HandleMark 析构——所有这期间写入的 Handle 全变为悬空指针。
 
