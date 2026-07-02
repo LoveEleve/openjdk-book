@@ -245,6 +245,8 @@ typedef FormatStringEventLog<512> ExtendedStringEventLog;
 
 #### FormatStringEventLog<256> —— 替换 bufsz=256
 
+![PerfData 整体架构](assets/perfdata-overview.png)
+
 ```cpp
 class FormatStringEventLog<256> : public EventLogBase< FormatStringLogMessage<256> > {
   FormatStringEventLog<256>(const char* name, int count = LogEventsBufferEntries)
@@ -1130,9 +1132,7 @@ _prologue->overflow = 0;
 
 Prologue 后面挨着的是 PerfDataEntry。每创建一个计数器就追加一个 Entry。固定头 24 字节 + 可变主体（名字 + 数据值）：
 
-![PerfDataEntry 内存结构](assets/perfdata-entry-layout.png)
-
-
+![alt text](image.png)
 
 jstat 的读取方式：Prologue 拿 `entry_offset=32` 和 `num_entries` → 从偏移 32 读第一个 entry → `data_type='J'` 知道值是 jlong → `data_offset` 跳到值的偏移 → 读 8 字节 → `entry_length` 跳到下一个 → 循环。
 
