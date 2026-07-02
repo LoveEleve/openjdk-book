@@ -300,6 +300,22 @@ set_metadata_handles(new (ResourceObj::C_HEAP, mtClass) GrowableArray<Metadata*>
 
 - `true` —— `on_C_heap` 标志。数据缓冲区 `_data` 用 `malloc` 在 C-Heap 上分配，而不是 ResourceArea。
 
+**构造函数内部做了什么？** `GrowableArray(30, true)` 调链如下：
+
+```
+GenericGrowableArray(30, 0, true, mtInternal)   // 基类
+  _len = 0;         // 当前 0 个元素
+  _max = 30;        // 容量 30
+  _arena = (Arena*)1;  // 标记在 C-Heap
+
+GrowableArray 构造体
+  _data = raw_allocate(sizeof(Metadata*));  // malloc(30 * 8 = 240 字节)
+  for (int i = 0; i < 30; i++)
+      ::new(&_data[i]) Metadata*();         // placement-new 把每个槽位初始化为 NULL
+```
+
+所以构造后是一个容量 30、长度 0 的空数组——30 个槽位全部是 NULL，等着 `push()` 往里填 `Method*` 或 `ConstantPool*`。
+
 **为什么必须是 C-Heap？** Metadata handle 的生命周期贯穿整个线程——只要线程还活着，它持有的 `methodHandle` 就不能被 ResourceMark 回收。如果存 ResourceArea 上，一次 `ResourceMark` 析构就全没了。
 
 ### 4.4 methodHandle 和 constantPoolHandle
