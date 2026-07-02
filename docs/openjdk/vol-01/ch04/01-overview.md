@@ -219,7 +219,7 @@ stubRoutines_init1 ─┼───→ universe_init               // universe de
 universe_init()
 ├─ guarantee HeapWord/oop 大小约束              编译期布局自检
 ├─ JavaClasses::compute_hard_coded_offsets()    计算 Java 类硬编码偏移
-├��� Universe::initialize_heap()         ★★★      堆创建
+├─ Universe::initialize_heap()         ★★★      堆创建
 │   ├─ create_heap()                              GCConfig 选 GC 类型，new CollectedHeap
 │   ├─ _collectedHeap->initialize()               堆内存预留 + 初始化
 │   ├─ compressed oops 设置                        堆基址 + 编码模式（Unscaled/ZeroBased/HeapBased）

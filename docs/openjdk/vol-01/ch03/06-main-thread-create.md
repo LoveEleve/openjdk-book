@@ -1356,7 +1356,7 @@ set_resource_area(new (mtThread)ResourceArea());
 set_handle_area(new (mtThread) HandleArea(NULL));
 ```
 
-`_resource_area` 的构造链（`new ResourceArea()` 如何一步步走向 ChunkPool 分配首块内存）和 `_handle_area` 的首 Chunk 尺寸差异（`tiny_pool` vs `small_pool`）已在第 2 节 `chunkpool_init` 的 ["ResourceArea 和 ResourceArea/HandleArea 构造链"](#_67) 中完整讲解——本节只展示构造函数调用点， 不重复撞针分配逻辑。
+`_resource_area` 的构造链和 `_handle_area` 的首 Chunk 尺寸差异已在第 2 节 `chunkpool_init` 的 ["`new (mtThread) ResourceArea()` 的构造链"](#_67) 中完整讲解——本节只展示构造函数调用点，不重复撞针分配逻辑。
 
 接着分配四个句柄/元数据管理字段：
 
@@ -1368,13 +1368,41 @@ set_free_handle_block(NULL);
 set_last_handle_mark(NULL);
 ```
 
-`_resource_area` 是 Arena 风格的临时内存池——在线程生命周期内可以快速分配小块内存并在一次操作后全部回收。`_handle_area` 是 GC 句柄区——JVM 内部代码在操作 Java 对象时通过 Handle 包装，防止 GC 期间对象被移动。`_active_handles` 在 `Thread::Thread()` 中先设为 NULL——本 Stage 第 6 步才通过 `set_active_handles(JNIHandleBlock::allocate_block())` 赋真值。紧接这些分配行之后还有一行关键代码：
+#### `_metadata_handles` —— 线程持有的 Metadata 句柄数组
+
+类型 `GrowableArray<Metadata*>*`（thread.hpp:628）——一个存 `Method*`、`ConstantPool*` 等 Metadata 指针的动态数组。
+
+`GrowableArray<Metadata*>(30, true)` 的 30 是初始容量（大多数线程持有 0~3 个 handle），`true` 是 `on_C_heap` 标志——告诉 GrowableArray 内部数据缓冲区在 C-Heap 上分配而不是 ResourceArea。原因：ResourceArea 的内容会随 `ResourceMark` 析构被整体释放，而 metadata handles 的生命周期必须跨过 ResourceMark 边界。`ResourceObj::C_HEAP` 表示对象本身也在 C-Heap 上，`mtClass` 是 NMT 标签。
+
+**为什么 Metadata 需要专门数组**：oop 的 handles 走 `JNIHandleBlock` 链表（GC 需要扫描），但 `Metadata*` 指向的是 Metaspace——不在 GC 堆里。真正需要这个数组的场景是 **JVMTI `RedefineClasses`（热类替换）**——重新定义类时旧的 `Method*` / `ConstantPool*` 需要被替换，JVM 必须先找出哪些 Metadata 仍然被线程 handle 引用（"活的"），否则会错误释放正在执行的 method。
+
+**写入者**：`methodHandle` 和 `constantPoolHandle` 是栈上 RAII 值类型，构造时调用 `metadata_handles()->push(obj)`（handles.inline.hpp:55-71），无需加锁。
+
+**遍历者**：safepoint 期间 `MetadataOnStackMark` 通过 `Threads::metadata_handles_do(Metadata::mark_on_stack)`（metadataOnStackMark.cpp:54）遍历所有线程的数组，调 `m->set_on_stack(true)` 打标记。RedefineClasses 检查此标记决定哪些 Metadata 可安全回收。
+
+#### `_active_handles` —— JNI 局部引用块链表头
+
+类型 `JNIHandleBlock*`（thread.hpp:301）。`JNIHandleBlock` 是固定 32 槽的句柄块——`_handles[32]`（oop 数组） + `_next`（链表指针） + `_top`（已用槽位，0~32）。构造时设为 NULL——等到 Stage 4 第 6 步 `set_active_handles(JNIHandleBlock::allocate_block())` 才分配首个块。
+
+运行时 Java 调 native 方法时，`JNIHandles::make_local()` 调 `thread->active_handles()->allocate_handle(obj)` 往里存 JNI local ref——每个 `jobject` 本质是 `_handles[32]` 中指向堆 oop 的指针。GC 依赖它：`Thread::oops_do()` 调用 `active_handles()->oops_do(f)` 遍历链表，把存活的 oop 标记为 GC 根。如果 `_active_handles` 是 NULL，JNI local ref 就不会被 GC 扫描。
+
+#### `_free_handle_block` —— 线程本地空闲块缓存
+
+类型 `JNIHandleBlock*`（thread.hpp:304）。一个单元素 free list——释放的 JNIHandleBlock 不立即归还全局池，而是缓存到线程本地。下次本线程再分配时（`allocate_block()`，jniHandles.cpp:364-405），先检查 `thread->free_handle_block()`——命中则直接取走，无需锁；未命中才持全局锁从 `_block_free_list` 取。释放时（`release_block()`，jniHandles.cpp:408-415）挂回头——下次无锁复用。线程退出时 `JavaThread::exit()` 把缓存块归还全局池。
+
+#### `_last_handle_mark` —— HandleMark 栈顶指针
+
+类型 `HandleMark*`（thread.hpp:307）。HandleMark 是 RAII 水位标记——构造时保存 `_handle_area` 的当前分配水位（`_chunk/_hwm/_max/_size_in_bytes`），然后 push 到 `_last_handle_mark` 链表；析构时回滚到保存的水位，`_last_handle_mark` 回退到 `_previous_handle_mark`。
+
+紧接这三行置 NULL 之后，构造函数第 246 行：
 
 ```cpp
 new HandleMark(this);
 ```
 
-这是本线程的第一个 `HandleMark`——它通过构造函数副作用把自己链接到 `_last_handle_mark`。`HandleMark` 是 RAII 类，构造时记录 `_handle_area` 的当前水位，析构时截断回去——后续所有 Handle 分配都在这个 Mark 之上，退出时一口气回收。
+`HandleMark::initialize()` 做了两件事：`set_previous_handle_mark(thread->last_handle_mark())`（此时为 NULL），然后 `thread->set_last_handle_mark(this)`（指向自己）。`set_last_handle_mark(NULL)` 只是初始化变量，紧随其后的 `new HandleMark(this)` 立即创建第一个 Mark 并覆盖——两者不矛盾。后续再 `new HandleMark(thread)` 时构成**栈式链表**——后进先出，层层叠放。
+
+**三概念辨析**：`HandleArea` 是草稿纸（Arena），`HandleMark` 是纸上画的水位线（RAII——构造画线记当前位置，析构把那线之后的内容撕掉），`Handle` 是纸上写的一个词（`oop*` 薄包装，构造时在 HandleArea 中分配槽位）。出代码块时 HandleMark 析构——所有这期间写入的 Handle 全变为悬空指针。
 
 #### 线程安全
 
