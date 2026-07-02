@@ -165,7 +165,26 @@ HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起
 
 大多数 JNI 调用链的生命周期是：进入 native → 分配 local ref → 返回 → 释放块。同一线程连续两帧可以无锁复用这一个缓存块，不需要囤积。第二帧如果命中缓存（大概率），免去锁竞争；如果需要更多块，走全局分配。
 
-### 3.5 构造时为什么都是 NULL
+### 3.5 JNIHandleBlock 是线程私有的
+
+每个 `Thread` 对象持有自己的一套 JNIHandleBlock 链：
+
+- `_active_handles`（`thread.hpp:301`）—— 本线程正在使用的 JNIHandleBlock 链表头，线程私有
+- `_free_handle_block`（`thread.hpp:304`）—— 本线程的空闲块缓存（单块），线程私有
+
+有一个全局池 `JNIHandleBlock::_block_free_list`（静态成员，见 `jniHandles.hpp:160`）作为后备——`allocate_block()` 先拿空闲块缓存、再拿全局池时才需要锁。
+
+**与 Thread 构造函数的关系**：HotSpot 的线程模型中，每个能执行 JNI 调用的线程都**必须**拥有一个 `_active_handles` 链表，这样 GC 才能扫描它的 local ref。但 Thread 构造函数执行时线程还没启动——OS 层没附着、栈边界未知、任何 JNI 函数都调不了——所以设置为 NULL 是合理的。
+
+真正给主线程分配第一个 JNIHandleBlock 的时机在 `Threads::create_vm()` 第 6 步：
+
+```cpp
+main_thread->set_active_handles(JNIHandleBlock::allocate_block());
+```
+
+`allocate_block()` 从线程的空闲块缓存或全局池拿一个块，挂到 `_active_handles` 上。此后主线程调任何 JNI 函数时，返回的 `jobject` 都会写入这个块。如果 32 槽用完，`allocate_handle()` 自动扩展新块（`_next` 链接）。
+
+### 3.6 构造时为什么都是 NULL
 
 `thread.cpp:234-236`：
 
@@ -175,7 +194,7 @@ set_free_handle_block(NULL);
 set_last_handle_mark(NULL);
 ```
 
-三行都是 NULL——线程刚出生，还不能执行 JNI 调用（OS 层还没附着），HandleArea 也是空的。`_active_handles` 在 Stage 4 第 6 步 `set_active_handles(JNIHandleBlock::allocate_block())` 才赋真值，`_last_handle_mark` 在紧随三行之后的 `new HandleMark(this)`（thread.cpp:246）立即被第一个 Mark 覆盖。此处只是 C++ 安全实践：所有指针在使用前显式初始化。
+三行都是 NULL——线程刚出生，还不能执行 JNI 调用，全局池里的块也不能直接挂给一个没附着的线程。此处只是 C++ 安全实践：所有指针在使用前显式初始化。
 
 ---
 
