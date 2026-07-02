@@ -12,18 +12,12 @@
 /* === src/hotspot/share/services/management.cpp === */
 
 void management_init() {
-#if INCLUDE_MANAGEMENT
   Management::init();
   ThreadService::init();
   RuntimeService::init();
   ClassLoadingService::init();
-#else
-  ThreadService::init();
-#endif // INCLUDE_MANAGEMENT
 }
 ```
-
-`INCLUDE_MANAGEMENT` 默认开启。关闭时只保留 `ThreadService::init()`——因为 `ThreadService` 同时被 JVMTI 等子系统使用，不是 JMX 专属。
 
 四个 `init()` 的分工：
 
