@@ -155,8 +155,8 @@ HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起
 以下字段只在链表第一个块中才有意义——注释里说"Having two types of blocks complicates the code and the space overhead in negligible"：与其为"普通块"和"首块"定义两个类，不如所有块都带上这些字段，非首块的浪费忽略不计。
 
 - `JNIHandleBlock* _last` —— 链表尾块指针。首块用它 O(1) 找到链尾，新块直接挂到 `_last->_next`，不用遍历链表
-- `JNIHandleBlock* _pop_frame_link` —— `PushLocalFrame`/`PopLocalFrame` 时用。Push 时记下当前 `_top` 所在的块，Pop 时直接回滚到这个块，`_top` 以上的槽位全部释放
-- `oop* _free_list` —— 空闲槽位链表，**重建时一次性扫描串联，不是在删除时立即串联**。`DeleteLocalRef` 释放 slot 时只做一件事——把槽位写入 `NULL`，不碰 `_free_list`。真正串联发生在 `allocate_handle` 发现分配失败且 `_free_list == NULL` 时：调 `rebuild_free_list()`（`jniHandles.cpp:548`）遍历所有已分配槽位，发现 `*handle == NULL` 的就强转为 `(oop)_free_list` 写入槽位（侵入式链表），链头挂在 `_free_list`。下次 `allocate_handle` 优先从 `_free_list` 取。
+- `JNIHandleBlock* _pop_frame_link` —— `PushLocalFrame`/`PopLocalFrame` 的书签。`Push` 时记下"当前用的是哪个块"，`Pop` 时顺着这个指针跳回那个块、把 `_top` 恢复到 Push 之前的位置——Push 之后分配的所有 local ref 一次性作废。不用逐个 `DeleteLocalRef`。如图：`Push` 在块 1 画线→中间分配扩展出块 2→`Pop` 顺着 `_pop_frame_link` 回块 1、砍掉块 2。
+- `oop* _free_list` —— 空闲槽位链表，**串的是整条链表上所有块的 NULL 槽位**，不是只串第一个块。在 `rebuild_free_list()` 时用 `for (current = this; current != NULL; current = current->_next)` 遍历**全部块**收集 NULL slot，串成一条侵入式链表（槽位自身存下一跳地址），统一挂在首块的 `_free_list` 上。下次 `allocate_handle` 优先从这条链头取 slot。
 - `int _allocate_before_rebuild` —— 重建 `_free_list` 之后还能从空闲链表分配多少次。举个例子：`_top` 到了 32（满），期间用户调了 3 次 `DeleteLocalRef` 删掉槽位 3、7、15。JVM 扫描全部 32 个槽位，发现 3 个空闲的，重建 `_free_list`，同时把 `_allocate_before_rebuild` 设为 3。接下来 3 次 `allocate_handle` 从 `_free_list` 链头取（-1），计数器归零后下一次分配时再触发重建扫描——如果没空闲槽位就扩展新块。
 - `size_t _planned_capacity` —— 当前 JNI 帧计划需要的槽位数。native 代码可以主动调 `env->EnsureLocalCapacity(N)` 告诉 VM"我这个函数需要 N 个 local ref"。JVM 把 `_planned_capacity` 设为 N，如果当前块不够空间，**现在就扩展**足够多的新块——一次性完成，省得后面每次 `allocate_handle` 失败时再逐个扩。类比：进考场前老师说"你要多少草稿纸"，一次给全，不用写到一半举手。
 
