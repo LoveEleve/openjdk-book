@@ -147,7 +147,7 @@ HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起
 - `JNIHandleBlock* _last` —— 链表尾块指针。首块用它 O(1) 找到链尾，新块直接挂到 `_last->_next`，不用遍历链表
 - `JNIHandleBlock* _pop_frame_link` —— `PushLocalFrame`/`PopLocalFrame` 时用。Push 时记下当前 `_top` 所在的块，Pop 时直接回滚到这个块，`_top` 以上的槽位全部释放
 - `oop* _free_list` —— 空闲槽位链表，侵入式链表：`DeleteLocalRef` 释放 slot 后，JVM 把那个槽位里的内容从 `oop`（对象地址）改写为 `oop*`（下一个空闲槽位的地址），槽位自身就是链表节点，不需要额外分配内存。`_free_list` 指向链头，下次 `allocate_handle` 优先从链头取 slot（比 `_top++` 多一次指针跳转，但避免了空洞）。链结构如下：`_free_list → _handles[3] → _handles[7] → NULL`——3 号槽位存的是 `&_handles[7]`，7 号存的是 `NULL` 表示链尾。
-- `int _allocate_before_rebuild` —— 重建 `_free_list` 之前还能分配多少次。因为遍历 `_free_list` 拿空闲槽位比直接 `_top++` 慢，JVM 在 `_handles[32]` 全满时一次性扫描所有已分配槽位，把其中被 `DeleteLocalRef` 删过的位置收集起来重建 `_free_list`，然后这个计数器决定"接下来的 N 次分配都从 `_free_list` 拿"
+- `int _allocate_before_rebuild` —— 重建 `_free_list` 之后还能从空闲链表分配多少次。举个例子：`_top` 到了 32（满），期间用户调了 3 次 `DeleteLocalRef` 删掉槽位 3、7、15。JVM 扫描全部 32 个槽位，发现 3 个空闲的，重建 `_free_list`，同时把 `_allocate_before_rebuild` 设为 3。接下来 3 次 `allocate_handle` 从 `_free_list` 链头取（-1），计数器归零后下一次分配时再触发重建扫描——如果没空闲槽位就扩展新块。
 - `size_t _planned_capacity` —— 当前 JNI 帧计划需要的槽位数。`EnsureLocalCapacity(N)` 调用时写入，确保帧内至少能分配 N 个 local ref
 
 #### 静态成员（全局共享）
