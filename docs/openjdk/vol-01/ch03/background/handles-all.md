@@ -244,7 +244,7 @@ set_last_handle_mark(NULL);
 
 ### 4.0 先理解"Metadata 是什么"
 
-Java 程序里的每一个类，在 JVM 内部都有两个 C++ 对象在 Metaspace 中表示：
+Java 程序里的每一个类，在 JVM 内部由以下 C++ 对象在 Metaspace 中表示：
 
 - `InstanceKlass` —— 类的"定义"：这个类有哪些字段、哪些方法、父类是谁
 - `Method` —— 类里每个方法的字节码、JIT 编译后的机器码、异常表
