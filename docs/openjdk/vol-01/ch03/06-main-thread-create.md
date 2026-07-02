@@ -1294,11 +1294,13 @@ double SuspendibleThreadSet::_suspend_all_start = 0.0;   // 暂停开始时间
 
 工作流程分两条线：GC 线程主动登记（join/yield）和 VMThread 发起暂停（synchronize）。
 
-`SuspendibleThreadSet`（STS）是 GC 线程和 VMThread 之间的**协作式暂停协议**。和 `_SR_lock`（VMThread 用信号 12 强行打断目标线程的抢占式暂停）不同，STS 是线程主动声明"我准备好了，可以停了"。
+用一个具体的场景理解这个协议。G1 的并发标记线程（`ConcurrentGCThread`）是在后台持续工作的——遍历 Java 堆、标记活对象。这个线程大多数时间和用户线程并行运行，但偶尔 VMThread 需要执行一个 safepoint 操作（比如某些 GC 阶段要求全局暂停）。
 
-一个线程要参与 STS 协议，先调 `join()`——`_nthreads` 计数 +1。在工作循环中定期调 `yield()`——检查 `_suspend_all` 标志，如果 VMThread 发了暂停请求，就把 `_nthreads_stopped` +1。当 `_nthreads_stopped == _nthreads` 时（所有参与的线程都停下了），`_synchronize_wakeup->signal()` 通知 VMThread 继续。VMThread 调 `synchronize()` 设 `_suspend_all = true`，然后 `_synchronize_wakeup->wait()` 阻塞等待所有线程就绪。
+问题是：并发标记线程大部分时间在做不重要的事，随时可以停；但它偶尔在一个关键操作中——持着某个锁、或者在修改一个指针——这时候不能停。`_SR_lock` 用信号 12 强行打断线程的方式在这里不好用——并发标记线程要自己告诉 VMThread"我准备好了"。STS 就是做这事的。
 
-所以 `_synchronize_wakeup` 这个 Semaphore 是 STS 的核心通道——`suspendibleThreadSet_init()` 只建了一个管道，后面并发 GC 线程和 VMThread 通过这个管道握手。这才是 ch04 之后才会大量使用的场景——当前 vm_init_globals() 阶段还没有并发 GC 线程需要暂停，管道建好了等后面用。
+线程在执行关键操作前调 `join()` 登记自己，操作完后调 `leave()` 注销。在工作循环里定期调 `yield()`——这不是"把 CPU 让给别人"的那个 yield，而是"检查有没有人要我停"。VMThread 要发起暂停时调 `synchronize()`，把 `_suspend_all` 设为 true，然后等所有登记过的线程都调 `yield()`。最后一个线程停下的那一下，`_nthreads_stopped == _nthreads`，signal Semaphore 通知 VMThread。VMThread 执行完 safepoint 后调 `desynchronize()`，把所有线程唤醒。
+
+所以 `_synchronize_wakeup` 是一个管道——两个方向的握手都通过它。`suspendibleThreadSet_init()` 做的事只有 `new Semaphore()` 建一个管子，后面 ch04 的并发 GC 线程和 VMThread 通过这个管子来回通信。当前阶段还没有并发 GC 线程需要暂停——管子建好了在那等着。
 
 > `vm_init_globals()` 只是 VM 线程侧的前置基础设施。同文件下方的 `init_globals()` 才是 ch04 的核心——它依次初始化 management、bytecodes、classLoader、codeCache、VM_Version、universe、interpreter 等 20+ 个子系统。不要混淆两个函数。
 
