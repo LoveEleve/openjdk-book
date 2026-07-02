@@ -54,46 +54,8 @@
   * [3.4 参数解析](openjdk/vol-01/ch03/04-args-parse.md)
   * [3.5 OS 后初始化](openjdk/vol-01/ch03/05-os-init2.md)
   * [3.6 第一个 JavaThread：主线程登记](openjdk/vol-01/ch03/06-main-thread-create.md)
-* [第四章 — vm_init_globals](openjdk/vol-01/ch04.md) - 7 项全局基础设施 + 主线程绑定
-* [第五章 — mutex_init](openjdk/vol-01/ch05.md) - ~90 锁 + 10 级 ranking 系统
-* [第六章 — CodeCache](openjdk/vol-01/ch06.md) - 三段 JIT 代码内存
-* [第七章 — VM_Version_init](openjdk/vol-01/ch07.md) - CPU 特性探测与 Intrinsic 级联
-* [第八章 — stubRoutines_init1](openjdk/vol-01/ch08.md) - 16 个早期桩代码
-* [第九章 — classLoader_init1](openjdk/vol-01/ch09.md) - Bootstrap Classpath 与 Zip 库
-* [第十章 — universe_init 总览](openjdk/vol-01/ch10.md) - init_globals 的转折点
-* [第十一章 — G1CollectedHeap：18步堆创建](openjdk/vol-01/ch11-heap/01-overview.md)
-  * [11.2 HeapRegion——堆的原子单位](openjdk/vol-01/ch11-heap/02-region.md)
-  * [11.3 Card Table——跨 Region 写跟踪](openjdk/vol-01/ch11-heap/03-card-table.md)
-  * [11.4 BOT——Block Offset Table](openjdk/vol-01/ch11-heap/04-bot.md)
-  * [11.5 HeapRegionManager](openjdk/vol-01/ch11-heap/05-manager.md)
-  * [11.6 mmap 预留与辅助内存](openjdk/vol-01/ch11-heap/06-mmap.md)
-* [第十二章 — Metaspace](openjdk/vol-01/ch12.md) - 类元数据的内存管理
-* [第十三章 — SymbolTable + StringTable](openjdk/vol-01/ch13.md) - 并发安全的符号存储
-* [第十四章 — G1Policy + ConcurrentMark](openjdk/vol-01/ch14.md) - GC 调度基础设施
-* [第十五章 — GC 屏障桩](openjdk/vol-01/ch15.md) - G1 SATB 写屏障
-* [第十六章 — TemplateInterpreter：286 Codelet](openjdk/vol-01/ch16-interpreter/01-overview.md)
-  * [16.2 CodeletMark——RAII 提交](openjdk/vol-01/ch16-interpreter/02-codelet.md)
-  * [16.3 TosState——11 种栈顶类型](openjdk/vol-01/ch16-interpreter/03-tosstate.md)
-  * [16.4 generate_all()——分类生成](openjdk/vol-01/ch16-interpreter/04-generate-all.md)
-* [第十七章 — InvocationCounter](openjdk/vol-01/ch17.md) - 编译阈值状态机
-* [第十八章 — 微小初始化](openjdk/vol-01/ch18.md) - sizeof 断言/GC 种子/寄存器名
-* [第十九章 — TemplateTable](openjdk/vol-01/ch19.md) - 256 字节码的设计图纸
-* [第二十章 — SharedRuntime 桩](openjdk/vol-01/ch20.md) - 6 个 Resolve Blob
-* [第二十一章 — 类型系统](openjdk/vol-01/ch21.md) - TypeArrayKlass 与核心类偏移
-* [第二十二章 — vmStructs + PrintFlags](openjdk/vol-01/ch22.md) - SA 调试与配置归档
-* [第二十三章 — 引用 + JNI 句柄](openjdk/vol-01/ch23.md) - 软引用时钟与 OopStorage
-* [第二十四章 — 编译底座](openjdk/vol-01/ch24.md) - 虚表桩/IC 缓冲/编译指令
-* [第二十五章 — CompileBroker](openjdk/vol-01/ch25.md) - C1/C2 调度中枢
-* [第二十六章 — Universe 后初始化](openjdk/vol-01/ch26-post/01-overview.md)
-  * [26.2 第二次 Interpreter::initialize()](openjdk/vol-01/ch26-post/02-reinit-interpreter.md)
-  * [26.3 OOM 错误预分配](openjdk/vol-01/ch26-post/03-oom-prealloc.md)
-  * [26.4 initialize_known_methods](openjdk/vol-01/ch26-post/04-known-methods.md)
-* [第二十七章 — Intrinsic 桩 Phase 2](openjdk/vol-01/ch27.md) - 50+ 硬件加速入口
-* [第二十八章 — MH 适配器](openjdk/vol-01/ch28.md) - invokedynamic 的桥梁
-* [第二十九章 — Post-init (上)](openjdk/vol-01/ch29.md) - VMThread + java.lang 类加载
-* [第三十章 — Post-init：编译器线程 -> JNI_OK](openjdk/vol-01/ch30-post/01-compiler-threads.md)
-  * [30.2 模块系统初始化](openjdk/vol-01/ch30-post/02-modules.md)
-  * [30.3 最后一步——return JNI_OK](openjdk/vol-01/ch30-post/03-final-steps.md)
+* [第四章 — init.cpp 全局初始化](openjdk/vol-01/ch04/01-overview.md) - init_globals() 30 项核心子系统初始化
+  * [4.1 init_globals() 总览](openjdk/vol-01/ch04/01-overview.md)
 
   </div>
 </details>
