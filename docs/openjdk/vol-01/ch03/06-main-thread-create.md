@@ -1130,19 +1130,9 @@ _prologue->overflow = 0;
 
 Prologue 后面挨着的是 PerfDataEntry。每创建一个计数器就追加一个 Entry。固定头 24 字节 + 可变主体（名字 + 数据值）：
 
-```
-PerfDataEntry 内存布局:
-┌─ 固定头 (24B) ─────────────────────────────────────┐
-│ entry_length  │ name_offset │ vector_length         │ ← jint×3=12B
-│ data_type='J' │ flags  │ data_units │ variability  │ ← jbyte×4=4B
-│ data_offset                                      │ ← jint=4B
-│ (padding 4B 对齐)                                  │ ← 4B
-├─ 可变部分 ─────────────────────────────────────────┤
-│ "sun.rt.sync_Inflations\0"                         │ ← 名字字符串+\0
-│ (padding 到 8B 对齐)                                 │
-│ jlong value = 0                                    │ ← 8B 数据值
-└────────────────────────────────────────────────────┘
-```
+![PerfDataEntry 内存结构](assets/perfdata-entry-layout.png)
+
+
 
 jstat 的读取方式：Prologue 拿 `entry_offset=32` 和 `num_entries` → 从偏移 32 读第一个 entry → `data_type='J'` 知道值是 jlong → `data_offset` 跳到值的偏移 → 读 8 字节 → `entry_length` 跳到下一个 → 循环。
 
