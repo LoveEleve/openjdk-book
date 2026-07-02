@@ -132,12 +132,28 @@ HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起
 
 ### 3.1 JNIHandleBlock 是什么
 
-`jniHandles.hpp:137-153` 定义，固定 32 槽的 oop 数组块，链表结构：
+`jniHandles.hpp:132-168` 定义，继承 `CHeapObj<mtInternal>`，固定 32 槽的 oop 数组块，链表结构。
+
+#### 每个块都有的字段
 
 - `oop _handles[32]` —— `oop` 就是 `oopDesc*`，每个槽位存一个**堆上 Java 对象的地址**。GC 移动对象后直接更新这个槽位里的地址值。注意这里存的是 `oop`（一层指针 `oopDesc*`），不是 `oop*`（两层指针 `oopDesc**`）——这和 Handle 体系不同：Handle 通过槽位间接访问（双层），JNIHandleBlock 直接受 GC 写更新（单层）。
-- `int _top` —— 已用槽位索（0~32），类似栈顶指针。每分配一个 JNI local ref，`_top++`
+- `int _top` —— 已用槽位索引（0~32），类似栈顶指针。每分配一个 JNI local ref，`_top++`
 - `JNIHandleBlock* _next` —— 链表下一块。32 槽不够用时扩展新块，串成链表
-- `oop* _free_list` —— 空闲槽位链表。DeleteLocalRef 释放的 slot 被串成单链表，下次分配时优先复用（比 `_top++` 多一次指针跳转，但避免了空间浪费）
+
+#### 仅链表首块使用的字段
+
+以下字段只在链表第一个块中才有意义——注释里说"Having two types of blocks complicates the code and the space overhead in negligible"：与其为"普通块"和"首块"定义两个类，不如所有块都带上这些字段，非首块的浪费忽略不计。
+
+- `JNIHandleBlock* _last` —— 链表尾块指针。首块用它 O(1) 找到链尾，新块直接挂到 `_last->_next`，不用遍历链表
+- `JNIHandleBlock* _pop_frame_link` —— `PushLocalFrame`/`PopLocalFrame` 时用。Push 时记下当前 `_top` 所在的块，Pop 时直接回滚到这个块，`_top` 以上的槽位全部释放
+- `oop* _free_list` —— 空闲槽位链表。`DeleteLocalRef` 释放的 slot 被串成单链表，下次分配时优先复用（比 `_top++` 多一次指针跳转，但避免了空间浪费）
+- `int _allocate_before_rebuild` —— 重建 `_free_list` 之前还能分配多少次。因为遍历 `_free_list` 拿空闲槽位比直接 `_top++` 慢，JVM 在 `_handles[32]` 全满时一次性扫描所有已分配槽位，把其中被 `DeleteLocalRef` 删过的位置收集起来重建 `_free_list`，然后这个计数器决定"接下来的 N 次分配都从 `_free_list` 拿"
+- `size_t _planned_capacity` —— 当前 JNI 帧计划需要的槽位数。`EnsureLocalCapacity(N)` 调用时写入，确保帧内至少能分配 N 个 local ref
+
+#### 静态成员（全局共享）
+
+- `static JNIHandleBlock* _block_free_list`（`jniHandles.cpp:346 = NULL`）—— 全局空闲块池。没有 `init()` 函数，程序启动时自动零初始化。`allocate_block()` 按"线程缓存→全局池→`new`"的顺序尝试，`release_block()` 把释放的块挂回全局池
+- `static int _blocks_allocated` —— 调试用计数器，记录一共分配了多少个块
 
 存储位置是 **C-Heap**（`malloc/free`），不是 HandleArea 的 Chunk。
 
