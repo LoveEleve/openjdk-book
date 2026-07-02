@@ -1419,14 +1419,51 @@ new HandleMark(this);
 `Thread::Thread()` 构造函数中初始化线程列表无锁遍历所需的基础字段：
 
 ```cpp
-_oops_do_parity = 0;
-_threads_hazard_ptr = NULL;
-_threads_list_ptr = NULL;
-_nested_threads_hazard_ptr_cnt = 0;
-_rcu_counter = 0;
+uint     _oops_do_parity = 0;                    // GC 标记轮次（偶数才扫描）
+ThreadsList* _threads_hazard_ptr = NULL;         // 当前线程正在读的 ThreadsList 快照
+SafeThreadsListPtr* _threads_list_ptr = NULL;    // 稳定引用包装（多层嵌套时用）
+uint     _nested_threads_hazard_ptr_cnt = 0;     // 嵌套 acquire_stable_list 的深度
+volatile uint _rcu_counter = 0;                 // RCU 风格的代际计数（写者递增，读者比对）
 ```
 
-这四个字段是实现线程列表无锁遍历的基础——其他线程（如 GC 的 VMThread）可以在不拿锁的情况下安全遍历活跃线程列表。`_threads_hazard_ptr` 在遍历前保存当前列表指针，配合 `_rcu_counter` 防止遍历期间列表被回收。
+前 4 个字段属于 Thread 实例（线程私有），`_rcu_counter` 是 ThreadsSMRSupport 的全局静态字段。它们配合实现 **SMR（Safe Memory Reclamation）**——HotSpot 的线程列表无锁遍历机制。
+
+**为什么需要无锁遍历？** GC、JStack、JVMTI 等操作都要遍历所有活跃 JavaThread。如果用锁保护线程列表，每次 GC 都要先抢 `Threads_lock`——在高频场景下成为瓶颈。SMR 让读者不拿锁就能安全遍历，写者（增删线程）也不阻塞读者。
+
+**核心机制——Copy-on-Write + hazard pointer**：
+
+1. **ThreadsList 是不可变快照**。线程列表本身是个 `JavaThread*` 数组（`ThreadsList::_threads`，`threadSMR.hpp:158`），一旦发布就不修改。增删线程时新建一个 ThreadsList，用 `Atomic::xchg` 原子替换全局 `_java_thread_list` 指针（`threadSMR.cpp:159-161`）。旧列表还存活，等没人用了再删。
+
+2. **读者先"挂标签"再读**。遍历前调用 `acquire_stable_list()`（`threadSMR.cpp:366`），把当前 `_java_thread_list` 指针保存到自己的 `_threads_hazard_ptr`——相当于贴张条子说"我正在读这个版本"。然后直接遍历这个快照数组，不需要任何锁。
+
+3. **写者删线程时先扫描 hazard ptr**。`smr_delete()`（`threadSMR.cpp:944`）把线程从列表移除后不能立即 `delete`——旧 ThreadsList 可能还有人正在遍历。它调用 `is_a_protected_JavaThread()` 扫描所有线程的 `_threads_hazard_ptr`，如果有人还指着包含这个线程的旧列表，就在 `Threads_lock` 上 `wait`，直到那些读者调用 `release_stable_list()` 释放后才真正 `delete thread`（`threadSMR.cpp:1009`）。
+
+**举个具体场景**：
+
+```
+T1(GC 线程)                          T2(普通 JavaThread 退出)
+─────────────────────────────────    ────────────────────────────────
+acquire_stable_list():
+  hazard_ptr = list_v3               从 _java_thread_list 移除自己
+  (贴条:我在读 list_v3)               Atomic::xchg(list_v4, &_java_thread_list)
+                                      _java_thread_list 现在指向 list_v4
+for (t in list_v3) {                 smr_delete(t2):
+  扫描 t2...                           is_a_protected(t2)?
+}                                      → 扫描到 T1.hazard_ptr == list_v3
+release_stable_list():                  → list_v3 包含 t2 → 等!
+  hazard_ptr = NULL                  wait on Threads_lock...
+                                      ...
+                                      再次扫描: T1.hazard_ptr 已 NULL
+                                      → 安全 delete t2
+```
+
+T1 全程不拿 `Threads_lock`（除了内部的 `delete_lock`），T2 也不阻塞 T1 的遍历——T1 拿着旧快照 list_v3 慢慢扫，T2 等 T1 扫完。
+
+**`_rcu_counter` 的作用**：这是 RCU（Read-Copy-Update）风格的代际计数。写者替换 `_java_thread_list` 时递增，读者比对前后值判断"我读的快照是否已过期"。和 hazard ptr 配合提供双重保险。
+
+**`_nested_threads_hazard_ptr_cnt` 的作用**：同一线程可能嵌套调用 `acquire_stable_list()`（如 GC 遍历线程时又触发了 JFR 的线程枚举）。计数器记录嵌套深度，确保最外层 `release_stable_list()` 才真正清除 hazard_ptr。
+
+> **为什么这些字段是线程私有的？** hazard ptr 必须线程私有——每个读者独立声明"我在读哪个版本"，不能被其他线程修改。`_rcu_counter` 则是全局共享的（`ThreadsSMRSupport::_rcu_counter`），写者递增让所有读者感知。完整的 SMR 机制（包括 `ThreadsListHandle` RAII 包装、`SafeThreadsListPtr` 嵌套处理、`_to_delete_list` 延迟删除链表）将在后续 Stop-The-World / 线程生命周期章节详细展开。
 
 #### 系统监控
 
