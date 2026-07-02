@@ -1179,38 +1179,25 @@ NEWPERFCOUNTER → PerfDataManager::create_counter(SUN_RT, "_sync_Inflations", U
 
 `PerfMemory::alloc()` 本质是撞针推进——`_top += size`。如果剩余空间不够（`_top + size >= _end`），记录 overflow 字节数并返回 NULL，后续计数器降级到 C-Heap 分配——仍然可用，只是 jstat 读不到。默认 32KB 约能放 300~600 个计数器。
 
-#### gdb 验证——断点在 ObjectMonitor::Initialize() 之后
+#### hexdump 验证——断点在 ObjectMonitor::Initialize() 之后
 
-断点打到 `ObjectMonitor::Initialize()` 返回后，这 7 个计数器已经在共享内存中写入了。gdb 里可以逐层查：
-
-```
-# Prologue 头部——num_entries 从 0 变成了 7
-x/32xb PerfMemory::_start
-
-# 看 Prologue 的结构体字段
-p ((PerfDataPrologue*)PerfMemory::_start)->magic
-p ((PerfDataPrologue*)PerfMemory::_start)->num_entries    # 7
-p ((PerfDataPrologue*)PerfMemory::_start)->used             # 非零了
-p ((PerfDataPrologue*)PerfMemory::_start)->accessible       # 还是 0
-
-# 看第一个计数器（_sync_Inflations）
-set $entry = (PerfDataEntry*)(PerfMemory::_start + sizeof(PerfDataPrologue))
-p $entry->entry_length
-p $entry->data_type                                     # 0x4a = 'J'
-p $entry->data_units                                    # 0x04 = U_Events
-# 看第一个计数器的名字
-p (char*)((long)$entry + $entry->name_offset)
-# 看第一个计数器的值
-p *(jlong*)((long)$entry + $entry->data_offset)         # 0
-```
-
-shell 里也能看出变化——`hexdump` 的输出从全是零变成了有内容：
+断点打到 `ObjectMonitor::Initialize()` 返回后，7 个计数器已经在共享内存文件中写好了。在终端执行：
 
 ```
-hexdump -C /tmp/hsperfdata_$(whoami)/$(pgrep java) | head -20
+hexdump -C /tmp/hsperfdata_$(whoami)/$(pgrep java) | head -40
 ```
 
-`num_entries=7`、`used` 不再为零、第一个 entry 的可变部分出现了 `sun.rt.sync_Inflations` 字符串。7 个计数器的 jlong 初始值都是 0——计数器只是注册好了，还没开始计数。
+和之前在 `perfMemory_init()` 之后抓到的内容对比——变化如下。Prologue 头的变化可以直接对照偏移看出来：
+
+- `0x1C` 处 `num_entries` 从 `00 00 00 00` → `07 00 00 00`（7 个计数器）
+- `0x08` 处 `used` 从 `00 00 00 00` → 非零（共享内存已占用字节）
+- `0x20` 往后（= entry_offset = 32 字节处）不再全是零——第一个 PerfDataEntry 的固定头出现
+- 第一个 entry 内部，`data_type` 偏移处是 `4a`（字符 `'J'`，说明值是 jlong）
+- `data_units` 偏移处是 `04`（`U_Events`）
+- 固定头后面的可变部分出现了 `sun.rt.sync_Inflations` 字符串
+- jlong 数据区的 8 字节全是零——计数器刚创建，值还是 0
+
+把 hexdump 的输出贴过来，我来逐字节标注每个字段。
 
 正常退出时 `exit_globals()` → `perfMemory_exit()` → `unlink("/tmp/hsperfdata_<user>/<pid>")` 删除文件。JVM 崩溃时文件会留下——jstat 可以读取崩溃进程的残留文件用于诊断。
 
