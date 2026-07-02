@@ -152,7 +152,17 @@ HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起
 
 #### 静态成员（全局共享）
 
-- `static JNIHandleBlock* _block_free_list`（`jniHandles.cpp:346 = NULL`）—— 全局空闲块池。没有 `init()` 函数，程序启动时自动零初始化。`allocate_block()` 按"线程缓存→全局池→`new`"的顺序尝试，`release_block()` 把释放的块挂回全局池
+- `static JNIHandleBlock* _block_free_list`（`jniHandles.cpp:346 = NULL`）—— 全局空闲块池。没有 `init()` 函数，程序启动时自动零初始化为 NULL。`allocate_block()`（`jniHandles.cpp:364-405`）按以下顺序尝试：
+
+  ```
+  allocate_block(thread):
+  1. thread->free_handle_block() != NULL  → 拿线程本地缓存（无锁）
+  2. 持全局锁，_block_free_list != NULL  → 从全局池拿
+  3. 全局池也是 NULL                    → new JNIHandleBlock()
+       └─ CHeapObj<mtInternal>::operator new → malloc
+  ```
+
+  **第一次分配时**，线程本地缓存是 NULL（构造函数刚设的），全局池也是 NULL（静态零初始化）。所以第 1、2 步都跳过，直接走第 3 步：`new JNIHandleBlock()`，底层调用 `malloc` 从 C-Heap 分配一块内存。此后这个块被释放时挂回全局池或线程缓存，下次分配就可能命中第 1 或第 2 步了。
 - `static int _blocks_allocated` —— 调试用计数器，记录一共分配了多少个块
 
 存储位置是 **C-Heap**（`malloc/free`），不是 HandleArea 的 Chunk。
