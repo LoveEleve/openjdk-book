@@ -762,12 +762,7 @@ new (mtThread) ResourceArea()
   │
   ├─ 6. Chunk 构造函数在这块内存上执行:
   │      _len = 984, _next = NULL
-  │      内存布局:
-  │      ┌───────────┬───────────────────────────────────┐
-  │      │ Chunk头部  │ 数据区 (984 字节, 全部空闲)        │
-  │      │ _next=NULL │                                   │
-  │      │ _len=984   │                                   │
-  │      └───────────┴───────────────────────────────────┘
+  │   
   │
   ├─ 7. Arena 设置三个指针:
   │      _first = _chunk = 这个 Chunk 的地址
@@ -1354,35 +1349,48 @@ _stack_size = 0;
 
 #### 内存管理
 
-四个分配器对象——全部用 `new` 在 C-Heap 上分配，GC 不管理它们：
+`Thread::Thread()` 构造函数中分配四个分配器对象——全部用 `new` 在 C-Heap 上分配，GC 不管理它们：
 
 ```cpp
-ResourceArea*   _resource_area;    // new(mtThread) ResourceArea——临时内存池
-HandleArea*     _handle_area;      // new(mtThread) HandleArea——GC 句柄区
-GrowableArray<Metadata*>* _metadata_handles; // new——元数据句柄表
-JNIHandleBlock* _active_handles;   // JNI 局部引用链表头
-JNIHandleBlock* _free_handle_block; // 空闲句柄块链
-int             _visited_for_critical_count; // 嵌套 JNI critical 调用计数器
+set_resource_area(new (mtThread)ResourceArea());
+set_handle_area(new (mtThread) HandleArea(NULL));
+set_metadata_handles(new (ResourceObj::C_HEAP, mtClass)
+                     GrowableArray<Metadata*>(30, true));
+set_active_handles(NULL);
+set_free_handle_block(NULL);
+set_last_handle_mark(NULL);
 ```
 
-`_resource_area` 是 Arena 风格的临时内存池——在线程生命周期内可以快速分配小块内存并在一次操作后全部回收。`_handle_area` 是 GC 句柄区——JVM 内部代码在操作 Java 对象时通过 Handle 包装，防止 GC 期间对象被移动。`_active_handles` 在本 Stage 第 6 步才赋值。
+`_resource_area` 是 Arena 风格的临时内存池——在线程生命周期内可以快速分配小块内存并在一次操作后全部回收。`_handle_area` 是 GC 句柄区——JVM 内部代码在操作 Java 对象时通过 Handle 包装，防止 GC 期间对象被移动。`_active_handles` 在 `Thread::Thread()` 中先设为 NULL——本 Stage 第 6 步才通过 `set_active_handles(JNIHandleBlock::allocate_block())` 赋真值。紧接这些分配行之后还有一行关键代码：
+
+```cpp
+new HandleMark(this);
+```
+
+这是本线程的第一个 `HandleMark`——它通过构造函数副作用把自己链接到 `_last_handle_mark`。`HandleMark` 是 RAII 类，构造时记录 `_handle_area` 的当前水位，析构时截断回去——后续所有 Handle 分配都在这个 Mark 之上，退出时一口气回收。
 
 #### 线程安全
 
+`Thread::Thread()` 构造函数中初始化线程列表无锁遍历所需的基础字段：
+
 ```cpp
-Threads::ThreadsList* _threads_hazard_ptr;  // 线程列表的 hazard pointer（无锁安全读取）
-ThreadsList*          _threads_list_ptr;     // 指向当前有效的线程列表快照
-int  _hazard_ptr_count;                      // 递归引用计数
-uint _rcu_counter;                           // RCU 风格计数器
+_oops_do_parity = 0;
+_threads_hazard_ptr = NULL;
+_threads_list_ptr = NULL;
+_nested_threads_hazard_ptr_cnt = 0;
+_rcu_counter = 0;
 ```
 
-这三个是实现线程列表无锁遍历的基础——其他线程（如 GC 的 VMThread）可以在不拿锁的情况下安全遍历活跃线程列表。`_threads_hazard_ptr` 在遍历前保存当前列表指针，配合 `_rcu_counter` 防止遍历期间列表被回收。
+这四个字段是实现线程列表无锁遍历的基础——其他线程（如 GC 的 VMThread）可以在不拿锁的情况下安全遍历活跃线程列表。`_threads_hazard_ptr` 在遍历前保存当前列表指针，配合 `_rcu_counter` 防止遍历期间列表被回收。
 
 #### 系统监控
 
+`Thread::Thread()` 构造函数中分配 Suspend/Resume 锁：
+
 ```cpp
-Monitor* _SR_lock;          // suspend/resume 的 Monitor（不是 synchronized 那个 ObjectMonitor）
-volatile uint32_t _suspend_flags;  // 挂起标志（0=正常运行，非0=需要挂起）
+_SR_lock = new Monitor(Mutex::suspend_resume, "SR_lock", true,
+                       Monitor::_safepoint_check_sometimes);
+_suspend_flags = 0;
 ```
 
 `_SR_lock` 是 HotSpot 的 `Monitor`（第 3.5 节详细讲解的四层锁机制的第 3 层），用于线程的 suspend/resume 操作。它和第 3.5 节第 1.1 步注册的 `SR_signum` 信号配合工作：
@@ -1446,34 +1454,40 @@ void JavaThread::initialize() {
 
 **执行引擎和 JNI：**
 
+`initialize()` 中设置 Java 层线程对象的镜像和 JNI 入口：
+
 ```cpp
-oop       _threadObj;               // Java 层的 Thread 对象（此刻 NULL，尚未绑定）
-address   _entry_point;             // 线程启动后执行的第一个方法入口（NULL）
-JNIEnv    _jni_environment;         // JNI 环境块，内含 jni_functions() 函数表
+set_threadObj(NULL);
+set_entry_point(NULL);
+set_jni_functions(jni_functions());
 ```
 
-`_threadObj` 是 Java 堆中的 `java.lang.Thread` 对象引用——没创建到 Java 堆是因为此刻 `init_globals()` 还没执行，Java 堆还没初始化。`_jni_environment.functions = jni_functions()` 把 JNI 函数表指针写入——后续 native 方法通过这个表调用 JNI 函数。
+`_threadObj` 是 Java 堆中的 `java.lang.Thread` 对象引用——此刻设为 NULL，因为 `init_globals()` 还没执行，Java 堆还没初始化。`_jni_environment.functions = jni_functions()` 把 JNI 函数表指针写入——后续 native 方法通过这个表调用 JNI 函数。
 
 **Deoptimization（去优化）：**
 
+`initialize()` 中初始化去优化相关的帧链表：
+
 ```cpp
-vframeArray* _vframe_array_head;    // Java 帧栈的快照链表头
-vframeArray* _vframe_array_last;    // 链表尾
-nmethod*     _deopt_nmethod;        // 当前正在去优化的 nmethod（NULL）
-intptr_t*    _must_deopt_id;        // 必须去优化的原因 ID（NULL）
+set_vframe_array_head(NULL);
+set_vframe_array_last(NULL);
+set_deopt_compiled_method(NULL);
+clear_must_deopt_id();              // _must_deopt_id = -1（-1 表示无效）
 ```
 
 去优化是 JIT 编译器特有的问题——当编译假设（比如"这个调用点总是调同一个方法"）被打破时，需要把当前编译帧"解构"回解释器帧。`_vframe_array_head/last` 链表保存被解构的帧信息。
 
 **线程生命周期：**
 
+`initialize()` 中设置线程生命周期相关字段：
+
 ```cpp
-bool        _on_thread_list;        // 是否已插入 Threads::_thread_list 链表
-ThreadState _thread_state;          // _thread_new → _thread_in_vm → ... 状态机
-TerminatedTypes _terminated;        // _not_terminated（未终止） / _thread_exiting / _thread_dead
+_thread_state = _thread_new;
+_terminated = _not_terminated;
+_on_thread_list = false;
 ```
 
-这三个字段记录线程在整个生命周期中处于哪个阶段。构造函数设 `_thread_state = _thread_new`（新建），`_terminated = _not_terminated`（未终止），`_on_thread_list = false`（尚未加入全局链表）。
+这三个字段记录线程在整个生命周期中处于哪个阶段。`_thread_state = _thread_new`（新建），`_terminated = _not_terminated`（未终止, 值为 `0xDEAD-2=57003`），`_on_thread_list = false`（尚未加入全局链表）。
 
 JavaThread 的状态机共 10 个状态，核心设计是**偶数 = 稳定状态，奇数（偶数+1）= 过渡状态**。主线程在本节只会用到 5 个稳定状态：
 
@@ -1491,12 +1505,14 @@ HotSpot 用 RAII 包装类管理状态转换——`ThreadInVMfromJava`（Java→
 
 **栈守卫：**
 
+`initialize()` 中设置栈守卫状态：
+
 ```cpp
-StackGuardState   _stack_guard_state;            // stack_guard_unused → stack_guard_enabled
-address           _reserved_stack_activation;     // 保留区激活地址
+_stack_guard_state = stack_guard_unused;
+_reserved_stack_activation = NULL;   // stack base not known yet
 ```
 
-`_stack_guard_state` 控制栈守卫区的状态——初始为 `stack_guard_unused`（未启用）。第 8 步 `create_stack_guard_pages()` 成功后改为 `stack_guard_enabled`。`_reserved_stack_activation` 在第 5 步 `record_stack_base_and_size()` 中初始设为 `stack_base()`。
+`_stack_guard_state` 控制栈守卫区的状态——初始为 `stack_guard_unused`（未启用）。第 8 步 `create_stack_guard_pages()` 成功后改为 `stack_guard_enabled`。`_reserved_stack_activation` 在 `initialize()` 中先设为 NULL，第 5 步 `record_stack_base_and_size()` 中才改为 `stack_base()`。
 
 **异常处理：**
 
