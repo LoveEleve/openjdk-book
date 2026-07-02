@@ -134,10 +134,10 @@ HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起
 
 `jniHandles.hpp:137-153` 定义，固定 32 槽的 oop 数组块，链表结构：
 
-- `_handles[32]` —— oop 数组
-- `_top` —— 已用槽位索引（0~32），类似栈顶
-- `_next` —— 链表下一块（32 槽不够时扩展）
-- `_free_list` —— 空闲槽位链表（DeleteLocalRef 释放的 slot 可复用）
+- `oop _handles[32]` —— 32 个槽位，每个槽位存放一个从 Java 堆拷贝过来的 oop 值。GC 移动堆上对象后，直接更新槽位里的这个值。注意是 `oop`（值）不是 `oop*`（指针）——GC 通过这个槽位找到 Java 对象，移动后原地写入新地址。
+- `int _top` —— 已用槽位索（0~32），类似栈顶指针。每分配一个 JNI local ref，`_top++`
+- `JNIHandleBlock* _next` —— 链表下一块。32 槽不够用时扩展新块，串成链表
+- `oop* _free_list` —— 空闲槽位链表。DeleteLocalRef 释放的 slot 被串成单链表，下次分配时优先复用（比 `_top++` 多一次指针跳转，但避免了空间浪费）
 
 存储位置是 **C-Heap**（`malloc/free`），不是 HandleArea 的 Chunk。
 
