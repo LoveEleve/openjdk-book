@@ -162,7 +162,7 @@ HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起
        └─ CHeapObj<mtInternal>::operator new → malloc
   ```
 
-  **第一次分配时**，线程本地缓存是 NULL（构造函数刚设的），全局池也是 NULL（静态零初始化）。所以第 1、2 步都跳过，直接走第 3 步：`new JNIHandleBlock()`，底层调用 `malloc` 从 C-Heap 分配一块内存。此后这个块被释放时挂回全局池或线程缓存，下次分配就可能命中第 1 或第 2 步了。
+  **第一次分配时**，线程本地缓存是 NULL（构造函数刚设的），全局池也是 NULL（静态零初始化）。所以第 1、2 步都跳过，直接走第 3 步：`new JNIHandleBlock()`，底层调用 `malloc` 从 C-Heap 分配一块内存。分配后的块**不进线程缓存也不进全局池**——它直接挂到 `_active_handles` 上（调用方 `main_thread->set_active_handles(allocate_block())`），进入"正在使用"状态。此后当这个块被**释放**时（`release_block()`），才根据 `thread` 参数决定：`thread != NULL` → 挂线程本地缓存；`thread == NULL` → 挂全局池。
 - `static int _blocks_allocated` —— 调试用计数器，记录一共分配了多少个块
 
 存储位置是 **C-Heap**（`malloc/free`），不是 HandleArea 的 Chunk。
