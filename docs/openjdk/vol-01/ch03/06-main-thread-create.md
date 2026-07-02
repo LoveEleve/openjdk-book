@@ -1360,7 +1360,7 @@ set_handle_area(new (mtThread) HandleArea(NULL));
 
 接着分配四个句柄/元数据管理字段。
 
-> **前置概念**：以下几节涉及 HotSpot 中互相独立的三套 Handle 体系——oop Handle（HandleArea/HandleMark/Handle）、Metadata Handle（methodHandle/constantPoolHandle）、JNIHandleBlock。如果直接看这四行代码感觉不知所云，请先阅读[前置概念：HotSpot 的三套 Handle 体系](openjdk/vol-01/ch03/background/handles-all.md)。
+> **前置概念**：以下几节涉及 HotSpot 中互相独立的三套 Handle 体系——oop Handle（HandleArea/HandleMark/Handle）、Metadata Handle（methodHandle/constantPoolHandle）、JNIHandleBlock。如果直接看这四行代码感觉不知所云，请先阅读[前置概念：HotSpot 的三套 Handle 体系](#/openjdk/vol-01/ch03/background/handles-all)。
 
 ```cpp
 set_metadata_handles(new (ResourceObj::C_HEAP, mtClass)
