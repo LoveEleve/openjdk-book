@@ -285,7 +285,7 @@ set_metadata_handles(new (ResourceObj::C_HEAP, mtClass) GrowableArray<Metadata*>
 ```
 
 逐项拆解：
-- `GrowableArray<Metadata*>`：HotSpot 自己的动态数组（类似 `std::vector`，但 HotSpot 避免 STL）
+- `GrowableArray<Metadata*>`：HotSpot 自己的动态数组（类似 `std::vector`，但 HotSpot 避免 STL）。`Metadata*` 是基类指针——`Method` 和 `ConstantPool` 都继承自 `Metadata`（`method.hpp:70`、`constantPool.hpp:98`），所以数组里既存 `Method*` 也存 `ConstantPool*`，通过基类指针统一管理。
 - `30`：初始容量（大多数线程持有 0~3 个 handle，30 是首次扩容前的一次性开销）
 - `true`：`on_C_heap` 标志——数据缓冲区用 `malloc` 在 C-Heap 上分配，不是 ResourceArea
 
