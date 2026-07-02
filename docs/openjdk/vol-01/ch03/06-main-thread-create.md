@@ -1034,7 +1034,7 @@ ChunkPool reuse 比每次 `os::malloc` 快 10-100 倍。
 
 
 
-### perfMemory_init — jstat 共享内存
+### perfMemory_init — jstat 的共享内存文件
 
 ```cpp
 void perfMemory_init() {
@@ -1043,15 +1043,155 @@ void perfMemory_init() {
 }
 ```
 
-`UsePerfData` 默认 true。`PerfMemory::initialize()` 在 Linux 上调用 `mmap_create_shared()`，创建 `/tmp/hsperfdata_<user>/<pid>` 文件——一个 mmap 的共享内存文件：
+`UsePerfData` 默认 true，传 `-XX:-UsePerfData` 则整条管线短路——本章后面的 `ObjectMonitor::Initialize()` 也不创建任何计数器。默认路径下 `PerfMemory::initialize()` 在 `/tmp/hsperfdata_<user>/` 下创建一个以当前 PID 命名的 mmap 共享内存文件，jstat 通过 mmap 读这个文件获取实时指标。
 
-1. 计算容量（默认 32KB）
-2. `mkdir /tmp/hsperfdata_<user>`，清理同目录下已死进程的残留文件
-3. `open(O_CREAT|O_RDWR)` 创建文件，`ftruncate` 到目标大小
-4. `mmap(MAP_SHARED)` 映射为共享内存，`close(fd)`（通过 mmap 指针访问）
-5. 在共享内存头部写入 PerfDataPrologue——magic 0xc0c0feca + byte_order + version + 计数器元数据入口表
+#### PerfMemory::initialize() —— 文件创建
 
-`ObjectMonitor::Initialize()`（本章最后一节）中的 `NEWPERFCOUNTER(_sync_Inflations)` 调用 `PerfDataManager::create_counter()` 在这个共享内存中分配空间。`jstat -class` 等工具通过读这个文件获取实时指标。
+容量计算 —— `PerfDataMemorySize` 是 `product(intx)` 类型 flag，默认 32KB：
+
+```cpp
+size_t capacity = align_up(PerfDataMemorySize, os::vm_allocation_granularity());
+//                           ↑ 默认 32*K = 32768 字节, 范围 128~2MB
+```
+
+接着调 `create_memory_region(capacity)`，Linux 上三层回退（`perfMemory_linux.cpp:1306`）：
+
+```cpp
+void PerfMemory::create_memory_region(size_t size) {
+  if (PerfDisableSharedMem) {
+    _start = create_standard_memory(size);        // 第一层：禁用共享了，走私有 mmap
+  } else {
+    _start = create_shared_memory(size);           // 第二层：默认——尝试共享内存
+    if (_start == NULL) {
+      PerfDisableSharedMem = true;
+      _start = create_standard_memory(size);      // 第三层：共享失败，降级到私有 mmap
+    }
+  }
+  if (_start != NULL) _capacity = size;
+}
+```
+
+默认路径走 `create_shared_memory`，在 `/tmp/hsperfdata_<user>/<pid>` 创建文件。`mmap_create_shared` 的完整流程（`perfMemory_linux.cpp`）：
+
+```
+1. os::current_process_id()               → PID
+2. get_user_name(geteuid())               → 用户名 → "/tmp/hsperfdata_<user>" 目录
+3. cleanup_sharedmem_files(dirname)       → 清理已死进程的残留文件
+4. os::open(filename, O_RDWR|O_CREAT|O_NOFOLLOW, 0600)  → 创建文件
+5. ftruncate(fd, size)                    → 扩展到 32KB
+6. mmap(0, size, PROT_RW, MAP_SHARED, fd, 0)  → 映射为共享内存
+7. close(fd)                              → 文件关了，mmap 映射还保持
+8. memset(mapAddress, 0, size)            → 整块清零
+```
+
+`MAP_SHARED` 是关键——JVM 对这块内存的写入会同步回文件。jstat 进程 mmap 同一个文件时直接看到写入内容。
+
+如果共享内存失败（如 `/tmp` 不可写），回退到 `create_standard_memory`——本质是 `mmap(MAP_PRIVATE|MAP_ANONYMOUS)` 私有匿名内存，没有 backing 文件，jstat 无法读取。如果三层全失败，`_start` 保持 NULL，回到 `initialize()` 中用 `NEW_C_HEAP_OBJ` 仅分配 Prologue 在 C-Heap 上——功能残缺但 JVM 不崩溃。
+
+文件创建成功后，`initialize()` 接着写入 PerfDataPrologue：
+
+```cpp
+_prologue = (PerfDataPrologue*)_start;    // Prologue 在共享内存开头
+_end = _start + _capacity;                // 共享内存末尾
+_top = _start + sizeof(PerfDataPrologue); // 可分配区起始
+
+_prologue->magic = 0xc0c0feca;            // "café coco" 魔数
+_prologue->byte_order = PERFDATA_LITTLE_ENDIAN;
+_prologue->major_version = 2;
+_prologue->minor_version = 0;
+_prologue->accessible = 0;                // jstat 等这位置成 1 才读
+_prologue->entry_offset = sizeof(PerfDataPrologue);   // = 32 字节
+_prologue->num_entries = 0;
+_prologue->used = 0;
+_prologue->overflow = 0;
+```
+
+#### PerfDataPrologue —— 共享内存的扉页
+
+`PerfDataPrologue` 是 32 字节的固定头部，占据共享内存的第 0 字节。jstat 打开文件第一步读这个头：
+
+```
+偏移  字段              值              jstat 怎么用
+0x00  magic              cafe c0c0      4 字节魔数验证——不是这个就拒绝
+0x04  byte_order         01(LITTLE)     后续多字节字段按小端解析
+0x05  major_version      02             版本号——不匹配则结构可能不兼容
+0x06  minor_version      00
+0x07  accessible         00             0=未就绪，jstat 轮询等它变 1
+0x08  used               0              当前已用字节
+0x0C  overflow           0              溢出字节数
+0x10  mod_time_stamp     0              最后修改时间
+0x18  entry_offset       0x20=32        第一个计数器从第 32 字节开始
+0x1C  num_entries        0              计数器数量——现在是 0
+```
+
+`accessible=0` 是 jstat 的等待信号——JVM 完全就绪后设成 1，在此之前 jstat 不读。
+
+#### PerfDataEntry —— 一个计数器的完整结构
+
+Prologue 后面挨着的是 PerfDataEntry。每创建一个计数器就追加一个 Entry。固定头 24 字节 + 可变主体（名字 + 数据值）：
+
+```
+PerfDataEntry 内存布局:
+┌─ 固定头 (24B) ─────────────────────────────────────┐
+│ entry_length  │ name_offset │ vector_length         │ ← jint×3=12B
+│ data_type='J' │ flags  │ data_units │ variability  │ ← jbyte×4=4B
+│ data_offset                                      │ ← jint=4B
+│ (padding 4B 对齐)                                  │ ← 4B
+├─ 可变部分 ─────────────────────────────────────────┤
+│ "sun.rt.sync_Inflations\0"                         │ ← 名字字符串+\0
+│ (padding 到 8B 对齐)                                 │
+│ jlong value = 0                                    │ ← 8B 数据值
+└────────────────────────────────────────────────────┘
+```
+
+jstat 的读取方式：Prologue 拿 `entry_offset=32` 和 `num_entries` → 从偏移 32 读第一个 entry → `data_type='J'` 知道值是 jlong → `data_offset` 跳到值的偏移 → 读 8 字节 → `entry_length` 跳到下一个 → 循环。
+
+#### ObjectMonitor::Initialize() —— 7 个同步计数器
+
+`ObjectMonitor::Initialize()` 内部创建 7 个 PerfData 计数器——**不创建任何 ObjectMonitor 对象**。ObjectMonitor 是运行时动态创建的（轻量锁膨胀为重量锁时按需 new），这里只是为同步统计提前放好计分牌：
+
+```cpp
+void ObjectMonitor::Initialize() {
+  if (UsePerfData) {
+    NEWPERFCOUNTER(_sync_Inflations);           // 轻量锁膨胀为重量锁的次数
+    NEWPERFCOUNTER(_sync_Deflations);            // 重量锁收缩回轻量锁的次数
+    NEWPERFCOUNTER(_sync_ContendedLockAttempts); // 锁竞争尝试次数
+    NEWPERFCOUNTER(_sync_FutileWakeups);        // 无效唤醒次数
+    NEWPERFCOUNTER(_sync_Parks);                // 线程 park 次数
+    NEWPERFCOUNTER(_sync_Notifications);        // notify 调用次数
+    NEWPERFVARIABLE(_sync_MonExtant);            // 当前存活 ObjectMonitor 数
+  }
+}
+```
+
+7 个计数器各自的含义：
+
+| 计数器 | 类型 | 什么时候递增 |
+|--------|------|------------|
+| `_sync_Inflations` | Counter | 轻量锁膨胀为重量锁时 |
+| `_sync_Deflations` | Counter | 重量锁回收 |
+| `_sync_ContendedLockAttempts` | Counter | 发现锁已被占用 |
+| `_sync_FutileWakeups` | Counter | notify 发出但无线程等待 |
+| `_sync_Parks` | Counter | 线程竞争失败，调 ParkEvent::park() |
+| `_sync_Notifications` | Counter | obj.notify() 调用时 |
+| `_sync_MonExtant` | **Variable** | 每次 new/delete ObjectMonitor 更新 |
+
+`_sync_MonExtant` 用 Variable 而不是 Counter——它需要随时反映当前存活的 monitor 数量，可增可减。
+
+`NEWPERFCOUNTER` 的调用链（以 `_sync_Inflations` 为例）：
+
+```
+NEWPERFCOUNTER → PerfDataManager::create_counter(SUN_RT, "_sync_Inflations", U_Events)
+  → new PerfLongCounter(name) → create_entry(T_LONG, sizeof(jlong))
+    → PerfMemory::alloc(entry_size + name_len + 8)
+      → _top += size  (共享内存中推进)
+      → _prologue->used += size
+      → _prologue->num_entries++
+```
+
+`PerfMemory::alloc()` 本质是撞针推进——`_top += size`。如果剩余空间不够（`_top + size >= _end`），记录 overflow 字节数并返回 NULL，后续计数器降级到 C-Heap 分配——仍然可用，只是 jstat 读不到。默认 32KB 约能放 300~600 个计数器。
+
+正常退出时 `exit_globals()` → `perfMemory_exit()` → `unlink("/tmp/hsperfdata_<user>/<pid>")` 删除文件。JVM 崩溃时文件会留下——jstat 可以读取崩溃进程的残留文件用于诊断。
 
 ### SuspendibleThreadSet_init — 可挂起线程集合
 
