@@ -162,7 +162,7 @@ HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起
        └─ CHeapObj<mtInternal>::operator new → malloc
   ```
 
-  **第一次分配时**，线程本地缓存是 NULL（构造函数刚设的），全局池也是 NULL（静态零初始化）。所以第 1、2 步都跳过，直接走第 3 步：`new JNIHandleBlock()`，底层调用 `malloc` 从 C-Heap 分配一块内存。分配后的块**不进线程缓存也不进全局池**——它直接挂到 `_active_handles` 上（调用方 `main_thread->set_active_handles(allocate_block())`），进入"正在使用"状态。此后当这个块被**释放**时（`release_block()`），才根据 `thread` 参数决定：`thread != NULL` → 挂线程本地缓存；`thread == NULL` → 挂全局池。
+  **第一次分配时**，`_free_handle_block`（线程的"空闲块缓存"）是 NULL（构造函数刚设的），全局池也是 NULL（静态零初始化）。所以第 1、2 步都跳过，直接走第 3 步：`new JNIHandleBlock()`，底层调用 `malloc`。分配后的块**不进 `_free_handle_block`（空闲缓存）**——它直接挂到 `_active_handles` 上（`main_thread->set_active_handles(allocate_block())`），进入"正在使用"状态。注意 Thread 有**两个**私有槽：`_active_handles`（正在用的块链表）和 `_free_handle_block`（1 个空闲块缓存），别搞混。此后当这个块被 `release_block()` **释放**时，才根据 `thread` 参数决定：`thread != NULL` → 进 `_free_handle_block`（抽屉备用）；`thread == NULL` → 进全局池。
 - `static int _blocks_allocated` —— 调试用计数器，记录一共分配了多少个块
 
 存储位置是 **C-Heap**（`malloc/free`），不是 HandleArea 的 Chunk。
