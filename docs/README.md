@@ -55,6 +55,7 @@
   * [3.5 OS 后初始化](openjdk/vol-01/ch03/05-os-init2.md)
   * [3.6 第一个 JavaThread：主线程登记](openjdk/vol-01/ch03/06-main-thread-create.md)
   * [前置概念：三套 Handle 体系](openjdk/vol-01/ch03/background/handles-all.md)
+  * [前置概念：Thread-SMR](openjdk/vol-01/ch03/background/smr.md)
 * [第四章 — init.cpp 全局初始化](openjdk/vol-01/ch04/01-overview.md) - init_globals() 30 项核心子系统初始化
   * [4.1 init_globals() 总览](openjdk/vol-01/ch04/01-overview.md)
   * [4.2 management_init — JMX 子系统的 C++ 侧地基](openjdk/vol-01/ch04/02-management.md)

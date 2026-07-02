@@ -155,6 +155,7 @@
     alias: {
       '/openjdk/vol-01/ch01': '/openjdk/vol-01/ch01/README',
       '/openjdk/vol-01/ch03/background/handles-all': '/openjdk/vol-01/ch03/background/handles-all',
+      '/openjdk/vol-01/ch03/background/smr': '/openjdk/vol-01/ch03/background/smr',
     },
 
     // 代码块默认语言：无标记/纯文本 → Java

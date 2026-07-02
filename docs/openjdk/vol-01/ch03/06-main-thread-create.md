@@ -1419,48 +1419,14 @@ new HandleMark(this);
 `Thread::Thread()` 构造函数中初始化 5 个与线程列表安全遍历相关的字段（`thread.cpp:239-243`）：
 
 ```cpp
-int                       _oops_do_parity = 0;               // GC 并行标记 parity，防止重复扫描
-ThreadsList* volatile     _threads_hazard_ptr = NULL;        // SMR hazard pointer：声明"我正在读这个快照"
-SafeThreadsListPtr*       _threads_list_ptr = NULL;          // 嵌套遍历的稳定引用包装
-uint                      _nested_threads_hazard_ptr_cnt = 0; // 嵌套 acquire_stable_list 深度
-volatile uintx            _rcu_counter = 0;                  // GlobalCounter 用代际计数
+_oops_do_parity = 0;               // GC 并行标记 parity，防止重复扫描
+_threads_hazard_ptr = NULL;        // SMR hazard pointer：声明"我正在读这个快照"
+_threads_list_ptr = NULL;          // 嵌套遍历的稳定引用包装
+_nested_threads_hazard_ptr_cnt = 0; // 嵌套深度计数器
+_rcu_counter = 0;                  // GlobalCounter 代际计数
 ```
 
-5 个字段全部是 `Thread` 的实例字段（线程私有），声明在 `thread.hpp:157-315`。此刻初始化为 NULL/0，因为线程尚未加入 `Threads::_thread_list`——不存在被其他线程并发遍历的可能。
-
-这组字段服务于 HotSpot 线程列表的 **SMR（Safe Memory Reclamation）** 机制——让读者不用锁就能安全遍历所有活跃 JavaThread，写者（增删线程）也不阻塞读者。GC、JStack、JVMTI 都要遍历线程列表，频繁争用 `Threads_lock` 会成为瓶颈。
-
-**核心原理——Copy-on-Write + Hazard Pointer**：
-
-* **Copy-on-Write**：`ThreadsList` 是不可变的 `JavaThread*` 数组（`threadSMR.hpp:162-164`）。增删线程时调用 `ThreadsList::add_thread()` / `remove_thread()` 新建一个 ThreadsList 副本，再由 `add_thread()` / `remove_thread()` 用 `Atomic::xchg` 原子替换全局 `_java_thread_list` 指针（`threadSMR.cpp:744-752` / `922-931`）。旧列表不被立即释放——等所有读者释放 hazard ptr 后再 delete。
-
-* **Hazard Pointer**：读者遍历前执行 `acquire_stable_list()`，将当前 `_java_thread_list` 地址写入本线程的 `_threads_hazard_ptr`（先打 tag 标记为未验证，再 CAS 置 verified，`threadSMR.cpp:395-412`）。这相当于声明"我正在操作这个快照版本"。遍历结束后 `release_stable_list()` 清除 `_threads_hazard_ptr`。写者 `smr_delete()` 扫描所有线程的 hazard ptr——如果还有线程指着包含待删线程的旧列表，就在 `Threads_lock` 上 wait 直到读者释放（`threadSMR.cpp:944-1009`）。
-
-```
-读者（GC/JStack/JVMTI）              写者（Threads::add / Threads::remove / Thread::smr_delete）
-
-acquire_stable_list()
-→ 读 _java_thread_list              Atomic::xchg(新快照)
-→ 写入 _threads_hazard_ptr          旧快照进入 _to_delete_list
-→ 再次验证 _java_thread_list 未变
-  遍历 ThreadsList::_threads[]       smr_delete(线程):
-release_stable_list()                → 扫描所有线程 _threads_hazard_ptr
-→ _threads_hazard_ptr = NULL         → 有人指着则 wait → 无人指着则 delete
-```
-
-**字段逐个说明**：
-
-* `_oops_do_parity`（`int`）——GC 并行标记轮次。GC 遍历线程的 oop 引用时调用 `claim_oops_do_par_case()`（`thread.cpp:862-874`），用 CAS 将本线程的 parity 与全局 `strong_roots_parity` 比对，防止同一轮 GC 内重复扫描同一线程。
-
-* `_threads_hazard_ptr`（`ThreadsList* volatile`）——SMR 的 hazard pointer 本体。读者存储当前正在读取的 ThreadsList 快照地址，写者扫描此字段决定能否释放旧列表和退出的线程对象。同时兼任 tagged pointer——低位 bit 用作"已验证/未验证"状态标记（`thread.hpp:162-169`）。
-
-* `_threads_list_ptr`（`SafeThreadsListPtr*`）——嵌套安全遍历的引用包装。同一线程可能嵌套调用 `acquire_stable_list()`（如 GC 遍历线程列表时触发了 JFR 的线程枚举）。非嵌套首次调用走 fast path（直接用 `_threads_hazard_ptr`），嵌套调用走 nested path——创建 `SafeThreadsListPtr` 对象挂到此字段，通过 `_previous` 指针链式管理多个嵌套层（`threadSMR.hpp:201-207`）。
-
-* `_nested_threads_hazard_ptr_cnt`（`uint`）——嵌套深度计数器。记录当前线程有多少层嵌套的 `acquire_stable_list()` 未释放。仅最外层 `release_stable_list()` 真正清除 `_threads_hazard_ptr`，内层只递减计数器。
-
-* `_rcu_counter`（`volatile uintx`）——GlobalCounter 机制的本线程代际计数。每个线程持有此字段的地址注册到 `GlobalCounter`，写者递增全局 epoch 后遍历所有线程的 `_rcu_counter`，判断是否所有读者都已同步到新代（`thread.hpp:313-319`）。与 SMR 的 hazard ptr 平行运作，用于其他子系统（如 JFR、JVMTI tag map）的安全内存回收。
-
-这 5 个字段此刻全部为 NULL/0——主线程尚未加入 `Threads::_thread_list`，没有并发读者需要协调。SMR 和 GlobalCounter 的完整机制（包括 `ThreadsListHandle` RAII 包装、`_to_delete_list` 延迟释放链表、`SafeThreadsListPtr` 嵌套处理、GlobalCounter 的 epoch 协议）将在后续章节结合线程生命周期详细展开。
+这 5 个字段全部为 `Thread` 的实例字段（线程私有），此刻初始化为 NULL/0——因为线程尚未加入 `Threads::_thread_list`。它们服务于 HotSpot 的 **SMR（Safe Memory Reclamation）** 机制——让读者不用锁就能安全遍历全局线程列表，Copy-on-Write 快照 + Hazard Pointer 保护的完整原理见[前置概念：Thread-SMR —— 线程列表的安全并发访问](https://openjdk-book.cn/#/openjdk/vol-01/ch03/background/smr)。
 
 #### 系统监控
 
