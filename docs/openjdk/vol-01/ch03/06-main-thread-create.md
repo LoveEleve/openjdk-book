@@ -1181,23 +1181,92 @@ NEWPERFCOUNTER → PerfDataManager::create_counter(SUN_RT, "_sync_Inflations", U
 
 #### hexdump 验证——断点在 ObjectMonitor::Initialize() 之后
 
-断点打到 `ObjectMonitor::Initialize()` 返回后，7 个计数器已经在共享内存文件中写好了。在终端执行：
+断点打到 `ObjectMonitor::Initialize()` 返回后，终端跑：
 
 ```
-hexdump -C /tmp/hsperfdata_$(whoami)/$(pgrep java) | head -40
+hexdump -C /tmp/hsperfdata_root/$(pgrep java) | head -40
 ```
 
-和之前在 `perfMemory_init()` 之后抓到的内容对比——变化如下。Prologue 头的变化可以直接对照偏移看出来：
+之前的输出只有一个 Prologue 头（`num_entries=0`，其余全是零）。这次完全不同——冒出了 7 个计数器的完整 Entry。从头开始逐字节对照。
 
-- `0x1C` 处 `num_entries` 从 `00 00 00 00` → `07 00 00 00`（7 个计数器）
-- `0x08` 处 `used` 从 `00 00 00 00` → 非零（共享内存已占用字节）
-- `0x20` 往后（= entry_offset = 32 字节处）不再全是零——第一个 PerfDataEntry 的固定头出现
-- 第一个 entry 内部，`data_type` 偏移处是 `4a`（字符 `'J'`，说明值是 jlong）
-- `data_units` 偏移处是 `04`（`U_Events`）
-- 固定头后面的可变部分出现了 `sun.rt.sync_Inflations` 字符串
-- jlong 数据区的 8 字节全是零——计数器刚创建，值还是 0
+Prologue 头（0x00~0x1F）——和原来比，变了三处：
 
-把 hexdump 的输出贴过来，我来逐字节标注每个字段。
+```
+0x00  ca fe c0 c0   magic，没变
+0x04  01            byte_order，没变
+0x05  02            major_version
+0x06  00            minor_version
+0x07  00            accessible = 0，jstat 还在等
+0x08  a8 01 00 00   used = 0x1a8 = 424  ← 不再是 0，7个 Entry 占了 424 字节
+0x0C  00 00 00 00   overflow = 0
+0x10  c8 01 ac 01   mod_time_stamp   ← 有值了，上次全是 0
+0x14  00 00 00 00
+0x18  20 00 00 00   entry_offset = 0x20 = 32
+0x1C  07 00 00 00   num_entries = 7  ← 从 0 变成了 7
+```
+
+从 0x20 开始就是第一个 Entry。第 1 个——`_sync_Inflations`（56 字节的 Counter）：
+
+```
+0x20  38 00 00 00   entry_length = 0x38 = 56 字节
+0x24  14 00 00 00   name_offset = 0x14 = 20（名字在 0x20+20=0x34）
+0x28  00 00 00 00   vector_length = 0（标量，不是数组）
+0x2C  4a            data_type = 0x4a = 'J'（值是 jlong）
+0x2D  00            flags = 0
+0x2E  04            data_units = 0x04 = U_Events
+0x2F  02            data_variability = 0x02 = V_Monotonic（Counter）
+0x30  30 00 00 00   data_offset = 0x30 = 48（jlong 在 0x20+48=0x50）
+```
+
+名字从 0x34 开始：`73 75 6e 2e 72 74 2e 5f 73 79 6e 63 5f 49 6e 66 6c 61 74 69 6f 6e 73 00` = `sun.rt._sync_Inflations\0`，23 字节 + 结尾 \0。
+
+jlong 值在 0x50：`00 00 00 00 00 00 00 00` = 0。Counter 刚建好，还没线程来 inc。
+
+第 2 个——`_sync_Deflations`（0x58~0x8F，同样是 56 字节 Counter）：
+
+```
+0x58  38 00 00 00   entry_length = 56
+0x5C  14 00 00 00   name_offset = 20
+...
+0x67  02            data_variability = V_Monotonic
+...
+0x6C  名从 0x6C 开始：sun.rt._sync_Deflations（21 字节）
+...
+0x88  jlong 值 = 0
+```
+
+结构和第一个完全一致——名字不同，长度差 2 字节，但都恰好对齐到 8 字节边界。
+
+第 3 个——`_sync_ContendedLockAttempts`（0x90~0xCF，64 字节 Counter）：
+
+```
+0x90  40 00 00 00   entry_length = 0x40 = 64 ← 比前两个大
+0x94  14 00 00 00   name_offset = 20
+...
+0x9E  04            data_units = U_Events
+0x9F  02            data_variability = V_Monotonic
+0xA0  38 00 00 00   data_offset = 0x38 = 56
+```
+
+名字从 0xA4：`sun.rt._sync_ContendedLockAttempts`，30 字节 + \0。名字长了，entry_length 从 56 跳到 64。jlong 值在 0xC8：全是零。
+
+第 4~6 个——`_sync_FutileWakeups`、`_sync_Parks`、`_sync_Notifications`——结构同上，全部是 Counter（`data_variability=0x02`），jlong 值全部为零。只有名字长度不同导致 entry_length 略有差异。
+
+第 7 个——`_sync_MonExtant`（0x170~0x1A7，56 字节），关键区别在一个字节：
+
+```
+0x170  38 00 00 00   entry_length = 56
+...
+0x17C  4a            data_type = 'J'
+0x17D  00
+0x17E  04            data_units = U_Events
+0x17F  03            data_variability = 0x03 = V_Variable ← 不是 0x02！
+0x180  30 00 00 00   data_offset = 48
+```
+
+前 6 个全是 `0x02`（`V_Monotonic`，Counter），只有这个用的是 `0x03`（`V_Variable`）。`NEWPERFVARIABLE` 宏的效果就落在这一个字节上——jstat 读到它就知道这个值可增可减，不是单调累加。名字 `sun.rt._sync_MonExtant\0` 19 字节，jlong 值同样为零——当前没有 ObjectiveMonitor 存活。
+
+0x1A8 开始到 0x7FFF 全是零——424 字节之后还没有新 Entry 写入。7 个计数器只占了一小段尾部。
 
 正常退出时 `exit_globals()` → `perfMemory_exit()` → `unlink("/tmp/hsperfdata_<user>/<pid>")` 删除文件。JVM 崩溃时文件会留下——jstat 可以读取崩溃进程的残留文件用于诊断。
 
