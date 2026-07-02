@@ -61,6 +61,8 @@ GC 时，GC 调用 `HandleArea::oops_do()` 遍历所有 Chunk 里所有已分配
 
 `Thread::Thread()` 构造函数里 `set_last_handle_mark(NULL)` 只是 C++ 安全实践——不让指针有未定义的初始值。紧随其后的 `new HandleMark(this)` 把 NULL 替换为第一个 Mark——这个 Mark 的 `_previous_handle_mark` 就是 NULL，表示"下面没有更早的横线了"。
 
+> **为什么必须在 product 构建保留 `_last_handle_mark` 链？** `ResourceMark` 也维护 `_previous_resource_mark` 链，但只在 `DEBUG_ONLY` 里——product 直接删掉。`HandleMark` 保留了它，不是功能必须（回滚靠 `_chunk/_hwm/_max`，不需要链），而是防御性的：HandleArea 涉及 GC 根扫描——如果 Arena 回滚出错导致 GC 误删活对象，JVM 直接 crash。保留 `_last_handle_mark` 链能帮助在 hs_err 文件里追查 HandleMark 嵌套是否不平衡。
+
 ### 2.3 Handle —— 指向槽位的指针
 
 `handles.hpp:64`：
