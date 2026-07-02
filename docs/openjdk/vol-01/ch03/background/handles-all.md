@@ -285,9 +285,20 @@ set_metadata_handles(new (ResourceObj::C_HEAP, mtClass) GrowableArray<Metadata*>
 ```
 
 逐项拆解：
-- `GrowableArray<Metadata*>`：HotSpot 自己的动态数组（类似 `std::vector`，但 HotSpot 避免 STL）。`Metadata*` 是基类指针——`Method` 和 `ConstantPool` 都继承自 `Metadata`（`method.hpp:70`、`constantPool.hpp:98`），所以数组里既存 `Method*` 也存 `ConstantPool*`，通过基类指针统一管理。
-- `30`：初始容量（大多数线程持有 0~3 个 handle，30 是首次扩容前的一次性开销）
-- `true`：`on_C_heap` 标志——数据缓冲区用 `malloc` 在 C-Heap 上分配，不是 ResourceArea
+
+- `GrowableArray<Metadata*>` —— HotSpot 自己的动态数组（类似 `std::vector`，但 HotSpot 避免 STL）。内部有三个关键字段：
+
+  | 字段 | 类型 | 含义 |
+  |---|---|---|
+  | `_data` | `E*`（此处为 `Metadata**`） | 指向实际元素缓冲区 |
+  | `_len` | `int` | 当前已存入的元素个数（初始 0） |
+  | `_max` | `int` | 缓冲区当前容量（初始 30），超出时自动扩容 |
+
+  `Metadata*` 是基类指针——`Method` 和 `ConstantPool` 都继承自 `Metadata`（`method.hpp:70`、`constantPool.hpp:98`），所以数组里既存 `Method*` 也存 `ConstantPool*`。
+
+- `30` —— 初始容量 `_max = 30`。大多数线程只有 0~3 个 metadata handle，30 是首次扩容前的一次性开销。
+
+- `true` —— `on_C_heap` 标志。数据缓冲区 `_data` 用 `malloc` 在 C-Heap 上分配，而不是 ResourceArea。
 
 **为什么必须是 C-Heap？** Metadata handle 的生命周期贯穿整个线程——只要线程还活着，它持有的 `methodHandle` 就不能被 ResourceMark 回收。如果存 ResourceArea 上，一次 `ResourceMark` 析构就全没了。
 
