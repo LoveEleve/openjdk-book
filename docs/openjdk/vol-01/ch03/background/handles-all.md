@@ -293,6 +293,8 @@ set_metadata_handles(new (ResourceObj::C_HEAP, mtClass) GrowableArray<Metadata*>
 
 ### 4.4 methodHandle 和 constantPoolHandle
 
+> **本章只关注 Handle 体系，不深入 Klass / Method / ConstantPool / RedefineClasses 本身。** `Method`、`ConstantPool` 的完整结构、`InstanceKlass` 的字段布局、`RedefineClasses` 的触发机制——这些将在后续的类加载和 JVMTI 章节详细展开。这里你只需要知道：`methodHandle` 是一个 RAII 包装器，构造时把 `Method*` 登记到 `_metadata_handles` 数组，析构时移除，目的是**防止 RedefineClasses 误删正在被引用的 Metadata**。
+
 `handles.hpp:133-168` 用宏展开：
 
 ```cpp
