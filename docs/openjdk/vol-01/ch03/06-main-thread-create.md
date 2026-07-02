@@ -1280,7 +1280,19 @@ void SuspendibleThreadSet_init() {
 }
 ```
 
-内部 `initialize()` 只做一件事——`new Semaphore()`，创建一个初始计数为 0 的信号量。
+内部 `initialize()` 只做一件事——`new Semaphore()`，创建一个初始计数为 0 的信号量。先看 STS 的几个核心静态变量，后面讲协议时提到的 `_nthreads`、`_nthreads_stopped` 都在这里：
+
+```cpp
+// suspendibleThreadSet.cpp
+static Semaphore* _synchronize_wakeup = NULL;   // initialize() 中 new 出来
+
+uint   SuspendibleThreadSet::_nthreads          = 0;  // 已 join 的线程数
+uint   SuspendibleThreadSet::_nthreads_stopped  = 0;  // 当前已停下的线程数
+bool   SuspendibleThreadSet::_suspend_all       = false;  // VMThread 是否发了暂停请求
+double SuspendibleThreadSet::_suspend_all_start = 0.0;   // 暂停开始时间
+```
+
+工作流程分两条线：GC 线程主动登记（join/yield）和 VMThread 发起暂停（synchronize）。
 
 `SuspendibleThreadSet`（STS）是 GC 线程和 VMThread 之间的**协作式暂停协议**。和 `_SR_lock`（VMThread 用信号 12 强行打断目标线程的抢占式暂停）不同，STS 是线程主动声明"我准备好了，可以停了"。
 
