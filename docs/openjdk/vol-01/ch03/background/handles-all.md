@@ -290,7 +290,7 @@ set_metadata_handles(new (ResourceObj::C_HEAP, mtClass) GrowableArray<Metadata*>
 
   | 字段 | 类型 | 含义 |
   |---|---|---|
-  | `_data` | `E*`（此处为 `Metadata**`） | 指向实际元素缓冲区 |
+  | `_data` | 存储的元素类型是 `Metadata*` | 指向实际元素缓冲区，每个槽位存一个 `Metadata*` 指针 |
   | `_len` | `int` | 当前已存入的元素个数（初始 0） |
   | `_max` | `int` | 缓冲区当前容量（初始 30），超出时自动扩容 |
 
