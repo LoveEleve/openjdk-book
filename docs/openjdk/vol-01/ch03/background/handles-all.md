@@ -172,7 +172,13 @@ HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起
 - `_active_handles`（`thread.hpp:301`）—— 本线程正在使用的 JNIHandleBlock 链表头，线程私有
 - `_free_handle_block`（`thread.hpp:304`）—— 本线程的空闲块缓存（单块），线程私有
 
-有一个全局池 `JNIHandleBlock::_block_free_list`（静态成员，见 `jniHandles.hpp:160`）作为后备——`allocate_block()` 先拿空闲块缓存、再拿全局池时才需要锁。
+有一个全局池 `JNIHandleBlock::_block_free_list`（静态成员，`jniHandles.cpp:346`）作为后备——声明为 `static`，程序启动时自动零初始化：
+
+```cpp
+JNIHandleBlock* JNIHandleBlock::_block_free_list = NULL;
+```
+
+没有专门的 `init()` 函数——它一开始就是空的。`allocate_block()` 先拿线程的空闲块缓存、再试着从全局池拿、实在没有才 `new JNIHandleBlock()`。块用完后通过 `release_block(thread, block)` 归还：如果 `thread != NULL`，缓存到线程本地；如果 `thread == NULL`（如线程退时），挂回全局池。**全局池没有容量上限**——是 C-Heap 上的单链表，释放多少块就能存多少块。
 
 **与 Thread 构造函数的关系**：HotSpot 的线程模型中，每个能执行 JNI 调用的线程都**必须**拥有一个 `_active_handles` 链表，这样 GC 才能扫描它的 local ref。但 Thread 构造函数执行时线程还没启动——OS 层没附着、栈边界未知、任何 JNI 函数都调不了——所以设置为 NULL 是合理的。
 
