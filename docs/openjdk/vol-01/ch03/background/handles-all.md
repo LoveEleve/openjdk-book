@@ -242,13 +242,41 @@ set_last_handle_mark(NULL);
 
 ## 4. methodHandle / constantPoolHandle —— Metadata 的保护机制
 
-### 3.1 为什么不共用 HandleArea
+### 4.0 先理解"Metadata 是什么"
 
-oop Handle 用 HandleArea 是因为 GC 要遍历槽位更新指针。但 Metaspace 里的 Metadata 不会被 GC 移动——GC 根本不扫描 Metaspace。所以不需要 HandleArea 的"GC 遍历更新"能力。
+Java 程序里的每一个类，在 JVM 内部都有两个 C++ 对象在 Metaspace 中表示：
 
-metadata handle 需要的保护是另一个方向：**不让 RedefineClasses 把"正在被人引用"的旧版本 Metadata 回收掉**。所以它用一个**数组**来存引用，而不是 Arena 槽位。
+- `InstanceKlass` —— 类的"定义"：这个类有哪些字段、哪些方法、父类是谁
+- `Method` —— 类里每个方法的字节码、JIT 编译后的机器码、异常表
+- `ConstantPool` —— 类常量池：存字符串、类引用、方法引用等
 
-### 3.2 GrowableArray<Metadata*>(30, true) 的含义
+举个例子：
+
+```java
+public class Foo {
+    public int add(int a, int b) {
+        return a + b;
+    }
+}
+```
+
+`Foo` 加载后，Metaspace 里有三个 Metadata 对象：一个 `InstanceKlass`（Foo 类的定义）、一个 `Method`（`add` 方法的信息）、一个 `ConstantPool`（Foo 类的常量池）。
+
+### 4.1 问题：RedefineClasses 会替换旧版本
+
+HotSpot 支持 **RedefineClasses**——不需要重启 JVM，运行时替换类的新版本。JVMTI 工具（如 IDE 的"Hot Swap"）会调用它。
+
+当 RedefineClasses 把 `Foo.add` 换成新版本：
+- Metaspace 里会出现一个**新的 `Method` 对象**（新版本的 `add`）
+- 旧的 `Method` 对象需要被回收
+
+**问题来了**：如果某个线程此刻正好在执行旧的 `add` 方法，它的 C++ 调用栈上有 `Method*` 指针指向旧的方法对象——直接把旧的 `Method` 回收掉，那个线程就崩溃了。
+
+这就是 `_metadata_handles` 存在的理由：**登记"哪些 Metadata 对象正在被某个线程引用"，RedefineClasses 来回收时先检查登记表，看看有没有人还拿着。**
+
+### 4.2 为什么不共用 HandleArea
+
+### 4.3 GrowableArray<Metadata*>(30, true) 的含义
 
 `thread.cpp:233`：
 
@@ -263,7 +291,7 @@ set_metadata_handles(new (ResourceObj::C_HEAP, mtClass) GrowableArray<Metadata*>
 
 **为什么必须是 C-Heap？** Metadata handle 的生命周期贯穿整个线程——只要线程还活着，它持有的 `methodHandle` 就不能被 ResourceMark 回收。如果存 ResourceArea 上，一次 `ResourceMark` 析构就全没了。
 
-### 3.3 methodHandle 和 constantPoolHandle
+### 4.4 methodHandle 和 constantPoolHandle
 
 `handles.hpp:133-168` 用宏展开：
 
@@ -288,7 +316,7 @@ methodHandle::methodHandle(Method* obj) : _value(obj), _thread(Thread::current()
 
 类比：图书馆（Metaspace）不搬书，但管理员（RedefineClasses）会下架旧版书。你把借书卡放进"正在使用"箱（`_metadata_handles`）——管理员来回收时看到卡在箱子里，就不下架这本书。
 
-### 3.4 RedefineClasses 的完整 6 步
+### 4.5 RedefineClasses 的完整 6 步
 
 ```
 java.lang.instrument.redefineClasses()
