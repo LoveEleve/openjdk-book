@@ -53,6 +53,14 @@ GC 时，GC 调用 `HandleArea::oops_do()` 遍历所有 Chunk 里所有已分配
 
 类比：在草稿纸上画一条横线。写代码时 Handle 不断增加（线以下内容越来越多），出作用域时 HandleMark 析构——从线开始的内容全撕掉。
 
+`_last_handle_mark` 是 `Thread` 的一个字段（`HandleMark*`），记录当前线程的 HandleMark 栈顶。每个 HandleMark 构造时做两件事：
+1. 把当前 `thread->_last_handle_mark` 存到自己的 `_previous_handle_mark`
+2. 把 `thread->_last_handle_mark` 改为指向自己
+
+析构时相反——`thread->_last_handle_mark = _previous_handle_mark`。这就形成了一个**栈式链表**——后进先出，新 Mark 在上面，旧 Mark 在下面。
+
+`Thread::Thread()` 构造函数里 `set_last_handle_mark(NULL)` 只是 C++ 安全实践——不让指针有未定义的初始值。紧随其后的 `new HandleMark(this)` 把 NULL 替换为第一个 Mark——这个 Mark 的 `_previous_handle_mark` 就是 NULL，表示"下面没有更早的横线了"。
+
 ### 2.3 Handle —— 指向槽位的指针
 
 `handles.hpp:64`：
