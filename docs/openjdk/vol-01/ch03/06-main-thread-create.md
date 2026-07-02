@@ -245,8 +245,6 @@ typedef FormatStringEventLog<512> ExtendedStringEventLog;
 
 #### FormatStringEventLog<256> —— 替换 bufsz=256
 
-![PerfData 整体架构](assets/perfdata-overview.png)
-
 ```cpp
 class FormatStringEventLog<256> : public EventLogBase< FormatStringLogMessage<256> > {
   FormatStringEventLog<256>(const char* name, int count = LogEventsBufferEntries)
@@ -1182,6 +1180,8 @@ NEWPERFCOUNTER → PerfDataManager::create_counter(SUN_RT, "_sync_Inflations", U
 `PerfMemory::alloc()` 本质是撞针推进——`_top += size`。如果剩余空间不够（`_top + size >= _end`），记录 overflow 字节数并返回 NULL，后续计数器降级到 C-Heap 分配——仍然可用，只是 jstat 读不到。默认 32KB 约能放 300~600 个计数器。
 
 正常退出时 `exit_globals()` → `perfMemory_exit()` → `unlink("/tmp/hsperfdata_<user>/<pid>")` 删除文件。JVM 崩溃时文件会留下——jstat 可以读取崩溃进程的残留文件用于诊断。
+
+![PerfData 整体架构](assets/perfdata-overview.png)
 
 ### SuspendibleThreadSet_init — 可挂起线程集合
 
