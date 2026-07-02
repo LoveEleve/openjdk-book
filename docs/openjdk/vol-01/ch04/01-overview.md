@@ -10,7 +10,9 @@ Stage 4 结束时（参见 [3.6](#/openjdk/vol-01/ch03/06-main-thread-create)）
   jint status = init_globals();
 ```
 
-`init_globals()` 定义在 `src/hotspot/share/runtime/init.cpp`，函数体依次调用 **30 个子函数**，把 JVM 从"有线程没业务"推进到"能跑字节码的运行时"。本章（ch04）的任务就是把这 30 个函数以及背后的原理全部搞清楚。
+`init_globals()` 定义在 `src/hotspot/share/runtime/init.cpp`，函数体依次调用 **30 个子函数**，把 JVM 从"有线程没业务"推进到"能跑字节码的运行时"。这 30 个函数的代码量普遍不大——最大的 `universe_post_init` 只有 111 行，12 个是 trivial 单行委托——但它们背后的 JVM 子系统原理极为庞大。一个函数代码少不代表原理少：`bytecodes_init` 只有 3 行，但背后是 JVM 字节码规范 + Bytecode class 体系(12 子类) + Rewriter 改写机制；`os_init_globals` 只有 1 行空 hook，但背后是 os::init/init_2 的真实初始化路径。
+
+因此本卷（vol-01 的 ch04-ch32）不按函数数量分组，而是**按背后的子系统/原理分章**，共 29 章 120 篇文档。本章（4.1）是总览，给出 30 项时序图、依赖链和 29 章地图。
 
 ---
 
@@ -165,7 +167,7 @@ init_globals()
    └─ JVMFlag::printFlags()              标志最终打印
 ```
 
-30 个子函数里，**12 个是 trivial 单行委托**（如 `bytecodes_init`、`accessFlags_init` 仅 `assert`）。真正有实质内容的约 10 个，其中 `universe_init`（76 行）和 `universe_post_init`（111 行）是两个重头戏。本章按 Block 分节展开，trivial 函数合并为"轻量委托清单"表格，不单独占节。
+30 个子函数里，**12 个是 trivial 单行委托**（如 `bytecodes_init`、`accessFlags_init` 仅 `assert`）。但 trivial 不等于没原理——`os_init_globals` 是空 hook 但要讲清楚为什么空、真实初始化在哪；`accessFlags_init` 仅 sizeof 断言但要讲 JVM_ACC_* 位域和 RedefineClasses 用的内部位。本卷按子系统分章展开，trivial 函数合并到 ch04/05 一篇，其余按原理独立成章。
 
 ---
 
@@ -222,7 +224,7 @@ universe_init()
 ├─ Universe::initialize_heap()         ★★★      堆创建
 │   ├─ create_heap()                              GCConfig 选 GC 类型，new CollectedHeap
 │   ├─ _collectedHeap->initialize()               堆内存预留 + 初始化
-│   ├─ compressed oops 设置                        堆基址 + 编码模式（Unscaled/ZeroBased/HeapBased）
+│   ├─ compressed oops 设置                        堆基址 + 编码模式（Unscaled/ZeroBased/DisjointBase/HeapBased）
 │   └─ ThreadLocalAllocBuffer::startup_initialization()  TLAB
 ├─ SystemDictionary::initialize_oop_storage()   oop 存储
 ├─ Metaspace::global_initialize()      ★★       元空间
@@ -240,22 +242,50 @@ universe_init()
 
 `universe_init` 之所以是中枢，因为它建立了后续所有 Java 代码运行的物质基础——堆（对象分配）、Metaspace（Klass/metadata）、符号表（SymbolTable/StringTable，Java 字符串和符号的 intern）、方法缓存（`LatestMethodCache`，JVM 反射调用 Java 方法的 fast path）。它之后的 `interpreter_init`、`universe2_init`、`javaClasses_init` 都依赖这些已就绪。
 
-堆与 GC 的细节在本章 4.4 节完整展开（不依赖 ch11-heap，自包含讲解 `Universe::initialize_heap` 的堆预留、compressed oops 三种模式、TLAB 启动）。
+堆与 GC 的细节在 ch11 完整展开（`Universe::initialize_heap` 的堆预留、compressed oops 四模式、TLAB 启动）。
 
 ---
 
 ## 章节地图
 
-本章按 Block 分为 7 个子节：
+30 个函数背后的子系统原理极为庞大，按子系统/原理分章，共 29 章（ch04-ch32）120 篇文档：
 
-| 节 | 文件 | Block | 覆盖函数 | 重头戏 |
-|----|------|-------|---------|--------|
-| 4.1 | 本文件 | — | 总览 | — |
-| 4.2 | [02-pre-universe-light.md](#/openjdk/vol-01/ch04/02-pre-universe-light) | A（前 4 项） | management / bytecodes / classLoader / compilationPolicy | compilationPolicy_init |
-| 4.3 | [03-codecache-stubs.md](#/openjdk/vol-01/ch04/03-codecache-stubs) | A（后 4 项） | codeCache / VM_Version / os_init_globals / stubRoutines_init1 | codeCache_init（委托 CodeCache::initialize） |
-| 4.4 | [04-universe-init.md](#/openjdk/vol-01/ch04/04-universe-init) | B | universe_init + gc_barrier_stubs_init | universe_init ★★★ |
-| 4.5 | [05-interpreter-java-classes.md](#/openjdk/vol-01/ch04/05-interpreter-java-classes) | C | 解释器/模板表/运行时存根/universe2/javaClasses 等 12 项 | interpreter_init / generate_stubs / javaClasses_init |
-| 4.6 | [06-compiler-init.md](#/openjdk/vol-01/ch04/06-compiler-init) | D | vtableStubs / ICB / compilerOracle / dependencyContext / compileBroker | compileBroker_init |
-| 4.7 | [07-post-init.md](#/openjdk/vol-01/ch04/07-post-init) | E | universe_post_init / stubRoutines_init2 / MethodHandles / NMT / Flags | universe_post_init ★★ |
+| 章 | 子系统 | 篇数 | 覆盖的 init_globals 函数 |
+|----|--------|------|--------------------------|
+| ch04 | 总览 + 轻量函数合并 | 5 | management_init / bytecodes_init / os_init_globals + trivial(accessFlags/invocationCounter/InterfaceSupport/VMRegImpl) |
+| ch05 | classLoader_init1 | 3 | classLoader_init1 |
+| ch06 | compilationPolicy_init | 4 | compilationPolicy_init |
+| ch07 | codeCache_init | 5 | codeCache_init |
+| ch08 | VM_Version_init | 6 | VM_Version_init |
+| ch09 | stubRoutines_init1 | 5 | stubRoutines_init1 |
+| ch10 | universe_init 总览 + 辅助初始化 | 6 | universe_init(JavaClasses offsets/InjectedField/ClassLoaderData/JVMFlag 约束/OopStorage) |
+| ch11 | initialize_heap | 5 | universe_init → Universe::initialize_heap |
+| ch12 | Metaspace | 7 | universe_init → Metaspace::global_initialize |
+| ch13 | CDS | 6 | universe_init → MetaspaceShared::initialize_shared_spaces |
+| ch14 | SymbolTable + StringTable + ResolvedMethodTable | 4 | universe_init → 三个 Table::create_table |
+| ch15 | LatestMethodCache | 3 | universe_init → 6× LatestMethodCache |
+| ch16 | interpreter_init | 5 | interpreter_init |
+| ch17 | templateTable_init | 4 | templateTable_init |
+| ch18 | SharedRuntime::generate_stubs | 5 | SharedRuntime::generate_stubs |
+| ch19 | universe2_init | 5 | universe2_init |
+| ch20 | javaClasses_init | 4 | javaClasses_init |
+| ch21 | referenceProcessor_init | 3 | referenceProcessor_init |
+| ch22 | jni_handles_init | 3 | jni_handles_init |
+| ch23 | gc_barrier_stubs_init | 3 | gc_barrier_stubs_init |
+| ch24 | vmStructs_init | 3 | vmStructs_init |
+| ch25 | compileBroker_init | 6 | compileBroker_init |
+| ch26 | vtableStubs_init | 3 | vtableStubs_init |
+| ch27 | InlineCacheBuffer_init | 3 | InlineCacheBuffer_init |
+| ch28 | dependencyContext_init | 4 | dependencyContext_init |
+| ch29 | universe_post_init | 5 | universe_post_init |
+| ch30 | stubRoutines_init2 | 5 | stubRoutines_init2 |
+| ch31 | MethodHandles::generate_adapters | 4 | MethodHandles::generate_adapters |
+| ch32 | compilerOracle_init + NMT + 收尾 | 4 | compilerOracle_init + NMT_stack_walkable + PrintFlagsFinal |
 
-下一节（4.2）从 Block A 的前 4 个轻量函数开始——`management_init`（JMX）、`bytecodes_init`、`classLoader_init1`、`compilationPolicy_init`。它们是 `universe_init` 的前置依赖中最轻的一组，多数是 trivial 委托，为 4.3 的 `codeCache_init` 和 4.4 的 `universe_init` 做铺垫。
+**重头戏**（6+ 篇）：ch08 VM_Version(6) / ch10 universe_init 辅助(6) / ch12 Metaspace(7) / ch13 CDS(6) / ch25 compileBroker(6)
+
+**5 篇级**：ch07 codeCache / ch09 stubRoutines1 / ch11 initialize_heap / ch16 interpreter / ch18 generate_stubs / ch19 universe2 / ch29 universe_post / ch30 stubRoutines2
+
+写作顺序按依赖关系：ch04 → ch05-ch09（Block A）→ ch10-ch15（Block B）→ ch16-ch24（Block C）→ ch25-ch28（Block D）→ ch29-ch32（Block E）。
+
+下一章（ch05）从 `classLoader_init1` 开始——用 `dlsym` 加载 7 个 zip 函数、从 jimage 读取 VM 选项、构建 bootstrap classpath。它是 `universe_init` 的前置依赖之一，和 ch01 的 `dlopen` 形成 Java↔C++ 的对称。
