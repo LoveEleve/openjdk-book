@@ -160,6 +160,10 @@ HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起
 - `int _allocate_before_rebuild` —— 重建 `_free_list` 之后还能从空闲链表分配多少次。举个例子：`_top` 到了 32（满），期间用户调了 3 次 `DeleteLocalRef` 删掉槽位 3、7、15。JVM 扫描全部 32 个槽位，发现 3 个空闲的，重建 `_free_list`，同时把 `_allocate_before_rebuild` 设为 3。接下来 3 次 `allocate_handle` 从 `_free_list` 链头取（-1），计数器归零后下一次分配时再触发重建扫描——如果没空闲槽位就扩展新块。
 - `size_t _planned_capacity` —— 当前 JNI 帧计划需要的槽位数。native 代码可以主动调 `env->EnsureLocalCapacity(N)` 告诉 VM"我这个函数需要 N 个 local ref"。JVM 把 `_planned_capacity` 设为 N，如果当前块不够空间，**现在就扩展**足够多的新块——一次性完成，省得后面每次 `allocate_handle` 失败时再逐个扩。类比：进考场前老师说"你要多少草稿纸"，一次给全，不用写到一半举手。
 
+![JNIHandleBlock 字段结构——每块字段 vs 首块专用字段，oop 槽位指向 JAVA HEAP](assets/jnihandleblock-fields.png)
+
+![JNIHandleBlock 链表——多块通过 _next 串联，首块 _last 指向尾块](assets/jnihandleblock-chain.png)
+
 #### 静态成员（全局共享）
 
 - `static JNIHandleBlock* _block_free_list`（`jniHandles.cpp:346 = NULL`）—— 全局空闲块池。没有 `init()` 函数，程序启动时自动零初始化为 NULL。`allocate_block()`（`jniHandles.cpp:364-405`）按以下顺序尝试：
@@ -238,6 +242,8 @@ set_last_handle_mark(NULL);
 
 三行都是 NULL——线程刚出生，还不能执行 JNI 调用，全局池里的块也不能直接挂给一个没附着的线程。此处只是 C++ 安全实践：所有指针在使用前显式初始化。
 
+![JNIHandleBlock 初始 NULL → 首次分配后 _active_handles 指向新块](assets/jnihandleblock-null-vs-allocated.png)
+
 ---
 
 ## 4. methodHandle / constantPoolHandle —— Metadata 的保护机制
@@ -295,6 +301,8 @@ set_metadata_handles(new (ResourceObj::C_HEAP, mtClass) GrowableArray<Metadata*>
   | `_max` | `int` | 缓冲区当前容量（初始 30），超出时自动扩容 |
 
   `Metadata*` 是基类指针——`Method` 和 `ConstantPool` 都继承自 `Metadata`（`method.hpp:70`、`constantPool.hpp:98`），所以数组里既存 `Method*` 也存 `ConstantPool*`。
+
+  ![GrowableArray<Metadata*> 构造完成后的初始状态——_len=0, _max=30, _data 30 个槽位全是 NULL](assets/growablearray-initial-state.png)
 
 - `30` —— 初始容量 `_max = 30`。大多数线程只有 0~3 个 metadata handle，30 是首次扩容前的一次性开销。
 
