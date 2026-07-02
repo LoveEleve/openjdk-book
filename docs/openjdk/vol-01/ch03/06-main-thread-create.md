@@ -1404,6 +1404,8 @@ new HandleMark(this);
 
 `HandleMark::initialize()` 做了两件事：`set_previous_handle_mark(thread->last_handle_mark())`（此时为 NULL），然后 `thread->set_last_handle_mark(this)`（指向自己）。`set_last_handle_mark(NULL)` 只是初始化变量，紧随其后的 `new HandleMark(this)` 立即创建第一个 Mark 并覆盖——两者不矛盾。后续再 `new HandleMark(thread)` 时构成**栈式链表**——后进先出，层层叠放。
 
+> **为什么先置 NULL 再立即覆盖？** 这只是 C++ 安全实践——避免野指针。`Thread::Thread()` 里先 `set_last_handle_mark(NULL)` 把字段初始化为合法值，紧接着的 `new HandleMark(this)` 立即覆盖为真实 Mark。如果中间有异常或断言失败，至少字段是 NULL 而不是野指针——更安全也更容易调试。这个设计动机和完整的三件套（HandleArea / HandleMark / Handle）背景在 [前置概念：三套 Handle 体系](#/openjdk/vol-01/ch03/background/handles-all) 已详细讲过，这里不重复。
+
 **三概念辨析**：`HandleArea` 是草稿纸（Arena），`HandleMark` 是纸上画的水位线（RAII——构造画线记当前位置，析构把那线之后的内容撕掉），`Handle` 是纸上写的一个词（`oop*` 薄包装，构造时在 HandleArea 中分配槽位）。出代码块时 HandleMark 析构——所有这期间写入的 Handle 全变为悬空指针。
 
 #### 线程安全
