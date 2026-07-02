@@ -10,33 +10,7 @@ Stage 4 结束时（参见 [3.6](#/openjdk/vol-01/ch03/06-main-thread-create)）
   jint status = init_globals();
 ```
 
-`init_globals()` 定义在 `src/hotspot/share/runtime/init.cpp`，函数体依次调用 **30 个子函数**，把 JVM 从"有线程没业务"推进到"能跑字节码的运行时"。本章（ch04）逐项展开这 30 个子函数。
-
----
-
-## init_globals() 在 create_vm 中的位置
-
-回顾 [3.2](#/openjdk/vol-01/ch03/02-threads-create-vm) 的 9 阶段骨架，`init_globals()` 是**阶段 6「全局模块与 VMThread」**的核心：
-
-```
-Threads::create_vm()
-├── [阶段 1] 前置初始化                    ch03/03 已讲
-├── [阶段 2] 参数解析                      ch03/04 已讲
-├── [阶段 3] os::init_2 与安全点           ch03/05 已讲
-├── [阶段 4] Agent 与 vm_init_globals     ch03/06 已讲（含 7 项基础设施）
-├── [阶段 5] 主线程附着                    ch03/06 已讲（new JavaThread + ObjectMonitor::Initialize）
-├── [阶段 6] 全局模块与 VMThread  ★本章
-│   ├── ObjectMonitor::Initialize()       ch03/06 已讲（7 个 PerfData 计数器）
-│   ├── init_globals()           ★★★    ← 本阶段核心，ch04 展开
-│   ├── cache_global_variables()
-│   ├── Threads::add(main_thread)
-│   └── VMThread::create() + wait ready
-├── [阶段 7] Java 类引导                   ch05
-├── [阶段 8] 编译器与运行时服务
-└── [阶段 9] Java 世界诞生
-```
-
-阶段 6 的第一项 `ObjectMonitor::Initialize()` 已在 3.6 讲完。本章从第二项 `init_globals()` 开始。阶段 6 剩余的 `cache_global_variables()`、`Threads::add()`、`VMThread::create()` 不在 `init_globals()` 内部，属于 create_vm 函数体后续行，本章末尾或后续章节覆盖。
+`init_globals()` 定义在 `src/hotspot/share/runtime/init.cpp`，函数体依次调用 **30 个子函数**，把 JVM 从"有线程没业务"推进到"能跑字节码的运行时"。本章（ch04）的任务就是把这 30 个函数以及背后的原理全部搞清楚。
 
 ---
 

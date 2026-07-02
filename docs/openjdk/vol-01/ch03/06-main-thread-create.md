@@ -1349,11 +1349,18 @@ _stack_size = 0;
 
 #### 内存管理
 
-`Thread::Thread()` 构造函数中分配四个分配器对象——全部用 `new` 在 C-Heap 上分配，GC 不管理它们：
+`Thread::Thread()` 构造函数中分配资源管理对象——全部用 `new` 在 C-Heap 上分配，GC 不管理它们：
 
 ```cpp
 set_resource_area(new (mtThread)ResourceArea());
 set_handle_area(new (mtThread) HandleArea(NULL));
+```
+
+`_resource_area` 的构造链（`new ResourceArea()` 如何一步步走向 ChunkPool 分配首块内存）和 `_handle_area` 的首 Chunk 尺寸差异（`tiny_pool` vs `small_pool`）已在第 2 节 `chunkpool_init` 的 ["ResourceArea 和 ResourceArea/HandleArea 构造链"](#_67) 中完整讲解——本节只展示构造函数调用点， 不重复撞针分配逻辑。
+
+接着分配四个句柄/元数据管理字段：
+
+```cpp
 set_metadata_handles(new (ResourceObj::C_HEAP, mtClass)
                      GrowableArray<Metadata*>(30, true));
 set_active_handles(NULL);
