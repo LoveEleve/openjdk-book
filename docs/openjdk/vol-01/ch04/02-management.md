@@ -58,7 +58,13 @@ JDK 自带一批工具，在 `JAVA_HOME/bin/` 下：
 | `jvisualvm` | 堆/CPU/线程图形分析（JDK 9 后独立下载） |
 | `JMC` | Java Mission Control，飞行记录分析（Oracle 商业，OpenJDK 开源） |
 
-`jconsole` 连上一个本地或远程 JVM，会自动每秒采样一次堆/线程/类加载数据画曲线。它的数据来源和方式一不一样——走 JMX 远程协议（RMI），目标 JVM 要主动启动 JMX Agent。
+这些都是 Java 写的图形程序，需要 X11 窗口系统才能显示。在 Linux 上有三种用法：
+
+1. **本地有桌面环境**（如 GNOME/KDE）— 直接运行 `jconsole <pid>` 即可，连本地 JVM
+2. **远程服务器无桌面** — 通过 `ssh -X user@server` 把图形转发到本地 X server，或在本机用 `jconsole` 通过 JMX 远程连接服务器的 `jmxremote.port`
+3. **纯命令行服务器**（无 X11，无 forwarding）— 图形工具用不了，只能用方式一的命令行工具
+
+`jconsole` 连上一个 JVM 后，会自动每秒采样一次堆/线程/类加载数据画曲线。它的数据来源和方式一不一样——走 JMX 远程协议（RMI），目标 JVM 要主动启动 JMX Agent（后面会讲怎么启动）。
 
 ### 方式三：Java 代码
 
