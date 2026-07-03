@@ -12,7 +12,7 @@ ThreadsList* volatile ThreadsSMRSupport::_java_thread_list = new ThreadsList(0);
 
 这是 HotSpot 的全局 JavaThread 链表——所有存活的 `JavaThread` 对象都在上面。GC（`Threads::threads_do()`）、`jstack`（JVM/TI）、[JFR](https://bugs.openjdk.org/browse/JDK-8190298) 都需要遍历它。
 
-JDK 8 的做法是**持 `Threads_lock` 遍历**：读者和写者互斥——线程创建/退出拿着锁改链表时，遍历者全阻塞。应用创建线程频繁时，GC 线程遍历等锁的时间可能远长于真正扫描的时间。
+JDK 8 的做法是**持 `Threads_lock` 遍历 `Threads::_thread_list`（`JavaThread*` 单向链表）**：读者和写者互斥——线程创建/退出拿着锁改链表时，遍历者全阻塞。JDK 11 保留了 `Threads::_thread_list`（`Threads::add()` / `Threads::remove()` 仍在维护它），同时引入了 `ThreadsSMRSupport::_java_thread_list`——一个 Copy-on-Write 的 `ThreadsList` 快照数组，让读者可以无锁遍历。
 
 Thread-SMR（Safe Memory Reclamation）用**无锁读 + Copy-on-Write 写**解耦读者和写者。
 
