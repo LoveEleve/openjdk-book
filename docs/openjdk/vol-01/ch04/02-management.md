@@ -830,7 +830,17 @@ void ClassLoadingService::init() {
 
 ### 三种调用来源
 
-每个 DCmd 注册时声明接受哪些来源（位掩码）：
+**DCmd 不止 jcmd 能用**——它是个通用诊断命令框架，有三种调用入口，最终都走同一个 `DCmd::parse_and_execute`，只是来源参数不同：
+
+| 调用方 | 入口 | source 参数 | 典型场景 |
+|--------|------|------------|---------|
+| **jcmd 工具** | AttachListener 线程 → `jcmd()` 函数（`attachListener.cpp:200`） | `DCmd_Source_AttachAPI` | 命令行 `jcmd <pid> VM.version` |
+| **JMX 客户端**（jconsole / Java 代码） | `jmm_ExecuteDiagnosticCommand`（`management.cpp:2032`）→ `parse_and_execute` | `DCmd_Source_MBean` | jconsole 点按钮 / Java 代码调 DiagnosticCommandMBean |
+| **JVM 内部代码** | 直接调 `DCmd::parse_and_execute` | `DCmd_Source_Internal` | JVM 内部触发诊断（如 OOM 时自动 dump） |
+
+三种来源最终都调 `DCmd::parse_and_execute`（`diagnosticFramework.hpp:306`），只是 source 参数不同——DCmd 的 `execute(source, THREAD)` 方法能根据 source 判断是谁调的，做不同处理。
+
+每个 DCmd 注册时用位掩码声明接受哪些来源：
 
 ```cpp
 enum DCmdSource {
@@ -872,14 +882,6 @@ ThreadDumpDCmd::execute() → 打印所有线程栈
 ```
 
 **AttachListener 线程直接执行 DCmd**——`attach_listener_thread_entry`（`attachListener.cpp:344`）是个死循环，`dequeue()` 收到请求后，在 `funcs[]` 表里找到 `"jcmd"` 对应的函数，直接调 `jcmd()`，`jcmd()` 再调 `DCmd::parse_and_execute`。整条调用链都在 AttachListener 线程的栈上完成，不转发给其他线程。
-
-**但不是所有 DCmd 都走 AttachListener**。DCmd 有三种调用来源（见上面"三种调用来源"段）：
-
-| 来源 | 谁触发 | 走 AttachListener 吗？ |
-|------|--------|---------------------|
-| `AttachAPI` | jcmd 工具 | **是**——AttachListener 线程 dequeue 后直接执行 |
-| `MBean` | jconsole / Java 代码（通过 JMX） | **否**——Java 层通过 `jmm_interface->ExecuteDiagnosticCommand` 直接调，不经过 attach API |
-| `Internal` | JVM 内部代码 | **否**——直接调 `DCmd::parse_and_execute`，不经过任何线程转发 |
 
 所以 jcmd 走的是 AttachListener 路径，但 jconsole/Java 代码走的是 JMX 路径（通道 B 的 `jmm_interface`）——两条路径最终都调用 `DCmd::parse_and_execute`，但入口不同。
 
