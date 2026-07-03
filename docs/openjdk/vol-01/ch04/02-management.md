@@ -895,25 +895,52 @@ ThreadDumpDCmd::execute() → 打印所有线程栈
 
 ## JMX Agent 启动
 
-`jconsole`、VisualVM 远程连接一个 JVM 时，目标 JVM 必须启动 JMX Agent（监听 RMI 端口）。Agent 不是 `management_init` 启动的——`management_init` 只铺 C++ 侧地基，Agent 是 Java 层的，要等 JNI 就绪后才能启动。
+前面讲的通道 A（PerfData 共享内存）不需要 JVM 配合——jstat 直接读文件。但通道 B 的 JMX 远程连接（jconsole/VisualVM 连过来）需要 JVM 内部有个"接待员"——这就是 **JMX Agent**。
+
+### JMX Agent 是什么
+
+JMX Agent 是一个 **Java 类**——`jdk.internal.agent.Agent`（在 `java.management` 模块里）。它做两件事：
+1. 在 JVM 内启动一个 **RMI 服务器**（RMI = Remote Method Invocation，Java 的远程调用协议），监听一个 TCP 端口（如 9999）
+2. 把 JVM 的所有 MXBean 注册到这个 RMI 服务器上
+
+这样远程的 jconsole 连上这个端口后，就能通过 RMI 协议调用 MXBean 的方法（`getThreadCount()`、`gc()` 等），最终通过 `jmm_interface` 进 HotSpot C++ 侧。
+
+```
+远程的 jconsole                    目标 JVM
+┌──────────────┐                  ┌──────────────────────────────────┐
+│  jconsole    │                  │  JMX Agent (jdk.internal.agent) │
+│  连接 RMI    │ ── TCP/RMI ───→ │  ├── RMI 服务器监听 9999 端口   │
+│  端口        │                  │  ├── 注册所有 MXBean             │
+└──────────────┘                  │  └── 调用 jmm_interface → HotSpot│
+                                  └──────────────────────────────────┘
+```
+
+### Agent 不是 management_init 启动的
+
+`management_init` 只铺 C++ 侧地基（PerfData 计数器 + 能力位 + DCmd），**不启动 Agent**——因为 Agent 是 Java 类，要等 JNI 就绪后才能加载。Agent 在 `create_vm` 末尾或运行时按需启动。
 
 三种启动方式：
 
 ```
-方式1: 启动时加参数
+方式1: 启动时加参数（远程 JMX）
   java -Dcom.sun.management.jmxremote.port=9999 MyApp
-  → 在 create_vm 末尾由 Management::initialize() 启动 Agent
+  → create_vm 末尾由 Management::initialize() 加载并调 Agent.startAgent()
+  → Agent 启动 RMI 服务器监听 9999 端口
 
-方式2: 运行时通过 jcmd 启动
+方式2: 运行时通过 jcmd 启动（远程 JMX）
   jcmd <pid> ManagementAgent.start jmxremote.port=9999
   → JMXStartRemoteDCmd::execute() → Agent.startRemoteManagementAgent()
 
-方式3: 只启动本地 JMX（jconsole 本地连接）
+方式3: 只启动本地 JMX（jconsole 本地连接，不开端口）
   jcmd <pid> ManagementAgent.start_local
-  → JMXStartLocalDCmd::execute()
+  → JMXStartLocalDCmd::execute() → Agent.startLocalManagementAgent()
 ```
 
-这三种都不在 `management_init` 里——`management_init` 只负责注册 DCmd（包括 `ManagementAgent.start` 这个 DCmd 本身）和创建 PerfData 计数器，让 Agent 启动后有数据可读。
+**方式 1 和 2 是"远程 JMX"**——Agent 监听 TCP 端口，远程的 jconsole 通过网络连过来。
+
+**方式 3 是"本地 JMX"**——不监听端口，只在本机内通过 attach API 连接（和 jcmd 同一条路径）。jconsole 默认用本地连接（不用输入 IP 和端口），走的就是这个。
+
+这三种都不在 `management_init` 里——`management_init` 只负责注册 DCmd（包括 `ManagementAgent.start` 这个 DCmd 本身）和创建 PerfData 计数器，让 Agent 启动后有数据可读。Agent 的实际启动在 `create_vm` 末尾（方式 1）或运行时通过 jcmd 触发（方式 2、3）。
 
 ---
 
