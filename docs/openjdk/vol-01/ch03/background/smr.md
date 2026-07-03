@@ -33,29 +33,50 @@ class ThreadsList : public CHeapObj<mtThread> {
 
 `ThreadsList` 是一个 `JavaThread*` 的**不可变数组**。构造时从旧列表 `Copy::disjoint_words()` 拷贝所有指针，追加/移除目标线程后返回新列表——**永远不原地修改旧列表**。
 
-核心操作是 `ThreadsList::add_thread()` 和 `ThreadsList::remove_thread()`：
+核心操作是 `ThreadsList::add_thread()`（`threadSMR.cpp:562-574`）：
 
 ```cpp
-// threadSMR.cpp:562-574
 ThreadsList *ThreadsList::add_thread(ThreadsList *list, JavaThread *java_thread) {
-  ThreadsList *const new_list = new ThreadsList(list->_length + 1);
-  Copy::disjoint_words(list->_threads, new_list->_threads, list->_length);  // 全拷贝
-  new_list->_threads[list->_length] = java_thread;                           // 尾部追加
+  const uint index = list->_length;            // 新线程放在旧列表末尾
+  const uint new_length = index + 1;           // 新列表长度 = 旧长度 + 1
+  const uint head_length = index;              // 需要复制的前段元素数 = 旧长度
+
+  ThreadsList *const new_list = new ThreadsList(new_length);  // ① 分配新数组
+
+  if (head_length > 0) {
+    Copy::disjoint_words(                       // ② 全量复制旧数组
+      (HeapWord*)list->_threads,
+      (HeapWord*)new_list->_threads,
+      head_length
+    );
+  }
+
+  *(JavaThread**)(new_list->_threads + index) = java_thread;  // ③ 尾部追加新线程
+
   return new_list;
 }
 ```
 
-`remove_thread()` 同理——拷贝旧列表的前半段和后半段，跳过目标线程。
+逐行解释：
+
+- **① `new ThreadsList(new_length)`** — 在 C-Heap 上分配一个长度为 `old_length + 1` 的新 `ThreadsList` 对象，内部包含 `JavaThread* _threads[new_length]` 数组。
+- **② `Copy::disjoint_words`** — 把旧列表的 `_threads` 数组**全部复制**到新列表。`disjoint_words` 是 HotSpot 的内存复制函数（按 `HeapWord` 即 8 字节对齐），源和目标不重叠。空列表（`_length == 0`）时 `head_length == 0`，跳过复制直接到③。
+- **③ 尾部追加** — `new_list->_threads` 是指向数组第一个元素的 `JavaThread*` 指针，`+ index` 偏移到旧长度位置，把新线程的指针写进去。
+
+这就是 **Copy-on-Write** 的含义——不是原地改，而是**全量复制旧数组后再追一条**。旧 `ThreadsList` 对象保留不动，任何已经拿到旧列表指针的读者不受影响。
+
+`ThreadsList::remove_thread()`（`threadSMR.cpp:655`）同理：分配长度 `-1` 的新数组，拷贝时跳过目标线程——前半段和后半段分别复制，中间空一位。
 
 ### 2.1 原子替换全局指针
 
-`threadSMR.cpp:743-758`：
+新列表建好后，通过 `Atomic::xchg` 原子替换全局 `_java_thread_list`：
 
 ```cpp
+// threadSMR.cpp:743-752
 void ThreadsSMRSupport::add_thread(JavaThread *thread) {
   ThreadsList *new_list = ThreadsList::add_thread(get_java_thread_list(), thread);
   ThreadsList *old_list = xchg_java_thread_list(new_list);  // Atomic::xchg
-  free_list(old_list);  // 旧列表不立即删除，进入排队
+  free_list(old_list);  // 旧列表不立即释放，加入 _to_delete_list 排队
 }
 ```
 
