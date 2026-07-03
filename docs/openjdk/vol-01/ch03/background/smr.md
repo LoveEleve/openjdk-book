@@ -99,54 +99,62 @@ ThreadsList::ThreadsList(int entries) :
 
 数组比 `entries` 多分配一个位置——末尾固定存 NULL，作为遍历时的哨兵。
 
-### 3.3 源码对应
+### 3.3 源码对应：三层调用链
 
-每个设计步骤对应哪个函数：
+CoW 的设计嵌在一套严格的分层调用中，每一层有明确的职责边界。
 
-**步骤①②③：分配新数组 + 全量拷贝 + 尾追加 → `ThreadsList::add_thread()`**（`threadSMR.cpp:562-574`）
+**第一层：`Threads::add()`——标准链表的唯一写入口**（`thread.cpp:4456-4486`）
 
 ```cpp
-ThreadsList *ThreadsList::add_thread(ThreadsList *list, JavaThread *java_thread) {
-  const uint index = list->_length;
-  const uint new_length = index + 1;
-  ThreadsList *const new_list = new ThreadsList(new_length);    // ① new 分配新数组
-  if (list->_length > 0) {
-    Copy::disjoint_words(                                        // ② memcpy 全量拷贝
-      (HeapWord*)list->_threads,
-      (HeapWord*)new_list->_threads,
-      list->_length);
-  }
-  *(JavaThread**)(new_list->_threads + index) = java_thread;    // ③ 尾追加
-  return new_list;
+void Threads::add(JavaThread* p, bool force_daemon) {
+  p->set_next(_thread_list);
+  _thread_list = p;                          // 头插到标准链表
+  p->set_on_thread_list();
+  _number_of_threads++;
+  // ... daemon 计数 + ThreadService 注册 ...
+  ThreadsSMRSupport::add_thread(p);          // 最后一步：同步更新 SMR 快照
 }
 ```
 
-**步骤④：原子替换 → `xchg_java_thread_list()`**（`threadSMR.cpp:159-161`）
+这一层做的是标准链表的维护——头插新节点、递增计数器。最后一行才调 `SMRSupport::add_thread(p)`，因为 SMR 快照是对标准链表的**衍生**——先有权威数据 `_thread_list`，再生成只读副本 `_java_thread_list`。两个写操作在同一个持 `Threads_lock` 的函数中完成。
 
-```cpp
-inline ThreadsList* ThreadsSMRSupport::xchg_java_thread_list(ThreadsList* new_list) {
-  return (ThreadsList*)Atomic::xchg(new_list, &_java_thread_list);
-}
-```
-
-`Atomic::xchg` 把 `new_list` 写入 `_java_thread_list` 并返回旧值。从此刻起：
-- 新读者调用 `get_java_thread_list()` 拿到的都是 v4
-- 老读者手上的 v3 仍然有效——他们早就拿到了 v3 的指针
-
-**写者调用的完整入口 → `ThreadsSMRSupport::add_thread()`**（`threadSMR.cpp:743-758`）
+**第二层：`ThreadsSMRSupport::add_thread()`——CoW 快照的编排者**（`threadSMR.cpp:743-758`）
 
 ```cpp
 void ThreadsSMRSupport::add_thread(JavaThread *thread) {
   ThreadsList *new_list = ThreadsList::add_thread(get_java_thread_list(), thread);
-  // ... 统计代码 ...
-  ThreadsList *old_list = xchg_java_thread_list(new_list);   // 原子替换
-  free_list(old_list);  // 旧列表进入待回收队列（Hazard Pointer 决定何时真正 delete）
+  ThreadsList *old_list = xchg_java_thread_list(new_list);
+  free_list(old_list);
 }
 ```
 
-三步：获取当前快照 → 创建新快照 → 原子替换后把旧的交给 `free_list()`。
+这一层调度 CoW 三步：取当前快照 → 委托 `ThreadsList::add_thread()` 建新快照 → `Atomic::xchg` 原子替换全局指针 → 旧快照送入 `free_list()` 待回收队列。
 
-**移除是对称的 CoW**：`ThreadsSMRSupport::remove_thread()`（`threadSMR.cpp:917-933`）调用 `ThreadsList::remove_thread()`——拷贝时跳过目标线程，分两段拷贝（head 部分 [0, i) + tail 部分 (i, length]），不改变剩余线程的相对顺序。
+**第三层：`ThreadsList::add_thread()`——纯 CoW 的底层实现**（`threadSMR.cpp:562-574`）
+
+```cpp
+ThreadsList *ThreadsList::add_thread(ThreadsList *list, JavaThread *java_thread) {
+  ThreadsList *const new_list = new ThreadsList(list->_length + 1);  // ① 分配新容器
+  if (list->_length > 0) {
+    Copy::disjoint_words(list->_threads, new_list->_threads,         // ② 全量 memcpy
+                         list->_length);
+  }
+  *(JavaThread**)(new_list->_threads + list->_length) = java_thread; // ③ 尾追加
+  return new_list;
+}
+```
+
+最底层——输入一个 `ThreadsList` 和一个 `JavaThread*`，输出长度 +1 的新 `ThreadsList`。不读全局指针，不涉及替换回收。全量拷贝而非原地追加——因为旧快照可能有读者正在遍历，原地改尾部会破坏读者手里的数据。
+
+三层分工：
+
+| 层 | 函数 | 职责 |
+|---|---|---|
+| 入口 | `Threads::add()` | 维护标准链表，触发 SMR 同步 |
+| 编排 | `ThreadsSMRSupport::add_thread()` | 调度 CoW：取旧→建新→替换→回收 |
+| 底层 | `ThreadsList::add_thread()` | 纯 CoW：全量拷贝 + 尾追加 |
+
+**移除同理**：`ThreadsSMRSupport::remove_thread()`（`threadSMR.cpp:917-933`）同样三层——`Threads::remove()` 从标准链表摘除后调 `SMRSupport::remove_thread()`，底层 `ThreadsList::remove_thread()` 分两段拷贝跳过目标线程。
 
 ### 3.4 CoW 解决了什么、留下了什么
 
