@@ -491,7 +491,39 @@ public:
 
 ---
 
-## 11. 全文总结
+## 11. 概念辨析：CoW、Hazard Pointer、RCU、Thread-SMR
+
+读者常困惑：这到底是 Copy-on-Write、Hazard Pointer 还是 RCU？**四者不互斥，描述的是同一个机制的不同维度：**
+
+**Thread-SMR** 是 HotSpot 对整套线程列表安全并发访问方案的命名（Safe Memory Reclamation）。它由两个正交的技术组成：
+
+- **Copy-on-Write (CoW)**：快照的**创建**方式。增删线程时不原地修改数组，而是分配新 `ThreadsList` + 全量拷贝 + `Atomic::xchg` 原子替换全局指针（`threadSMR.cpp:160`）。解决的是"读者如何拿到一个不被写者破坏的版本"。
+
+- **Hazard Pointer (HP)**：快照的**回收**方式。读者在遍历前把正在使用的 `ThreadsList*` 写入自己线程的 `_threads_hazard_ptr`（`thread.inline.hpp:88`），遍历完清零。写者删除前扫描所有线程的 hazard ptr，有引用就不删（`threadSMR.cpp:850-892`）。解决的是"旧版本何时能安全释放"。
+
+Thread-SMR 和 Linux 内核的 **RCU (Read-Copy-Update)** 共享"读者无锁 + 写入生成新版本 + 延迟回收旧版本"的设计思想，但回收的**触发条件**不同：RCU 等 grace period（所有读者离开临界区），Thread-SMR 等 hazard ptr 清零（持有**特定版本**的读者读完）。粒度差异——RCU 等全体读者，SMR 等特定读者。
+
+JDK 源码中的 `_rcu_counter`（`thread.hpp:313-318`）是平行于 `_threads_hazard_ptr` 的另一套机制（通过 `GlobalCounter`），用于 Thread-SMR 之外的非线程列表场景，不影响本文核心逻辑。
+
+## 12. GC 读快照的安全性
+
+核心疑问：GC 扫描线程 oop 时拿到的只是某个瞬间的 `ThreadsList` 快照。如果快照创建后才出生的新线程不在里面——GC 会漏掉栈上 oop 吗？如果快照里有已退出的线程——会访问已释放内存吗？
+
+### 情况 A：Stop-the-World GC（Serial / Parallel Full GC / CMS remark）
+
+**不会漏，也不会悬空。** STW GC 在 safepoint 中运行（`SafepointSynchronize::begin()`），此时没有任何 Java 线程能创建或退出——`Threads::add()` 和 `Threads::remove()` 都需要 `Threads_lock`，而锁的获取前提是**不在 safepoint 中**。快照包含的就是此刻所有活着的 Java 线程，不存在"快照之外"的线程。
+
+### 情况 B：并发 GC（G1 concurrent marking / ZGC / Shenandoah）
+
+**并发标记阶段确实有线程在继续跑**——包括新出生的和正在退出的。GC 拿到的 `ThreadsList` 快照可能不是全体活线程的完整集合。但 **GC 不会漏 oop**，因为并发 GC 不是纯粹靠 `ThreadsList` 快照来判断 oop 存活：
+
+1. **SATB (Snapshot-At-The-Beginning)**：G1 并发标记开始时建立逻辑快照——所有此刻已存在的对象视为存活。并发期间新线程分配的对象通过 SATB 写屏障记录（`G1BarrierSet`），即使新线程不在 `ThreadsList` 快照中，其分配的 oop 也会被标记。
+2. **Card Table**：任何线程写入引用时更新 card table。并发期间新线程的引用写入同样标记 card，remark 阶段会扫描脏 card。
+3. **Remark 阶段重新进入 safepoint**：G1 的 remark (`G1CMRemarkTask::work()`, `g1ConcurrentMark.cpp:1839`) 在 safepoint 下调用 `Threads::threads_do()` 重新扫描**全体**线程栈，处理并发期间积累的 SATB 缓冲区。
+
+**一句话**：并发 GC 不是纯粹靠某次 `ThreadsList` 快照来找 oop——它还依赖写屏障（SATB / card table）追踪快照之外的并发变化。`ThreadsList` 快照是根扫描的起点，SATB 写屏障和 safepoint remark 兜底保证完整性。
+
+## 13. 全文总结
 
 | 步骤 | 方案 | 解决的问题 | 留下的问题 |
 |------|------|-----------|-----------|
