@@ -16,12 +16,9 @@ _rcu_counter = 0;                    // volatile uintx，GlobalCounter 代际计
 
 ## 1. 起点：一个全局链表，两种并发操作
 
-HotSpot 用 `ThreadsSMRSupport::_java_thread_list`（`threadSMR.hpp:108`）这条全局链表管理所有 `JavaThread` 对象。两种操作：
+HotSpot 用 `Threads::_thread_list`（`thread.hpp:2205`，`static JavaThread*`）管理所有 `JavaThread` 对象——用 `_next` 指针串成的单向链表，`Threads::add()` 头插新节点，`Threads::remove()` 摘除已退出节点。
 
-- **写者（增删线程）**：`Threads::add()` 插入节点，`Threads::remove()` 摘除节点。
-- **读者（遍历线程）**：GC 遍历 oop 根，jstack dump 线程栈，JVMTI 枚举线程。
-
-**这是经典的并发读写问题。读者遍历到一半时写者删掉一个节点——读者手上的 next 指针指向已释放的内存，直接 crash。**
+**这个链表是唯一的标准全局线程链表。** 本文讨论的 SMR 机制在此基础上维护一份 `ThreadsSMRSupport::_java_thread_list`（`ThreadsList* volatile`，`threadSMR.hpp:108`）——从上一个 `_java_thread_list` 快照重建的 Copy-on-Write 只读副本。读者通过 SMR 遍历的是 `_java_thread_list`（无锁快照），写者增删后同步更新两者：`Threads::_thread_list`（标准链表）和 `ThreadsSMRSupport::_java_thread_list`（SMR 快照）始终包含相同的线程集合。
 
 ---
 
