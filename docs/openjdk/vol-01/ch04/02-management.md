@@ -893,13 +893,17 @@ ThreadDumpDCmd::execute() → 打印所有线程栈
 
 ---
 
-## JMX Agent 启动
+## JMX Agent 启动（本 JDK 不可用）
 
-前面讲的通道 A（PerfData 共享内存）不需要 JVM 配合——jstat 直接读文件。但通道 B 的 JMX 远程连接（jconsole/VisualVM 连过来）需要 JVM 内部有个"接待员"——这就是 **JMX Agent**。
+> **本节说明**：下面讲的 JMX Agent 功能依赖 `java.rmi` 模块和 `jdk.internal.agent.Agent` 类。**本项目的 jdk11u-copy 已经裁剪掉了 RMI 相关代码**（`java.rmi` 模块不存在，`jdk.management.agent` 模块里 `Agent.java` 被删掉）。所以 JMX Agent 在本 JDK 上**不可用**——`ManagementAgent.start` 这个 DCmd 虽然注册了，但执行时会因找不到 Agent 类而失败。
+>
+> 本节仅作为"标准 JDK 上 JMX Agent 是怎么工作的"背景知识保留，实际验证时可以跳过。
+
+标准 JDK 上，jconsole / VisualVM 远程连接一个 JVM 时，目标 JVM 必须启动 JMX Agent。Agent 不是 `management_init` 启动的——`management_init` 只铺 C++ 侧地基，Agent 是 Java 层的，要等 JNI 就绪后才能启动。
 
 ### JMX Agent 是什么
 
-JMX Agent 是一个 **Java 类**——`jdk.internal.agent.Agent`（在 `java.management` 模块里）。它做两件事：
+JMX Agent 是一个 **Java 类**——`jdk.internal.agent.Agent`。它做两件事：
 1. 在 JVM 内启动一个 **RMI 服务器**（RMI = Remote Method Invocation，Java 的远程调用协议），监听一个 TCP 端口（如 9999）
 2. 把 JVM 的所有 MXBean 注册到这个 RMI 服务器上
 
@@ -915,11 +919,7 @@ JMX Agent 是一个 **Java 类**——`jdk.internal.agent.Agent`（在 `java.man
                                   └──────────────────────────────────┘
 ```
 
-### Agent 不是 management_init 启动的
-
-`management_init` 只铺 C++ 侧地基（PerfData 计数器 + 能力位 + DCmd），**不启动 Agent**——因为 Agent 是 Java 类，要等 JNI 就绪后才能加载。Agent 在 `create_vm` 末尾或运行时按需启动。
-
-三种启动方式：
+### 三种启动方式（标准 JDK 上）
 
 ```
 方式1: 启动时加参数（远程 JMX）
