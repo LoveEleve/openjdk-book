@@ -1496,7 +1496,25 @@ void management_init() {
 | `management.cpp:143`（NMTDCmd 单独注册） | 1 |
 | **management_init 后合计** | **42** |
 
-每个 `DCmdFactoryImpl<XxxDCmd>` 对象是一个 C++ 类，对应一条 jcmd 命令——`name()` 返回命令名（如 `"VM.version"`），`execute()` 实现命令逻辑。注册方式是头插法链表插入（`factory->_next = _DCmdFactoryList; _DCmdFactoryList = factory;`）。运行时 jcmd 发命令进来，`DCmdFactory::factory()` 遍历链表按名字匹配找到对应的 factory，调它的 `create_resource_instance()` 创建 DCmd 实例执行。
+每个 `DCmdFactoryImpl<XxxDCmd>` 对象是一个 C++ 类——**工厂**，不是命令本身。工厂负责"管理命令的元数据"和"创建命令实例"：
+
+- `name()` 返回命令名（如 `"VM.version"`）——告诉 jcmd 这条命令叫什么
+- `description()` / `impact()` / `permission()`——命令的说明、影响等级、权限要求
+- `_enabled` / `_hidden` / `_export_flags`——是否启用、是否隐藏、对哪些来源开放
+- `create_resource_instance()` ← **关键**：创建真正的 DCmd 实例（`new XxxDCmd()`）
+
+命令的执行逻辑 `execute()` **不在工厂上**，在 DCmd 类上（如 `VersionDCmd::execute()`）。工厂只是"生产命令的工厂"，不亲自执行命令。注册方式是头插法链表插入（`factory->_next = _DCmdFactoryList; _DCmdFactoryList = factory;`）。
+
+运行时 jcmd 发命令进来，调用链是：
+
+```
+jcmd "VM.version" 进来
+  → DCmdFactory::factory() 遍历链表，按 name() 找到 DCmdFactoryImpl<VersionDCmd>
+  → 调 factory->create_resource_instance() → new VersionDCmd()
+  → 调 VersionDCmd::execute()  ← execute 在 DCmd 上，不在 Factory 上
+```
+
+所以是**工厂创建命令，命令执行逻辑**——两者分工明确。
 
 DCmd 有三种调用来源，最终都走 `DCmd::parse_and_execute`：
 - **AttachAPI**（jcmd 工具）——走 AttachListener 线程
