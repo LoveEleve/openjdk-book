@@ -482,17 +482,76 @@ int DCmdFactory::register_DCmdFactory(DCmdFactory* factory) {
 }
 ```
 
-所以 `Management::init()` 执行完这 4 行后，`_DCmdFactoryList` 就是一条包含 40+ 个 `DCmdFactory` 节点的链表。运行时 jcmd 发命令进来，`DCmdFactory::factory(source, cmd, len)` 遍历这条链表，按名字匹配找到对应的 factory，调它的 `create_resource_instance()` 创建 DCmd 实例执行。
+`DCmdFactoryImpl` 是个模板子类（`diagnosticFramework.hpp:404`），用模板参数指定具体 DCmd 类型。每次 `new DCmdFactoryImpl<XxxDCmd>(...)` 都在 C 堆上创建一个对象，调 `register_DCmdFactory` 插入链表头部。
+
+看 `register_dcmds()` 的源码（`diagnosticCommand.cpp:71-138`），每行都是一次 `new + register`：
+
+```cpp
+/* === src/hotspot/share/services/diagnosticCommand.cpp:71-138（节选）=== */
+
+void DCmdRegistrant::register_dcmds(){
+  uint32_t full_export = DCmd_Source_Internal | DCmd_Source_AttachAPI
+                         | DCmd_Source_MBean;
+  DCmdFactory::register_DCmdFactory(new DCmdFactoryImpl<HelpDCmd>(full_export, true, false));
+  DCmdFactory::register_DCmdFactory(new DCmdFactoryImpl<VersionDCmd>(full_export, true, false));
+  DCmdFactory::register_DCmdFactory(new DCmdFactoryImpl<CommandLineDCmd>(full_export, true, false));
+  DCmdFactory::register_DCmdFactory(new DCmdFactoryImpl<PrintSystemPropertiesDCmd>(full_export, true, false));
+  // ... 一直 new 下去
+  DCmdFactory::register_DCmdFactory(new DCmdFactoryImpl<CompilerDirectivesClearDCmd>(full_export, true, false));
+  // JMX Agent 命令(不导出给 MBean)
+  uint32_t jmx_agent_export_flags = DCmd_Source_Internal | DCmd_Source_AttachAPI;
+  DCmdFactory::register_DCmdFactory(new DCmdFactoryImpl<JMXStartRemoteDCmd>(jmx_agent_export_flags, true,false));
+  // ...
+}
+```
+
+每一行做两件事：
+1. `new DCmdFactoryImpl<XxxDCmd>(...)` —— 在 C 堆上创建一个 factory 对象
+2. `DCmdFactory::register_DCmdFactory(...)` —— 头插法插入链表
+
+### 到底创建了几个对象？
+
+数 `new DCmdFactoryImpl` 的次数：
+
+| 注册位置 | `new` 次数 | 何时执行 |
+|---------|-----------|---------|
+| `diagnosticCommand.cpp:71-138`（`register_dcmds()`） | **41** | management_init 调用 |
+| `management.cpp:143`（NMTDCmd 单独注册） | **1** | management_init 调用 |
+| `jfrDcmds.cpp:672-676`（JFR 5 个命令） | **5** | JFR `on_create_vm_2` 调用（不在 management_init） |
+| `logDiagnosticCommand.cpp:61`（Log 命令） | **1** | 日志系统初始化（不在 management_init） |
+
+所以 **management_init 执行完时，链表里有 42 个 DCmdFactory 对象**（41 + 1 NMT）。JVM 完全启动后，JFR 和日志系统还会追加 6 个，最终链表里有 **48 个**。
+
+链表示意（头插法，最后注册的在链表头）：
+
+```
+_DCmdFactoryList (静态头指针)
+       │
+       ▼
+┌──────────────────┐    _next    ┌──────────────────┐    _next    ┌──────────────────┐
+│ DCmdFactoryImpl  │ ─────────→ │ DCmdFactoryImpl  │ ─────────→ │ DCmdFactoryImpl  │ ─→ ...
+│ <NMTDCmd>        │            │ <CompilerDirect..>│            │ <ClassLoaderStat>│
+│ name="VM.native"│            │ name="Compiler.."│            │ name="VM.class.."│
+│ export=full      │            │ export=full      │            │ export=full      │
+│ enabled=true     │            │ enabled=true     │            │ enabled=true     │
+│ hidden=false     │            │ hidden=false     │            │ hidden=false     │
+└──────────────────┘             └──────────────────┘             └──────────────────┘
+       ↑ 最后注册的在链表头                                        第一个注册的在链表尾
+```
+
+因为头插法，链表顺序和注册顺序**相反**——`register_dcmds()` 第一行注册的 `HelpDCmd` 在链表尾，最后注册的 `DebugOnCmdStartDCmd` 在链表头；`management.cpp` 单独注册的 `NMTDCmd` 插在最前面。
+
+运行时 jcmd 发命令进来，`DCmdFactory::factory(source, cmd, len)`（`diagnosticFramework.cpp:498`）从链表头开始遍历，按 `name()` 匹配找到对应的 factory，调它的 `create_resource_instance()` 创建 DCmd 实例执行。
 
 **和能力位的对比**：
 
-| 维度 | 第 2 步：9 个能力位 | 第 3 步：40+ DCmd 注册 |
-|------|-------------------|----------------------|
-| 存什么 | 9 个 bit | 40+ 个 C++ 对象（DCmdFactory 子类实例） |
-| 存哪里 | `_optional_support` 静态结构体（4 字节） | `_DCmdFactoryList` 单向链表（在 C 堆） |
-| 数据形式 | 位域（bit-field） | 链表节点（`_next` 指针串联） |
-| 怎么读 | `jmm_GetOptionalSupport` 一次性读走 9 个 bit | `DCmdFactory::factory()` 遍历链表按名字查找 |
-| 何时用 | Java 层初始化时查一次，决定哪些方法可用 | 每次 `jcmd <pid> <命令>` 都要查 |
+| 维度 | 第 2 步：9 个能力位 | 第 3 步：DCmd 注册 |
+|------|-------------------|------------------|
+| 存什么 | 9 个 bit | 42 个 C++ 对象（management_init 后） |
+| 存哪里 | `_optional_support` 静态结构体（4 字节） | `_DCmdFactoryList` 单向链表（C 堆） |
+| 数据形式 | 位域（bit-field，`: 1`） | 链表节点（`_next` 指针串联） |
+| 怎么读 | `jmm_GetOptionalSupport` 一次性读 9 个 bit | `DCmdFactory::factory()` 遍历链表按名字查找 |
+| 何时用 | Java 层初始化时查一次，决定哪些方法可用 | 每次 `jcmd <pid> <命令>` 都要遍历查找 |
 
 ### 为什么 NMT 要单独注册
 
