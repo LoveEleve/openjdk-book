@@ -341,7 +341,7 @@ void Management::init() {
 
 ### 1. 3 个 PerfVariable 计时器
 
-这三个计数器记录 JVM 启动的三个关键时间戳（都是绝对时间，单位毫秒）。创建方式和 [3.6 节 ObjectMonitor::Initialize()](#/openjdk/vol-01/ch03/06-main-thread-create?id=objectmonitorinitialize-7-个同步计数器) 完全一样——都是调用 `PerfDataManager::create_variable()`，在 ch03/05 创建的 PerfData 共享内存里分配一个 `PerfDataEntry`（填头部 + 数据区），`_valuep` 直接指向共享内存数据区，后续写入零系统调用。本节不再重复 PerfDataEntry 的创建细节，只列计数器清单和运行时含义：
+这三个计数器记录 JVM 启动的三个关键时间戳（都是绝对时间，单位毫秒）。创建方式和 ch03/06 节讲过的 `ObjectMonitor::Initialize()` 完全一样——都是调用 `PerfDataManager::create_variable()`，在 ch03/05 创建的 PerfData 共享内存里分配一个 `PerfDataEntry`（填头部 + 数据区），`_valuep` 直接指向共享内存数据区，后续写入零系统调用。本节不再重复 PerfDataEntry 的创建细节，只列计数器清单和运行时含义：
 
 | 计数器全名 | 写入时机 | 含义 |
 |-----------|---------|------|
