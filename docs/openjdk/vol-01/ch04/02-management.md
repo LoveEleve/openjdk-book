@@ -368,19 +368,25 @@ void Management::record_vm_startup_time(jlong begin, jlong duration) {
 
 通道 B 的 Java 层（`VMManagementImpl`）在初始化时会问 HotSpot："你支持哪些监控能力？"——HotSpot 用 `_optional_support` 这个结构体回答。9 个布尔位：
 
-| 能力位 | 设置条件 | 对应的 Java API |
-|--------|---------|----------------|
-| `isLowMemoryDetectionSupported` | 恒为 1 | `MemoryPoolMXBean.isUsageThresholdExceeded()` |
-| `isCompilationTimeMonitoringSupported` | 恒为 1 | `CompilationMXBean.getTotalCompilationTime()` |
-| `isThreadContentionMonitoringSupported` | 恒为 1 | `ThreadMXBean.isThreadContentionMonitoringEnabled()` |
-| `isCurrentThreadCpuTimeSupported` | `os::is_thread_cpu_time_supported()` | `ThreadMXBean.getCurrentThreadCpuTime()` |
-| `isOtherThreadCpuTimeSupported` | 同上 | `ThreadMXBean.getThreadCpuTime(id)` |
-| `isObjectMonitorUsageSupported` | 恒为 1 | `ThreadMXBean.getThreadInfo(id, maxDepth)` |
-| `isSynchronizerUsageSupported` | `INCLUDE_SERVICES` | `ThreadMXBean.findDeadlockedThreads()` |
-| `isThreadAllocatedMemorySupported` | 恒为 1 | `ThreadMXBean.getThreadAllocatedBytes(id)` |
-| `isRemoteDiagnosticCommandsSupported` | 恒为 1 | `DiagnosticCommandMBean` 是否可用 |
+| 能力位 | 设置条件 | 提供的能力 | 对应的 Java API |
+|--------|---------|----------|----------------|
+| `isLowMemoryDetectionSupported` | 恒为 1 | **低内存告警**：给内存池设一个使用率阈值（如老年代 80%），超过后自动触发通知。背后的 `LowMemoryDetector` 在 Service 线程中检查阈值，通过 `Sensor`（Java 侧的告警器）通知注册的监听器 | `MemoryPoolMXBean.setUsageThreshold(long)` / `isUsageThresholdExceeded()` |
+| `isCompilationTimeMonitoringSupported` | 恒为 1 | **JIT 编译耗时查询**：能查到 JVM 累计花了多少毫秒做 JIT 编译 | `CompilationMXBean.getTotalCompilationTime()` |
+| `isThreadContentionMonitoringSupported` | 恒为 1 | **线程竞争统计**：开启后能查到每个线程在锁上等待了多久、多久进过 synchronized 块。默认关闭，开启有性能开销 | `ThreadMXBean.setThreadContentionMonitoringEnabled(true)` / `getThreadInfo(id).getBlockedTime()` |
+| `isCurrentThreadCpuTimeSupported` | `os::is_thread_cpu_time_supported()` | **当前线程 CPU 时间**：查当前线程累计用了多少 CPU 时间（纳秒）。依赖 OS 支持——某些嵌入式平台不支持 | `ThreadMXBean.getCurrentThreadCpuTime()` |
+| `isOtherThreadCpuTimeSupported` | 同上 | **其他线程 CPU 时间**：查任意指定线程的 CPU 时间，不只是当前线程。同样依赖 OS | `ThreadMXBean.getThreadCpuTime(long id)` |
+| `isObjectMonitorUsageSupported` | 恒为 1 | **ObjectMonitor 使用情况**：`dumpAllThreads` 时能带上每个线程持有了哪些 synchronized 锁（ObjectMonitor）的信息 | `ThreadMXBean.dumpAllThreads(lockedMonitors=true, ...)` |
+| `isSynchronizerUsageSupported` | `INCLUDE_SERVICES` | **JSR-166 同步器使用情况**：`dumpAllThreads` 时能带上每个线程持有了哪些 `ReentrantLock`/`ReentrantReadWriteLock` 等 JSR-166 同步器。同时是 `findDeadlockedThreads()`（找死锁，含 Lock 锁的）的前提 | `ThreadMXBean.findDeadlockedThreads()` |
+| `isThreadAllocatedMemorySupported` | 恒为 1 | **线程分配内存统计**：查每个线程在 Java 堆上累计分配了多少字节（TLAB 分配量累加）。用于排查哪个线程分配对象最多 | `ThreadMXBean.getThreadAllocatedBytes(long id)` |
+| `isRemoteDiagnosticCommandsSupported` | 恒为 1 | **远程诊断命令**：能通过 JMX 远程连接执行 DCmd 诊断命令（如 `Thread.print`、`GC.heap_dump`）。否则只能本地 attach | `DiagnosticCommandMBean` 是否可用 |
 
-CPU 时间支持位取决于 OS——某些嵌入式平台 `os::is_thread_cpu_time_supported()` 返回 false，此时两个位为 0，对应的 `ThreadMXBean` 方法返回 -1。
+几个需要说明的：
+
+**`isCurrentThreadCpuTimeSupported` / `isOtherThreadCpuTimeSupported` 依赖 OS**：HotSpot 调用 `os::is_thread_cpu_time_supported()` 判断——Linux/Windows/macOS 都支持，某些嵌入式平台（如纯 RTOS 移植）可能返回 false。此时两个位为 0，对应的 `ThreadMXBean` 方法返回 -1。这两个位通常同时为 1 或同时为 0。
+
+**`isSynchronizerUsageSupported` 依赖 `INCLUDE_SERVICES`**：这是一个编译期宏，控制是否编译 heap inspector 等服务。标准 JDK 构建都启用，裁剪版可能关闭。它是 `findDeadlockedThreads()`（查找包括 `ReentrantLock` 在内的死锁）的前提——`findMonitorDeadlockedThreads()`（只查 synchronized 锁死锁）不需要这个位。
+
+**`isLowMemoryDetectionSupported` 是个完整子系统**：不是简单的位查询，背后是 `LowMemoryDetector` + `Sensor` 机制——内存池设阈值后，Service 线程定期检查，超过阈值就触发 Java 侧的 `Sensor.trigger()`，`Sensor` 通知所有注册的监听器（如 `MemoryMXBean` 发 `Notification`）。这让 Java 代码能收到"老年代快满了"的主动告警，而不是自己轮询查询。
 
 ### 3. DCmd 注册
 
