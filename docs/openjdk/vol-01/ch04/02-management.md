@@ -1049,6 +1049,14 @@ jconsole/VisualVM 的实时图形界面在**开发/测试环境**更有用（本
 
 所以 RMI 被删对生产环境影响极小——现代生产环境排查 JVM 问题走的是"监控大盘 + 命令行工具 + Arthas + 离线 dump 分析"四件套，都不依赖 RMI。
 
+> **本节涉及的这些概念后续章节会展开讲解**：
+> - **Attach API**（`/tmp/.attach_pid<pid>` + SIGQUIT + UNIX socket 通信）——在 ch04 后续 "DCmd 工作机制" 一节展开
+> - **Instrumentation API**（`java.lang.instrument`，运行时修改字节码）——是 Arthas / JRebel / async-profiler 等工具的底层基础，后续 Java Agent / 字节码章节展开
+> - **JVMTI**（JVM Tool Interface，C++ native 调试接口）——是 JVMTI agent、debugger、profiler 的底层接口，后续 JVMTI 章节展开
+> - **HeapDumpOnOutOfMemoryError / hs_err 日志** 等 JVM 诊断参数——在 ch29 universe_post_init 讲异常预分配时展开
+>
+> 本节先讲到"这些工具不依赖 RMI、不受裁剪影响"这个结论即可，具体的底层机制后续逐个展开。
+
 标准 JDK 上，jconsole / VisualVM 远程连接一个 JVM 时，目标 JVM 必须启动 JMX Agent。Agent 不是 `management_init` 启动的——`management_init` 只铺 C++ 侧地基，Agent 是 Java 层的，要等 JNI 就绪后才能启动。
 
 ### JMX Agent 是什么
