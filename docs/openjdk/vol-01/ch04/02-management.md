@@ -446,6 +446,8 @@ DCmd 的工作机制（jcmd 怎么通过 attach API 把命令送到 JVM、Attach
 
 ## ThreadService::init() — 4 个线程计数器
 
+下面 3 个 Service 的 `init()`（ThreadService / RuntimeService / ClassLoadingService）内部机制都一样——都是调用 `PerfDataManager::create_counter` / `create_variable` 在 PerfData 共享内存里创建 PerfDataEntry（和上面 `Management::init()` 的 3 个计时器是同一套机制，详见 ch03/06 的 `ObjectMonitor::Initialize()`）。所以下面不再贴 `create_counter` 内部细节，只列每个 Service 注册了哪些计数器、什么时候更新、外部工具怎么读。
+
 ```cpp
 /* === src/hotspot/share/services/threadService.cpp === */
 
