@@ -125,7 +125,7 @@ public class MyApp {
 | `jmap` | 堆转储 / 直方图 | `jmap -histo <pid>` | 触发 |
 | `jinfo` | 查看/修改 VM flag | `jinfo -flag PrintGC <pid>`（读） / `jinfo -flag +PrintGC <pid>`（写） | 读+写 |
 
-这些工具不需要目标 JVM 改代码——`jstat` 直接读共享内存，`jcmd`/`jstack`/`jmap` 通过 attach API 让目标 JVM 执行命令。
+这些工具不需要目标 JVM 改代码——`jstat` 直接读 PerfData 共享内存（本章下文会讲），`jcmd`/`jstack`/`jmap` 通过 attach API 让目标 JVM 执行命令。attach API 的底层原理（`AttachListener` 线程、UNIX socket 通信、`/tmp/.attach_pid<pid>` 握手文件）后续章节会详细展开。
 
 **方式二：图形工具**
 
