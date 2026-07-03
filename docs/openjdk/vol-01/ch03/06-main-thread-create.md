@@ -1424,7 +1424,7 @@ _nested_threads_hazard_ptr_cnt = 0; // 嵌套深度计数器
 _rcu_counter = 0;                  // GlobalCounter 代际计数
 ```
 
-这 5 个字段全部为 `Thread` 的实例字段（线程私有），此刻初始化为 NULL/0——因为线程尚未加入 `Threads::_thread_list`。它们服务于 HotSpot 的 **SMR（Safe Memory Reclamation）** 机制——让读者不用锁就能安全遍历全局线程列表，Copy-on-Write 快照 + Hazard Pointer 保护的完整原理见[前置概念：Thread-SMR —— 线程列表的安全并发访问](https://openjdk-book.cn/#/openjdk/vol-01/ch03/background/smr)。
+这 5 个字段全部为 `Thread` 的实例字段（线程私有），此刻初始化为 NULL/0——因为线程尚未加入 `Threads::_thread_list`。它们服务于 HotSpot 的 **SMR（Safe Memory Reclamation）** 机制——让读者不用锁就能安全遍历全局线程列表，Copy-on-Write 快照 + Hazard Pointer 保护的完整原理见[前置概念：Thread-SMR —— 线程列表的安全并发访问](#/openjdk/vol-01/ch03/background/smr)。
 
 #### 系统监控
 

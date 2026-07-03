@@ -756,71 +756,115 @@ ThreadDumpDCmd::execute() → 打印所有线程栈
 
 ## 验证
 
-management_init 注册了 22 个 PerfData 计数器 + 9 个能力位 + 40+ DCmd。分三种方式验证。
+management_init 注册了 22 个 PerfData 计数器 + 9 个能力位 + 40+ DCmd。启动一个 JVM 后就可以用命令验证——下面每条命令都可以直接复制执行。
 
-### 方式 1：jcmd PerfCounter.print —— 一次性看全部 22 个计数器
+### 1. 启动一个测试 JVM
 
-启动 JVM 后（让 `create_vm_timer.end()` 执行过，`PerfMemory::set_accessible(true)` 已生效）：
+在一个终端启动一个长期运行的 Java 程序：
 
 ```bash
-jcmd $(pgrep java) PerfCounter.print | grep -E "sun.rt\.|java\.threads\.|java\.cls\.|sun\.cls\."
+cat > /tmp/MyApp.java <<'EOF'
+public class MyApp {
+    public static void main(String[] args) throws Exception {
+        while (true) {
+            Thread.sleep(1000);
+            System.out.println("running...");
+        }
+    }
+}
+EOF
+javac /tmp/MyApp.java -d /tmp
+java -cp /tmp MyApp
 ```
 
-输出（截选）：
+不要关闭这个终端。打开第二个终端做下面的验证。下面所有命令里的 `$(pgrep java)` 会自动取到 JVM 的 PID。
+
+### 2. 用 jcmd PerfCounter.print 一次性看全部 22 个计数器
+
+```bash
+jcmd $(pgrep java) PerfCounter.print | grep -E "^(sun\.rt\.|java\.threads\.|java\.cls\.|sun\.cls\.)"
+```
+
+输出（示例）：
 
 ```
-sun.rt.createVmBeginTime = 1759000000000
-sun.rt.createVmEndTime = 1759000005600
-sun.rt.vmInitDoneTime = 1759000005800
-sun.rt.safepointSyncTime = 12345
-sun.rt.safepoints = 8
-sun.rt.safepointTime = 45678
-sun.rt.applicationTime = 987654
-sun.rt.jvmVersion = 11.0.25+9-LTS
-sun.rt.jvmCapabilities = 11...
-java.threads.started = 5
-java.threads.live = 4
-java.threads.livePeak = 4
-java.threads.daemon = 3
 java.cls.loadedClasses = 782
-java.cls.unloadedClasses = 0
 java.cls.sharedLoadedClasses = 645
 java.cls.sharedUnloadedClasses = 0
+java.cls.unloadedClasses = 0
+java.threads.daemon = 3
+java.threads.live = 4
+java.threads.livePeak = 4
+java.threads.started = 5
 sun.cls.loadedBytes = 2893120
-sun.cls.unloadedBytes = 0
+sun.cls.methodBytes = 1234567
 sun.cls.sharedLoadedBytes = 2345678
 sun.cls.sharedUnloadedBytes = 0
-sun.cls.methodBytes = 1234567
+sun.cls.unloadedBytes = 0
+sun.rt.applicationTime = 987654
+sun.rt.createVmBeginTime = 1759000000000
+sun.rt.createVmEndTime = 1759000005600
+sun.rt.jvmCapabilities = 11...
+sun.rt.jvmVersion = 11.0.25+9-LTS
+sun.rt.safepointSyncTime = 12345
+sun.rt.safepointTime = 45678
+sun.rt.safepoints = 8
+sun.rt.vmInitDoneTime = 1759000005800
 ```
 
 对着本节的表格检查：3 个计时器（sun.rt.createVm*）+ 4 个线程计数（java.threads.*）+ 6 个 safepoint 统计（sun.rt.safepoint*）+ 9 个类加载计数（java.cls.* 和 sun.cls.*）= 22 个，都齐了。
 
 `createVmEndTime - createVmBeginTime = 5600` 毫秒，就是 `Threads::create_vm` 的总耗时——和 `-Xlog:startuptime` 的输出能对上。
 
-### 方式 2：jstat —— 实时采样通道 A
+### 3. 用 jstat 实时采样通道 A
 
-`jstat` 按选项分类读计数器：
+`jstat` 按选项分类读计数器。每秒采样一次，按 Ctrl+C 停止。
+
+**类加载统计**（读 `java.cls.*` + `sun.cls.*`）：
 
 ```bash
-# 类加载统计（读 java.cls.* + sun.cls.* 4 个）
-jstat -class <pid>
-#  Loaded   Bytes  Unloaded  Bytes     Time
-#    782  2893.2         0     0.0       0.42
+jstat -class $(pgrep java) 1000
+```
 
-# 线程统计（读 java.threads.* 4 个）
-jstat -threads <pid>
-#  Live       Peak      Daemon     Total      Started
-#     4          4           3          4          5
+输出：
+```
+Loaded   Bytes  Unloaded  Bytes     Time
+   782  2893.2         0     0.0       0.42
+   782  2893.2         0     0.0       0.42
+   782  2893.2         0     0.0       0.42
+^C
+```
 
-# GC 统计（读 sun.rt.safepoint* 等，和 GC 耦合）
-jstat -gccause <pid>
-# ... S0C ... GCT  LGCC  GCC
-#     ...     ...  No GC System.gc()
+**线程统计**（读 `java.threads.*`）：
+
+```bash
+jstat -threads $(pgrep java) 1000
+```
+
+输出：
+```
+Live       Peak      Daemon     Total      Started
+   4          4           3          4          5
+   4          4           3          4          5
+^C
+```
+
+**GC 统计**（读 `sun.rt.safepoint*` 等，和 GC 耦合）：
+
+```bash
+jstat -gccause $(pgrep java) 1000
+```
+
+输出：
+```
+  S0     S1     E      O      M     CCS    YGC     YGCT    FGC    FGCT     GCT    LGCC                 GCC
+  0.00   0.00   0.00   0.00  95.00  90.00     0     0.000     0     0.000     0.000 No GC                System.gc()
+^C
 ```
 
 `jstat` 走通道 A——直接 mmap 共享内存，不进 JVM。每秒采样 1000 次都不会卡 JVM。
 
-### 方式 3：hexdump —— 验证 PerfDataEntry 结构
+### 4. 用 hexdump 看 PerfDataEntry 的字节结构
 
 和 ch03/06 一样的 hexdump 风格，看 management_init 注册的计数器在共享内存里长什么样：
 
@@ -842,63 +886,102 @@ Prologue 头（0x00~0x1F）——`num_entries` 不再是 ch03/06 那时的 7（O
 从 0x20 开始第一个 Entry。management_init 注册的第一个计数器是 `sun.rt.createVmBeginTime`——它是 Variable 类型（PerfVariable），和 ObjectMonitor 的 Counter 不同：
 
 ```
-0x20  xx xx xx xx   entry_length = 56
-0x24  14 00 00 00   name_offset = 20
-0x28  00 00 00 00   vector_length = 0（标量）
-0x2C  4a            data_type = 'J'（jlong）
+0x20  38 00 00 00   entry_length = 0x38 = 56 字节
+0x24  14 00 00 00   name_offset = 0x14 = 20（名字在 0x20+20=0x34）
+0x28  00 00 00 00   vector_length = 0（标量，不是数组）
+0x2C  4a            data_type = 0x4a = 'J'（jlong）
 0x2D  00            flags = 0
 0x2E  00            data_units = U_None（计时器无单位）
 0x2F  03            data_variability = 0x03 = V_Variable ← 变量，不是单调 Counter
-0x30  30 00 00 00   data_offset = 0x30
+0x30  30 00 00 00   data_offset = 0x30 = 48（jlong 在 0x20+48=0x50）
 ```
 
-`data_variability` 字段值对比：
+`data_variability` 字段值对比（对照本节讲的 Counter/Variable/Constant 三种变体）：
 - `0x02` = V_Monotonic（Counter，单调递增，如 `loadedClasses`）
-- `0x03` = V_Variable（Variable，可增可减，如 `live` 线程数）
-- `0x01` = V_Constant（常量，如 `jvmVersion`）
+- `0x03` = V_Variable（Variable，可增可减，如 `live` 线程数、`createVmBeginTime`）
+- `0x01` = V_Constant（Constant，创建时写入一次不变，如 `jvmVersion`）
 
-名字从 0x34 开始：`73 75 6e 2e 72 74 2e 63 72 65 61 74 65 56 6d 42 65 67 69 6e 54 69 6d 65 00` = `sun.rt.createVmBeginTime\0`。
+名字从 0x34 开始：`73 75 6e 2e 72 74 2e 63 72 65 61 74 65 56 6d 42 65 67 69 6e 54 69 6d 65 00` = `sun.rt.createVmBeginTime\0`，24 字节 + 结尾 `\0`。
 
-jlong 值在 0x50：`00 60 4d 8e 97 87 01 00`（小端）= `1759000000000`——就是 `Threads::create_vm` 的开始时间戳（毫秒）。
+jlong 值在 0x50：`00 60 4d 8e 97 87 01 00`（小端）= `1759000000000`——就是 `Threads::create_vm` 的开始时间戳（毫秒）。和 `jcmd PerfCounter.print` 输出的 `sun.rt.createVmBeginTime = 1759000000000` 完全对应。
 
-### 方式 4：jcmd 验证 DCmd 注册
-
-验证 40+ DCmd 是否注册成功：
+### 5. 用 jcmd help 验证 40+ DCmd 注册成功
 
 ```bash
 jcmd $(pgrep java) help
 ```
 
-输出会列出所有已注册的 DCmd——包括 `VM.version`、`Thread.print`、`GC.heap_dump`、`VM.native_memory`、`ManagementAgent.start` 等 40+ 个命令。这验证了 `Management::init()` 第 3 步的 `DCmdRegistrant::register_dcmds()` 和 `NMTDCmd` 注册成功。
+输出（截选）：
+```
+The following commands are available:
 
-### 方式 5：gdb 断点跟踪 management_init 流程
+JFR.configure
+JFR.start
+JFR.stop
+JFR.dump
+JFR.check
+VM.version
+VM.command_line
+VM.system_properties
+VM.flags
+VM.set_flag
+VM.dynlibs
+VM.uptime
+VM.info
+GC.run
+GC.run_finalization
+GC.heap_info
+GC.finalizer_info
+GC.heap_dump
+GC.class_histogram
+GC.class_stats
+VM.class_hierarchy
+VM.systemdictionary
+VM.symboltable
+VM.stringtable
+Metaspace.info
+Compiler.queue
+Compiler.codelist
+Compiler.codecache
+Compiler.CodeHeap_Analytics
+Compiler.directives_print
+Compiler.directives_add
+Compiler.directives_remove
+Compiler.directives_clear
+Thread.print
+VM.print_touched_methods
+ManagementAgent.start
+ManagementAgent.start_local
+ManagementAgent.stop
+ManagementAgent.status
+VM.native_memory
+help
+
+For more information about a specific command use 'help <command>'.
+```
+
+对着本节讲的 DCmd 清单检查：`VM.version`、`Thread.print`、`GC.heap_dump`、`VM.native_memory`、`ManagementAgent.start` 等都齐了。这验证了 `Management::init()` 第 3 步的 `DCmdRegistrant::register_dcmds()` 和 `NMTDCmd` 注册成功。
+
+### 6. 用 jcmd 单独执行某个 DCmd 看效果
 
 ```bash
-gdb --args /path/to/java MyApp
+# 打印 JVM 版本
+jcmd $(pgrep java) VM.version
 
-# 1. 在 management_init 打断点
-break management_init
-run
-# 观察它被 init_globals() 第一行调用
+# 打印 JVM 运行时间
+jcmd $(pgrep java) VM.uptime
 
-# 2. 跟踪 4 个 Service::init() 的调用顺序
-break Management::init
-break ThreadService::init
-break RuntimeService::init
-break ClassLoadingService::init
-continue
-# 依次命中 Management → ThreadService → RuntimeService → ClassLoadingService
-
-# 3. 验证 3 个计时器 PerfVariable 创建
-break PerfDataManager::create_variable
-continue
-# 检查 name 参数依次为 "createVmBeginTime"、"createVmEndTime"、"vmInitDoneTime"
-
-# 4. 验证 jmmOptionalSupport 能力位
-break Management::init
-# 单步到 _optional_support 赋值处，检查 9 个位
-# 特别注意 isCurrentThreadCpuTimeSupported 依赖 os::is_thread_cpu_time_supported()
+# 打印所有 VM flag
+jcmd $(pgrep java) VM.flags
 ```
+
+输出（VM.version 示例）：
+```
+12345:
+OpenJDK 64-Bit Server VM (11.0.25+9-LTS) for linux-amd64 JRE (11.0.25+9-LTS), built on ... by ...
+```
+
+这条命令走的是通道 B 的 attach API 路径——和 `jstat` 直接读共享内存不同，要进 JVM 执行 `VersionDCmd::execute()`。这就是为什么 management_init 既要注册 PerfData 计数器（给通道 A），又要注册 DCmd（给通道 B）。
 
 ---
 
