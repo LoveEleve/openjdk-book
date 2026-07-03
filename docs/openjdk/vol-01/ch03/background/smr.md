@@ -196,10 +196,10 @@ inline ThreadsList* Thread::cmpxchg_threads_hazard_ptr(ThreadsList* exchange, Th
 上面听起来很完美——但有一个微妙的并发窗口：
 
 ```
-读者 T1                          写者 T2
-─────────────────────────    ─────────────────────
-get_java_thread_list() → v3   Thread 退出
-                              新快照 v4 = remove(Tx)  
+读者 T1                          写者 T2（持有 Threads_lock）
+─────────────────────────    ────────────────────────────────
+get_java_thread_list() → v3   Threads::remove(Tx)：摘除线程 Tx
+                              新快照 v4 = SMR::remove_thread(Tx)  
                               xchg → v4
 写入 _threads_hazard_ptr=v3   扫描 _threads_hazard_ptr
 （这一纳秒还没写完）           还没扫到 T1 → 没有 v3
@@ -208,6 +208,8 @@ get_java_thread_list() → v3   Thread 退出
 完成写入 _threads_hazard_ptr=v3
 开始遍历 v3 → 指针悬空！
 ```
+
+> **SMR 的"无锁"是针对读者的。** 写者（`Threads::add()` / `Threads::remove()`）仍然在 `Threads_lock` 保护下执行。SMR 的收益在于：**GC 遍历线程列表时不再需要拿锁**——GC 是最频繁的读者，遍历耗时也最长。每次 GC 之前都要先抢 `Threads_lock`，这意味着 GC 会阻塞所有线程的创建和退出。SMR 让 GC 只需 `acquire_stable_list()` 拿到快照就能遍历，整个过程不碰锁。写者只在创建/退出时短暂持锁，而读者永远不需要。这就是 Copy-on-Write 的 trade-off——用写者的全量拷贝开销换读者的无锁。不是"没有任何锁"，而是"读操作不需要等锁"。
 
 T1 的 hazard ptr **还没写上去**时 T2 已经扫完了。T1 此时才贴标签——手上的 v3 里包含已释放的指针。
 
