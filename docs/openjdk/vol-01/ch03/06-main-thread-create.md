@@ -1125,8 +1125,6 @@ _prologue->overflow = 0;
 
 Prologue 后面挨着的是 PerfDataEntry。每创建一个计数器就追加一个 Entry。固定头 24 字节 + 可变主体（名字 + 数据值）：
 
-![alt text](image.png)
-
 jstat 的读取方式：Prologue 拿 `entry_offset=32` 和 `num_entries` → 从偏移 32 读第一个 entry → `data_type='J'` 知道值是 jlong → `data_offset` 跳到值的偏移 → 读 8 字节 → `entry_length` 跳到下一个 → 循环。
 
 #### ObjectMonitor::Initialize() —— 7 个同步计数器
