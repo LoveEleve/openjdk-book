@@ -28,6 +28,21 @@ GC 遍历一次可能几百微秒。这几百微秒内，**整套系统的线程
 
 初始化时两者都是空集：`_thread_list = NULL`（`thread.cpp:3503`），`_java_thread_list = new ThreadsList(0)`——一个长度为 0 的空数组（`threadSMR.cpp:75`）。
 
+`ThreadsSMRSupport` 是这套机制的名称空间——一个 **全静态类**（`threadSMR.hpp:88`，`class ThreadsSMRSupport : AllStatic`）。所有方法和字段都是 `static`，JVM 中不存在它的实例对象。作为全局协调器，它管理以下关键状态：
+
+```cpp
+// threadSMR.hpp:108-117
+static ThreadsList* volatile _java_thread_list;  // 全局 CoW 快照——JVM 唯一
+static ThreadsList*          _to_delete_list;    // 待删除旧快照的链表头
+static volatile uint         _delete_notify;     // 双重检查锁 flag（第 8.1 节）
+// 其余字段是统计计数器（-XX:+EnableThreadSMRStatistics 控制）：
+static volatile uint         _deleted_thread_cnt;
+static volatile uint         _tlh_cnt;
+// ...
+```
+
+全静态意味着 **SMR 的协调状态是 JVM 级别的全局单例**——整个 VM 只有一个 `_java_thread_list` 指针、一个 `_to_delete_list` 队列。每个线程私有的 SMR 字段（`_threads_hazard_ptr` 等 5 个，见本文第 11.2 节总结）与这个全局协调器配合，构成完整的读/写协议。
+
 ```
 全局状态：
   Threads::_thread_list       → [T3] → [T2] → [T1] → NULL
@@ -136,6 +151,14 @@ ThreadsList::ThreadsList(int entries) :
 ```
 
 为什么要 `entries + 1`？遍历代码不需要每次检查 `i < length`，直接遇到 NULL 就停——更简洁也更安全。
+
+**为什么说 `_threads` 是数组？** 证据在 `threadSMR.hpp:188` 的 `thread_at()`：
+
+```cpp
+JavaThread *const thread_at(uint i) const { return _threads[i]; }
+```
+
+遍历 ThreadsList 时使用的是**数组下标 `_threads[i]`**（O(1) 随机访问），不是链表式的 `cur = cur->next()`。构造函数中 `NEW_C_HEAP_ARRAY(JavaThread*, entries + 1, mtThread)` 分配的是堆数组——`NEW_C_HEAP_ARRAY` 是 HotSpot 的堆数组分配宏，产生一块连续内存。ThreadsList 的核心能力正是 **O(1) 下标定位**，这是它区别于 `_thread_list` 链表的本质特征。
 
 ### 3.4 三层调用链：从入口往下看
 

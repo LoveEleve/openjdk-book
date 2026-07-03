@@ -899,6 +899,26 @@ ThreadDumpDCmd::execute() → 打印所有线程栈
 >
 > 本节仅作为"标准 JDK 上 JMX Agent 是怎么工作的"背景知识保留，实际验证时可以跳过。
 
+### 为什么 jdk11u-copy 删掉了 RMI
+
+jdk11u-copy 的裁剪原则是**只删除已被淘汰或明确废弃的功能**。RMI 属于这一类：
+
+**RMI 已在 JDK 15 废弃**。RMI（Remote Method Invocation）是 Java 早期的远程调用协议，1996 年 JDK 1.1 引入。它有几个问题导致被淘汰：
+
+1. **协议笨重**——RMI 用 Java 序列化传输对象，数据大、性能差，还要开 TCP 端口
+2. **只能 Java ↔ Java**——不支持跨语言，不能和 C++/Python/Go 通信
+3. **安全风险大**——Java 反序列化漏洞频发（如 CVE-2015-4852 等），RMI 是反序列化攻击的主要入口
+4. **现代替代方案成熟**——REST/HTTP+JSON、gRPC、消息队列都比 RMI 更通用、更安全
+
+现代企业应用几乎不用 RMI 了——要么 REST API，要么 gRPC。RMI 只在老的 JMX 远程监控和已淘汰的 EJB 里还在用。
+
+**Linux 服务器场景几乎不用 RMI**：
+- Linux 服务器一般不开 GUI 桌面，不会用 jconsole 图形工具连过来
+- Linux 上更常用 `jstat`/`jcmd`/`jstack` 这些命令行工具——它们走通道 A（读 PerfData 共享内存）或 attach API（UNIX socket），**都不依赖 RMI**
+- 远程监控的现代实践是装 Prometheus + JMX exporter（HTTP 协议，不是 RMI）
+
+删掉 RMI 后唯一受影响的是 **jconsole/VisualVM 的远程连接**——但本 JDK 是学习用的裁剪版，不会用 jconsole 连过来。`jstat`/`jcmd`/`jstack` 这些命令行工具完全不受影响（走通道 A 和 attach API，不依赖 RMI）。
+
 标准 JDK 上，jconsole / VisualVM 远程连接一个 JVM 时，目标 JVM 必须启动 JMX Agent。Agent 不是 `management_init` 启动的——`management_init` 只铺 C++ 侧地基，Agent 是 Java 层的，要等 JNI 就绪后才能启动。
 
 ### JMX Agent 是什么
