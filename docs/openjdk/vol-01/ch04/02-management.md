@@ -425,7 +425,78 @@ typedef struct {
 
 ### 3. DCmd 注册
 
-DCmd（Diagnostic Command，诊断命令）就是 `jcmd` 工具能执行的命令。`jcmd <pid> <命令名>` 背后的执行者就是 DCmd。`Management::init()` 最后 4 行注册所有 DCmd：
+#### DCmd 到底是什么
+
+在讲注册之前，先搞清楚 DCmd 本身是什么。
+
+**DCmd（Diagnostic Command，诊断命令）是一个 C++ 类**——准确说是 `DCmd` 基类（`diagnosticFramework.hpp:238`，继承 `ResourceObj`）+ 一堆子类。**每个子类对应一条 jcmd 命令**。
+
+看一个最简单的例子——`VersionDCmd`（对应 `jcmd <pid> VM.version`）：
+
+```cpp
+/* === src/hotspot/share/services/diagnosticCommand.hpp:60-75 === */
+
+class VersionDCmd : public DCmd {
+public:
+  VersionDCmd(outputStream* output, bool heap) : DCmd(output,heap) { }
+
+  static const char* name()         { return "VM.version"; }            // 命令名
+  static const char* description() { return "Print JVM version information."; }  // 帮助说明
+  static const char* impact()       { return "Low"; }                  // 影响等级(Low/Medium/High)
+  static const JavaPermission permission() {                           // JMX 调用时的权限要求
+    JavaPermission p = {"java.util.PropertyPermission",
+                        "java.vm.version", "read"};
+    return p;
+  }
+  static int num_arguments()        { return 0; }                       // 参数个数
+
+  virtual void execute(DCmdSource source, TRAPS);   // ← 执行逻辑(打印版本信息)
+};
+```
+
+`execute()` 是核心——用户跑 `jcmd <pid> VM.version`，最终就是调这个函数。它的实现在 `diagnosticCommand.cpp`：
+
+```cpp
+/* === src/hotspot/share/services/diagnosticCommand.cpp:164-168 === */
+
+void VersionDCmd::execute(DCmdSource source, TRAPS) {
+  output()->print_cr("%s version %s", Abstract_VM_Version::vm_name(),
+                                       Abstract_VM_Version::vm_release());
+}
+```
+
+就是把 JVM 版本信息打到 `_output`（outputStream）里，返回给 jcmd 工具显示。
+
+**所以 DCmd = "一条 jcmd 命令的 C++ 实现类"**。每条命令（`VM.version`、`Thread.print`、`GC.heap_dump` 等）都对应一个 DCmd 子类，子类的 `name()` 返回命令名，`execute()` 实现命令逻辑。`jcmd <pid> VM.version` 实际上就是让 JVM 找到 `VersionDCmd` 这个子类，调它的 `execute()`。
+
+`DCmd` 基类提供这些通用方法（子类按需重写）：
+
+| 方法 | 作用 | VersionDCmd 怎么实现 |
+|------|------|---------------------|
+| `name()` | 命令名（jcmd 用的字符串） | `"VM.version"` |
+| `description()` | 命令说明（help 显示） | `"Print JVM version information."` |
+| `impact()` | 影响等级（Low/Medium/High） | `"Low"`——读版本不影响 JVM |
+| `permission()` | JMX 调用时的 Java 权限 | `PropertyPermission("java.vm.version", "read")` |
+| `num_arguments()` | 参数个数 | 0——无参数 |
+| `parse()` | 解析参数 | 基类默认实现（拒绝任何参数） |
+| `execute()` | **执行命令逻辑** | 打印版本字符串 |
+
+`impact()` 的作用是告诉用户这条命令对 JVM 的影响程度——`VM.version` 是 Low（读个字符串），`Thread.print` 是 Medium（遍历所有线程），`GC.heap_dump` 是 High（遍历整个堆写文件）。jcmd 工具会用这个值提示用户。
+
+HotSpot 内置 42 个 DCmd 子类（management_init 阶段注册的 41 + 1 个 NMT），分布在不同文件：
+
+| 文件 | 声明的 DCmd 子类 |
+|------|-----------------|
+| `diagnosticCommand.hpp` | 35+ 个标准命令（VersionDCmd、ThreadDumpDCmd、HeapDumpDCmd 等） |
+| `nmtDCmd.hpp` | 1 个（NMTDCmd，对应 `VM.native_memory`） |
+| `jfr/dcmd/jfrDcmds.hpp` | 5 个 JFR 命令（JFR.start/stop/dump/check/configure，后续注册） |
+| `logging/logDiagnosticCommand.hpp` | 1 个（LogDiagnosticCommand，对应 `VM.log`，后续注册） |
+
+每个 DCmd 子类都配套一个 `DCmdFactoryImpl<XxxDCmd>` 工厂对象（上面讲过），factory 负责创建 DCmd 实例、管理 enabled/hidden 状态、提供命令元数据（name/description/impact/permission）。
+
+#### 注册源码
+
+`Management::init()` 最后 4 行注册所有 DCmd：
 
 ```cpp
 /* === src/hotspot/share/services/management.cpp:138-143 === */
