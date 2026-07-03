@@ -754,25 +754,150 @@ ThreadDumpDCmd::execute() → 打印所有线程栈
 
 ---
 
-## gdb 验证点
+## 验证
+
+management_init 注册了 22 个 PerfData 计数器 + 9 个能力位 + 40+ DCmd。分三种方式验证。
+
+### 方式 1：jcmd PerfCounter.print —— 一次性看全部 22 个计数器
+
+启动 JVM 后（让 `create_vm_timer.end()` 执行过，`PerfMemory::set_accessible(true)` 已生效）：
 
 ```bash
+jcmd $(pgrep java) PerfCounter.print | grep -E "sun.rt\.|java\.threads\.|java\.cls\.|sun\.cls\."
+```
+
+输出（截选）：
+
+```
+sun.rt.createVmBeginTime = 1759000000000
+sun.rt.createVmEndTime = 1759000005600
+sun.rt.vmInitDoneTime = 1759000005800
+sun.rt.safepointSyncTime = 12345
+sun.rt.safepoints = 8
+sun.rt.safepointTime = 45678
+sun.rt.applicationTime = 987654
+sun.rt.jvmVersion = 11.0.25+9-LTS
+sun.rt.jvmCapabilities = 11...
+java.threads.started = 5
+java.threads.live = 4
+java.threads.livePeak = 4
+java.threads.daemon = 3
+java.cls.loadedClasses = 782
+java.cls.unloadedClasses = 0
+java.cls.sharedLoadedClasses = 645
+java.cls.sharedUnloadedClasses = 0
+sun.cls.loadedBytes = 2893120
+sun.cls.unloadedBytes = 0
+sun.cls.sharedLoadedBytes = 2345678
+sun.cls.sharedUnloadedBytes = 0
+sun.cls.methodBytes = 1234567
+```
+
+对着本节的表格检查：3 个计时器（sun.rt.createVm*）+ 4 个线程计数（java.threads.*）+ 6 个 safepoint 统计（sun.rt.safepoint*）+ 9 个类加载计数（java.cls.* 和 sun.cls.*）= 22 个，都齐了。
+
+`createVmEndTime - createVmBeginTime = 5600` 毫秒，就是 `Threads::create_vm` 的总耗时——和 `-Xlog:startuptime` 的输出能对上。
+
+### 方式 2：jstat —— 实时采样通道 A
+
+`jstat` 按选项分类读计数器：
+
+```bash
+# 类加载统计（读 java.cls.* + sun.cls.* 4 个）
+jstat -class <pid>
+#  Loaded   Bytes  Unloaded  Bytes     Time
+#    782  2893.2         0     0.0       0.42
+
+# 线程统计（读 java.threads.* 4 个）
+jstat -threads <pid>
+#  Live       Peak      Daemon     Total      Started
+#     4          4           3          4          5
+
+# GC 统计（读 sun.rt.safepoint* 等，和 GC 耦合）
+jstat -gccause <pid>
+# ... S0C ... GCT  LGCC  GCC
+#     ...     ...  No GC System.gc()
+```
+
+`jstat` 走通道 A——直接 mmap 共享内存，不进 JVM。每秒采样 1000 次都不会卡 JVM。
+
+### 方式 3：hexdump —— 验证 PerfDataEntry 结构
+
+和 ch03/06 一样的 hexdump 风格，看 management_init 注册的计数器在共享内存里长什么样：
+
+```bash
+hexdump -C /tmp/hsperfdata_root/$(pgrep java) | head -100
+```
+
+Prologue 头（0x00~0x1F）——`num_entries` 不再是 ch03/06 那时的 7（ObjectMonitor 注册的 7 个），而是 29（7 + management_init 新增的 22）：
+
+```
+0x00  ca fe c0 c0   magic，没变
+0x04  01            byte_order
+0x07  01            accessible = 1 ← 已开放外部读取（set_accessible(true) 执行过）
+0x08  xx xx xx xx   used ← 比 ch03/06 的 0x1a8 大，22 个新 Entry 占了更多字节
+0x18  20 00 00 00   entry_offset = 0x20
+0x1C  1d 00 00 00   num_entries = 0x1d = 29 ← 7（ObjectMonitor）+ 22（management_init）
+```
+
+从 0x20 开始第一个 Entry。management_init 注册的第一个计数器是 `sun.rt.createVmBeginTime`——它是 Variable 类型（PerfVariable），和 ObjectMonitor 的 Counter 不同：
+
+```
+0x20  xx xx xx xx   entry_length = 56
+0x24  14 00 00 00   name_offset = 20
+0x28  00 00 00 00   vector_length = 0（标量）
+0x2C  4a            data_type = 'J'（jlong）
+0x2D  00            flags = 0
+0x2E  00            data_units = U_None（计时器无单位）
+0x2F  03            data_variability = 0x03 = V_Variable ← 变量，不是单调 Counter
+0x30  30 00 00 00   data_offset = 0x30
+```
+
+`data_variability` 字段值对比：
+- `0x02` = V_Monotonic（Counter，单调递增，如 `loadedClasses`）
+- `0x03` = V_Variable（Variable，可增可减，如 `live` 线程数）
+- `0x01` = V_Constant（常量，如 `jvmVersion`）
+
+名字从 0x34 开始：`73 75 6e 2e 72 74 2e 63 72 65 61 74 65 56 6d 42 65 67 69 6e 54 69 6d 65 00` = `sun.rt.createVmBeginTime\0`。
+
+jlong 值在 0x50：`00 60 4d 8e 97 87 01 00`（小端）= `1759000000000`——就是 `Threads::create_vm` 的开始时间戳（毫秒）。
+
+### 方式 4：jcmd 验证 DCmd 注册
+
+验证 40+ DCmd 是否注册成功：
+
+```bash
+jcmd $(pgrep java) help
+```
+
+输出会列出所有已注册的 DCmd——包括 `VM.version`、`Thread.print`、`GC.heap_dump`、`VM.native_memory`、`ManagementAgent.start` 等 40+ 个命令。这验证了 `Management::init()` 第 3 步的 `DCmdRegistrant::register_dcmds()` 和 `NMTDCmd` 注册成功。
+
+### 方式 5：gdb 断点跟踪 management_init 流程
+
+```bash
+gdb --args /path/to/java MyApp
+
 # 1. 在 management_init 打断点
 break management_init
+run
+# 观察它被 init_globals() 第一行调用
 
-# 2. 验证 3 个时间戳 PerfVariable 创建
+# 2. 跟踪 4 个 Service::init() 的调用顺序
+break Management::init
+break ThreadService::init
+break RuntimeService::init
+break ClassLoadingService::init
+continue
+# 依次命中 Management → ThreadService → RuntimeService → ClassLoadingService
+
+# 3. 验证 3 个计时器 PerfVariable 创建
 break PerfDataManager::create_variable
+continue
 # 检查 name 参数依次为 "createVmBeginTime"、"createVmEndTime"、"vmInitDoneTime"
 
-# 3. 验证 jmmOptionalSupport 能力位
+# 4. 验证 jmmOptionalSupport 能力位
 break Management::init
 # 单步到 _optional_support 赋值处，检查 9 个位
-
-# 4. 运行时验证 PerfData 共享内存
-# 启动 JVM 后查看文件
-ls -la /tmp/hsperfdata_$(whoami)/
-# 用 jcmd 读取
-jcmd $(pidof java) PerfCounter.print | grep "sun.rt\|java.threads\|java.cls"
+# 特别注意 isCurrentThreadCpuTimeSupported 依赖 os::is_thread_cpu_time_supported()
 ```
 
 ---
