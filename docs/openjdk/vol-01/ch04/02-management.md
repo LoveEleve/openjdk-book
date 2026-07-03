@@ -120,30 +120,67 @@ JVM 进程                                外部工具（jstat）
 
 但 PerfData 共享内存里目前还是空的——`perfMemory_init` 只建了"仓库"（文件 + mmap），还没往里放数据。`management_init` 就是第一批往里放数据的——22 个 PerfData 计数器（线程数、类加载数、safepoint 统计等）。后续 `universe_post_init`、`compileBroker_init` 等还会继续往里加。
 
-### 通道 B：jmm_interface 函数表（Java 代码 / jconsole / jcmd 走这条）
+### 通道 A 解决不了的问题
 
-Java 代码里 `ManagementFactory.getThreadMXBean().getThreadCount()` 不是读共享内存——它走 JNI 调用链：
+通道 A 看起来很完美——零开销、被动读、不卡 JVM。但它有根本限制：**共享内存里只能放简单数值**。
+
+考虑这几个用例：
+
+| 用例 | 通道 A 能做吗？ | 为什么 |
+|------|----------------|--------|
+| 读当前活线程数 | 能（一个 int） | 计数器就是简单数值 |
+| 读当前堆使用了多少字节 | 能（一个 long） | 计数器 |
+| 检测当前有没有死锁 | **不能** | 要遍历所有线程的锁关系图，不是读一个数 |
+| 打印所有线程的栈 | **不能** | 要遍历线程 + 读每个线程的栈帧，输出大段文本 |
+| 触发一次 GC | **不能** | 这是"让 JVM 干件事"，不是"读个数" |
+| 转储整个堆到文件 | **不能** | 复杂操作 + 大量数据 |
+
+通道 A 是"被动的、只读的、单值查询"——它把 JVM 状态压扁成一个个数字。但监控和诊断经常需要"让 JVM 主动干件事"或"查询复杂结构化数据"——这就要求**每次操作都进 JVM 执行 C++ 代码**，按需返回结果。
+
+### 通道 B：Java 代码主动调 JVM 干活
+
+通道 B 解决的就是"让 JVM 干件事"。它不是走共享内存，而是**走函数调用**——Java 代码发起调用，进 JVM 执行 C++ 函数，返回结果。
+
+还是用前面"观察 JVM"的 Java 代码例子：
+
+```java
+int threadCount = ManagementFactory.getThreadMXBean().getThreadCount();
+```
+
+这行代码背后发生了什么？`getThreadCount()` 不是读共享内存——它最终调用到 HotSpot C++ 侧的 `ThreadService`，读取那个 `_live_threads_count` 计数器（就是通道 A 注册的同一个计数器）返回。
+
+具体调用链（简化）：
 
 ```
-Java 代码
-  ThreadMXBean.getThreadCount()
-    ↓
-  libmanagement.so 里的 native 实现
-    ↓ JNI 调用
-  JVM_GetManagement(JMM_VERSION)  ← 一次性拿到 jmm_interface 函数表
-    ↓
-  jmm_interface->GetLongAttribute(JMM_THREAD_COUNT)
-    ↓
-  ThreadService::_live_threads_count 的值
+你的 Java 代码
+  └─ ThreadMXBean.getThreadCount()                      Java 接口方法
+       └─ ThreadImpl.getThreadCount()                     Java 实现类
+            └─ native getThreadCount()                    JNI native 方法
+                 └─ libmanagement.so 里的 C 函数          JVM 入口
+                      └─ 通过 jmm_interface 函数表查表     函数指针调用
+                           └─ jmm_GetLongAttribute(...)   HotSpot C++ 函数
+                                └─ 读 _live_threads_count 的值  最终数据源
 ```
 
-`jmm_interface` 是 HotSpot C++ 侧的一个**函数指针表**（约 40 个函数指针），定义在 `management.cpp`。Java 侧的 `libmanagement.so`（在 `java.management` 模块里）加载时通过 `JVM_GetManagement(JMM_VERSION)` 拿到这个表的指针，之后所有 MXBean 方法的调用都通过这个表的函数指针回调 HotSpot。
+前 4 层都是 Java/JNI 世界的常规代码——Java 接口、Java 实现类、native 方法、JNI 入口。关键是第 5 步那个"**jmm_interface 函数表**"——这是 Java 世界和 C++ 世界之间的桥梁。
 
-**和通道 A 的区别**：通道 B 是**主动的**——每次调用都要进 JVM 执行 C++ 代码，能做复杂逻辑（如死锁检测 `findDeadlocks`、堆转储 `dumpHeap`），但每次调用都有 JNI 开销。通道 A 只能读简单数值（计数器），通道 B 能做任何事。
+**为什么需要函数表？** Java 代码不能直接调 C++ 函数（JNI 规范决定的）。`libmanagement.so`（JDK 自带的 native 库）在加载时通过 `JVM_GetManagement()` 一次性拿到 HotSpot 提供的函数指针表，之后每次调用都通过这个表的某个函数指针进 JVM。`jmm_interface` 就是这个函数指针表——约 40 个函数指针，每个对应一类操作（读计数器、读线程信息、找死锁、堆转储等）。
 
-`management_init` 同时为两条通道做准备：
-- 注册 22 个 PerfData 计数器 → 给通道 A（被动读）
-- 初始化能力位 + 注册 DCmd → 给通道 B（Java/jcmd 主动调）
+**为什么叫"主动"通道？** 和通道 A 对比就清楚了：
+
+| 维度 | 通道 A（PerfData 共享内存） | 通道 B（jmm_interface 函数表） |
+|------|---------------------------|------------------------------|
+| 谁发起 | 外部工具主动读 | Java 代码主动调 |
+| 是否进 JVM | 不进，直接读 mmap | 进 JVM 执行 C++ 函数 |
+| 能做什么 | 只能读简单数值 | 任何事（死锁检测、堆转储、触发 GC） |
+| 开销 | 零（读内存） | JNI 调用开销 |
+| 谁走这条路 | jstat、jcmd PerfCounter.print | jconsole、Java 代码、jcmd（大部分命令） |
+
+**management_init 同时为两条通道做准备**：
+- 注册 22 个 PerfData 计数器 → 给通道 A（让 jstat 能读到数）
+- 初始化能力位 + 注册 DCmd → 给通道 B（让 Java/jcmd 能调命令）
+
+通道 A 的数据已经讲清楚了（22 个计数器）。通道 B 涉及的能力位和 DCmd 在下文 `Management::init()` 详解里展开。
 
 ---
 
