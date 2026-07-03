@@ -2,7 +2,7 @@
 
 在阅读 `Thread::Thread()` 构造函数的最后几行（`thread.cpp:239-243`）时，会看到 5 个初始化为 0/NULL 的字段。它们全部服务于同一个目标：**让多个线程在不持有 `Threads_lock` 的情况下安全遍历全局线程列表**。
 
-## 1. 问题：`Threads::_thread_list` 的并发困境
+## 1. 问题：`ThreadsSMRSupport::_java_thread_list` 的并发困境
 
 `threadSMR.hpp:108`：
 
