@@ -952,10 +952,49 @@ Arthas 是什么？它是一个 **Java Agent**——用 `java -jar arthas-boot.j
 | `heapdump /tmp/heap.hprof` | 堆转储 | `jcmd GC.heap_dump` |
 | `redefine /tmp/Foo.class` | 热更新类（不重启 JVM 替换方法体） | 无 |
 
-Arthas 的核心优势：
-- **不重启 JVM**——attach 到运行中的进程，排查完 detach 就行
-- **不走 RMI**——作为 javaagent 进程内读数据，本 JDK 删了 RMI 完全不影响
-- **能做 jcmd 做不到的事**——方法级追踪（trace）、实时观察返回值（watch）、反编译（jad）、热更新（redefine）
+#### Arthas 底层是不是包装了 jcmd/JMX？
+
+**不是**。Arthas 用的是一套**完全不同的 JVM API**，和 jcmd/JMX 不是一回事。
+
+jcmd/JMX 提供的是"查询 JVM 状态"的能力——读计数器、打线程栈、触发 GC、堆转储。这些是**只读或触发性的**，不能"在方法执行时插入逻辑"。
+
+Arthas 能做 jcmd 做不到的事（trace/watch/redefine），因为它的底层是 **Java Instrumentation API**（`java.lang.instrument`）——这是 JVM 提供的另一套完全独立的接口，专门用于**运行时修改字节码**。
+
+Arthas 底层的三个核心 API：
+
+| API | 提供什么 | Arthas 用来做什么 |
+|-----|---------|-----------------|
+| **Attach API**（JDK 6+） | 动态 attach 到运行中的 JVM | `java -jar arthas-boot.jar` 后通过 `VirtualMachine.attach(pid)` 连进目标 JVM，走的是和 jcmd **同一条** UNIX socket 通信路径（`/tmp/.attach_pid<pid>` + SIGQUIT + `/tmp/.java_pid<pid>`） |
+| **Instrumentation API**（`java.lang.instrument`） | 运行时修改已加载类的字节码——`addTransformer` 注册字节码转换器，`retransformClasses` 触发重新转换 | **Arthas 的核心**——用 ASM 字节码框架在方法前后织入"通知"代码（AOP），实现 `trace`（记录方法耗时）/ `watch`（记录返回值）/ `jad`（反编译字节码） |
+| **JVMTI**（JVM Tool Interface，C++ native 接口） | JVM 最底层的调试/profiling 接口——类加载事件、方法进入/退出事件、字段访问事件、堆遍历 | Instrumentation 是 JVMTI 的 Java 封装，async-profiler（Arthas 集成的火焰图工具）直接调 JVMTI + `AsyncGetCallTrace` 做非安全点采样 |
+
+**以 `watch Foo.method returnObj` 为例**，Arthas 底层做了什么：
+
+```
+1. Attach API 连进目标 JVM（同 jcmd 的 attach 路径）
+2. 把 Arthas 的 jar 加载到目标 JVM 的 classpath 里
+3. 调 Instrumentation.addTransformer(Enhancer) 注册字节码转换器
+4. 调 Instrumentation.retransformClasses(Foo.class) 触发 Foo 的重新加载
+5. JVM 加载 Foo 时，Enhancer 用 ASM 框架在 Foo.method 的进入/返回处织入通知代码：
+   - 方法进入时调 AdviceWeaver.onMethodEnter()
+   - 方法返回时调 AdviceWeaver.onMethodReturn()，传入返回值
+6. 织入的通知代码把返回值通过 Arthas 的 Advice 回调传给 WatchAdviceListener
+7. WatchAdviceListener 把返回值打印出来
+```
+
+这就是为什么 Arthas 能做"实时观察方法返回值"——它**修改了方法的字节码**，在方法执行时插了回调。这不是"查询 JVM 状态"，是"修改 JVM 行为"——jcmd/JMX 完全做不到。
+
+**和 jcmd/JMX 的关系**：
+
+| 维度 | jcmd / JMX（本节讲的 DCmd/jmm_interface） | Arthas |
+|------|----------------------------------------|--------|
+| 底层 API | `DCmd::parse_and_execute` / `jmm_interface` 函数表 | Attach API + **Instrumentation API** + ASM 字节码框架 |
+| 能做什么 | 查询状态、触发动作（GC/dump/线程转储） | **修改字节码**——方法级追踪、观察返回值、反编译、热更新 |
+| 是否修改 JVM 行为 | 不修改，只读或触发 | **修改**——织入通知代码改变方法行为 |
+| attach 方式 | jcmd 走 attach API（同 Arthas 的 attach 路径） | 同样的 attach API |
+| 不依赖 RMI | ✓ | ✓ |
+
+所以 Arthas 和 jcmd 的关系是：**attach 路径相同**（都用 Attach API），但**底层能力完全不同**——jcmd 是查 JVM 状态，Arthas 是改 JVM 字节码。Arthas 不是 jcmd 的"包装"，而是用了 JVM 的另一套独立 API（Instrumentation）实现了更强大的功能。
 
 **生产环境典型排查流程**（Arthas 场景）：
 1. 收到告警——某接口慢
