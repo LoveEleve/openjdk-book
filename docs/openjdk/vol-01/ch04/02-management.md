@@ -8,15 +8,70 @@
 
 ## "management" 到底是干什么的
 
-读者可能第一反应是"监控/观察 JVM"——查线程数、看 GC、读内存使用量。这只是 management 的一部分。实际上 HotSpot 的 management 子系统提供**三类能力**，对应日常说的"管理 JVM"：
+这不是 HotSpot 自己发明的概念，而是一个正式的 Java 规范——**JSR 174：Monitoring and Management Specification for the Java Virtual Machine**（2004 年 9 月最终发布，从 J2SE 5.0 开始进入 JDK）。
 
-| 能力类型 | 做什么 | 典型例子 |
-|---------|--------|---------|
-| **读**（查询） | 查询 JVM 当前状态，返回数据，不改变任何东西 | `getThreadCount()` 查线程数 / `getHeapMemoryUsage()` 查堆使用量 / `getLoadedClassCount()` 查类加载数 |
-| **写**（修改配置） | 修改 JVM 运行时配置/开关，返回旧值 | `setVerbose(true)` 打开 GC verbose / `setThreadCpuTimeEnabled(true)` 开启 CPU 时间统计 / `setUsageThreshold(N)` 设置内存告警阈值 |
-| **触发动作**（执行一次性操作） | 让 JVM 立即干一件事，有副作用 | `gc()` 触发一次 GC / `dumpHeap()` 堆转储到文件 / `findDeadlockedThreads()` 死锁检测 / `resetPeakThreadCount()` 重置峰值 |
+### JSR 174 官方定义
 
-"观察 JVM"只覆盖了第一类（读），所以读到后面出现"操作 JVM"（写/触发动作）时会感觉割裂——这其实是同一套 management 系统的不同能力维度。`management_init` 同时为这三类能力铺地基。
+JSR 174 的标题是 "Monitoring and Management Specification for the Java Virtual Machine"。官方在 "Request" 章节把 management 的职责明确分为**两大类**：
+
+> **Health Indicators（健康指标）** —— 让 Java 应用、系统管理工具、RAS 工具能监控 JVM 的健康状态：
+> - Class load/unload（类加载/卸载）
+> - Memory allocation statistics（内存分配统计）
+> - Garbage collection statistics（GC 统计）
+> - Monitor info & statistics（监视器信息和统计）
+> - Thread info & statistics（线程信息和统计）
+> - Just-in-Time statistics（JIT 编译统计）
+> - Object info（堆中对象信息，show/count all objects）
+> - Underlying OS and platform info（底层 OS 和平台信息）
+>
+> **Run-Time Control（运行时控制）** —— 让工具能动态调整 JVM 的运行时行为：
+> - Minimum heap size（最小堆大小）
+> - Verbose GC on demand（按需打开 GC verbose）
+> - Garbage collection control（GC 控制，如触发 System.gc）
+> - Thread creation control（线程创建控制）
+> - Just-in-Time compilation control（JIT 编译控制）
+
+JSR 174 还规定了几个**设计原则**：
+- **Very low performance impact**——即使监控事件开启，性能影响也要极低
+- **Restricted to low frequency events**——只支持低频事件，不做高频采样
+- **Interface should be self describing**——接口自描述，不需要静态绑定
+- **Mandatory and optional set**——分为强制支持和可选支持的能力
+
+### Java 侧的 API：java.lang.management 包
+
+JSR 174 在 Java 侧落地为 `java.lang.management` 包（Oracle 官方文档原文）：
+
+> "Provides the management interfaces for monitoring and management of the Java virtual machine and other components in the Java runtime. It allows both local and remote monitoring and management of the running Java virtual machine."
+>
+> —— `java.lang.management` package summary
+
+这个包提供 9 个标准 MXBean 接口（每个对应 JVM 的一个子系统）：
+
+| MXBean 接口 | 管 JVM 的哪部分 |
+|-------------|----------------|
+| `ClassLoadingMXBean` | 类加载系统 |
+| `MemoryMXBean` | 内存系统 |
+| `ThreadMXBean` | 线程系统 |
+| `RuntimeMXBean` | 运行时系统 |
+| `OperatingSystemMXBean` | 底层操作系统 |
+| `CompilationMXBean` | JIT 编译系统 |
+| `GarbageCollectorMXBean` | 垃圾收集器 |
+| `MemoryManagerMXBean` | 内存管理器 |
+| `MemoryPoolMXBean` | 内存池 |
+
+用户代码通过 `ManagementFactory.getClassLoadingMXBean()` 等静态方法获取这些 MXBean。
+
+### 三类能力对应 JSR 174 的两大类
+
+把 JSR 174 的 "Health Indicators" 和 "Run-Time Control" 拆到代码层面，对应三类操作：
+
+| 能力类型 | JSR 174 分类 | 做什么 | 典型例子 |
+|---------|-------------|--------|---------|
+| **读**（查询） | Health Indicators | 查询 JVM 当前状态，返回数据，不改变任何东西 | `getThreadCount()` 查线程数 / `getHeapMemoryUsage()` 查堆使用量 / `getLoadedClassCount()` 查类加载数 |
+| **写**（修改配置） | Run-Time Control | 修改 JVM 运行时配置/开关，返回旧值 | `setVerbose(true)` 打开 GC verbose / `setThreadCpuTimeEnabled(true)` 开启 CPU 时间统计 / `setUsageThreshold(N)` 设置内存告警阈值 |
+| **触发动作**（执行一次性操作） | Run-Time Control | 让 JVM 立即干一件事，有副作用 | `gc()` 触发一次 GC / `dumpHeap()` 堆转储到文件 / `findDeadlockedThreads()` 死锁检测 / `resetPeakThreadCount()` 重置峰值 |
+
+读者第一反应往往是"监控/观察 JVM"——这只覆盖了 "Health Indicators"（读）那一类。读到后面出现的"操作 JVM"其实属于 "Run-Time Control"（写+触发动作）——这两类都是 JSR 174 规范定义的 management 的职责。`management_init` 同时为这三类能力铺地基。
 
 ### 一个具体的场景：你作为运维和开发会做什么
 
@@ -33,21 +88,21 @@ public class MyApp {
 }
 ```
 
-`java MyApp` 启动后进程在后台跑。你作为运维/开发会对这个 JVM 做**三类不同的事**：
+`java MyApp` 启动后进程在后台跑。你作为运维/开发会对这个 JVM 做**三类不同的事**（对应 JSR 174 的两大类）：
 
-**1. 想知道它现在状态如何（读）**：
+**1. 想知道它现在状态如何（读 → Health Indicators）**：
 - 它跑了多久了？
 - 加载了多少个类？
 - 堆用了多少内存？
 - 现在有多少线程？
 - GC 触发了几次？每次多久？
 
-**2. 想调整它的运行时配置（写）**：
+**2. 想调整它的运行时配置（写 → Run-Time Control）**：
 - 打开 `-XX:+PrintGC` 让它打印每次 GC 信息
 - 打开线程竞争监控看哪些线程在锁上等待
 - 给老年代设一个使用率阈值，超过 80% 就告警
 
-**3. 想让它立即干件事（触发动作）**：
+**3. 想让它立即干件事（触发动作 → Run-Time Control）**：
 - 强制触发一次 GC（`System.gc()`）
 - 把整个堆转储到文件分析内存泄漏
 - 打印所有线程的栈看有没有死锁
@@ -95,17 +150,17 @@ Java 代码通过 `java.lang.management` 包（JSR 174 规范）查询和操作 
 ```java
 import java.lang.management.*;
 
-// === 读操作 ===
+// === 读操作（Health Indicators）===
 long uptime = ManagementFactory.getRuntimeMXBean().getUptime();
 int loadedCount = ManagementFactory.getClassLoadingMXBean().getLoadedClassCount();
 int threadCount = ManagementFactory.getThreadMXBean().getThreadCount();
 MemoryUsage heap = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage();
 
-// === 写操作 ===
+// === 写操作（Run-Time Control）===
 ManagementFactory.getClassLoadingMXBean().setVerbose(true);   // 打开类加载 verbose
 ManagementFactory.getThreadMXBean().setThreadCpuTimeEnabled(true);  // 开启 CPU 时间统计
 
-// === 触发动作 ===
+// === 触发动作（Run-Time Control）===
 ManagementFactory.getMemoryMXBean().gc();                       // 触发一次 GC
 long[] deadlocked = ManagementFactory.getThreadMXBean().findDeadlockedThreads();  // 死锁检测
 ManagementFactory.getThreadMXBean().resetPeakThreadCount();     // 重置峰值
