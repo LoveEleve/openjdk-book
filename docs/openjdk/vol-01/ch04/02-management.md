@@ -1434,18 +1434,105 @@ jlong 值在 0x1F0：`00 00 00 00 00 00 00 00` = 0。此刻还没被 `record_vm_
 
 ## 小结
 
-`management_init()` 是 JVM 可观测体系的 C++ 侧地基，做了三件事：
+### management_init() 做了什么
 
-1. **注册 22 个 PerfData 计数器** — 3 个时间戳 + 4 个线程计数 + 6 个 safepoint 统计 + 9 个类加载统计。写入 ch03/05 创建的 PerfData 共享内存，`jstat` 和 `jcmd PerfCounter.print` 可零开销读取。
+`management_init()` 是 JSR 174（JVM 管理 API 规范）在 HotSpot C++ 侧的地基。它本身只有 10 行，调用 4 个 Service 的 `init()`：
 
-2. **声明 9 个能力位** — `jmmOptionalSupport` 结构体，告诉 Java 层 JVM 支持哪些监控能力（如 CPU 时间支持取决于 OS）。
+```cpp
+void management_init() {
+  Management::init();        // 第 1 个
+  ThreadService::init();     // 第 2 个
+  RuntimeService::init();    // 第 3 个
+  ClassLoadingService::init(); // 第 4 个
+}
+```
 
-3. **注册 40+ 诊断命令** — 让 `jcmd <pid> <命令>` 能工作。包括 `Thread.print`、`GC.heap_dump`、`VM.native_memory` 等。
+这 4 个 `init()` 合起来做了三类事，对应 JSR 174 的两大职责（Health Indicators 健康指标 + Run-Time Control 运行时控制）：
 
-`management_init` **不**负责：
-- 创建 PerfData 共享内存（`perfMemory_init` 在 `vm_init_globals` 中已做）
-- 启动 JMX Agent（`Management::initialize` 在 `create_vm` 末尾按需启动）
-- 创建 PlatformMBeanServer（Java 侧按需创建）
-- 注册 MemoryService / CompileBroker 的 PerfData（在 `universe_post_init` / `compileBroker_init` 中各自注册）
+#### 第 1 类：往 PerfData 共享内存里注册 22 个计数器（给通道 A——jstat 被动读）
+
+每个计数器都是调 `PerfDataManager::create_counter` / `create_variable` 在共享内存（ch03/05 创建的 `/tmp/hsperfdata_<user>/<pid>` 文件）里创建一个 `PerfDataEntry`，`_valuep` 直接指向共享内存数据区，后续 `inc()` / `set_value()` 零系统调用。和 ch03/06 的 `ObjectMonitor::Initialize()` 是同一套机制。
+
+| Service | 注册数 | 计数器 | variability |
+|---------|--------|--------|-------------|
+| `Management::init()` | 3 | `createVmBeginTime` / `createVmEndTime` / `vmInitDoneTime` | Variable（时间戳，可变值） |
+| `ThreadService::init()` | 4 | `started` / `live` / `livePeak` / `daemon` | started 是 Counter，其余 Variable |
+| `RuntimeService::init()` | 6 | `safepointSyncTime` / `safepoints` / `safepointTime` / `applicationTime` / `jvmVersion` / `jvmCapabilities` | 前 4 个 Counter(Ticks)，后 2 个 Constant |
+| `ClassLoadingService::init()` | 9 | `loadedClasses` / `unloadedClasses` / `sharedLoadedClasses` / `sharedUnloadedClasses` / `loadedBytes` / `unloadedBytes` / `sharedLoadedBytes` / `sharedUnloadedBytes` / `methodBytes` | 前 8 个 Counter，最后 methodBytes 是 Variable |
+| **合计** | **22** | | |
+
+三种 variability 值（hexdump 验证过）：
+- `0x02` V_Monotonic（Counter，单调递增）
+- `0x03` V_Variable（Variable，可增可减）
+- `0x01` V_Constant（Constant，创建时写入一次不变）
+
+这 22 个计数器被 `jstat`（直接 mmap 读共享内存，零系统调用，不进 JVM）和 `jcmd PerfCounter.print` 读取。断点在 `management_init` 末尾时，hexdump 看到共享内存的 `num_entries` 从 ch03/06 的 7 变成 29（7 + 22）。
+
+#### 第 2 类：声明 9 个能力位（给通道 B——Java 层查询能力）
+
+往 `jmmOptionalSupport` 结构体（C 位域，9 个 `: 1` bit + 22 保留位 = 32 bit = 4 字节）里写 9 个标记位，声明 JVM 支持哪些监控能力：
+
+| 能力位 | 提供的能力 |
+|--------|----------|
+| `isLowMemoryDetectionSupported` | 低内存告警（内存池设阈值，超过自动通知） |
+| `isCompilationTimeMonitoringSupported` | JIT 编译耗时查询 |
+| `isThreadContentionMonitoringSupported` | 线程竞争统计（锁等待时间） |
+| `isCurrentThreadCpuTimeSupported` | 当前线程 CPU 时间（依赖 OS） |
+| `isOtherThreadCpuTimeSupported` | 其他线程 CPU 时间（依赖 OS） |
+| `isObjectMonitorUsageSupported` | synchronized 锁持有信息 |
+| `isSynchronizerUsageSupported` | ReentrantLock 等 JSR-166 锁信息 + 死锁检测 |
+| `isThreadAllocatedMemorySupported` | 线程分配对象字节数 |
+| `isRemoteDiagnosticCommandsSupported` | 远程执行 DCmd |
+
+这一步**只是写 9 个 bit 到静态结构体字段**，不创建对象、不分配内存、不注册回调。Java 层（`VMManagementImpl`）第一次访问 MXBean 时通过 `jmm_GetOptionalSupport` 一次性读走这 9 个 bit，据此决定哪些方法可用、哪些抛 `UnsupportedOperationException`。
+
+#### 第 3 类：注册 42 个 DCmd 到链表（给通道 B——jcmd/JMX 主动调）
+
+往 `_DCmdFactoryList` 单向链表（C 堆上的 `DCmdFactory` 对象链表）里插入 42 个节点：
+
+| 注册位置 | 数量 |
+|---------|------|
+| `diagnosticCommand.cpp:71-138`（`register_dcmds()`） | 41 |
+| `management.cpp:143`（NMTDCmd 单独注册） | 1 |
+| **management_init 后合计** | **42** |
+
+每个 `DCmdFactoryImpl<XxxDCmd>` 对象是一个 C++ 类，对应一条 jcmd 命令——`name()` 返回命令名（如 `"VM.version"`），`execute()` 实现命令逻辑。注册方式是头插法链表插入（`factory->_next = _DCmdFactoryList; _DCmdFactoryList = factory;`）。运行时 jcmd 发命令进来，`DCmdFactory::factory()` 遍历链表按名字匹配找到对应的 factory，调它的 `create_resource_instance()` 创建 DCmd 实例执行。
+
+DCmd 有三种调用来源，最终都走 `DCmd::parse_and_execute`：
+- **AttachAPI**（jcmd 工具）——走 AttachListener 线程
+- **MBean**（jconsole / Java 代码）——走 `jmm_interface->ExecuteDiagnosticCommand`
+- **Internal**（JVM 内部代码）——直接调
+
+JVM 完全启动后，JFR 还会追加 5 个、日志系统追加 1 个，最终链表里有 **48 个** DCmd。
+
+### 两条通道的关系
+
+management_init 注册的两类东西（PerfData 计数器 + DCmd/能力位）分别服务两条不同的数据通道：
+
+| 通道 | 服务什么 | 数据形式 | 谁走这条路 | 是否进 JVM |
+|------|---------|---------|-----------|----------|
+| **A（PerfData 共享内存）** | 22 个计数器（只读简单数值） | PerfDataEntry 结构 | jstat / jcmd PerfCounter.print | 不进，直接 mmap 读 |
+| **B（jmm_interface + DCmd）** | 读+写+触发动作（三类操作） | 函数表 + 链表 | jconsole / Java 代码 / jcmd | 进 JVM 执行 C++ 函数 |
+
+通道 A 是被动的（外部工具读，JVM 不配合），通道 B 是主动的（Java 代码/jcmd 调，进 JVM 执行）。两者最终都能访问到 HotSpot C++ 侧的同一个 Service（如 ThreadService），但入口和机制完全不同。
+
+### management_init 不负责什么
+
+- **创建 PerfData 共享内存**——`perfMemory_init` 在 `vm_init_globals`（ch03/05）中已做，management_init 只是往里填数据
+- **开放共享内存读取**——`PerfMemory::set_accessible(true)` 在 `create_vm` 末尾的 `create_vm_timer.end()` 里调用（断点在 management_init 末尾时 `accessible=0`，jstat 还读不到）
+- **启动 JMX Agent**——`Management::initialize()` 在 `create_vm` 末尾按需启动（本 JDK 已裁剪 RMI，Agent 不可用）
+- **创建 PlatformMBeanServer**——Java 侧 `ManagementFactory.getPlatformMBeanServer()` 按需创建
+- **注册 MemoryService / CompileBroker 的 PerfData**——在 `universe_post_init` / `compileBroker_init` 中各自注册
+
+### 生产环境验证
+
+本 JDK 虽然裁剪了 RMI（JMX Agent 不可用），但**不影响日常 JVM 排查**——现代生产环境排查 JVM 问题走的是四件套：
+
+1. **监控告警**（Prometheus + JMX exporter Agent 模式，HTTP 协议不走 RMI）
+2. **命令行工具**（jstat / jcmd / jstack，走通道 A 或 attach API）
+3. **Arthas**（attach + Instrumentation API，不走 RMI）
+4. **离线 dump 分析**（jcmd GC.heap_dump + MAT 离线分析）
+
+这些都不依赖 RMI，本 JDK 删了 RMI 完全不受影响。
 
 下一节（4.3）讲 `bytecodes_init()`——它只有 3 行，但背后是 JVM 字节码规范 + `_flags`/`_lengths` 编码体系 + Bytecode class 体系（12 子类）+ Rewriter 改写机制 + `fast`/`nofast` 变体字节码。
