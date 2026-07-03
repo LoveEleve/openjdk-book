@@ -349,7 +349,7 @@ void Management::init() {
 | `sun.rt.createVmEndTime` | 同上 | `Threads::create_vm` 结束时间 |
 | `sun.rt.vmInitDoneTime` | `set_init_completed()` 之后 | VM 初始化完成时间 |
 
-`RuntimeMXBean.getStartTime()` 返回的就是 `vmInitDoneTime`。`TraceVmCreationTime` 是 ch03/02 讲过的 RAII 计时器，析构时同时写入 PerfData 和 `-Xlog` 日志。
+`RuntimeMXBean.getStartTime()` 返回的就是 `vmInitDoneTime`。`createVmBeginTime` 和 `createVmEndTime` 这两个计时器的值由 `TraceVmCreationTime` 填入——ch03/02 讲过这个 RAII 计时器，它的 `end()` 方法调用 `Management::record_vm_startup_time(begin, duration)`，把启动开始时间和总耗时写到对应的 PerfVariable 里。
 
 ### 2. 9 个能力位（jmmOptionalSupport）
 
