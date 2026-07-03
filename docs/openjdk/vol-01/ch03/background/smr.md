@@ -18,7 +18,9 @@ _rcu_counter = 0;                    // volatile uintx，GlobalCounter 代际计
 
 HotSpot 用 `Threads::_thread_list`（`thread.hpp:2205`，`static JavaThread*`）管理所有 `JavaThread` 对象——用 `_next` 指针串成的单向链表，`Threads::add()` 头插新节点，`Threads::remove()` 摘除已退出节点。
 
-**这个链表是唯一的标准全局线程链表。** 本文讨论的 SMR 机制在此基础上维护一份 `ThreadsSMRSupport::_java_thread_list`（`ThreadsList* volatile`，`threadSMR.hpp:108`）——从上一个 `_java_thread_list` 快照重建的 Copy-on-Write 只读副本。读者通过 SMR 遍历的是 `_java_thread_list`（无锁快照），写者增删后同步更新两者：`Threads::_thread_list`（标准链表）和 `ThreadsSMRSupport::_java_thread_list`（SMR 快照）始终包含相同的线程集合。
+**这个链表是唯一的标准全局线程链表。** 本文讨论的 SMR 机制在此基础上维护一份 `ThreadsSMRSupport::_java_thread_list`（`ThreadsList* volatile`，`threadSMR.hpp:108`）——从上一个 `_java_thread_list` 快照重建的 Copy-on-Write 只读副本。
+
+两者初始化时都是空——`_thread_list = NULL`（`thread.cpp:3503`），`_java_thread_list = new ThreadsList(0)` 即长度为 0 的空数组（`threadSMR.cpp:75`）。增删线程时，`Threads::add()` 和 `Threads::remove()` 在**同一个函数、同一个持锁状态**下把同一个 `JavaThread*` 指针加入/摘除两边——`_thread_list` 是链表操作（O(1) 头插 / O(n) 摘除），`_java_thread_list` 是 CoW 重建（全量拷贝 + 替换）。两者永远包含相同的 `JavaThread*` 集合，不会出现一边比另一边多线程或漏线程的情况。
 
 ---
 
