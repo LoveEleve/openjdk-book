@@ -366,7 +366,9 @@ void Management::record_vm_startup_time(jlong begin, jlong duration) {
 
 ### 2. 9 个能力位（jmmOptionalSupport）
 
-通道 B 的 Java 层（`VMManagementImpl`）在初始化时会问 HotSpot："你支持哪些监控能力？"——HotSpot 用 `_optional_support` 这个结构体回答。9 个布尔位：
+这一步**就是往 `_optional_support` 这个 C++ 结构体里写 9 个 bit 标记**，没做其他任何事情——不创建对象、不分配内存、不注册回调。整个 `_optional_support` 是个静态结构体字段，Java 层第一次访问 MXBean 时通过 `jmm_GetOptionalSupport` 一次性读走这 9 个 bit，据此决定哪些方法可用、哪些抛 `UnsupportedOperationException`。
+
+9 个布尔位：
 
 | 能力位 | 设置条件 | 提供的能力 | 对应的 Java API |
 |--------|---------|----------|----------------|
