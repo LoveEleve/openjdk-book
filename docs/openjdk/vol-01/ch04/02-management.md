@@ -368,7 +368,40 @@ void Management::record_vm_startup_time(jlong begin, jlong duration) {
 
 这一步**就是往 `_optional_support` 这个 C++ 结构体里写 9 个 bit 标记**，没做其他任何事情——不创建对象、不分配内存、不注册回调。整个 `_optional_support` 是个静态结构体字段，Java 层第一次访问 MXBean 时通过 `jmm_GetOptionalSupport` 一次性读走这 9 个 bit，据此决定哪些方法可用、哪些抛 `UnsupportedOperationException`。
 
-9 个布尔位：
+先看这个结构体长什么样：
+
+```cpp
+/* === src/hotspot/share/include/jmm.h === */
+
+typedef struct {
+  unsigned int isLowMemoryDetectionSupported         : 1;
+  unsigned int isCompilationTimeMonitoringSupported  : 1;
+  unsigned int isThreadContentionMonitoringSupported: 1;
+  unsigned int isCurrentThreadCpuTimeSupported      : 1;
+  unsigned int isOtherThreadCpuTimeSupported        : 1;
+  unsigned int isObjectMonitorUsageSupported        : 1;
+  unsigned int isSynchronizerUsageSupported         : 1;
+  unsigned int isThreadAllocatedMemorySupported     : 1;
+  unsigned int isRemoteDiagnosticCommandsSupported   : 1;
+  unsigned int                                        : 22;  // 保留位
+} jmmOptionalSupport;
+```
+
+这是个 C 位域结构体（bit-field）——每个字段后面跟 `: 1` 表示这个字段只占 1 个 bit。9 个能力位 + 22 位保留 = 32 位，正好一个 `unsigned int`（4 字节）。
+
+**三处代码的分工**：
+
+| 位置 | 做什么 |
+|------|--------|
+| `jmm.h:57-68` | 定义结构体类型（9 个能力位 + 22 保留位 = 32 bit） |
+| `management.hpp:41` | 声明 `static jmmOptionalSupport _optional_support;`（Management 类的静态字段） |
+| `management.cpp:82` | 初始化为 `{0}`——C++ 静态变量定义，所有位清零 |
+| `management.cpp:118-136` | `Management::init()` 里逐个位赋值（就是下面的 `// 2.` 部分） |
+| `management.hpp:68` | 声明 `get_optional_support(jmmOptionalSupport*)`——运行时 Java 层通过它读取 |
+
+所以你在 `management.cpp:82` 看到的 `jmmOptionalSupport Management::_optional_support = {0};` 就是这个静态字段的定义——把所有 32 位清零。之后 `Management::init()` 在 `// 2.` 部分逐个把某些位设为 1，声明 JVM 支持这些能力。
+
+9 个布尔位各自提供的能力：
 
 | 能力位 | 设置条件 | 提供的能力 | 对应的 Java API |
 |--------|---------|----------|----------------|
