@@ -131,7 +131,7 @@ void ThreadsSMRSupport::add_thread(JavaThread *thread) {
 }
 ```
 
-这一层调度 CoW 三步：取当前快照 → 委托 `ThreadsList::add_thread()` 建新快照 → `Atomic::xchg` 原子替换全局指针 → 旧快照送入 `free_list()` 待回收队列。
+这一层调度 CoW 三步：取当前快照 → 委托 `ThreadsList::add_thread()` 建新快照 → `Atomic::xchg` 原子替换全局指针 → `free_list(old_list)` 回收旧快照（头插入 `_to_delete_list` 后立即扫描——没有 hazard ptr 指着的当场 delete，有引用的留在队列里等后续回收）。
 
 **第三层：`ThreadsList::add_thread()`——纯 CoW 的底层实现**（`threadSMR.cpp:562-574`）
 
@@ -163,9 +163,7 @@ ThreadsList *ThreadsList::add_thread(ThreadsList *list, JavaThread *java_thread)
 
 CoW 解决了"读者不用锁"——读者的数据（v3 数组）完全独立于写者修改的数据（全局指针 `_java_thread_list`）。写者改的是全局指针，读者用的是自己拿到的快照，两者不共享可变内存。
 
-**但留下一个问题：旧版本什么时候删？** v3 在 reader 手中独立操作——reader 现在正在遍历，不能删。如果 reader 遍历到一半就把 v3 释放了，reader 的指针立刻悬空。所以必须等 reader 遍历完。
-
-这就是 `free_list()` 不立即 `delete` 的原因——它只把旧列表挂入 `_to_delete_list`，等后续机制判断何时安全删除。
+**但留下一个问题：旧版本什么时候删？** v3 在 reader 手中独立操作——reader 现在正在遍历，不能删。`free_list()`（`threadSMR.cpp:779-845`）做两件事：先把旧快照挂入 `_to_delete_list` 排队，然后**立刻扫描整个待回收链**——如果某个旧快照没有被任何 hazard ptr 指着且嵌套引用计数为 0，当场 `delete` 它。这是一种机会主义清理：每次 add/remove 都顺手把能删的旧快照全删了。但正在被 hazard ptr 指着的快照不能删——它们留在 `_to_delete_list` 里，等下次 add/remove 或写者扫描时再试。
 
 而"后续机制"就是 **Hazard Pointer**（下一节）：reader 在遍历前贴一个"别删"标签，writer 扫描所有标签——没人贴才删。CoW 解决了读者无锁读，Hazard Pointer 解决了旧快照的安全回收。
 
