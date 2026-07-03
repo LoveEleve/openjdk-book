@@ -349,7 +349,20 @@ void Management::init() {
 | `sun.rt.createVmEndTime` | 同上 | `Threads::create_vm` 结束时间 |
 | `sun.rt.vmInitDoneTime` | `set_init_completed()` 之后 | VM 初始化完成时间 |
 
-`RuntimeMXBean.getStartTime()` 返回的就是 `vmInitDoneTime`。`createVmBeginTime` 和 `createVmEndTime` 这两个计时器的值由 `TraceVmCreationTime` 填入——ch03/02 讲过这个 RAII 计时器，它的 `end()` 方法调用 `Management::record_vm_startup_time(begin, duration)`，把启动开始时间和总耗时写到对应的 PerfVariable 里。
+`RuntimeMXBean.getStartTime()` 返回的就是 `vmInitDoneTime`。`createVmBeginTime` 和 `createVmEndTime` 这两个计数器的值由 `TraceVmCreationTime` 填入——ch03/02 讲过，`Threads::create_vm` 末尾会显式调用 `create_vm_timer.end()`（`thread.cpp:4080`），`end()` 调用 `Management::record_vm_startup_time(begin, duration)`（`management.cpp:200`），把启动开始时间和总耗时写到对应的 PerfVariable：
+
+```cpp
+/* === src/hotspot/share/services/management.cpp:200-208 === */
+
+void Management::record_vm_startup_time(jlong begin, jlong duration) {
+  if (_begin_vm_creation_time == NULL) return;   // PerfData 未初始化（vm init 失败）
+  _begin_vm_creation_time->set_value(begin);              // 写入 createVmBeginTime
+  _end_vm_creation_time->set_value(begin + duration);    // 写入 createVmEndTime
+  PerfMemory::set_accessible(true);                       // 允许外部工具 mmap 读
+}
+```
+
+注意最后一行 `PerfMemory::set_accessible(true)`——直到这一刻，PerfData 共享内存才对外部工具开放读取。ch03/05 创建了共享内存文件，但直到这里（`create_vm` 末尾，`end()` 被调用）才标记可读——保证外部工具读到的是完整的、已填好的计数器。
 
 ### 2. 9 个能力位（jmmOptionalSupport）
 
