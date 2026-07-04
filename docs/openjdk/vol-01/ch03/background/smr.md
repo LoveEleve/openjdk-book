@@ -257,54 +257,170 @@ ThreadsList *ThreadsList::add_thread(ThreadsList *list, JavaThread *java_thread)
 
 先讨论没有并发冲突的理想情况——读者已经把标签贴好了，写者才开始扫描。
 
-**初始状态**：`_java_thread_list` 指向 `ThreadsList(v3)`，其 `_threads = [T1, T2]`。GC 拿到 v3 快照。
-
-**Step 1 — 读者贴标签**：GC 把自己的 `_threads_hazard_ptr` 设为 v3。这是一个发布于所有线程可见内存中的公开声明："我正在用 v3，别删"。
+**初始时刻**。JVM 中有两个活跃线程 T1 和 T2。数据结构如下：
 
 ```
-GC: _threads_hazard_ptr = v3   // release_store_fence，其他核心可见
+Threads::_thread_list     → JavaThread(T2) → JavaThread(T1) → NULL
+                              (T2._next → T1, T1._next → NULL)
+
+ThreadsSMRSupport::
+_java_thread_list         → ThreadsList(v3)
+                              │ _length = 2
+                              │ _threads → [T2, T1]  ← JavaThread*[2]，顺序与链表一致
+
+GC._threads_hazard_ptr    == NULL  (尚未开始遍历)
+T1._threads_hazard_ptr    == NULL
+T2._threads_hazard_ptr    == NULL
 ```
 
-**Step 2 — 写者替换全局指针**：T2 线程退出。`remove_thread(T2)` 调用 `Atomic::xchg` 把全局指针从 v3 换为 v4 = [T1]。旧快照 v3 进入 `_to_delete_list` 排队。
 
-**Step 3 — 写者扫描所有 hazard ptr**：`smr_delete(T2)` 调用 `is_a_protected_JavaThread(T2)`，扫描每个线程的 `_threads_hazard_ptr`——发现 GC 指着 v3，而 T2 在 v3 里。
+**Step A — GC（读者）贴标签**。GC 发起 safepoint 扫描，需要遍历线程列表。它先通过 `get_java_thread_list()` 拿到当前全局快照的指针（v3），然后贴标签：
 
 ```
-扫描结果：
-  T1:  _threads_hazard_ptr == NULL
-  GC:  _threads_hazard_ptr == v3  ← 指着包含 T2 的快照
-  结论：T2 还被保护，不能删
+GC: _threads_hazard_ptr = v3
+     // 公开声明："我正在遍历 v3 快照，这个快照上的所有 JavaThread (T2, T1) 都别删"
 ```
 
-**注意**：hazard ptr 保护的是一整个 `ThreadsList`，不是单个 `JavaThread`。只要有人指着 v3，v3 里**所有**线程——包括 T2——都不能删。
+此时各结构状态：
 
-**Step 4 — 写者等待**：在 `delete_lock` 上 wait，等读者释放 v3。
+```
+ThreadsSMRSupport::_java_thread_list  → ThreadsList(v3) { _threads → [T2, T1] }
+ThreadsSMRSupport::_to_delete_list    == NULL （还没有旧快照需要回收）
 
-**Step 5 — 读者读完，摘标签**：GC 遍历完成，把 `_threads_hazard_ptr` 设为 NULL。同时 notify 等待中的写者。
+GC ._threads_hazard_ptr  == v3   ← 标签生效
+T1._threads_hazard_ptr   == NULL
+T2._threads_hazard_ptr   == NULL
+```
 
-**Step 6 — 写者重扫**：被唤醒后重扫——所有 hazard ptr 都是 NULL。T2 安全 `delete`。
+
+**Step B — T2 退出，写者从两个列表移除 T2**。T2 逻辑上已退出，但 **JavaThread(T2) 对象尚未 delete——它仍存在于旧快照 v3 中**。
+
+T2 的退出路径：`Threads::remove(this)`（`thread.cpp:2085`，持 `Threads_lock`）分两阶段：
+
+```
+阶段 B1：从标准链表摘除 T2
+  ─────────────────────────
+  Threads::_thread_list 被原地修改——跳过 T2 节点：
+    原来: JavaThread(T2) → JavaThread(T1) → NULL
+    现在: JavaThread(T1) → NULL           （T2._next 被绕过，但 T2 对象本身还在内存中）
+
+阶段 B2：更新 CoW 快照（ThreadsSMRSupport::remove_thread(T2)）
+  ─────────────────────────
+  ① 创建新快照 v4，只包含 [T1]
+  ② Atomic::xchg 替换全局指针：
+       _java_thread_list 从 → ThreadsList(v3) 变为 → ThreadsList(v4) { _threads → [T1] }
+  ③ free_list(v3)：把旧快照 v3 挂入 _to_delete_list 链表排队
+```
+
+此时各结构状态：
+
+```
+Threads::_thread_list              → JavaThread(T1) → NULL
+                                      JavaThread(T2) 在内存中，但已不在 _thread_list 链上
+
+ThreadsSMRSupport::_java_thread_list  → ThreadsList(v4) { _threads → [T1] }
+ThreadsSMRSupport::_to_delete_list    → ThreadsList(v3) { _threads → [T2, T1] }
+                                                             ↑ 旧快照排队等待回收
+                                                             ↑ JavaThread(T2) 的指针还在这里！
+
+GC ._threads_hazard_ptr  == v3   ← 指着旧快照 v3，而 v3 里仍有 T2
+```
+
+**关键认知**：JavaThread(T2) 对象此时还在三个地方有引用——① `ThreadsList(v3)._threads[]` 中（现在 v3 在 `_to_delete_list` 里），② GC 的 `_threads_hazard_ptr == v3` 保护的整个 v3 快照，③ 线程自身栈上。`smr_delete(T2)` 还没调用——此时只做了"从列表移除"，还没做"delete JavaThread"。
+
+
+**Step C — 写者调用 smr_delete(T2)，扫描决定能否 delete**。
+
+T2 退出流程继续：`Threads::remove()` 返回后，调用 `JavaThread::smr_delete()`（`thread.cpp:210-216`）→ `ThreadsSMRSupport::smr_delete(T2)`。
+
+`smr_delete()` 的第一步是调用 `is_a_protected_JavaThread(T2)`——扫描所有线程的 `_threads_hazard_ptr`，检查 T2 是否被引用：
+
+```
+扫描过程：
+  T1: _threads_hazard_ptr == NULL
+  GC: _threads_hazard_ptr == v3  ← 指着 v3！
+  ↓
+  收集 v3 快照上的所有 JavaThread → {T2, T1} → 加入哈希表
+  结论：T2 在受保护集合中 → is_a_protected_JavaThread(T2) == true
+```
+
+此时各结构状态：
+
+```
+ThreadsSMRSupport::
+_java_thread_list              → ThreadsList(v4) { _threads → [T1] }
+_to_delete_list                → ThreadsList(v3) { _threads → [T2, T1] }
+
+GC ._threads_hazard_ptr        == v3   ← 还在保护 v3
+T1._threads_hazard_ptr         == NULL
+T2._threads_hazard_ptr         == NULL （T2 已退出，已不参与扫描）
+
+hash_table(T2) == true         ← is_a_protected 返回 true
+```
+
+> hazard ptr 保护的是**整个 ThreadsList 快照**，不是单个 JavaThread。只要有人指着 v3，v3._threads[] 里的**所有**线程——包括 T2——都不能 delete。
+
+
+**Step D — 写者等待**。`smr_delete(T2)` 发现 T2 仍受保护 → 在 `delete_lock` 上 `wait()`。写者释放 `Threads_lock`，阻塞在 `delete_lock` 上等待通知。
+
+此时状态没有变化——写者只是在等。
+
+
+**Step E — 读者读完，摘标签，通知写者**。GC 遍历完 v3 快照上所有线程的 oop 根：
+
+```
+GC: _threads_hazard_ptr = NULL        // 摘标签——不再保护 v3
+    release_stable_list_wake_up()     // 发现 _delete_notify flag → 争 delete_lock → notify_all()
+                                      //   ↑ 双重检查锁，第 8.1 节详述
+```
+
+此时各结构状态：
+
+```
+GC ._threads_hazard_ptr  == NULL        ← v3 不再受保护
+T1._threads_hazard_ptr   == NULL
+
+ThreadsSMRSupport::
+_to_delete_list           → ThreadsList(v3) { _threads → [T2, T1] }
+                              ↑ v3 还在 _to_delete_list 里——没人保护了，但还没被删除
+                              ↑ free_list 中的机会主义清理还没触发
+```
+
+
+**Step F — 写者被唤醒，重扫，安全 delete**。`smr_delete(T2)` 的 `wait()` 返回，外层 `while(true)` 重新循环：
+
+```
+① 持 Threads_lock + delete_lock
+② is_a_protected_JavaThread(T2) → false （所有 hazard_ptr 都是 NULL）
+③ 退出 while(true) 循环
+④ delete T2;                      // JavaThread(T2) 被释放
+```
+
+T2 的 JavaThread 对象终于被 `delete`。注意只 delete 了 JavaThread(T2) 对象本身——v3 是另一个对象（ThreadsList），它在后续的 `free_list` 调用或某个 add/remove 顺手回收时被 delete（详见第 3.5 节 `free_list` 说明）。
 
 用最简伪代码总结这个理想流程（其中不涉及两阶段协议——那是为解决并发窗口才加入的）：
 
 ```cpp
 // 读者（GC）
 ThreadsList* list = ThreadsSMRSupport::get_java_thread_list();
-_threads_hazard_ptr = list;                      // 贴标签
+_threads_hazard_ptr = list;                      // 贴标签——保护整个 list
 for (int i = 0; i < list->length(); i++) {
   scan_oop(list->thread_at(i));                   // 无锁遍历
 }
-_threads_hazard_ptr = NULL;                       // 摘标签 + 通知等待者
+_threads_hazard_ptr = NULL;                       // 摘标签 + notify
 
-// 写者（smr_delete）
-while (is_a_protected_JavaThread(T2)) {           // 扫描所有 hazard ptr
+// 写者（T2 退出）
+//  阶段 1: Threads::remove(T2)  → 从两个列表移除（CoW + xchg）
+//  阶段 2: smr_delete(T2)       → 等待无人引用后 delete
+while (is_a_protected_JavaThread(T2)) {           // 扫描所有 hazard_ptr
   delete_lock()->wait();                          // 还有人引用就等
 }
 delete T2;                                        // 安全删除
 ```
 
 `is_a_protected_JavaThread()`（`threadSMR.cpp:850-892`）的扫描覆盖两处来源：
-- 在线程的 `_threads_hazard_ptr` 中（`ScanHazardPtrGatherProtectedThreadsClosure` 遍历所有线程收集 hazard ptr 指向的快照上的全部 `JavaThread*`）
-- 在待删除列表中 `_nested_handle_cnt != 0` 的快照上（嵌套引用计数保护——第 7 节详述）
+- 在线程的 `_threads_hazard_ptr` 中：遍历所有线程，对每个非空 hazard ptr 收集其指向的 ThreadsList 上的全部 `JavaThread*`
+- 在 `_to_delete_list` 中 `_nested_handle_cnt != 0` 的快照上：嵌套引用计数保护（第 7 节详述）
 
 ### 4.2 Hazard Pointer 解决了什么、留下了什么
 
