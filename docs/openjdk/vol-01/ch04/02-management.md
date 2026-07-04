@@ -1523,6 +1523,54 @@ DCmd 有三种调用来源，最终都走 `DCmd::parse_and_execute`：
 
 JVM 完全启动后，JFR 还会追加 5 个、日志系统追加 1 个，最终链表里有 **48 个** DCmd。
 
+### management_init 到底创建了什么对象
+
+management_init 创建的两类东西容易混淆，这里明确区分：
+
+**第 1 类：PerfData 计数器（22 个）——数据，外部工具可读**
+
+这 22 个计数器是 **PerfDataEntry 结构**，存在 PerfData 共享内存（`/tmp/hsperfdata_<user>/<pid>` 文件）里——这是 mmap 的文件，**外部进程能读**（jstat/jcmd PerfCounter.print 就在读）。每个 entry 包含名字、类型、单位、可变性、数据值。hexdump 看到的 `num_entries=29` 就是这些 entry 的数量（7 ObjectMonitor + 22 management_init）。
+
+**第 2 类：DCmdFactory 对象（42 个）——C++ 对象，外部工具看不到**
+
+这 42 个是 `DCmdFactoryImpl<XxxDCmd>` 类型的 **C++ 对象**，存在 HotSpot 进程的 **C 堆内存**（`malloc` 分配，内存类型 `mtInternal`）里。它们**不在 PerfData 共享内存里**，外部工具**看不到**——只能通过 jcmd 发命令间接触发它们工作。
+
+对比：
+
+| 维度 | PerfData 计数器（第 1 类） | DCmdFactory 对象（第 2 类） |
+|------|---------------------------|--------------------------|
+| 是什么 | PerfDataEntry 结构（数据） | DCmdFactoryImpl C++ 对象（工厂） |
+| 存哪里 | PerfData 共享内存（mmap 文件） | C 堆内存（malloc，mtInternal） |
+| 外部能看到吗 | 能（jstat/jcmd PerfCounter.print 直接读） | **不能**（HotSpot 进程内部对象） |
+| 数量 | 22 个 | 42 个 |
+| 包含 execute() 吗 | 不包含（只是数据） | **不包含**（execute 在 DCmd 上，不在 Factory 上） |
+| 怎么用 | 外部工具直接读 | 运行时 jcmd 触发 → factory 创建 DCmd → DCmd::execute() |
+
+关键点：**management_init 创建的 42 个 DCmdFactory 对象只是工厂，不是命令本身**。工厂对象里：
+- **有** `name()`（命令名，如 `"VM.version"`）
+- **有** `description()` / `impact()` / `permission()`（命令元数据）
+- **有** `create_resource_instance()`（创建 DCmd 实例的方法）
+- **有** `_enabled` / `_hidden` / `_export_flags`（管理状态）
+- **没有** `execute()`（执行逻辑在 DCmd 类上，不在工厂上）
+
+命令实例（`XxxDCmd`）是**运行时按需创建**的——只有用户执行 `jcmd <pid> VM.version` 时，对应的工厂才 `new VersionDCmd()` 创建命令实例，调它的 `execute()` 执行，执行完就析构。工厂对象从 management_init 到 JVM 退出一直存活在链表里。
+
+```
+management_init 阶段（注册时，创建工厂）：
+  new DCmdFactoryImpl<VersionDCmd>(...)   ← 创建工厂对象，插入链表
+  new DCmdFactoryImpl<ThreadDumpDCmd>(...)
+  new DCmdFactoryImpl<NMTDCmd>(...)
+  ... 共 42 个工厂对象
+  （不创建 VersionDCmd/ThreadDumpDCmd/NMTDCmd 命令实例）
+
+运行时（用户执行 jcmd VM.version）：
+  DCmdFactory::factory() 遍历链表找到 DCmdFactoryImpl<VersionDCmd>
+    → factory->create_resource_instance() → new VersionDCmd()  ← 按需创建命令实例
+      → VersionDCmd::execute()  ← 命令执行
+        → 执行完，命令实例析构
+  （工厂对象继续留在链表里，下次再创建新命令实例）
+```
+
 ### 两条通道的关系
 
 management_init 注册的两类东西（PerfData 计数器 + DCmd/能力位）分别服务两条不同的数据通道：
