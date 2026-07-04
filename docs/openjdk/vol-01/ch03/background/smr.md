@@ -179,6 +179,8 @@ JavaThread *const thread_at(uint i) const { return _threads[i]; }
 
 遍历 ThreadsList 时使用的是**数组下标 `_threads[i]`**（O(1) 随机访问），不是链表式的 `cur = cur->next()`。构造函数中 `NEW_C_HEAP_ARRAY(JavaThread*, entries + 1, mtThread)` 分配的是堆数组——`NEW_C_HEAP_ARRAY` 是 HotSpot 的堆数组分配宏，产生一块连续内存。ThreadsList 的核心能力正是 **O(1) 下标定位**，这是它区别于 `_thread_list` 链表的本质特征。
 
+> **图例约定**：下文所有状态图的 `_threads` 数组中，末尾始终有一个 NULL 哨兵（即使未显式标出）。例如 `[T1, T2, T3]` 表示实际数组为 `[T1, T2, T3, NULL]`（分配 `_length + 1` 个元素）。在细节展开处会显式标注 NULL 以强调其存在。
+
 ### 3.4 三层调用链：从入口往下看
 
 CoW 的搜索入口在 `Threads::add()`（`thread.cpp:4456-4486`）：
@@ -203,6 +205,10 @@ void Threads::add(JavaThread* p, bool force_daemon) {
 
 **第 2 层 — `ThreadsSMRSupport::add_thread()`：调度 CoW 三步**
 
+先看函数的完整三行，然后用具体例子逐行展示每一步后各数据结构的状态。
+
+假设当前状态：`_java_thread_list` 指向 `ThreadsList(v3) { _threads → [T1, T2] }`，`_to_delete_list == NULL`。新线程 T3 调用 `add_thread(T3)`。
+
 ```cpp
 void ThreadsSMRSupport::add_thread(JavaThread *thread) {
   ThreadsList *new_list = ThreadsList::add_thread(get_java_thread_list(), thread);  // ① 建新快照
@@ -211,9 +217,389 @@ void ThreadsSMRSupport::add_thread(JavaThread *thread) {
 }
 ```
 
-`xchg_java_thread_list()` 内部是 `Atomic::xchg(new_list, &_java_thread_list)`（`threadSMR.cpp:159-161`）——写者替换全局指针的唯一代码路径。新读者从此看到 v4，老读者手里的 v3 不受影响。
+**行 ① 执行后**——`get_java_thread_list()` 返回当前全局快照指针 `v3`。第三层的 `ThreadsList::add_thread(v3, T3)` 分配新 `ThreadsList(v4)` 并全量 memcpy v3 内容再尾追加 T3。`new_list` 指向 v4，但全局指针还没变：
 
-`free_list()` 不直接在此时 delete v3——它先检查有没有读者的 hazard ptr 还指着 v3。这引出了下文的 Hazard Pointer 机制。
+```
+new_list (= v4):  ThreadsList(v4) { _length = 3, _threads → [T1, T2, T3] }
+                                                ↑ 堆上新分配的数组
+_java_thread_list  →  ThreadsList(v3) { _length = 2, _threads → [T1, T2] }
+                                                ↑ 全局指针没变，v3 还在原位
+_to_delete_list    == NULL
+```
+
+**行 ② 执行后**——`xchg_java_thread_list(new_list)`（`threadSMR.cpp:159-161`）做的事：
+
+```cpp
+inline ThreadsList* ThreadsSMRSupport::xchg_java_thread_list(ThreadsList* new_list) {
+  return (ThreadsList*)Atomic::xchg(new_list, &_java_thread_list);
+}
+```
+
+`Atomic::xchg(new_list, &_java_thread_list)` 是原子替换：把 `new_list`（v4）写入 `_java_thread_list`，返回旧值（v3）。`old_list` 拿到 v3，此后 v3 不再被全局指针引用：
+
+```
+old_list (= v3):  ThreadsList(v3) { _length = 2, _threads → [T1, T2] }
+                                                ↑ 已脱离全局指针，挂在 old_list 局部变量上
+_java_thread_list  →  ThreadsList(v4) { _length = 3, _threads → [T1, T2, T3] }
+                                                ↑ 新读者拿到的就是这个
+_to_delete_list    == NULL  （v3 还没排队）
+```
+
+**行 ③ 执行后**——`free_list(old_list)`（`threadSMR.cpp:779-845`）做两件事：
+
+*第一件事：头插入 `_to_delete_list`。* 把 v3 挂入待删除链表：
+
+```cpp
+// free_list() 的第一部分（threadSMR.cpp:782-783）
+threads->set_next_list(_to_delete_list);   // v3._next_list = NULL
+_to_delete_list = threads;                 // 头插 v3
+```
+
+*第二件事：扫描整条 `_to_delete_list`，能删的当场删。* `free_list()` 调用后不会立刻 `return`——它会接着收集所有线程的 `_threads_hazard_ptr` 到哈希表，然后遍历 `_to_delete_list` 链表：对每个 `ThreadsList`，如果它**不在哈希表中**且 `_nested_handle_cnt == 0`，当场 `delete` 它；如果在表中有引用——留在链表里，等下次 add/remove 再试。
+
+如果此时没有读者的 hazard ptr 指着 v3，v3 当场被 delete；如果有读者正在遍历 v3（hazard ptr 指着它），v3 留在 `_to_delete_list` 中：
+
+```
+情况一：没有 hazard ptr 指着 v3
+  → v3 被 free_list() 扫描到，当场 delete
+  → _to_delete_list == NULL
+
+情况二：有读者（如 GC）的 _threads_hazard_ptr == v3
+  → v3 留在 _to_delete_list 中
+  → _to_delete_list  → ThreadsList(v3) → NULL
+  → 等到下次 add/remove 再次触发 free_list 扫描时，若仍无人引用，再 delete
+```
+
+**三行代码对应的结构变化总结**：
+
+```
+add_thread(T3) 调用前:
+  _java_thread_list  →  ThreadsList(v3) { [T1, T2] }
+  _to_delete_list    == NULL
+
+行① 建新快照后:
+  new_list  →  ThreadsList(v4) { [T1, T2, T3] }
+  _java_thread_list  →  ThreadsList(v3) { [T1, T2] }    ← 未变
+
+行② 原子替换后:
+  old_list  →  ThreadsList(v3) { [T1, T2] }           ← 脱离全局
+  _java_thread_list  →  ThreadsList(v4) { [T1, T2, T3] }  ← 生效
+
+行③ 回收后:
+  _java_thread_list  →  ThreadsList(v4) { [T1, T2, T3] }
+  _to_delete_list    →  ThreadsList(v3) （如果没有 hazard ptr 指着）→ delete
+                   或 →  ThreadsList(v3) （如果有 hazard ptr 指着）→ 留在链表等
+```
+
+#### `free_list()` 详解
+
+`free_list()`（`threadSMR.cpp:779-845`）不是简单地把旧快照挂到队列里——它有五段逻辑，每一段有明确的职责。
+
+**第一段：头插入 `_to_delete_list`**（第 782-789 行）
+
+```cpp
+void ThreadsSMRSupport::free_list(ThreadsList* threads) {
+  assert_locked_or_safepoint(Threads_lock);       // 必须已持锁或在 safepoint 中
+
+  threads->set_next_list(_to_delete_list);         // threads._next_list = 原链表头
+  _to_delete_list = threads;                       // 新头 = threads
+```
+
+`_to_delete_list` 是一条通过 `ThreadsList._next_list` 串起来的单链表。头插入意味着最新脱离全局的快照在最前面。`set_next_list` 把旧链表头挂在 `threads` 后面，然后全局头指针指向 `threads`。
+
+此时 `_to_delete_list` 是一条 **ThreadsList 的链表**，不是 JavaThread 的链表。每个节点是一个完整的快照容器。
+
+**第二段：计算哈希表大小**（第 791-799 行）
+
+```cpp
+  // Hash table size = first power of two >= 2 * MIN(current_thread_count, 32)
+  int hash_table_size = MIN2((int)get_java_thread_list()->length(), 32) << 1;
+  hash_table_size--;
+  hash_table_size |= hash_table_size >> 1;
+  hash_table_size |= hash_table_size >> 2;
+  hash_table_size |= hash_table_size >> 4;
+  hash_table_size |= hash_table_size >> 8;
+  hash_table_size |= hash_table_size >> 16;
+  hash_table_size++;
+```
+
+这段位操作是在求**大于等于 `(value * 2)` 的最小 2 的幂**。例如当前线程数 3 → `3*2 - 1 = 5` → 位扩展 → `7 + 1 = 8`。上限是 `32 * 2 = 64`。2 的幂方便哈希表取模。
+
+**第三段：收集所有线程的 hazard ptr**（第 801-806 行）
+
+```cpp
+  ThreadScanHashtable *scan_table = new ThreadScanHashtable(hash_table_size);
+  ScanHazardPtrGatherThreadsListClosure scan_cl(scan_table);
+  threads_do(&scan_cl);                             // 遍历所有 JavaThread
+  OrderAccess::acquire();                           // 内存屏障
+```
+
+`threads_do(&scan_cl)` 走的是 `_java_thread_list->thread_at(i)` 遍历，对每个 JavaThread 调用 `scan_cl.do_thread(thread)`。`ScanHazardPtrGatherThreadsListClosure`（`threadSMR.cpp:282-306`）的工作：
+
+```
+do_thread(thread):
+  ① threads = thread->get_threads_hazard_ptr()      // load_acquire 读 hazard ptr
+  ② if (threads == NULL) return;                    // 没贴标签 → 跳过
+  ③ threads = Thread::untag_hazard_ptr(threads);    // 去掉 tag bit（即使 tagged 也收集）
+  ④ if (!scan_table->has_entry(threads))
+       scan_table->add_entry(threads);               // 指针本身加入哈希表
+```
+
+注意第 ③ 步——即使读者的标签带 tag bit（未验证），`free_list` 也照收不误。原因在注释中写了（`threadSMR.cpp:297-301`）：「如果我们碰巧收集了一个随后被丢弃的未验证标签，唯一的副作用是把待回收的 ThreadsList 多保留一会儿」。保守处理，安全优先。
+
+`OrderAccess::acquire()` 在第 805 行——保证这里读到的所有 hazard ptr 的可见性，排在后续读 `_nested_handle_cnt` 之前。内存序上确保"hazard ptr 的读"先于"引用计数检查"。
+
+**第四段：遍历 `_to_delete_list` 链表，释放无人引用的快照**（第 808-836 行）
+
+```cpp
+  ThreadsList* current = _to_delete_list;
+  ThreadsList* prev = NULL;
+  ThreadsList* next = NULL;
+  bool threads_is_freed = false;
+
+  while (current != NULL) {
+    next = current->next_list();
+    if (!scan_table->has_entry((void*)current) && current->_nested_handle_cnt == 0) {
+      // 两个条件同时满足才能删：
+      //   ① 不在 hazard ptr 哈希表中（没有读者贴着标签保护它）
+      //   ② _nested_handle_cnt == 0（没有嵌套遍历的引用计数保护它）
+
+      if (prev != NULL) {
+        prev->set_next_list(next);           // 从链表中摘除 current
+      }
+      if (_to_delete_list == current) {
+        _to_delete_list = next;              // 如果删除的是表头，更新表头
+      }
+
+      if (current == threads) threads_is_freed = true;
+      delete current;                         // 释放 ThreadsList 对象
+    } else {
+      prev = current;                         // 不删 → 保留在链表中
+    }
+    current = next;
+  }
+```
+
+这段是核心——遍历整条 `_to_delete_list` 链表，对每个 ThreadsList 做两个检查：
+
+- **条件 ①** `!scan_table->has_entry(current)`：当前快照不在哈希表中 = 没有任何线程的 hazard ptr 指着它
+- **条件 ②** `current->_nested_handle_cnt == 0`：没有嵌套引用计数（第 7 节详述）
+
+两个条件**同时**满足 → 从链表中摘除并 `delete`。任一不满足 → 留在链表中，等下次 `free_list` 调用再检查。
+
+`threads_is_freed` 变量跟踪参数 `threads` 是否被成功删除——它只用于 debug 日志，不影响逻辑。
+
+**第五段：清理**（第 838-845 行）
+
+```cpp
+  if (!threads_is_freed) {
+    log_debug(thread, smr)("...threads=" INTPTR_FORMAT " is not freed.", p2i(threads));
+  }
+  delete scan_table;
+}
+```
+
+如果参数 `threads` 没能成功回收（有 hazard ptr 指着它），打一条 debug 日志。然后删除哈希表——它只在这次 `free_list` 调用期间存活。
+
+**为什么扫描的是 `_to_delete_list` 整条链，而不只是刚挂入的 `threads`？** 因为之前的 `_to_delete_list` 节点可能当时有 hazard ptr 引用，现在释放了——这次扫描是"机会主义清理"：每次 add/remove 触发 `free_list` 时，顺手把整条链上能删的全删了。
+
+---
+
+下面走两个完整的例子——一个从空集起步（JVM 启动），一个在已有线程之上追加（运行时）。
+
+### 例子一：JVM 启动——第一个线程加入
+
+**初始状态**——`Threads::create_vm()` 创建主线程之前。源码证据（`threadSMR.cpp:75`）：
+
+```cpp
+// threadSMR.cpp:75 — 静态初始化器，在 JVM 加载 .so 时执行
+ThreadsList* volatile ThreadsSMRSupport::_java_thread_list = new ThreadsList(0);
+```
+
+`_thread_list` 是 `static JavaThread*`，POD 类型默认初始化为 NULL。两者初始状态：
+
+```
+Threads::_thread_list       == NULL         ← 标准链表为空（POD 默认 NULL）
+ThreadsSMRSupport::
+_java_thread_list           → ThreadsList(0) { _length = 0, _threads → [NULL哨兵] }
+                              ↑ threadSMR.cpp:75 — new ThreadsList(0)，不是 NULL
+_to_delete_list             == NULL
+```
+
+**Step 1 — `Threads::add(main_thread)`**。在 `Threads::create_vm()` 中（`thread.cpp:3862-3864`）显式持锁调用：
+
+```cpp
+{ MutexLocker mu(Threads_lock);         // 主线程在 create_vm() 中持 Threads_lock
+  Threads::add(main_thread);            // thread.cpp:3863, 本文第 3.4 节详述
+}
+```
+
+`Threads::add()`（`thread.cpp:4458-4488`）内部先头插入标准链表，末尾调用 `ThreadsSMRSupport::add_thread(p)`：
+
+```cpp
+void Threads::add(JavaThread* p, bool force_daemon) {
+  assert(Threads_lock->owned_by_self(), "must have threads lock");    // thread.cpp:4460
+  p->set_next(_thread_list);
+  _thread_list = p;                    // 头插入标准链表
+  p->set_on_thread_list();
+  _number_of_threads++;
+  // ...
+  ThreadsSMRSupport::add_thread(p);    // thread.cpp:4484 — 进入 SMR 第二层
+}
+```
+
+执行完头插入后：
+
+```
+_thread_list → JavaThread(main) → NULL
+                  ↑ 头插法，main_thread 成为链表的第一个节点
+_number_of_threads = 1
+```
+
+**Step 2 — `ThreadsSMRSupport::add_thread(main_thread)`**。进入 SMR 的第二层：
+
+```
+① get_java_thread_list() → ThreadsList(0)     ← 当前空快照
+② ThreadsList::add_thread(ThreadsList(0), main_thread):
+     - new ThreadsList(0 + 1)                 ← 分配 v1，长度 1
+     - 因为 v0._length = 0，跳过 memcpy        ← 无内容可拷贝
+     - v1._threads[0] = main_thread
+     - return v1
+   → new_list 指向 ThreadsList(v1)
+```
+
+此时关键状态：
+
+```
+new_list (= v1):  ThreadsList(v1) { _length = 1, _threads → [main_thread, NULL] }
+                                        ↑ NEW_C_HEAP_ARRAY(JavaThread*, 2, mtThread)
+                                        ↑ _length = 1，实际数组 2 个元素，末尾是 NULL 哨兵
+_java_thread_list  →  ThreadsList(v0) { _length = 0, _threads → [NULL] }
+                                        ↑ 全局指针尚未替换
+_to_delete_list    == NULL
+```
+
+```
+③ xchg_java_thread_list(v1):
+     Atomic::xchg(v1, &_java_thread_list) → 返回旧值 v0
+   → old_list = v0
+   
+   替换后:
+     _java_thread_list  →  ThreadsList(v1) { [main_thread, NULL] }
+     old_list (= v0):     ThreadsList(v0) { [NULL] }    ← 脱离全局
+     _to_delete_list      == NULL    （v0 还没进入回收流程）
+```
+
+```
+④ free_list(v0):
+     - v0.set_next_list(NULL) → _to_delete_list = v0    ← 头插入待删除链
+     - scan_table 扫描所有 _threads_hazard_ptr → 全部 NULL（没有读者）
+     - 遍历 _to_delete_list: v0 不在 hash_table 中 → delete v0
+     - _to_delete_list 回到 NULL
+```
+
+**最终状态**：
+
+```
+Threads::_thread_list       → JavaThread(main) → NULL      ← 标准链表
+ThreadsSMRSupport::
+_java_thread_list           → ThreadsList(v1) { [main_thread] }  ← 全局快照
+_to_delete_list             == NULL                 ← 空快照 v0 已被 delete
+```
+
+首个线程入列后，SMR 协议正式运转。后续所有 add/remove 都在已有快照基础上重建。
+
+---
+
+### 例子二：运行时追加——第三个线程加入
+
+**初始状态**。已有 T1、T2 两个线程在跑：
+
+```
+Threads::_thread_list       → JavaThread(T2) → JavaThread(T1) → NULL
+                                ↑ T2._next → T1, T1._next → NULL
+
+ThreadsSMRSupport::
+_java_thread_list           → ThreadsList(v3) { _length = 2, _threads → [T2, T1] }
+_to_delete_list             == NULL
+```
+
+**Step 1 — `Threads::add(T3)`**（持 `Threads_lock`）。头插入：
+
+```
+_thread_list → JavaThread(T3) → JavaThread(T2) → JavaThread(T1) → NULL
+                  ↑ 新节点插在头部
+_number_of_threads = 3
+```
+
+**Step 2 — `ThreadsSMRSupport::add_thread(T3)`**：
+
+```
+① get_java_thread_list() → ThreadsList(v3) { [T2, T1] }
+② ThreadsList::add_thread(v3, T3):
+     - new ThreadsList(2 + 1)             ← 分配 v4，长度 3
+     - Copy::disjoint_words(v3._threads, v4._threads, 2)    ← 全量 memcpy
+     - v4._threads[2] = T3                 ← 尾追加
+     - return v4
+   → new_list 指向 ThreadsList(v4)
+```
+
+此时状态：
+
+```
+new_list (= v4):  ThreadsList(v4) { _length = 3, _threads → [T2, T1, T3] }
+                                            ↑ 堆上新分配的数组（和 v3 是两块内存）
+_java_thread_list  →  ThreadsList(v3) { _length = 2, _threads → [T2, T1] }
+                                            ↑ 全局指针尚未替换
+_to_delete_list    == NULL
+```
+
+```
+③ xchg_java_thread_list(v4):
+     Atomic::xchg(v4, &_java_thread_list) → 返回旧值 v3
+   → old_list = v3
+   
+   替换后:
+     _java_thread_list  →  ThreadsList(v4) { [T2, T1, T3] }  ← 全局生效
+     old_list (= v3):     ThreadsList(v3) { [T2, T1] }        ← 脱离全局
+     _to_delete_list      == NULL
+```
+
+```
+④ free_list(v3):
+     - scan_table 扫描所有 _threads_hazard_ptr:
+       · 情况 A: 全部 NULL → v3 不在 hash_table 中
+           → _to_delete_list 先头插入 v3
+           → 扫描到 v3: 不在表中 → delete v3
+           → _to_delete_list 回到 NULL
+       · 情况 B: GC._threads_hazard_ptr == v3（有读者正在遍历 v3）
+           → v3 在 hash_table 中
+           → _to_delete_list 头插入 v3
+           → 扫描到 v3: 在表中 → 跳过，留在链表中
+           → _to_delete_list → ThreadsList(v3) → NULL
+           → 等下次 add/remove 触发 free_list 时再扫描
+```
+
+**最终状态（情况 A，无人引用 v3）**：
+
+```
+Threads::_thread_list       → T3 → T2 → T1 → NULL            ← 标准链表
+ThreadsSMRSupport::
+_java_thread_list           → ThreadsList(v4) { [T2, T1, T3] }  ← 全局快照
+_to_delete_list             == NULL                    ← v3 已被 delete
+```
+
+**最终状态（情况 B，GC 正在读 v3）**：
+
+```
+Threads::_thread_list       → T3 → T2 → T1 → NULL            ← 标准链表
+ThreadsSMRSupport::
+_java_thread_list           → ThreadsList(v4) { [T2, T1, T3] }  ← 全局快照
+_to_delete_list             → ThreadsList(v3) → NULL           ← v3 排队等
+GC._threads_hazard_ptr      == v3                ← 读者还在保护它
+```
+
+> 不管哪种情况，`_java_thread_list` 已经指向 v4。新读者都拿到包含 T3 的 v4；旧读者手里的 v3 独立于全局指针，不受影响。
 
 **第 3 层 — `ThreadsList::add_thread()`：纯 Copy 操作**
 
