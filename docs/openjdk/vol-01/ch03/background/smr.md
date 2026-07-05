@@ -295,7 +295,7 @@ ThreadsSMRSupport::add_thread(T3):
   ③ xchg: _java_thread_list 从 v3 变为 v4，old_list = v3
   ④ free_list(v3):
        扫描所有 hazard ptr → 全部 NULL → v3 当场 delete
-       或: GC._threads_hazard_ptr == v3 → v3 留在 _to_delete_list 中排队
+       或: VMThread._threads_hazard_ptr == v3 → v3 留在 _to_delete_list 中排队
 
 最终状态（无人引用）：
   _thread_list       → T3 → T2 → T1 → NULL
@@ -306,7 +306,7 @@ ThreadsSMRSupport::add_thread(T3):
   _thread_list       → T3 → T2 → T1 → NULL
   _java_thread_list  → ThreadsList(v4) { [T2, T1, T3, NULL] }
   _to_delete_list    → ThreadsList(v3) { [T2, T1, NULL] }
-  GC._threads_hazard_ptr == v3
+  VMThread._threads_hazard_ptr == v3
 ```
 
 ### 3.6 CoW 留下了什么问题
@@ -325,18 +325,30 @@ ThreadsSMRSupport::add_thread(T3):
 
 **设计思路**：读者在使用快照前，先在某个写者能扫描到的公共位置贴一个标签。标签内容 = 正在使用的 `ThreadsList*` 指针。写者删除前扫描所有标签——没看到自己要删的快照 → 安全；看到了 → 等待。
 
-这个公共标签就是每个 `JavaThread` 对象上的 `_threads_hazard_ptr` 字段（`thread.hpp:157`，`ThreadsList* volatile`）。值为 NULL（空闲）或指向某个 ThreadsList 快照（受保护）。**hazard ptr 保护的是整个 ThreadsList，不是单个 JavaThread**——只要有人指着 v3，v3 上全部线程都不能删。
+这个公共标签就是每个线程对象上的 `_threads_hazard_ptr` 字段（`thread.hpp:157`，`ThreadsList* volatile`，`Thread` 基类定义——所有线程包括 `JavaThread`、`VMThread`、`NonJavaThread` 都继承此字段）。值为 NULL（空闲）或指向某个 ThreadsList 快照（受保护）。**hazard ptr 保护的是整个 ThreadsList，不是单个 JavaThread**——只要有人指着 v3，v3 上全部线程都不能删。
 
-先讨论没有并发冲突的理想情况——读者已经把标签贴好了，写者才开始扫描。
+先讨论没有并发冲突的理想情况——读者已经把标签贴好了，写者才开始扫描。此时有 T1、T2 两个活跃线程，以及执行 GC 扫描的 **VMThread**——它继承 `Thread`，拥有 `_threads_hazard_ptr` 字段。
 
-**初始状态**：两个活跃线程 T1、T2。`_java_thread_list → v3 { [T2, T1, NULL] }`。所有 `_threads_hazard_ptr == NULL`。
-
-**Step A — GC（读者）贴标签**：
+读者不必手动操作 `_threads_hazard_ptr`——`ThreadsListHandle`（第 4.1.1 小节）帮你完成了这一切。声明 `ThreadsListHandle tlh;` 时，构造过程自动做了两件事：
 
 ```
-GC._threads_hazard_ptr = v3
-  // 公开声明："我正在遍历 v3 快照，v3 上全部 JavaThread(T2, T1) 都别删"
+① 拿到当前全局快照：v3 = get_java_thread_list()
+                      // → _java_thread_list 此刻指向 ThreadsList(v3) { [T2, T1, NULL] }
+② 把 v3 写入当前线程的 _threads_hazard_ptr（release_store_fence 保证多核可见）：
+   _thread->set_threads_hazard_ptr(v3)
+   // _thread = Thread::current() = VMThread 自己
+   // 效果：VMThread._threads_hazard_ptr = v3
 ```
+
+> **为什么这里省略了 tag/untag 两步？** 因为本节讨论的是"没有并发冲突"的理想情况——写者在读者贴完标签之后才扫描。tag/untag （最低 bit 标记"未验证/已验证"状态）是专门对付第 4.2 节并发窗口的机制。在理想场景下，读者贴上的标签写者一定能看到——不需要"预报"和"确认"这两个阶段。这里的 ② 是简化版——第 5 节会展开完整的四步流程。
+
+**初始状态**：`_java_thread_list → v3 { [T2, T1, NULL] }`。所有线程的 `_threads_hazard_ptr == NULL`。
+
+**Step A — VMThread（读者）通过 `ThreadsListHandle` 贴标签**：
+
+VMThread 声明 `ThreadsListHandle tlh;` → 上述两步自动执行。标签贴在了 VMThread 自己的 `_threads_hazard_ptr` 字段上——VMThread 在说："我正在用 v3 这个快照，上面的线程都别删。"
+
+此时 VMThread 拿到的是 `_list = v3`，后续遍历时走 `v3->thread_at(i)`——无锁，与全局指针再无关系。
 
 **Step B — T2 退出，写者从两个列表移除 T2**。JavaThread(T2) 对象尚未 delete——只做了"从列表移除"。
 
@@ -349,8 +361,8 @@ T2 退出路径（`Threads::remove(T2)`，持 `Threads_lock`）：
 _thread_list       → T1 → NULL
 _java_thread_list  → v4 { [T1, NULL] }
 _to_delete_list    → v3 { [T2, T1, NULL] }    ← v3 在这排队，T2 还在 v3 里
-GC._threads_hazard_ptr     == v3              ← 指着 v3
-T1._threads_hazard_ptr     == NULL
+VMThread._threads_hazard_ptr  == v3           ← 指着 v3
+T1._threads_hazard_ptr        == NULL
 ```
 
 **Step C — 写者调用 `smr_delete(T2)`，扫描决定能否 delete**。
@@ -359,8 +371,8 @@ T1._threads_hazard_ptr     == NULL
 
 ```
 扫描过程：
-  T1: _threads_hazard_ptr == NULL
-  GC: _threads_hazard_ptr == v3  ← 指着 v3
+  T1:       _threads_hazard_ptr == NULL
+  VMThread: _threads_hazard_ptr == v3  ← 指着 v3
   ↓
   收集 v3 快照上的所有 JavaThread → {T1, T2} → 结论：T2 在受保护集合中
 ```
@@ -370,7 +382,7 @@ T1._threads_hazard_ptr     == NULL
 **Step E — 读者读完，摘标签，通知写者**：
 
 ```
-GC._threads_hazard_ptr = NULL               // 摘标签——不再保护 v3
+VMThread._threads_hazard_ptr = NULL               // 摘标签——不再保护 v3
 release_stable_list_wake_up() → notify_all   // 唤醒等待者
 ```
 
@@ -400,65 +412,72 @@ while (is_a_protected_JavaThread(T2)) {       // 扫描所有 hazard ptr
 delete T2;                                     // 安全删除
 ```
 
-#### 读者端工具类
+#### 读者端工具
 
-读者不直接操作 `_threads_hazard_ptr` 字段——HotSpot 提供了三个层次的封装：
-
-**第一层：`SafeThreadsListPtr`**（`threadSMR.hpp:201-252`）——协议的抽象载体。构造时若 `acquire=true` 则走 tag/untag fast path 获取受保护快照，析构时调用 `release_stable_list()` 释放。持有期间 `_list` 字段指向受保护的 `ThreadsList*`。`_previous` 字段形成嵌套链栈顶（第 6 节详述）。
-
-**第二层：两个具体使用模式**：
-
-| 子类 | 构造行为 | 使用场景 |
-|------|---------|---------|
-| `ThreadsListHandle`（`threadSMR.hpp:272-298`） | 构造时自动 acquire | GC 根扫描、JVMTI 线程枚举——同一个函数内获取、遍历、释放 |
-| `ThreadsListSetter`（`threadSMR.hpp:258-267`） | 构造时 `acquire=false`，手动 `set()` | thread dump（`ThreadDumpResult`）、死锁检测（`VM_FindDeadlocks`）——跨多个方法传递，延后决定何时获取 |
-
-`ThreadsListSetter` 的存在是为了解决"想先初始化容器，后按需获取保护"的模式——比如 thread dump 可能需要先收集所有线程的 `ThreadSnapshot`，再决定是否保护它们。
-
-**第三层：遍历迭代器**——读者通过两个内联的遍历工具使用 `ThreadsList` 快照：
-
-- `JavaThreadIterator`（`threadSMR.hpp:308-336`）：显式 `first()` / `next()` 遍历指定 `ThreadsList`
-- `JavaThreadIteratorWithHandle`（`threadSMR.hpp:346-371`）：`ThreadsListHandle` + `JavaThreadIterator` 合一，GC 最常用的形式：
+读者不需要手动操作 `_threads_hazard_ptr`。HotSpot 提供了 `ThreadsListHandle`——一个栈上的 RAII 对象，构造时自动获取受保护的快照，析构时自动释放：
 
 ```cpp
-// GC 线程遍历的典型写法
-for (JavaThreadIteratorWithHandle jtiwh;
-     JavaThread *jt = jtiwh.next(); ) {
-  // jt 受 jtiwh 内部的 ThreadsListHandle 保护
+// 读者只需声明这个变量，构造过程自动完成"贴标签→验证→使用→摘标签"
+ThreadsListHandle tlh;                     // 构造 = acquire_stable_list()
+for (int i = 0; i < tlh.list()->length(); i++) {
+  JavaThread *jt = tlh.list()->thread_at(i);  // jt 受保护
 }
+// tlh 析构 = release_stable_list() → 摘标签 + 必要时 notify 等待中的写者
 ```
 
-另外，`acquire_stable_list_fast_path()` 末尾有一行 `verify_hazard_ptr_scanned()`（`threadSMR.cpp:247-280`）——在 debug 模式下验证当前线程的 hazard ptr 确实可见于其他线程的扫描路径，防御性检查确保协议正确性。
+`ThreadsListHandle` 内部持有一个 `SafeThreadsListPtr`（`threadSMR.hpp:201`）——`acquire=true` 时走 fast path（或嵌套路径），`_list` 字段指向受保护的 `ThreadsList*`，`_needs_release` 标记是否需要析构时释放。
+
+还有一种延迟获取的模式：`ThreadsListSetter`（`threadSMR.hpp:258`）——构造时 `acquire=false`，由调用者后续手动 `set()`。用于 thread dump（`ThreadDumpResult`）等需要"先初始化容器、后决定何时获取保护"的场景。
 
 ### 4.2 并发窗口——贴标签和扫描之间有缝隙
 
-4.1 节假设读者**先**贴标签、写者**后**扫描。但现实中两者并发运行——读者不持锁，写者随时可能扫描。
+4.1 节假设读者**先**贴标签、T2 **后**执行退出流程。但现实中两者并发运行——VMThread 不持锁，T2 的退出流程随时可能触发扫描。
 
-**概念过渡**：读者"拿快照"和"贴标签"是两个独立操作，中间有一个缝隙。如果写者在这个缝隙里完成了全部扫描——写者认为无人保护 → delete 目标线程 → 读者随后贴标签指向已释放内存 → 野指针。
+**退出流程是谁执行的？** 当 T2 决定退出，它自己走完整个退出路径（`JavaThread::run()` 末尾，`thread.cpp:1876-1877`）：
+
+```
+T2 自身的调用栈：
+  JavaThread::run()
+    → this->exit(false)            // 内部调 Threads::remove(this)
+       → Threads::remove(this)     // 从 _thread_list 摘除 T2，CoW 建 v4
+    → this->smr_delete()           // 紧接着：
+       → ThreadsSMRSupport::smr_delete(this)
+          → is_a_protected_JavaThread(this)  // 扫描所有线程的 hazard ptr
+          → 如果无人保护 → delete this       // T2 把自己 delete 掉
+          → 如果有人保护 → wait(delete_lock) // 等读者释放标签
+```
+
+**T2 自己执行了"移除→扫描→删除"的全流程。** 它不是被某个"写者"删除——它是自己决定退出，自己把自己从列表移除，自己扫描是否还有人在用它，然后自己把自己 delete。
 
 下面展示这个竞态条件的完整时序：
 
 ```
-时刻  GC（读者，无锁）                   T2（写者，持 Threads_lock）
-────  ───────────────────────────────  ─────────────────────────────────
-t1    list = get_java_thread_list()     ← 拿到 v3 指针，但还没贴标签
-t2                                       Threads::remove(T2) → CoW 建 v4
+时刻  VMThread（读者，无锁）               T2（正退出，持 Threads_lock 执行 remove+smr_delete）
+────  ───────────────────────────────  ───────────────────────────────────────────────
+t1    list = get_java_thread_list()     ← 拿到 v3 快照指针，但还没贴标签
+                                           此时 v3._threads = [T2, T1, NULL]
+
+t2                                       T2 在 Threads::remove(this) 中：
+                                            从 _thread_list 摘除 T2，CoW 建 v4 = { [T1, NULL] }
 t3                                       Atomic::xchg → _java_thread_list = v4
-t4                                       smr_delete(T2): 开始扫描
-t5                                         scan GC._threads_hazard_ptr
-t6                                         → NULL （还没贴！）
-t7                                       扫描结束：全 NULL → 无人保护
-t8                                       delete T2 ← T2 已释放！
-t9    _threads_hazard_ptr = list       ← 贴上标签，但 list=v3，T2 已 delete
-t10   list->thread_at(1) 是 T2        ← 野指针！
+                                           主列表的快照不再包含 T2
+
+t4                                       T2 开始 smr_delete(this)：
+t5                                         is_a_protected_JavaThread(T2) → 扫描所有 hazard ptr
+t6                                         scan VMThread._threads_hazard_ptr → NULL（还没贴！）
+t7                                       扫描结束：全 NULL → 结论：T2 不受保护
+t8                                       delete this  ← T2 把自己 delete 了！
+
+t9    _threads_hazard_ptr = v3          ← VMThread 贴上标签，但 list=v3 里 T2 已释放
+t10   list->thread_at(1) 是 T2          ← 野指针！VMThread 崩溃
 ```
 
-**根本原因**：读端的"拿快照"和"贴标签"是两步。写端在这个窗口里完成了全部删除。
+**根本原因**：VMThread 的"拿快照"（t1）和"贴标签"（t9）是两步，中间有一个缝隙。T2 的退出流程在这个缝隙里完整执行——CoW 建新快照（t2-t3）、扫描无人保护（t4-t7）、delete 自己（t8）。等 VMThread 贴上标签时，T2 已经没了。
 
 **为什么简单解法不奏效**：
-- 加内存屏障？不行。问题不在 CPU 核心间可见性，而在语义层面：标签贴在已过时的快照上没意义。
-- 持锁再贴标签？回到方案一——读者阻塞写者。
-- 先贴 NULL → 拿快照 → 贴快照？仍是两步，窗口依然在。
+- 加内存屏障？不行。问题不在 CPU 核心间可见性——T2 确实在 t8 之前就完成了扫描。屏障只保证 VMThread 贴标签后能被看到，不解决"贴之前 T2 已经 delete"。
+- VMThread 持锁再贴标签？那又回到方案一——读者阻塞写者，GC 拿 Threads_lock 几百微秒，T2 无法退出。
+- VMThread 先贴 NULL → 拿快照 → 贴快照？仍是两步——贴 NULL 和贴快照之间同样有窗口。
 
 **解决方向**：读者贴标签后需要**验证**自己手里的快照是否仍然有效。如果发现快照已经过时（全局指针已变），就重试。
 
@@ -742,7 +761,7 @@ while (current != NULL) {
     从 _thread_list 摘除 → CoW 建新快照 v4 → free_list(v3) → v3 挂入 _to_delete_list
 
 ② T2 调用 smr_delete(T2)：
-    扫描发现 T2 在 GC.v3._threads 中 → T2 受保护 → wait
+    扫描发现 T2 在 VMThread.v3._threads 中 → T2 受保护 → wait
 
 ③ GC 完成遍历：
     _threads_hazard_ptr = NULL → notify_all

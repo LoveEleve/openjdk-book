@@ -182,7 +182,7 @@ ManagementFactory.getThreadMXBean().resetPeakThreadCount();     // 重置峰值
 
 ch03/05 的 `perfMemory_init` 创建了一个文件 `/tmp/hsperfdata_<user>/<pid>`（在 `tmpdir` 下，名字是 JVM 进程 PID），用 `mmap` 映射到 JVM 进程的虚拟地址空间。这个文件就是 PerfData 共享内存——JVM 往里写数据，外部工具 mmap 同一个文件读出来。
 
-![通道 A：PerfData 共享内存](assets/channel-a-perfdata.png)
+![alt text](image.png)
 
 **关键点**：通道 A 是**被动的**——JVM 往共享内存写完就完事，外部工具随时来读，**不需要 JVM 进程配合**。这就是 `jstat` 高频采样不卡 JVM 的原因。
 
@@ -584,7 +584,7 @@ void DCmdRegistrant::register_dcmds(){
 
 链表示意（头插法，最后注册的在链表头）：
 
-![DCmdFactory 链表结构](assets/dcmd-factory-list.png)
+
 
 因为头插法，链表顺序和注册顺序**相反**——`register_dcmds()` 第一行注册的 `HelpDCmd` 在链表尾，最后注册的 `DebugOnCmdStartDCmd` 在链表头；`management.cpp` 单独注册的 `NMTDCmd` 插在最前面。
 
