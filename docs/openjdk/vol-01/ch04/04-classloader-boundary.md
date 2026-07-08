@@ -157,7 +157,7 @@ ClassPathEntry (CHeapObj, 基类)
 在标准 JDK 11 上，`Arguments::get_sysclasspath()` 返回的第一段通常是：
 
 ```
-/usr/lib/jvm/java-11-openjdk/lib/modules
+/usr/lib/jvm/java-11-konajdk-11.0.31-1.tl4/lib/modules
 ```
 
 这是 jimage 文件——JDK 9+ 把所有核心类打包到一个 `lib/modules` 文件里（不是一堆 jar）。所以 `_jrt_entry` 是个 `ClassPathImageEntry`，从 jimage 里读 `java/lang/String.class` 等。
