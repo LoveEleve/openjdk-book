@@ -152,12 +152,15 @@ jdk11u-copy 是开发用的——改了某个 .java 文件，`make` 重新编译
 
 ### setup_boot_search_path 怎么处理这两种情况
 
-不管是目录还是 jimage 文件，`setup_boot_search_path()` 都用同一套逻辑处理——遍历搜索路径，对每个条目根据类型创建不同的 `ClassPathEntry` 子类（`classLoader.cpp:818`）：
+不管是目录还是 jimage 文件，`setup_boot_search_path()` 都用同一套逻辑处理——遍历搜索路径，对每个条目根据类型创建不同的 `ClassPathEntry` 子类（`classLoader.cpp:818`）。
+
+这里的 `class_path` 参数就是前面说的那个值——对于 jdk11u-copy 是 `/data/workspace/jdk11u-copy/build/linux-x86_64-normal-server-slowdebug/jdk/modules`，对于标准 JDK 是 `/usr/lib/jvm/java-11-konajdk/lib/modules`。
 
 ```cpp
 /* === src/hotspot/share/classfile/classLoader.cpp:818 === */
 
 void ClassLoader::setup_boot_search_path(const char *class_path) {
+  // class_path 的值就是前面说的那个路径
   // 遍历搜索路径里的每个条目（用路径分隔符 : 分隔）
   for (int start = 0; start < len; start = end) {
     // 找到下一个分隔符，提取这一段路径
