@@ -141,20 +141,26 @@ develop(bool, DelayCompilationDuringStartup, true,
 
 ### InvocationCounter 的 _counter 字段
 
-`InvocationCounter` 用一个 `unsigned int _counter` 同时编码计数和状态（`invocationCounter.hpp:44-45`）：
+`InvocationCounter` 用一个 32 位整数 `_counter` 同时存三样东西——方法调用次数、进位标志、状态：
 
 ```
-_counter（32 位）:  [count | carry | state]
-                    |31  3|   2   | 1 0 |
+_counter（32 位）:
+  bit 0-1: state（状态，2 位）
+  bit 2:  carry（进位标志，1 位）
+  bit 3-31: count（调用计数，29 位）
 ```
 
-| 区域 | 位数 | 含义 |
-|------|------|------|
-| count | 29 位（bit 3-31） | 方法调用计数 |
-| carry | 1 位（bit 2） | 进位标志——一旦设了就不清（sticky），表示计数器曾达到过大值 |
-| state | 2 位（bit 0-1） | 状态——`wait_for_nothing`(0) 或 `wait_for_compile`(1) |
+为什么要塞在一个 int 里？注释说"For space reasons"——因为 `InvocationCounter` 嵌在 `MethodCounters` 对象里，每个方法都有一个，省 1 个字段就省很多内存。
 
-`number_of_noncount_bits = 3`（carry 1 位 + state 2 位），所以 `count = _counter >> 3`。
+**state**（2 位）——就两个值：
+- `wait_for_nothing`（0）——不编译
+- `wait_for_compile`（1）——计数器溢出时触发编译
+
+**carry**（1 位）——进位标志，sticky 的——一旦设了就不清。什么时候设？方法计数器溢出（达到阈值）时调 `set_carry()`。为什么需要它？因为计数器溢出后会被衰减（减半），但 JVM 要记住"这个方法曾经热过"——carry=1 就是这个记忆。如果后来因为 RedefineClasses 等原因需要重新评估这个方法，carry=1 告诉 JVM"它曾经热过，可以重新编译"。
+
+**count**（29 位）——实际的方法调用计数。`count = _counter >> 3`——右移 3 位去掉低 3 位的 state 和 carry，只留计数部分。每次方法被调用，count 加 1（实际上加的是 `count_grain`，也就是 `1 << 3`，这样不会干扰低 3 位）。
+
+所以 `number_of_noncount_bits = 3`——低 3 位不是计数，是状态和 carry。阈值也要左移 3 位才能和 count 比较（因为 count 在高位）。
 
 ### 三个阈值
 
