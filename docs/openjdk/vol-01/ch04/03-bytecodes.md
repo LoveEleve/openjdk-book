@@ -242,26 +242,103 @@ void Bytecodes::def(Code code, const char* name, const char* format,
 - `j` = CP cache 索引，Java big-endian（未改写）
 - `J` = CP cache 索引，native 字节序（已改写）
 
-### 典型字节码的格式串
+### 所有格式串全览
 
-| 字节码 | 格式串 | 长度 | 含义 |
-|--------|--------|------|------|
-| `nop` | `"b"` | 1 | 仅操作码 |
-| `bipush` | `"bc"` | 2 | 操作码 + 1 字节常量 |
-| `sipush` | `"bcc"` | 3 | 操作码 + 2 字节常量 |
-| `ldc` | `"bk"` | 2 | 操作码 + 1 字节 CP 索引 |
-| `iload` | `"bi"` | 2 | 操作码 + 1 字节局部索引 |
-| `iload`（wide） | `"wbii"` | 4 | wide 前缀 + 操作码 + 2 字节局部索引 |
-| `ifeq` | `"boo"` | 3 | 操作码 + 2 字节偏移 |
-| `goto_w` | `"boooo"` | 5 | 操作码 + 4 字节偏移 |
-| `getfield` | `"bJJ"` | 3 | 操作码 + 2 字节 native CP cache 索引 |
-| `invokevirtual` | `"bJJ"` | 3 | 同上 |
-| `invokedynamic` | `"bJJJJ"` | 5 | 操作码 + 4 字节 native CP cache 索引 |
-| `new` | `"bkk"` | 3 | 操作码 + 2 字节 CP 索引 |
-| `tableswitch` | `""` | 变长 | 运行时计算长度 |
-| `lookupswitch` | `""` | 变长 | 运行时计算长度 |
+从 `bytecodes.cpp` 的 239 个 `def()` 调用中提取，实际只有 **19 种不同的格式串组合**。每种格式串对应一类字节码的内存布局：
 
-注意 `getfield` 用大写 `J`（native 字节序），`ldc` 用小写 `k`（Java 字节序）——因为 Rewriter 会改写 getfield 的操作数但不改写 ldc 的（ldc 的改写走另一条路径）。
+#### 1 字节：`"b"` —— 仅操作码
+
+| 格式串 | 含义 | 对应字节码 |
+|--------|------|-----------|
+| `"b"` | 只有操作码，无操作数 | `nop`、`iconst_1`、`aload_0`、`return`、`areturn` 等大部分单字节指令 |
+
+字节码示例：`b1` = return，1 字节。
+
+#### 2 字节：`"bc"` / `"bk"` / `"bi"` / `"bj"`
+
+| 格式串 | 含义 | 对应字节码 |
+|--------|------|-----------|
+| `"bc"` | 操作码 + 1 字节有符号常量 | `bipush`（压入立即数）、`newarray`（数组类型） |
+| `"bk"` | 操作码 + 1 字节常量池索引 | `ldc`（加载常量，索引 0-255） |
+| `"bi"` | 操作码 + 1 字节局部变量索引 | `iload`、`istore`、`aload`、`ret`（索引 0-255） |
+| `"bj"` | 操作码 + 1 字节 CP cache 索引 | `fast_aldc`（JVM 内部 ldc 加速版） |
+
+字节码示例：`bipush 42` = `10 2a`（0x10=bipush，0x2a=42），2 字节。
+
+#### 3 字节：`"bcc"` / `"bkk"` / `"bJJ"`
+
+| 格式串 | 含义 | 对应字节码 |
+|--------|------|-----------|
+| `"bcc"` | 操作码 + 2 字节有符号常量 | `sipush`（压入短整数） |
+| `"bkk"` | 操作码 + 2 字节常量池索引 | `ldc_w`、`ldc2_w`、`new`、`checkcast`、`getstatic`、`invokestatic` 等 |
+| `"bJJ"` | 操作码 + 2 字节 native CP cache 索引 | `getfield`、`putfield`、`invokevirtual`、`invokespecial`、`fast_*getfield` 等 |
+
+字节码示例：
+- `sipush 1000` = `11 03 e8`（0x11=sipush，0x03e8=1000），3 字节
+- `getfield #2` = `b4 00 02`（class 文件原始形式，Java big-endian），3 字节
+- `getfield #3` = `b4 03 00`（Rewriter 改写后，native little-endian），3 字节
+
+**`"bkk"` 和 `"bJJ"` 的区别**：`bkk` 用小写 k（常量池索引，Java 字节序，未被 Rewriter 改写）；`bJJ` 用大写 J（CP cache 索引，native 字节序，已被 Rewriter 改写）。`getstatic`/`invokestatic` 用 `bkk`（不走 CP cache），`getfield`/`invokevirtual` 用 `bJJ`（走 CP cache）。
+
+#### 4 字节：`"boooo"` / `"bkkc"` / `"b_JJ"` / `"bi_i"` / `"bi_"` / `"wbiicc"`
+
+| 格式串 | 含义 | 对应字节码 |
+|--------|------|-----------|
+| `"boooo"` | 操作码 + 4 字节分支偏移 | `goto_w`（宽跳转）、`jsr_w` |
+| `"bkkc"` | 操作码 + 2 字节 CP 索引 + 1 字节维数 | `multianewarray` |
+| `"b_JJ"` | 操作码 + 1 填充字节 + 2 字节 native CP cache 索引 | `fast_iaccess_0` 等（aload_0 + getfield 合并） |
+| `"bi_i"` | 操作码 + 1 字节索引 + 1 填充 + 1 字节索引 | `fast_iload2`（iload + iload 合并） |
+| `"bi_"` | 操作码 + 1 字节索引 + 1 填充字节 | `fast_icaload`（iload + caload 合并） |
+| `"wbiicc"` | wide 前缀 + 操作码 + 1 字节索引 + 1 字节常量 | `iinc` 的 wide 形式 |
+
+字节码示例：`goto_w 100` = `c8 00 00 00 64`（0xc8=goto_w，0x00000064=100），5 字节。
+
+#### 5 字节：`"bJJJJ"` / `"bJJ__"`
+
+| 格式串 | 含义 | 对应字节码 |
+|--------|------|-----------|
+| `"bJJJJ"` | 操作码 + 4 字节 native CP cache 索引 | `invokedynamic` |
+| `"bJJ__"` | 操作码 + 2 字节 native CP cache 索引 + 1 字节 count + 1 字节 0 | `invokeinterface` |
+
+字节码示例：`invokedynamic #5` = `ba 00 00 00 05`（4 字节索引），5 字节。
+
+`invokedynamic` 为什么用 4 字节索引而不是 2 字节？因为它每个调用点需要一个独立的 CP cache entry（不是共享的），2 字节索引不够用。
+
+#### wide 形式：`"wbii"` / `"wbiicc"`
+
+| 格式串 | 含义 | 对应字节码 |
+|--------|------|-----------|
+| `"wbii"` | wide 前缀 + 操作码 + 2 字节局部索引 | `iload`/`istore`/`aload`/`astore`/`lload` 等 wide 形式 |
+| `"wbiicc"` | wide 前缀 + 操作码 + 2 字节索引 + 2 字节常量 | `iinc` 的 wide 形式 |
+
+字节码示例：`wide iload 300` = `c4 15 01 2c`（0xc4=wide，0x15=iload，0x012c=300），4 字节。
+
+wide 形式把 1 字节局部变量索引扩展为 2 字节，支持超过 255 个局部变量的方法。
+
+#### 变长：`""`（空字符串）
+
+| 格式串 | 含义 | 对应字节码 |
+|--------|------|-----------|
+| `""` | 变长指令，长度运行时计算 | `tableswitch`、`lookupswitch`、`wide`、`breakpoint` |
+
+`tableswitch` 的内存布局：
+```
+[opcode] [0-3 字节对齐填充] [default: 4字节] [low: 4字节] [high: 4字节] [offset_0, offset_1, ..., offset_(high-low)]
+```
+长度 = 1 + 对齐填充 + (3 + high - low + 1) × 4，运行时才知道有多少个 case。
+
+#### 对照 HelloWorld 的 4 条字节码
+
+回到前面的 HelloWorld main 方法，4 条字节码的格式串：
+
+| 字节码 | 二进制 | 格式串 | 格式解读 |
+|--------|--------|--------|---------|
+| `getstatic #2` | `b2 00 02` | `"bJJ"` | b=getstatic, JJ=native CP cache 索引 #2 |
+| `ldc #3` | `12 03` | `"bk"` | b=ldc, k=常量池索引 #3 |
+| `invokevirtual #4` | `b6 00 04` | `"bJJ"` | b=invokevirtual, JJ=native CP cache 索引 #4 |
+| `return` | `b1` | `"b"` | b=return，无操作数 |
+
+注意：class 文件原始形式里 `getstatic` 的操作数是 `00 02`（Java big-endian 的 CP 索引 #2），Rewriter 改写后变成 native little-endian 的 CP cache 索引。`ldc` 的 `k` 仍是 Java 字节序的 CP 索引（因为 ldc 的改写走另一条路径，改成 `fast_aldc`）。
 
 ---
 
