@@ -181,7 +181,7 @@ void ClassLoader::setup_boot_search_path(const char *class_path) {
 }
 ```
 
-`create_class_path_entry()` 根据路径类型创建不同的 `ClassPathEntry` 子类——目录创建 `ClassPathDirEntry`，jar/zip 创建 `ClassPathZipEntry`，jimage 文件创建 `ClassPathImageEntry`。三种子类的详细结构和 `open_stream()` 方法在后续类加载章节展开，这里只需知道"根据类型创建不同的入口对象，串成链表，后续遍历它找 class 文件"。
+`create_class_path_entry()` 根据路径类型创建不同的 `ClassPathEntry` 子类——目录创建 `ClassPathDirEntry`，jar/zip 创建 `ClassPathZipEntry`，jimage 文件创建 `ClassPathImageEntry`。三种子类各自有 `open_stream(name)` 方法用来读 class 文件，详细结构后续再展开，这里只需知道"根据类型创建不同的入口对象，串成链表，后续遍历它找 class 文件"。
 
 ### 和前面步骤的关系
 
