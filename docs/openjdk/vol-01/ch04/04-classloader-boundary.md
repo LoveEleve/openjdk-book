@@ -160,9 +160,57 @@ ClassPathEntry (CHeapObj, 基类)
 /data/workspace/jdk11u-copy/build/linux-x86_64-normal-server-slowdebug/jdk/modules
 ```
 
-注意这是 **exploded build**（展开构建）——`modules` 是个**目录**而不是打包的 jimage 文件。目录里是 `java.base/`、`jdk.compiler/` 等模块子目录。这意味着 jdk11u-copy 跑 JVM 时走的是 `ClassPathDirEntry`（从目录读 class 文件），不是 `ClassPathImageEntry`（从 jimage 读）。
+注意这是 **exploded build**（展开构建）——`modules` 是个**目录**而不是打包的 jimage 文件。目录里直接放的就是 .class 文件：
 
-标准安装的 JDK（如 `/usr/lib/jvm/java-11-konajdk/lib/modules`）是打包的 jimage 文件，走 `ClassPathImageEntry`。两种方式都能加载类，只是来源不同。
+```
+$ ls jdk/modules/java.base/
+com/  java/  javax/  jdk/  META-INF/  module-info.class  sun/
+
+$ find jdk/modules/java.base/ -name "String.class"
+jdk/modules/java.base/java/lang/String.class    ← 直接就是 .class 文件
+```
+
+JVM 从这个目录读 class 文件时走的是 `ClassPathDirEntry`——直接用 `open()` 系统调用读文件。
+
+### jimage 是什么格式
+
+标准安装的 JDK（如 KonaJDK）的 `lib/modules` 不是目录，而是**一个文件**：
+
+```
+$ file /usr/lib/jvm/java-11-konajdk/lib/modules
+Java module image (little endian), version 1.0
+
+$ du -sh /usr/lib/jvm/java-11-konajdk/lib/modules
+137M
+
+$ xxd /usr/lib/jvm/java-11-konajdk/lib/modules | head -3
+00000000: dada feca 0000 0100 0000 0000 dd84 0000  ................
+```
+
+`file` 命令识别为 "Java module image"——这是 JDK 9 引入的 **jimage** 格式。开头 4 字节 `0xdadafeca` 是 jimage 的魔数（和 class 文件的 `0xCAFEBABE` 不同）。137MB 的文件里打包了所有核心类的 .class 文件，但**不是 zip/jar 格式**，而是专门为 JVM 快速加载设计的格式——所有 class 内容紧凑排列，mmap 后直接用偏移量定位，不用解压。
+
+### 为什么 jdk11u-copy 是目录而标准 JDK 是文件
+
+| | jdk11u-copy（编译输出） | 标准 JDK（安装版） |
+|---|---|---|
+| `modules` 是什么 | **目录** | **jimage 文件** |
+| class 在哪 | 直接是 `java.base/java/lang/String.class` | 打包在 137MB 的文件里 |
+| JVM 用哪个子类 | `ClassPathDirEntry`（`open()` 直接读文件） | `ClassPathImageEntry`（用 `JIMAGE_FindResource` 定位） |
+| 为什么 | `make` 编译后默认是展开形式，方便改代码重新编译立即生效 | 发布前用 `jlink` 工具把目录打包成 jimage，减少文件数量、加快启动 |
+
+jdk11u-copy 是开发用的——改了某个 .java 文件，`make` 重新编译后直接生成新的 .class 文件放在目录里，JVM 立即能读到。如果每次改代码都要重新打包 jimage，开发效率太低。标准 JDK 是发布给用户用的——打包成 jimage 减少文件数量（从几万个 .class 变成 1 个文件），启动时 mmap 一次就全加载了。
+
+### 对 ClassPathEntry 的影响
+
+`setup_boot_search_path()` 遍历搜索路径时，根据每个条目是目录还是文件创建不同的 `ClassPathEntry` 子类：
+
+| 条目类型 | 创建的子类 | 怎么读 class |
+|---------|----------|------------|
+| 目录（如 jdk11u-copy 的 `modules/`） | `ClassPathDirEntry` | `open()` 系统调用直接读 .class 文件 |
+| jar/zip 文件 | `ClassPathZipEntry` | 调 `ZIP_Open`/`ZIP_FindEntry`/`ZIP_ReadEntry` |
+| jimage 文件（如标准 JDK 的 `lib/modules`） | `ClassPathImageEntry` | 调 `JIMAGE_FindResource`/`JIMAGE_GetResource` |
+
+这就是为什么 `load_zip_library()` 要在 `setup_bootstrap_search_path()` 之前执行——如果搜索路径里有 jar/zip，`ClassPathZipEntry` 要用 ZIP 函数。
 
 如果有 `-Xbootclasspath/a:/path/to/app.jar`，app.jar 会作为后续条目追加，创建 `ClassPathZipEntry`。
 
