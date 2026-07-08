@@ -151,20 +151,7 @@ void ClassLoader::setup_boot_search_path(const char *class_path) {
 }
 ```
 
-`create_class_path_entry()` 根据路径是目录、jar/zip 文件、还是 jimage 文件，创建不同的 `ClassPathEntry` 子类：
-
-```
-ClassPathEntry (基类)
-  open_stream(name) → 核心方法：传入类名，返回 class 字节流
-├── ClassPathDirEntry       // 路径是目录（如 jdk11u-copy 的 modules/）
-│     open_stream() → open() 直接读 .class 文件
-├── ClassPathZipEntry       // 路径是 jar/zip 文件
-│     open_stream() → 调 ZIP_Open/FindEntry/ReadEntry 读
-└── ClassPathImageEntry     // 路径是 jimage 文件（如标准 JDK 的 lib/modules）
-      open_stream() → 调 JIMAGE_FindResource/GetResource 读
-```
-
-后续 JVM 加载类时（如加载 `java.lang.String`），就遍历这个 `ClassPathEntry` 链表，对每个条目调 `open_stream("java/lang/String")`——如果返回非 NULL 就找到了。
+`create_class_path_entry()` 根据路径类型创建不同的 `ClassPathEntry` 子类——目录创建 `ClassPathDirEntry`，jar/zip 创建 `ClassPathZipEntry`，jimage 文件创建 `ClassPathImageEntry`。三种子类的详细结构和 `open_stream()` 方法在后续类加载章节展开，这里只需知道"根据类型创建不同的入口对象，串成链表，后续遍历它找 class 文件"。
 
 ### 和前面步骤的关系
 
