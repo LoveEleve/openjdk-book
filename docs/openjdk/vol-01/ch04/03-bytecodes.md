@@ -4,40 +4,56 @@
 
 ---
 
-## 你写的一行 Java 代码，怎么变成 JVM 能执行的指令
+## 从一个真实的 class 文件说起
 
-先从你已经知道的事情开始。你写过这样的 Java 代码：
+项目里有个 `/data/workspace/demo/HelloWorld.java`：
 
 ```java
-int x = obj.field;
+public class HelloWorld {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}
 ```
 
-`javac` 把它编译成 class 文件后，这行代码变成了一串**字节码**——class 文件里的二进制指令。大概长这样：
+`javac` 编译后生成 `HelloWorld.class`。用 `javap -c` 反汇编看 main 方法的字节码：
 
 ```
-getfield #5
+$ javap -c HelloWorld.class
+  public static void main(java.lang.String[]);
+    Code:
+       0: getstatic     #2    // Field java/lang/System.out:Ljava/io/PrintStream;
+       3: ldc           #3    // String Hello, World!
+       5: invokevirtual #4    // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       8: return
 ```
 
-意思是"从对象 obj 上取字段 #5"。但 class 文件里存的不是文字，是二进制：
+4 条字节码指令，对应 main 方法里的 `System.out.println("Hello, World!")`。
+
+但这只是人类可读的文本。class 文件里实际存的是**二进制**。用 hexdump 看 class 文件里 main 方法字节码段的原始字节（在文件偏移 388 处）：
 
 ```
-0xB4 0x00 0x05
+b2 00 02 12 03 b6 00 04 b1
 ```
 
-- `0xB4` 是 `getfield` 的操作码（opcode）——告诉 JVM 这条指令是"取字段"
-- `0x00 0x05` 是操作数——告诉 JVM 取常量池里第 5 项的字段
+逐字节对照 `javap` 的输出：
 
-JVM 解释器执行这行字节码时，要做这些事：
-1. 读 `0xB4`，知道这是 `getfield`
-2. 查 `getfield` 指令多长——3 字节（1 操作码 + 2 操作数）
-3. 读后面 2 字节 `0x00 0x05`，知道是常量池第 5 项
-4. 查常量池第 5 项，拿到字段的偏移量和类型
-5. 从 obj 对象的对应偏移量读出字段值
-6. 把值压到操作数栈上
+| 二进制 | 操作码 | 指令 | 操作数 | 含义 |
+|--------|--------|------|--------|------|
+| `b2` `00 02` | 0xB2 = getstatic | getstatic | #2 | 取 System.out 字段 |
+| `12` `03` | 0x12 = ldc | ldc | #3 | 加载 "Hello, World!" 字符串 |
+| `b6` `00 04` | 0xB6 = invokevirtual | invokevirtual | #4 | 调用 println 方法 |
+| `b1` | 0xB1 = return | return | — | 方法返回 |
 
-第 4-6 步是运行时的具体执行。但第 1-3 步——"读操作码、查多长、读操作数"——**对每条字节码都要做**。JVM 怎么知道 `0xB4` 是 `getfield`？怎么知道它多长？操作数是什么类型？
+每条字节码由**操作码**（opcode，1 字节）+ **操作数**（0-N 字节）组成。JVM 解释器执行这行字节码时，要回答几个问题：
 
-**答案就是字节码表**——JVM 启动时把所有字节码的元信息填进一张表，后续解释器查表就知道每个字节码的"长相"。`bytecodes_init()` 就是初始化这张表。
+- 读到 `0xb2`，怎么知道这是 `getstatic`？
+- `getstatic` 指令多长？——3 字节（1 操作码 + 2 操作数），所以下一条指令从偏移 3 开始
+- 后面 2 字节 `00 02` 是什么？——常量池索引 #2
+- 执行后操作数栈怎么变？——压入 1 个值（PrintStream 对象引用）
+- 这条指令会抛异常吗？——可能（如果 System 类没初始化成功）
+
+这些答案**不在 class 文件里**——class 文件只存了二进制指令本身。JVM 必须自己知道每个字节码的"长相"。**答案就是字节码表**——JVM 启动时把所有字节码的元信息填进一张表，后续解释器查表就知道每个字节码的格式和行为。`bytecodes_init()` 就是初始化这张表。
 
 ---
 
