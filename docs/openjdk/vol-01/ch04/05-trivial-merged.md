@@ -220,11 +220,25 @@ if (x instanceof String) {   ← 还在，但走不通时会触发 uncommon trap
 
 ### 状态机和 carry
 
-两种状态（`invocationCounter.hpp:74-78`）：
-- `wait_for_nothing`——不编译（计数溢出也不触发）
-- `wait_for_compile`——计数溢出时触发编译
+`reinitialize()` 里用 `def()` 注册两个状态（`invocationCounter.cpp:141-146`）：
 
-`carry` 位是 sticky 的——一旦方法计数器溢出过一次，carry 位就永久置 1（`invocationCounter.cpp:44-54` 的 `set_carry()`）。这样即使计数器后来被衰减（decay），JVM 仍然知道"这个方法曾经热过"。
+```cpp
+def(wait_for_nothing, 0, do_nothing);
+def(wait_for_compile, 0, do_decay 或 dummy_invocation_counter_overflow);
+```
+
+`def(state, init_count, action)` 的三个参数：
+- **state**——状态名
+- **init_count**——进入这个状态时计数器的初始值（都是 0）
+- **action**——计数器溢出（达到阈值）时执行什么动作
+
+`def(wait_for_nothing, 0, do_nothing)` 意思是：状态 `wait_for_nothing` 下，计数器溢出时调 `do_nothing`——什么都不做。什么方法会处于这个状态？被标记为"不编译"的方法——比如 `-XX:CompileCommand=exclude,com.xxx.Foo::bar` 明确排除的方法，或者编译失败过的方法。这些方法即使被调几亿次也不会触发 JIT。
+
+`def(wait_for_compile, 0, ...)` 意思是：状态 `wait_for_compile` 下，计数器溢出时执行的动作取决于 `DelayCompilationDuringStartup`：
+- 启动时（`delay_overflow=true`）→ `do_decay`——不编译，衰减计数（减半）让方法继续跑
+- 正常时（`delay_overflow=false`）→ `dummy_invocation_counter_overflow`——触发编译
+
+大多数方法默认处于 `wait_for_compile` 状态。
 
 ### DelayCompilationDuringStartup 和 do_decay
 
