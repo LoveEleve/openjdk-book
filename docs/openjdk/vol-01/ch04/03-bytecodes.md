@@ -201,7 +201,7 @@ void Bytecodes::def(Code code, const char* name, const char* format,
 
 | 参数 | 含义 | getfield 的值 |
 |------|------|--------------|
-| `code` | 字节码编号 | `_getfield`（180） |
+| `code` | 字节码编号（`Bytecodes::Code` 枚举值，如 `_getfield = 180` 对应 `0xB4`） | `_getfield`（180） |
 | `name` | 名字 | `"getfield"` |
 | `format` | **格式串**（描述内存布局） | `"bJJ"` |
 | `wide_format` | wide 形式格式串 | `NULL`（getfield 无 wide 形式） |
