@@ -16,36 +16,85 @@ public class HelloWorld {
 }
 ```
 
-`javac` 编译后生成 `HelloWorld.class`。用 `javap -c` 反汇编看 main 方法的字节码：
+`javac` 编译后生成 `HelloWorld.class`，427 字节。但这个 class 文件里到底存了什么？用 `javap -v` 看它的完整结构：
 
 ```
-$ javap -c HelloWorld.class
-  public static void main(java.lang.String[]);
+$ javap -v HelloWorld.class
+Classfile /data/workspace/demo/HelloWorld.class
+  Last modified Jun 26, 2026; size 427 bytes
+  Compiled from "HelloWorld.java"
+public class HelloWorld
+  minor version: 0
+  major version: 55                          // JDK 11
+  flags: (0x0021) ACC_PUBLIC, ACC_SUPER
+  this_class: #5   // HelloWorld
+  super_class: #6  // java/lang/Object
+  interfaces: 0, fields: 0, methods: 2, attributes: 1
+
+Constant pool:                               // 常量池，28 项
+   #1 = Methodref       #6.#15    // java/lang/Object."<init>":()V
+   #2 = Fieldref        #16.#17   // java/lang/System.out:Ljava/io/PrintStream;
+   #3 = String          #18       // Hello, World!
+   #4 = Methodref       #19.#20   // java/io/PrintStream.println:(Ljava/lang/String;)V
+   #5 = Class           #21       // HelloWorld
+   #6 = Class           #22       // java/lang/Object
+   ...（共 28 项）
+
+{
+  public HelloWorld();                       // 构造方法
     Code:
-       0: getstatic     #2    // Field java/lang/System.out:Ljava/io/PrintStream;
+       0: aload_0
+       1: invokespecial #1   // Object."<init>"
+       4: return
+
+  public static void main(java.lang.String[]);  // main 方法
+    Code:
+       0: getstatic     #2    // Field java/lang/System.out
        3: ldc           #3    // String Hello, World!
-       5: invokevirtual #4    // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       5: invokevirtual #4    // Method println
        8: return
+}
 ```
 
-4 条字节码指令，对应 main 方法里的 `System.out.println("Hello, World!")`。
+class 文件不只是一串字节码——它有**完整的结构**，包含：
 
-但这只是人类可读的文本。class 文件里实际存的是**二进制**。用 hexdump 看 class 文件里 main 方法字节码段的原始字节（在文件偏移 388 处）：
+| 段 | 内容 | HelloWorld 里的值 |
+|----|------|------------------|
+| **magic** | 魔数（标识这是 class 文件） | `0xCAFEBABE` |
+| **version** | 版本号（major=55 表示 JDK 11） | minor=0, major=55 |
+| **constant_pool** | 常量池（类名/方法名/字段名/字符串常量等） | 28 项 |
+| **access_flags** | 类的访问标志 | `ACC_PUBLIC, ACC_SUPER` |
+| **this_class / super_class** | 本类和父类 | HelloWorld / Object |
+| **fields** | 字段表 | 0 个 |
+| **methods** | 方法表（每个方法含 Code 属性，字节码就在 Code 里） | 2 个（`<init>` + `main`） |
+| **attributes** | 类级属性 | 1 个（SourceFile） |
+
+**字节码只是 class 文件的一部分**——它存在每个方法的 `Code` 属性里。字节码里引用的 #2、#3、#4 等编号，是**常量池索引**——指向常量池里的 Methodref/Fieldref/String 项。
+
+用 hexdump 看 class 文件的二进制，开头 4 字节就是魔数 `CAFEBABE`：
 
 ```
-b2 00 02 12 03 b6 00 04 b1
+00000000: cafe babe 0000 0037 001d ...
+         ^^^^^^^^^^ ^^^^^^^^^ ^^^^
+         魔数        版本号    常量池项数(28+1=29)
+```
+
+main 方法的字节码在文件偏移 388 处（在 Code 属性里）：
+
+```
+偏移 388:  b2 00 02 12 03 b6 00 04 b1
 ```
 
 逐字节对照 `javap` 的输出：
 
 | 二进制 | 操作码 | 指令 | 操作数 | 含义 |
 |--------|--------|------|--------|------|
-| `b2` `00 02` | 0xB2 = getstatic | getstatic | #2 | 取 System.out 字段 |
-| `12` `03` | 0x12 = ldc | ldc | #3 | 加载 "Hello, World!" 字符串 |
-| `b6` `00 04` | 0xB6 = invokevirtual | invokevirtual | #4 | 调用 println 方法 |
+| `b2` `00 02` | 0xB2 = getstatic | getstatic | #2 | 取 System.out 字段（常量池第 2 项） |
+| `12` `03` | 0x12 = ldc | ldc | #3 | 加载 "Hello, World!" 字符串（常量池第 3 项） |
+| `b6` `00 04` | 0xB6 = invokevirtual | invokevirtual | #4 | 调用 println 方法（常量池第 4 项） |
 | `b1` | 0xB1 = return | return | — | 方法返回 |
 
-每条字节码由**操作码**（opcode，1 字节）+ **操作数**（0-N 字节）组成。JVM 解释器执行这行字节码时，要回答几个问题：
+每条字节码由**操作码**（opcode，1 字节）+ **操作数**（0-N 字节）组成。操作数里的 `#2`/`#3`/`#4` 就是常量池索引——指向常量池里的 Fieldref/String/Methodref 项。JVM 解释器执行 `getstatic #2` 时，要回答几个问题：
 
 - 读到 `0xb2`，怎么知道这是 `getstatic`？
 - `getstatic` 指令多长？——3 字节（1 操作码 + 2 操作数），所以下一条指令从偏移 3 开始
