@@ -189,7 +189,30 @@ InterpreterBackwardBranchLimit = (CompileThreshold * OnStackReplacePercentage) /
 | `InterpreterProfileLimit` | 调用多少次后开始收集 profile 数据 | 2000（10000 * 20%） |
 | `InterpreterBackwardBranchLimit` | 回边分支多少次后触发 OSR（栈上替换）编译 | 14000（10000 * 140%） |
 
-**profile 数据是什么？** 就是你写 Java 代码时 JVM 偷偷帮你收集的"运行时情报"。比如一个方法里有 `if (x instanceof String)` 分支，JVM 会记录"这个分支 90% 的时间走 true"。再比如 `List list = new ArrayList()`，JVM 会记录"这个变量 99% 的时候是 ArrayList 类型"。这些情报叫 profile，给 C2 编译器做优化用——C2 看到"90% 走 true"就只编译 true 分支，跳过 false 分支（叫"投机优化"）。所以 `InterpreterProfileLimit = 2000` 意思是：方法被调 2000 次后开始收集这些情报，攒够了 8000 次再编译，C2 就有了足够的情报做激进优化。
+**profile 数据是什么？** 就是你写 Java 代码时 JVM 偷偷帮你收集的"运行时情报"。比如一个方法里有 `if (x instanceof String)` 分支，JVM 会记录"这个分支 90% 的时间走 true"。再比如 `List list = new ArrayList()`，JVM 会记录"这个变量 99% 的时候是 ArrayList 类型"。这些情报叫 profile，给 C2 编译器做优化用。所以 `InterpreterProfileLimit = 2000` 意思是：方法被调 2000 次后开始收集这些情报，攒够了 8000 次再编译，C2 就有了足够的情报做激进优化。
+
+那 C2 怎么用这些情报？举个例子：
+
+```java
+if (x instanceof String) {
+    // true 分支
+} else {
+    // false 分支
+}
+```
+
+C2 看到 profile 说 90% 走 true，编译出来的机器码不会"删掉 else 分支"——而是把 else 分支挪走，留一个"守卫条件"：
+
+```
+if (x instanceof String) {   ← 还在，但走不通时会触发 uncommon trap
+    // true 分支的机器码（优化过，很快）
+}
+// 走不通 → uncommon trap → 去优化(deoptimization) → 切回解释器重新执行
+```
+
+正常情况（90%）走 true 分支，很快。异常情况（10%）走 false 时会触发**uncommon trap**——JVM 立刻切回解释器，从 if 开始重新执行，走 false 分支。结果是对的，只是慢一点。
+
+这就是"投机优化"——赌你走 true，赌错了就退回解释器跑一次。赌对 90% 的时候赚了速度，赌错 10% 的时候代价是退回解释器。uncommon trap 和去优化的完整机制后续单独讲解，这里只需知道"profile 数据让 C2 敢做投机优化"。
 
 **OSR（On-Stack Replacement，栈上替换）是什么？** 普通 JIT 编译是"方法下一次被调用时用编译版本"。但如果一个方法里有个很长的循环（比如 `while (true) { ... }`），它可能在一次调用里跑很久很久，永远不会返回——普通 JIT 等不到"下一次调用"。OSR 解决这个问题：不用等方法返回，直接在**循环执行过程中**把解释执行的栈帧替换成编译版本的栈帧，接着跑编译后的机器码。`InterpreterBackwardBranchLimit = 14000` 就是触发 OSR 的阈值——回边分支（循环的跳转）执行 14000 次后，在循环中途切换到编译版本。
 
