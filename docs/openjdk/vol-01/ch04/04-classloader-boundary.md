@@ -154,13 +154,15 @@ ClassPathEntry (CHeapObj, 基类)
 
 ### 实际的搜索路径长什么样
 
-在标准 JDK 11 上，`Arguments::get_sysclasspath()` 返回的第一段通常是：
+在 jdk11u-copy 构建输出里，`Arguments::get_sysclasspath()` 返回的第一段是：
 
 ```
-/usr/lib/jvm/java-11-konajdk-11.0.31-1.tl4/lib/modules
+/data/workspace/jdk11u-copy/build/linux-x86_64-normal-server-slowdebug/jdk/modules
 ```
 
-这是 jimage 文件——JDK 9+ 把所有核心类打包到一个 `lib/modules` 文件里（不是一堆 jar）。所以 `_jrt_entry` 是个 `ClassPathImageEntry`，从 jimage 里读 `java/lang/String.class` 等。
+注意这是 **exploded build**（展开构建）——`modules` 是个**目录**而不是打包的 jimage 文件。目录里是 `java.base/`、`jdk.compiler/` 等模块子目录。这意味着 jdk11u-copy 跑 JVM 时走的是 `ClassPathDirEntry`（从目录读 class 文件），不是 `ClassPathImageEntry`（从 jimage 读）。
+
+标准安装的 JDK（如 `/usr/lib/jvm/java-11-konajdk/lib/modules`）是打包的 jimage 文件，走 `ClassPathImageEntry`。两种方式都能加载类，只是来源不同。
 
 如果有 `-Xbootclasspath/a:/path/to/app.jar`，app.jar 会作为后续条目追加，创建 `ClassPathZipEntry`。
 
