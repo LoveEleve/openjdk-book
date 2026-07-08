@@ -415,104 +415,14 @@ _fmt_not_simple   = 1<<11,   // 非简单（wide 或变长）
 
 ---
 
-## Bytecodes（复数）和 Bytecode（单数）
 
-现在讲一个容易混淆的点：有两个名字几乎一样的类。
-
-**`Bytecodes`（复数）**——就是上面讲的"字典"，`AllStatic` 纯静态工具类，持有 6 张静态表。`bytecodes_init()` 初始化的就是它。
-
-**`Bytecode`（单数）**——运行时解析某条具体字节码的栈上对象。它持有 `_bcp`（字节码指针，指向字节码字节流的某个位置）和 `_code`（当前字节码编号），提供类型安全的读取方法。
-
-| | Bytecodes（复数） | Bytecode（单数） |
-|---|---|---|
-| 性质 | 静态工具类 | 栈上对象 |
-| 持有什么 | 6 张全局静态表 | `_bcp` 指针 + `_code` 字节码编号 |
-| 做什么 | **声明**所有字节码的格式 | **解析**某条具体的字节码 |
-| 何时用 | 启动时初始化一次 | 运行时每次解析字节码 |
-
-**一句话：Bytecodes 是字典，Bytecode 是读者**。
-
-### 11 个 Bytecode 子类
-
-`Bytecode` 基类提供通用的字节读取方法。11 个子类按字节码类型分组，每个子类对应一类字节码，提供类型安全的访问方法：
-
-```
-Bytecode (基类)
-├── Bytecode_invoke          // invokevirtual/special/static/interface/dynamic
-├── Bytecode_field           // getfield/putfield/getstatic/putstatic
-├── Bytecode_checkcast       // checkcast
-├── Bytecode_instanceof      // instanceof
-├── Bytecode_new             // new
-├── Bytecode_multianewarray  // multianewarray
-├── Bytecode_anewarray       // anewarray
-├── Bytecode_loadconstant    // ldc/ldc_w/ldc2_w
-├── Bytecode_lookupswitch    // lookupswitch（变长）
-├── Bytecode_tableswitch     // tableswitch（变长）
-└── Bytecode_member_ref      // 中间基类（invoke 和 field 的公共逻辑）
-```
-
-比如 `Bytecode_invoke`（`bytecode.hpp:204`）提供 `static_target()`（解析目标方法）、`has_receiver()`（是否有 receiver）等方法。运行时代码这样用：
-
-```cpp
-Bytecode_invoke invoke(method, bci);          // 构造，_code = _invokevirtual
-methodHandle callee = invoke.static_target(); // 解析目标方法
-```
-
-`static_target()` 内部调 `index()` 读取操作数——按 `Bytecodes` 表里 `"bJJ"` 声明的格式，用 native 字节序读 2 字节 CP cache 索引。**字典声明格式，读者按格式读**——两者通过 `_flags[]` 的 flag 位串起来。
-
----
-
-## Rewriter 改写：把 class 文件字节码改成运行时字节码
-
-现在讲最后一块——Rewriter。它是连接 `Bytecodes`（声明）和 `Bytecode`（读取）的关键。
-
-### 为什么要改写
-
-class 文件里的字节码是"未解析形式"——操作数是**原始常量池索引**（Java big-endian）。但运行时用**常量池缓存索引**（ConstantPoolCache）更快——缓存里已经存好了解析结果（字段的偏移量、方法入口等），不用每次都查常量池解析。
-
-所以 JVM 在类加载的**链接阶段**（验证之后、首次执行之前）运行 Rewriter，把字节码操作数从"原始 CP 索引 + Java 字节序"改成"CP cache 索引 + native 字节序"。
-
-### 改写前后字节码流的变化
-
-以 `getfield` 为例（CP 索引 5 → CP cache 索引 3）：
-
-**改写前**（class 文件原始形式）：
-```
-0xB4  0x00 0x05    // getfield, CP 索引 = 5（Java big-endian）
-```
-
-**改写后**（Rewriter 处理）：
-```
-0xB4  0x03 0x00    // getfield, CP cache 索引 = 3（native little-endian）
-```
-
-操作码不变（仍是 `0xB4`），但 2 字节操作数从 Java 序变成 native 序，数值从 CP 索引变成 CP cache 索引。这正好对应格式串 `"bJJ"` 的大写 J——native 字节序的 CP cache 索引。
-
-### fast 变体：运行时进一步加速
-
-除了 Rewriter 的 CP 索引改写，还有一类改写是**运行时模板表**做的——把标准字节码替换成 fast 变体，按类型特化加速：
-
-| 原字节码 | fast 变体 | 加速什么 |
-|---------|----------|---------|
-| `getfield`（对象类型） | `fast_agetfield` | 跳过运行时类型判断 |
-| `getfield`（int 类型） | `fast_igetfield` | 跳过运行时类型判断 |
-| `putfield`（对象类型） | `fast_aputfield` | 跳过运行时类型判断 |
-| `invokevirtual`（final） | `fast_invokevfinal` | 跳过虚方法分派 |
-| `ldc`（引用类型） | `fast_aldc` | 直接指向 resolved references |
-| `lookupswitch` | `fast_linearswitch`/`fast_binaryswitch` | 按 pairs 数选算法 |
-| `aload_0` + 后续 | `fast_aload_0`/`fast_iaccess_0` | 合并两条指令减少分派 |
-| `return`（Object.<init>） | `return_register_finalizer` | 注册 finalizer |
-
-这 36 个 fast 变体不出现在 class 文件里，是 JVM 内部字节码（码值 203-238），在 `Bytecodes::initialize()` 里也有对应的 `def()` 声明。
-
-### nofast 变体：CDS 的只读保护
-
-CDS（Class Data Sharing）把类的字节码归档到共享文件，运行时 mmap 到只读段。如果运行时还要改写字节码（改成 fast 变体），会触发对只读段的写操作——段错误。
-
-解决方案：CDS dump 时把 `_getfield`/`_putfield`/`_aload_0`/`_iload` 改成 `_nofast_*` 版本。`_nofast_*` 执行时走和原版完全相同的逻辑，但**永不调 `patch_bytecode`**——字节码保持不变，ConstMethod 可以安全放在只读段。
-
----
-
+> **Bytecode 子类、Rewriter 改写、fast/nofast 变体不在本节展开**——它们都是运行时的事，不属于 init_globals 阶段：
+>
+> - **Bytecode 子类体系**（11 个子类，运行时按需构造的栈上解析器）——在解释器章节展开
+> - **Rewriter 改写**（类加载时把 CP 索引改成 CP cache 索引 + native 字节序）——在类加载章节展开
+> - **fast/nofast 变体**（36 个 JVM 内部字节码，Rewriter/模板表改写的产物）——跟着 Rewriter 走
+>
+> 本节聚焦 bytecodes_init 做的事：启动时填 6 张静态表。
 ## 小结
 
 `bytecodes_init()` 做的事很简单——调 `Bytecodes::initialize()`，通过 239 次 `def()` 调用把所有字节码的元信息填进 6 张静态表：
@@ -520,10 +430,10 @@ CDS（Class Data Sharing）把类的字节码归档到共享文件，运行时 m
 | 表 | 存什么 |
 |----|--------|
 | `_name[]` | 字节码名字 |
-| `_result_type[]` | 栈顶类型 |
+| `_result_type[]` | 执行后栈顶元素类型 |
 | `_depth[]` | 栈深度变化 |
 | `_lengths[]` | 指令长度（低 4 位普通，高 4 位 wide） |
-| `_java_code[]` | fast 变体对应的 Java 标准字节码 |
+| `_java_code[]` | JVM 内部字节码对应的 Java 标准字节码 |
 | `_flags[]` | 格式信息（双页 512 个，普通 + wide） |
 
 这套表是后续解释器、JIT 编译器、字节码验证器的基础——它们都靠查这些表知道每个字节码的格式和行为。
