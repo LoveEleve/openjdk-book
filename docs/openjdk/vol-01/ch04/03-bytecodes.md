@@ -16,134 +16,102 @@ public class HelloWorld {
 }
 ```
 
-`javac` 编译后生成 `HelloWorld.class`，427 字节。但这个 class 文件里到底存了什么？用 `javap -v` 看它的完整结构：
+`javac` 编译后生成 `HelloWorld.class`，427 字节。这个文件里存了什么？
+
+### ClassFile 结构
+
+JVM 规范（JVMS §4.1）定义了 class 文件的格式——一个 `ClassFile` 结构：
 
 ```
-$ javap -v HelloWorld.class
-Classfile /data/workspace/demo/HelloWorld.class
-  Last modified Jun 26, 2026; size 427 bytes
-  Compiled from "HelloWorld.java"
-public class HelloWorld
-  minor version: 0
-  major version: 55                          // JDK 11
-  flags: (0x0021) ACC_PUBLIC, ACC_SUPER
-  this_class: #5   // HelloWorld
-  super_class: #6  // java/lang/Object
-  interfaces: 0, fields: 0, methods: 2, attributes: 1
-
-Constant pool:                               // 常量池，28 项
-   #1 = Methodref       #6.#15    // java/lang/Object."<init>":()V
-   #2 = Fieldref        #16.#17   // java/lang/System.out:Ljava/io/PrintStream;
-   #3 = String          #18       // Hello, World!
-   #4 = Methodref       #19.#20   // java/io/PrintStream.println:(Ljava/lang/String;)V
-   #5 = Class           #21       // HelloWorld
-   #6 = Class           #22       // java/lang/Object
-   ...（共 28 项）
-
-{
-  public HelloWorld();                       // 构造方法
-    Code:
-       0: aload_0
-       1: invokespecial #1   // Object."<init>"
-       4: return
-
-  public static void main(java.lang.String[]);  // main 方法
-    Code:
-       0: getstatic     #2    // Field java/lang/System.out
-       3: ldc           #3    // String Hello, World!
-       5: invokevirtual #4    // Method println
-       8: return
+ClassFile {
+    u4             magic;                  // 魔数
+    u2             minor_version;          // 次版本号
+    u2             major_version;          // 主版本号
+    u2             constant_pool_count;    // 常量池项数
+    cp_info        constant_pool[];        // 常量池
+    u2             access_flags;           // 访问标志
+    u2             this_class;             // 本类
+    u2             super_class;            // 父类
+    u2             interfaces_count;       // 接口数
+    u2             interfaces[];           // 接口表
+    u2             fields_count;           // 字段数
+    field_info     fields[];               // 字段表
+    u2             methods_count;          // 方法数
+    method_info    methods[];              // 方法表
+    u2             attributes_count;       // 属性数
+    attribute_info attributes[];           // 属性表
 }
 ```
 
-class 文件不只是一串字节码——它有**完整的结构**，包含：
+`u4` 是 4 字节无符号整数，`u2` 是 2 字节。class 文件就是按这个顺序依次存储的。HelloWorld.class 对应每个字段的值：
 
-| 段 | 内容 | HelloWorld 里的值 |
-|----|------|------------------|
-| **magic** | 魔数（标识这是 class 文件） | `0xCAFEBABE` |
-| **version** | 版本号（major=55 表示 JDK 11） | minor=0, major=55 |
-| **constant_pool** | 常量池（类名/方法名/字段名/字符串常量等） | 28 项 |
-| **access_flags** | 类的访问标志 | `ACC_PUBLIC, ACC_SUPER` |
-| **this_class / super_class** | 本类和父类 | HelloWorld / Object |
-| **fields** | 字段表 | 0 个 |
-| **methods** | 方法表（每个方法含 Code 属性，字节码就在 Code 里） | 2 个（`<init>` + `main`） |
-| **attributes** | 类级属性 | 1 个（SourceFile） |
+| 字段 | 类型 | HelloWorld 的值 | 含义 |
+|------|------|-----------------|------|
+| `magic` | u4 | `0xCAFEBABE` | 魔数，标识这是 class 文件 |
+| `minor_version` | u2 | `0` | 次版本号 |
+| `major_version` | u2 | `55` | 主版本号 55 = JDK 11 |
+| `constant_pool_count` | u2 | `29` | 28 项常量 + 1（从 1 开始计数） |
+| `constant_pool[]` | 变长 | 28 项 | 类名/方法名/字段名/字符串常量等 |
+| `access_flags` | u2 | `0x0021` | `ACC_PUBLIC \| ACC_SUPER` |
+| `this_class` | u2 | `#5` | 指向常量池第 5 项 = HelloWorld |
+| `super_class` | u2 | `#6` | 指向常量池第 6 项 = java/lang/Object |
+| `interfaces_count` | u2 | `0` | 无接口 |
+| `fields_count` | u2 | `0` | 无字段 |
+| `methods_count` | u2 | `2` | 两个方法：`<init>` 和 `main` |
+| `attributes_count` | u2 | `1` | 一个类级属性：SourceFile |
 
-**字节码只是 class 文件的一部分**——它存在每个方法的 `Code` 属性里。字节码里引用的 #2、#3、#4 等编号，是**常量池索引**——指向常量池里的 Methodref/Fieldref/String 项。
+### 二进制对照
 
-用 hexdump 看完整的 class 文件二进制（427 字节），标注每个段的位置：
+用 hexdump 看 class 文件的二进制，对照上面的结构：
 
 ```
-00000000: cafe babe 0000 0037 001d 0a00 0600 0f09  .......7........
-         ^^^^^^^^^^ ^^^^^^^^^ ^^^^
-         magic       版本号     常量池项数(29)
-                     minor=0   ↓
-                     major=55  常量池开始(0x0a)
-                     (JDK 11)
-
-         --- 常量池 28 项 (0x0a - 0x136) ---
-
-00000010: 0010 0011 0800 120a 0013 0014 0700 1507  ................
-00000020: 0016 0100 063c 696e 6974 3e01 0003 2829  .....<init>...()
-         ...（常量池存了类名/方法名/字段名/字符串常量等）...
-
-00000090: 170c 0018 0019 0100 0d48 656c 6c6f 2c20  .........Hello, 
-000000a0: 576f 726c 6421 0700 1a0c 001b 001c 0100  World!..........
-         ↑ "Hello, World!" 字符串常量存在这里
-
-00000130: 7269 6e67 3b29 5600 2100 0500 0600 0000  ring;)V.!.......
-                         ^^^^ ^^^^ ^^^^ ^^^^ ^^^^
-                         access  this  super  ifc  fields
-                         _flags  _class _class _cnt _cnt
-                         0x0021  #5    #6    0    0
-                         ACC_PUBLIC
-                         ACC_SUPER
-
-00000140: 0000 0200 0100 0700 0800 0100 0900 0000  ................
-         ^^^^
-         methods_count = 2
-
-         === 方法 1: <init> ===
-         0x0143: access_flags=0x0001 name=#7 desc=#8 attr_count=1
-         0x014b: Code 属性
-         0x0155: code_length=5
-00000150: 1d00 0100 0100 0000 052a b700 01b1 0000  .........*......
-                              ^^^^^^^^^^^^^^^^^
-                              <init> 的 5 字节字节码:
-                              2a       aload_0
-                              b7 0001  invokespecial #1
-                              b1       return
-
-         === 方法 2: main ===
-         0x016e: access_flags=0x0009 name=#11 desc=#12 attr_count=1
-         0x0176: Code 属性
-         0x0180: code_length=9
-00000180: 0000 0009 b200 0212 03b6 0004 b100 0000  ................
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^
-                    main 的 9 字节字节码:
-                    b2 0002  getstatic #2   (System.out)
-                    12 03    ldc #3         ("Hello, World!")
-                    b6 0004  invokevirtual #4 (println)
-                    b1       return
-
-00000190: 0100 0a00 0000 0a00 0200 0000 0300 0800  ................
-000001a0: 0400 0100 0d00 0000 0200 0e              ..........
-                                        ^^
-                                        类级属性 SourceFile
+偏移   二进制                              字段
+0x0000 cafe babe                           magic = 0xCAFEBABE
+0x0004 0000                                minor_version = 0
+0x0006 0037                                major_version = 55 (JDK 11)
+0x0008 001d                                constant_pool_count = 29 (28项+1)
+0x000a 0a 0006 000f 09 0010 0011 ...       constant_pool[1..28] (0x0a-0x136)
+       ...                                 (常量池存了 Object.<init>、System.out、
+       ...                                  "Hello, World!"、println 等引用)
+0x0137 0021                                access_flags = ACC_PUBLIC|ACC_SUPER
+0x0139 0005                                this_class = #5 (HelloWorld)
+0x013b 0006                                super_class = #6 (Object)
+0x013d 0000                                interfaces_count = 0
+0x013f 0000                                fields_count = 0
+0x0141 0002                                methods_count = 2
+0x0143 ...                                 methods[0]: <init>
+0x016e ...                                 methods[1]: main
+0x01a9 0001 000d                           attributes_count=1, SourceFile
 ```
 
-这个 427 字节的文件包含了 HelloWorld 程序的全部信息——魔数、版本、28 项常量池、2 个方法（`<init>` 和 `main`），每个方法的 Code 属性里存着字节码。
+**字节码在 `methods[]` 里**——每个方法的 `method_info` 结构含一个 `Code` 属性，Code 属性里存着该方法的字节码。所以**字节码只是 class 文件的一部分**，不是全部。
 
-逐字节对照 `javap` 的输出：
+### 两个方法的字节码
 
-| 二进制 | 操作码 | 指令 | 操作数 | 含义 |
-|--------|--------|------|--------|------|
-| `b2` `00 02` | 0xB2 = getstatic | getstatic | #2 | 取 System.out 字段（常量池第 2 项） |
-| `12` `03` | 0x12 = ldc | ldc | #3 | 加载 "Hello, World!" 字符串（常量池第 3 项） |
-| `b6` `00 04` | 0xB6 = invokevirtual | invokevirtual | #4 | 调用 println 方法（常量池第 4 项） |
-| `b1` | 0xB1 = return | return | — | 方法返回 |
+HelloWorld 有两个方法，每个方法的 Code 属性里存着字节码：
 
-每条字节码由**操作码**（opcode，1 字节）+ **操作数**（0-N 字节）组成。操作数里的 `#2`/`#3`/`#4` 就是常量池索引——指向常量池里的 Fieldref/String/Methodref 项。JVM 解释器执行 `getstatic #2` 时，要回答几个问题：
+**方法 1：`<init>`（构造方法）**——5 字节字节码，在文件偏移 0x0159：
+
+```
+2a       aload_0          // 把 this 压入栈
+b7 0001  invokespecial #1 // 调用 Object.<init>()
+b1       return           // 返回
+```
+
+**方法 2：`main`**——9 字节字节码，在文件偏移 0x0184：
+
+```
+b2 0002  getstatic #2     // 取 System.out（常量池第 2 项）
+12 03    ldc #3           // 加载 "Hello, World!"（常量池第 3 项）
+b6 0004  invokevirtual #4 // 调用 println（常量池第 4 项）
+b1       return           // 返回
+```
+
+操作数里的 `#2`/`#3`/`#4` 是**常量池索引**——指向常量池里的 Fieldref（System.out）、String（"Hello, World!"）、Methodref（println）。
+
+### JVM 执行字节码时需要知道什么
+
+每条字节码由**操作码**（opcode，1 字节）+ **操作数**（0-N 字节）组成。JVM 解释器执行 `getstatic #2` 时，要回答几个问题：
 
 - 读到 `0xb2`，怎么知道这是 `getstatic`？
 - `getstatic` 指令多长？——3 字节（1 操作码 + 2 操作数），所以下一条指令从偏移 3 开始
