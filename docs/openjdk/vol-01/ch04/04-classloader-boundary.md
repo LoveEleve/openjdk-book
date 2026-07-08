@@ -82,16 +82,91 @@ Java 有三种类加载器：引导类加载器（Bootstrap ClassLoader）、扩
 
 ### setup_boot_search_path 做什么
 
-`setup_boot_search_path(sys_class_path)`（`classLoader.cpp:818`）遍历搜索路径里的每个条目，为每个条目创建一个 `ClassPathEntry` 对象：
+`setup_boot_search_path(sys_class_path)`（`classLoader.cpp:818`）遍历搜索路径里的每个条目，为每个条目创建一个 `ClassPathEntry` 对象。搜索路径是用路径分隔符（Linux 上是 `:`）分隔的多个路径，比如 `/usr/lib/jvm/java-11/lib/modules:/path/to/app.jar`。
 
-- 如果条目是目录 → 创建 `ClassPathDirEntry`（从目录读 class 文件）
-- 如果条目是 jar/zip 文件 → 创建 `ClassPathZipEntry`（用前面加载的 ZIP 函数从 jar 里读 class 文件）
+源码（`classLoader.cpp:818-875`）核心是一个 for 循环遍历路径：
 
-这些 `ClassPathEntry` 串成链表，后续 JVM 加载类时就遍历这个链表找 class 文件。
+```cpp
+/* === src/hotspot/share/classfile/classLoader.cpp:818 === */
+
+void ClassLoader::setup_boot_search_path(const char *class_path) {
+  int len = (int)strlen(class_path);
+  int end = 0;
+  bool set_base_piece = true;
+
+  // 遍历路径里的每个条目（用路径分隔符分隔）
+  for (int start = 0; start < len; start = end) {
+    // 找到下一个路径分隔符
+    while (class_path[end] && class_path[end] != os::path_separator()[0]) {
+      end++;
+    }
+    // 提取这一段路径
+    char* path = ...;  // 例如 "/usr/lib/jvm/java-11/lib/modules" 或 "/path/to/app.jar"
+
+    if (set_base_piece) {
+      // 第一段路径必须是 jimage 文件（lib/modules）或 java.base exploded build
+      struct stat st;
+      if (os::stat(path, &st) == 0) {
+        ClassPathEntry* new_entry = create_class_path_entry(path, &st, false, false, CHECK);
+        if (Arguments::has_jimage()) {
+          _jrt_entry = new_entry;   // 保存 jimage 入口
+        }
+      }
+      set_base_piece = false;
+    } else {
+      // 后续路径（-Xbootclasspath/a 追加的）调 update_class_path_entry_list
+      update_class_path_entry_list(path, false, true);
+    }
+
+    // 跳过路径分隔符
+    while (class_path[end] == os::path_separator()[0]) { end++; }
+  }
+}
+```
+
+### ClassPathEntry 的三种子类
+
+`ClassPathEntry` 是基类（`classLoader.hpp:47`），有三个子类，分别对应三种类来源：
+
+```
+ClassPathEntry (CHeapObj, 基类)
+  _next → 链表指针
+  open_stream(name) → 核心方法：打开类文件流
+├── ClassPathDirEntry       // 从目录读 class 文件
+│     _dir → 目录路径
+│     open_stream() → 拼接路径打开文件
+├── ClassPathZipEntry       // 从 jar/zip 读 class 文件
+│     _zip → jzfile* 句柄（用前面加载的 ZIP_Open 打开的）
+│     _zip_name → jar 文件名
+│     open_stream() → 调 FindEntry + ReadEntry 读 class
+└── ClassPathImageEntry     // 从 jimage 文件读 class 文件
+      _jimage → JImageFile* 句柄
+      open_stream() → 调 JImageFindResource + JImageGetResource 读 class
+```
+
+| 子类 | `is_jar_file()` | `is_modules_image()` | 读 class 的方式 |
+|------|----------------|---------------------|--------------|
+| `ClassPathDirEntry` | false | false | `open()` 系统调用直接读文件 |
+| `ClassPathZipEntry` | true | false | 调前面 dlsym 加载的 `ZIP_Open`/`ZIP_FindEntry`/`ZIP_ReadEntry` |
+| `ClassPathImageEntry` | false | true | 调 `JIMAGE_FindResource`/`JIMAGE_GetResource` |
+
+`open_stream(name)` 是核心方法——传入类名（如 `"java/lang/String"`），返回 `ClassFileStream*`（class 文件的字节流），后续 ClassFileParser 解析这个流。
+
+### 实际的搜索路径长什么样
+
+在标准 JDK 11 上，`Arguments::get_sysclasspath()` 返回的第一段通常是：
+
+```
+/usr/lib/jvm/java-11-openjdk/lib/modules
+```
+
+这是 jimage 文件——JDK 9+ 把所有核心类打包到一个 `lib/modules` 文件里（不是一堆 jar）。所以 `_jrt_entry` 是个 `ClassPathImageEntry`，从 jimage 里读 `java/lang/String.class` 等。
+
+如果有 `-Xbootclasspath/a:/path/to/app.jar`，app.jar 会作为后续条目追加，创建 `ClassPathZipEntry`。
 
 ### 和前面步骤的关系
 
-第 4 步依赖第 2 步——`ClassPathZipEntry` 要用 `load_zip_library()` 加载的 ZIP 函数（`ZipOpen`/`FindEntry`/`ReadEntry` 等）才能从 jar 里读 class 文件。所以 `load_zip_library()` 必须在 `setup_bootstrap_search_path()` 之前执行。
+第 4 步依赖第 2 步——`ClassPathZipEntry` 要用 `load_zip_library()` 加载的 ZIP 函数（`ZipOpen`/`FindEntry`/`ReadEntry` 等）才能从 jar 里读 class 文件。`ClassPathImageEntry` 要用 `JIMAGE_Open` 等 jimage 函数（但这些在 `lookup_vm_options()` 更早加载，不在 `classLoader_init1` 里）。所以 `load_zip_library()` 必须在 `setup_bootstrap_search_path()` 之前执行。
 
 第 4 步也依赖第 3 步（仅在 CDS dump 时）——如果 `DumpSharedSpaces`，把 boot classpath 写入 `SharedPathsMiscInfo`，写入 CDS 归档文件头。
 
