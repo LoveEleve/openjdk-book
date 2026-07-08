@@ -197,18 +197,18 @@ void Bytecodes::def(Code code, const char* name, const char* format,
                     int depth, bool can_trap, Code java_code);
 ```
 
-参数含义：
+参数含义（按位置对应，实际调用不写参数名）：
 
-| 参数 | 含义 | getfield 的值 |
-|------|------|--------------|
-| `code` | 字节码编号（`Bytecodes::Code` 枚举值，如 `_getfield = 180` 对应 `0xB4`） | `_getfield`（180） |
-| `name` | 名字 | `"getfield"` |
-| `format` | **格式串**（描述内存布局） | `"bJJ"` |
-| `wide_format` | wide 形式格式串 | `NULL`（getfield 无 wide 形式） |
-| `result_type` | 栈顶类型 | `T_ILLEGAL` |
-| `depth` | 栈深度变化 | `+1` |
-| `can_trap` | 能否抛异常 | `true`（可能 NPE） |
-| `java_code` | 对应的 Java 标准字节码 | `_getfield`（自己） |
+| 位置 | 参数 | 含义 | getfield 的值 |
+|------|------|------|--------------|
+| 1 | `code` | 字节码编号（`Bytecodes::Code` 枚举值，如 `_getfield = 180` 对应 `0xB4`） | `_getfield` |
+| 2 | `name` | 名字字符串 | `"getfield"` |
+| 3 | `format` | **格式串**（描述内存布局） | `"bJJ"` |
+| 4 | `wide_format` | wide 形式格式串 | `NULL`（getfield 无 wide 形式） |
+| 5 | `result_type` | **执行后栈顶元素的类型**（不是方法返回值类型——是这条字节码执行完后操作数栈顶放的是什么类型的东西；当类型不能仅由字节码本身决定时设为 `T_ILLEGAL`，如 getfield 取出的字段类型取决于字段声明） | `T_ILLEGAL` |
+| 6 | `depth` | 执行后栈深度的变化量 | `0` |
+| 7 | `can_trap` | 能否抛异常 | `true`（可能 NPE） |
+| 8 | `java_code` | 对应的 Java 标准字节码（JVM 内部 fast 变体才需要，标准字节码默认等于自己） | `_getfield`（自己） |
 
 最关键的是 `format` 参数——**格式串**描述字节码的内存布局。
 
