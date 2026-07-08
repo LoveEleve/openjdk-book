@@ -38,6 +38,26 @@ class AccessFlags {
 
 整个类**只有一个字段** `jint _flags`，没有虚函数，没有其他成员。断言就是确保这一点——如果有人加了虚函数（会有 vtable 指针，多 8 字节）或其他字段，`sizeof` 就不等于 4 了。
 
+### 谁持有 AccessFlags 对象
+
+`AccessFlags` 被三处复用——Method、Klass 各自内嵌一个 `AccessFlags` 对象，Field 只存低 16 位：
+
+```cpp
+// method.hpp:79
+AccessFlags       _access_flags;        // Method 里有完整的 AccessFlags 对象（4 字节）
+
+// instanceKlass.hpp
+AccessFlags       _access_flags;        // Klass 里也有完整的 AccessFlags 对象（4 字节）
+
+// fieldInfo.hpp:195
+void set_access_flags(u2 val) { _shorts[access_flags_offset] = val; }
+                                            // Field 只存 u2（2 字节，只要低 16 位）
+```
+
+为什么 Field 只要低 16 位？因为字段不需要 HotSpot 内部标志（不需要"排队等编译""RedefineClasses 状态"等），只要 Java 标准的 public/private/static/volatile 等，这些全在低 16 位。而 Method 和 Klass 需要高 16 位的 HotSpot 内部标志，所以用完整的 `AccessFlags` 对象。
+
+同一个 `AccessFlags` 类，放在 Method 里就是方法标志，放在 Klass 里就是类标志——具体用哪些位取决于它被谁持有。断言 `sizeof(AccessFlags) == sizeof(jint)` 保护的就是 Method 和 Klass 里这个 4 字节字段——确保不会因为误加虚函数变成 8 字节，破坏 Method/Klass 的内存布局。
+
 ### 三组标志位
 
 32 位分成三组（`accessFlags.hpp:36-98`）：
