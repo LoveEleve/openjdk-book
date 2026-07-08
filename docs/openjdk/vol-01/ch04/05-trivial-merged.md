@@ -126,6 +126,19 @@ void invocationCounter_init() {
 
 转调 `reinitialize()`（`invocationCounter.cpp:138-167`）——设置方法调用的编译阈值：解释器执行一个方法多少次后触发 JIT 编译。
 
+### DelayCompilationDuringStartup 参数
+
+参数 `DelayCompilationDuringStartup` 是 `reinitialize()` 的入参，控制启动时编译器的行为。它是个 `develop` flag（`globals.hpp:1378`），默认 `true`：
+
+```cpp
+develop(bool, DelayCompilationDuringStartup, true,
+        "Delay invoking the compiler until main application class is loaded")
+```
+
+意思是"延迟编译——直到主应用类加载完才开始编译"。为什么需要它？JVM 启动时要加载几百个 JDK 核心类（`java.lang.Object`、`java.lang.String` 等），这些类的方法会被频繁调用，计数器很快达到阈值。如果此时就触发 JIT 编译，CPU 会被编译线程占满，启动反而变慢——而且启动时很多类还没加载完，编译出来的代码可能不完整。
+
+所以启动时传 `true`：计数器溢出时不编译，只调 `do_decay` 衰减（减半），让方法继续跑解释器。等到主应用类加载完，JVM 调 `CompilationPolicy::completed_vm_startup()`（`compilationPolicy.cpp:89`，从 `jni.cpp:442` 的 `FindClass` 触发）把 `_in_vm_startup` 设为 false，然后重新调 `reinitialize(false)` 切换到正常模式——计数器溢出就真正触发编译。
+
 ### InvocationCounter 的 _counter 字段
 
 `InvocationCounter` 用一个 `unsigned int _counter` 同时编码计数和状态（`invocationCounter.hpp:44-45`）：
