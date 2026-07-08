@@ -78,7 +78,13 @@ void ClassLoader::setup_bootstrap_search_path() {
 
 Java 有三种类加载器：引导类加载器（Bootstrap ClassLoader）、扩展类加载器、应用类加载器。引导类加载器负责加载 JDK 核心类（`java.lang.Object`、`java.lang.String` 等）——这些类在 JDK 的 `lib/modules` 文件（jimage 格式）里。
 
-但 JVM 要知道去哪里找这些类——这就是"搜索路径"。`Arguments::get_sysclasspath()` 返回的就是引导类加载器的搜索路径，在 JVM 启动参数解析阶段（ch03/04 讲的 `Arguments::parse`）设置好的。
+但 JVM 要知道去哪里找这些类——这就是"搜索路径"。`Arguments::get_sysclasspath()` 返回的就是引导类加载器的搜索路径。这个值在 JVM 启动参数解析阶段（ch03/04 讲的 `Arguments::parse`）由 `os::set_boot_path()` 设置（`os.cpp:1334`）——它拼接 `$JAVA_HOME/lib/modules`：
+
+对于 jdk11u-copy，`JAVA_HOME` 是 `/data/workspace/jdk11u-copy/build/linux-x86_64-normal-server-slowdebug/jdk`，所以搜索路径是：
+
+```
+/data/workspace/jdk11u-copy/build/linux-x86_64-normal-server-slowdebug/jdk/modules
+```
 
 ### 先看标准 JDK 的 modules 是什么
 
