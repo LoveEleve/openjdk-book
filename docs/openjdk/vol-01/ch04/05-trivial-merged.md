@@ -330,19 +330,25 @@ void VMRegImpl::set_regName() {
 
 ### VMRegImpl 是什么
 
-JVM 内部用整数编号表示寄存器（0=RAX, 1=RAX(高32位), 2=RBX, ...），这个编号叫 VMReg。`regName[]` 数组把编号映射到名字字符串——OopMap 打印、OptoReg 分配、调试输出时用来把编号翻译成人类可读的名字（如 "RAX"、"XMM0"）。
+JIT 编译器把 Java 方法编译成机器码时，要用 CPU 寄存器。但 JIT 内部不直接用"RAX""XMM0"这些名字——它用**整数编号**：0=RAX，1=RAX的高32位(EAX)，2=RBX，3=EBX，... 这个编号叫 VMReg。
+
+为什么要用编号而不是直接用名字？因为 JIT 编译器要做**寄存器分配**——决定哪些变量放哪个寄存器。分配算法操作的是整数编号，不是字符串名字。比如"把变量 a 分配到寄存器 0，变量 b 分配到寄存器 4"——比"分配到 RAX、分配到 XMM0"方便。
+
+但调试时人需要看名字——"寄存器 0"不知道是什么，"RAX"才看得懂。`regName[]` 数组就是这个翻译表：`regName[0] = "RAX"`，`regName[32] = "XMM0"`。GC 扫描 OopMap 时也要打印"这个寄存器里存的是对象引用"——打印时用 `regName[i]` 而不是裸编号。
 
 ### 四类寄存器
 
-按编号区间排列：
+编号按区间连续排列：
 
-| 类型 | 寄存器 | 每个占几个 slot | 为什么 |
-|------|--------|----------------|--------|
-| GPR（通用） | RAX/RBX/.../R15（16 个） | 2 | 64 位寄存器可拆成两个 32 位（RAX 低 32 位是 EAX），JIT 寄存器分配器按 32 位 slot 分配 |
-| FPR（浮点） | ST0-ST7（8 个） | 2 | 同上 |
-| XMM（SSE/AVX） | XMM0-XMM15（16 个） | `max_slots_per_register` | XMM 寄存器更宽（128/256/512 位），按更细的 slot 分 |
-| KRegister（AVX-512 掩码） | K0-K7（8 个） | `max_slots_per_register` | AVX-512 的掩码寄存器 |
+| 编号区间 | 类型 | 寄存器 | 每个占几个 slot | 为什么 |
+|---------|------|--------|----------------|--------|
+| 0 开始 | GPR（通用） | RAX/RBX/.../R15（16 个） | 2 | 64 位寄存器可拆成两个 32 位（RAX 低 32 位是 EAX），JIT 寄存器分配器按 32 位 slot 分配 |
+| 接着 | FPR（浮点） | ST0-ST7（8 个） | 2 | 同上 |
+| 接着 | XMM（SSE/AVX） | XMM0-XMM15（16 个） | `max_slots_per_register` | XMM 寄存器更宽（128/256/512 位），按更细的 slot 分 |
+| 接着 | KRegister（AVX-512 掩码） | K0-K7（8 个） | `max_slots_per_register` | AVX-512 的掩码寄存器 |
+
+以 GPR 为例：编号 0=RAX（低32位），1=RAX（高32位），2=RBX（低32位），3=RBX（高32位）... 每个 64 位寄存器占 2 个编号。源码里 `regName[i++] = reg->name(); regName[i++] = reg->name();` 就是给同一个寄存器填两次名字——编号 0 和 1 都叫 "RAX"。
 
 ### 为什么源码在 cpu/x86 不在 share
 
-这个函数在 `cpu/x86/vmreg_x86.cpp` 而不是 `share/`——因为不同 CPU 架构的寄存器不一样（ARM 有 VFP/NEON 寄存器，x86 有 XMM/KRegister）。但调用在 `share/` 的 `init.cpp:122`——`init_globals()` 调 `VMRegImpl::set_regName()`，编译时链接到当前平台的实现。
+这个函数在 `cpu/x86/vmreg_x86.cpp` 而不是 `share/`——因为不同 CPU 架构的寄存器完全不一样。x86 有 RAX/RBX/XMM0，ARM 有 R0-R14/VFP/NEON 寄存器。但调用在 `share/` 的 `init.cpp:122`——`init_globals()` 调 `VMRegImpl::set_regName()`，编译时链接到当前平台的实现。
