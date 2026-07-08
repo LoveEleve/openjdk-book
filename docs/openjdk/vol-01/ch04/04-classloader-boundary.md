@@ -99,6 +99,27 @@ $ xxd /usr/lib/jvm/java-11-konajdk-11.0.31-1.tl4/lib/modules | head -1
 
 jimage 不是 zip 也不是 jar，是专门为 JVM 设计的格式——所有核心类的 .class 文件紧凑排列在一个文件里，JVM 用 `mmap` 映射后通过偏移量直接定位某个 class，不用解压。`java.lang.String`、`java.lang.Object` 等几千个核心类全在这一个文件里。
 
+不是扁平地 a.class/b.class/c.class 排列，而是**按模块 + 包路径组织**的。用 `jimage list` 命令可以看到内部结构：
+
+```bash
+$ jimage list /usr/lib/jvm/java-11-konajdk/lib/modules
+
+Module: java.base                          ← 模块名
+    META-INF/services/java.nio.file.spi.FileSystemProvider
+    com/sun/crypto/provider/AESCipher.class
+    com/sun/crypto/provider/AESCrypt.class
+    java/lang/Object.class                 ← java.lang.Object 在这里
+    java/lang/String.class                 ← java.lang.String 在这里
+    java/lang/StringBuilder.class
+    ...
+Module: java.compiler                      ← 另一个模块
+    ...
+Module: java.desktop
+    ...
+```
+
+31474 行——意味着这个 137MB 的文件里有大约 3 万个 class 和其他资源。它们按模块分组（`java.base`、`java.compiler`、`java.desktop` 等），每个模块内用 `/` 分隔的包路径定位（如 `java/lang/String.class`）。JVM 调 `JIMAGE_FindResource(jimage, "java.base", version, "java/lang/String.class", &size)` 就能定位到 String.class 在文件里的偏移量，再调 `JIMAGE_GetResource` 读出来。
+
 ### 再看 jdk11u-copy 的 modules 是什么
 
 但 jdk11u-copy 是我们自己编译的，它的 `modules` 不一样：
