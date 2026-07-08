@@ -23,7 +23,73 @@ void classLoader_init1() {
 3. 如果 `DumpSharedSpaces`，创建 `SharedPathsMiscInfo` 对象（CDS 相关）
 4. `setup_bootstrap_search_path()`——构建引导类加载器搜索路径
 
-PerfData 计数器的创建机制和 ch03/06 的 `ObjectMonitor::Initialize()` 一样（都是 `PerfDataManager::create_counter` 往共享内存里写 PerfDataEntry），本节不再重复，重点讲第 2 步——加载 zip 库。
+PerfData 计数器的创建机制和 ch03/06 的 `ObjectMonitor::Initialize()` 一样（都是 `PerfDataManager::create_counter` 往共享内存里写 PerfDataEntry），本节不再重复。重点讲第 2、3、4 步。
+
+---
+
+## SharedPathsMiscInfo（CDS 相关）
+
+第 3 步的源码（`classLoader.cpp:1710-1715`）：
+
+```cpp
+#if INCLUDE_CDS
+  if (DumpSharedSpaces) {
+    _shared_paths_misc_info = new SharedPathsMiscInfo();
+  }
+#endif
+```
+
+`DumpSharedSpaces` 是一个 JVM flag——用 `-Xshare:dump` 启动时为 true，表示"生成 CDS 归档文件"而不是"正常启动 JVM"。普通启动时这个 flag 是 false，这步跳过。
+
+`SharedPathsMiscInfo` 是什么？它是一个记录**类路径信息**的对象——boot classpath、app classpath 等。在 CDS dump 时把这些路径信息记录下来，写入 CDS 归档文件的文件头。运行时用 CDS 归档启动时，会读出这些路径信息并校验——如果运行时的类路径和 dump 时不一致，CDS 归档就不可用（因为路径变了，类的位置可能变了）。
+
+**普通启动时这步不做**——只有 `-Xshare:dump` 时才创建 `SharedPathsMiscInfo`。后续在 CDS 相关章节展开。
+
+---
+
+## setup_bootstrap_search_path()：构建引导类加载器搜索路径
+
+第 4 步的源码（`classLoader.cpp:640-654`）：
+
+```cpp
+/* === src/hotspot/share/classfile/classLoader.cpp:640 === */
+
+void ClassLoader::setup_bootstrap_search_path() {
+  const char* sys_class_path = Arguments::get_sysclasspath();
+  if (PrintSharedArchiveAndExit) {
+    // Don't print sys_class_path
+  } else {
+    trace_class_path("bootstrap loader class path=", sys_class_path);
+  }
+#if INCLUDE_CDS
+  if (DumpSharedSpaces) {
+    _shared_paths_misc_info->add_boot_classpath(sys_class_path);
+  }
+#endif
+  setup_boot_search_path(sys_class_path);
+}
+```
+
+### 什么是引导类加载器搜索路径
+
+Java 有三种类加载器：引导类加载器（Bootstrap ClassLoader）、扩展类加载器、应用类加载器。引导类加载器负责加载 JDK 核心类（`java.lang.Object`、`java.lang.String` 等）——这些类在 JDK 的 `lib/modules` 文件（jimage 格式）里。
+
+但 JVM 要知道去哪里找这些类——这就是"搜索路径"。`Arguments::get_sysclasspath()` 返回的就是引导类加载器的搜索路径，在 JVM 启动参数解析阶段（ch03/04 讲的 `Arguments::parse`）设置好的。
+
+### setup_boot_search_path 做什么
+
+`setup_boot_search_path(sys_class_path)`（`classLoader.cpp:818`）遍历搜索路径里的每个条目，为每个条目创建一个 `ClassPathEntry` 对象：
+
+- 如果条目是目录 → 创建 `ClassPathDirEntry`（从目录读 class 文件）
+- 如果条目是 jar/zip 文件 → 创建 `ClassPathZipEntry`（用前面加载的 ZIP 函数从 jar 里读 class 文件）
+
+这些 `ClassPathEntry` 串成链表，后续 JVM 加载类时就遍历这个链表找 class 文件。
+
+### 和前面步骤的关系
+
+第 4 步依赖第 2 步——`ClassPathZipEntry` 要用 `load_zip_library()` 加载的 ZIP 函数（`ZipOpen`/`FindEntry`/`ReadEntry` 等）才能从 jar 里读 class 文件。所以 `load_zip_library()` 必须在 `setup_bootstrap_search_path()` 之前执行。
+
+第 4 步也依赖第 3 步（仅在 CDS dump 时）——如果 `DumpSharedSpaces`，把 boot classpath 写入 `SharedPathsMiscInfo`，写入 CDS 归档文件头。
 
 ---
 
