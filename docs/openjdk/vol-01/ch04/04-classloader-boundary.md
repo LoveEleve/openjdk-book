@@ -80,146 +80,97 @@ Java 有三种类加载器：引导类加载器（Bootstrap ClassLoader）、扩
 
 但 JVM 要知道去哪里找这些类——这就是"搜索路径"。`Arguments::get_sysclasspath()` 返回的就是引导类加载器的搜索路径，在 JVM 启动参数解析阶段（ch03/04 讲的 `Arguments::parse`）设置好的。
 
-### setup_boot_search_path 做什么
+### 先看标准 JDK 的 modules 是什么
 
-`setup_boot_search_path(sys_class_path)`（`classLoader.cpp:818`）遍历搜索路径里的每个条目，为每个条目创建一个 `ClassPathEntry` 对象。搜索路径是用路径分隔符（Linux 上是 `:`）分隔的多个路径，比如 `/usr/lib/jvm/java-11/lib/modules:/path/to/app.jar`。
+在标准安装的 JDK 里（如 KonaJDK），引导类加载器的搜索路径第一段是 `lib/modules`：
 
-源码（`classLoader.cpp:818-875`）核心是一个 for 循环遍历路径：
+```bash
+$ file /usr/lib/jvm/java-11-konajdk-11.0.31-1.tl4/lib/modules
+Java module image (little endian), version 1.0
+
+$ du -sh /usr/lib/jvm/java-11-konajdk-11.0.31-1.tl4/lib/modules
+137M
+
+$ xxd /usr/lib/jvm/java-11-konajdk-11.0.31-1.tl4/lib/modules | head -1
+00000000: dada feca 0000 0100 ...
+```
+
+这是一个 **137MB 的文件**，不是目录。`file` 命令识别为 "Java module image"——这是 JDK 9 引入的 **jimage 格式**。开头 4 字节 `0xdadafeca` 是 jimage 的魔数（和 class 文件的 `0xCAFEBABE` 不同）。
+
+jimage 不是 zip 也不是 jar，是专门为 JVM 设计的格式——所有核心类的 .class 文件紧凑排列在一个文件里，JVM 用 `mmap` 映射后通过偏移量直接定位某个 class，不用解压。`java.lang.String`、`java.lang.Object` 等几千个核心类全在这一个文件里。
+
+### 再看 jdk11u-copy 的 modules 是什么
+
+但 jdk11u-copy 是我们自己编译的，它的 `modules` 不一样：
+
+```bash
+$ ls /data/workspace/jdk11u-copy/build/linux-x86_64-normal-server-slowdebug/jdk/modules
+java.base/  java.management/  jdk.compiler/  jdk.jfr/  ...
+
+$ find jdk/modules/java.base/ -name "String.class"
+jdk/modules/java.base/java/lang/String.class
+```
+
+**这是个目录，不是文件**。里面按模块分了子目录（`java.base/`、`jdk.compiler/` 等），每个模块目录下直接就是 .class 文件——和你在 IDE 里看到的 src 结构一样。
+
+### 为什么不同
+
+| | jdk11u-copy（编译输出） | 标准 JDK（安装版） |
+|---|---|---|
+| `modules` 是什么 | 目录 | jimage 文件（137MB） |
+| class 在哪 | `java.base/java/lang/String.class` 直接是 .class 文件 | 打包在 jimage 文件里 |
+| 为什么 | `make` 编译后默认展开，改代码重编立即生效 | 发布前用 `jlink` 工具打包成 jimage，减少文件数量、加快启动 |
+
+jdk11u-copy 是开发用的——改了某个 .java 文件，`make` 重新编译后直接生成新的 .class 文件放在目录里，JVM 立即能读到。如果每次改代码都要重新打包 jimage，开发效率太低。标准 JDK 是发布给用户用的——用 `jlink` 把几万个 .class 打包成 1 个 jimage 文件，启动时 mmap 一次就全加载了。
+
+### setup_boot_search_path 怎么处理这两种情况
+
+不管是目录还是 jimage 文件，`setup_boot_search_path()` 都用同一套逻辑处理——遍历搜索路径，对每个条目根据类型创建不同的 `ClassPathEntry` 子类（`classLoader.cpp:818`）：
 
 ```cpp
 /* === src/hotspot/share/classfile/classLoader.cpp:818 === */
 
 void ClassLoader::setup_boot_search_path(const char *class_path) {
-  int len = (int)strlen(class_path);
-  int end = 0;
-  bool set_base_piece = true;
-
-  // 遍历路径里的每个条目（用路径分隔符分隔）
+  // 遍历搜索路径里的每个条目（用路径分隔符 : 分隔）
   for (int start = 0; start < len; start = end) {
-    // 找到下一个路径分隔符
-    while (class_path[end] && class_path[end] != os::path_separator()[0]) {
-      end++;
-    }
-    // 提取这一段路径
-    char* path = ...;  // 例如 "/usr/lib/jvm/java-11/lib/modules" 或 "/path/to/app.jar"
+    // 找到下一个分隔符，提取这一段路径
+    char* path = ...;  // 例如 "/path/to/lib/modules" 或 "/path/to/app.jar"
 
     if (set_base_piece) {
-      // 第一段路径必须是 jimage 文件（lib/modules）或 java.base exploded build
+      // 第一段路径是核心模块（jimage 或 exploded build 目录）
       struct stat st;
-      if (os::stat(path, &st) == 0) {
-        ClassPathEntry* new_entry = create_class_path_entry(path, &st, false, false, CHECK);
-        if (Arguments::has_jimage()) {
-          _jrt_entry = new_entry;   // 保存 jimage 入口
-        }
-      }
+      os::stat(path, &st);                    // 检查路径是文件还是目录
+      ClassPathEntry* new_entry = create_class_path_entry(path, &st, ...);
+      _jrt_entry = new_entry;                 // 保存为核心入口
       set_base_piece = false;
     } else {
-      // 后续路径（-Xbootclasspath/a 追加的）调 update_class_path_entry_list
+      // 后续路径是 -Xbootclasspath/a 追加的 jar 或目录
       update_class_path_entry_list(path, false, true);
     }
-
-    // 跳过路径分隔符
-    while (class_path[end] == os::path_separator()[0]) { end++; }
   }
 }
 ```
 
-### ClassPathEntry 的三种子类
-
-`ClassPathEntry` 是基类（`classLoader.hpp:47`），有三个子类，分别对应三种类来源：
+`create_class_path_entry()` 根据路径是目录、jar/zip 文件、还是 jimage 文件，创建不同的 `ClassPathEntry` 子类：
 
 ```
-ClassPathEntry (CHeapObj, 基类)
-  _next → 链表指针
-  open_stream(name) → 核心方法：打开类文件流
-├── ClassPathDirEntry       // 从目录读 class 文件
-│     _dir → 目录路径
-│     open_stream() → 拼接路径打开文件
-├── ClassPathZipEntry       // 从 jar/zip 读 class 文件
-│     _zip → jzfile* 句柄（用前面加载的 ZIP_Open 打开的）
-│     _zip_name → jar 文件名
-│     open_stream() → 调 FindEntry + ReadEntry 读 class
-└── ClassPathImageEntry     // 从 jimage 文件读 class 文件
-      _jimage → JImageFile* 句柄
-      open_stream() → 调 JImageFindResource + JImageGetResource 读 class
+ClassPathEntry (基类)
+  open_stream(name) → 核心方法：传入类名，返回 class 字节流
+├── ClassPathDirEntry       // 路径是目录（如 jdk11u-copy 的 modules/）
+│     open_stream() → open() 直接读 .class 文件
+├── ClassPathZipEntry       // 路径是 jar/zip 文件
+│     open_stream() → 调 ZIP_Open/FindEntry/ReadEntry 读
+└── ClassPathImageEntry     // 路径是 jimage 文件（如标准 JDK 的 lib/modules）
+      open_stream() → 调 JIMAGE_FindResource/GetResource 读
 ```
 
-| 子类 | `is_jar_file()` | `is_modules_image()` | 读 class 的方式 |
-|------|----------------|---------------------|--------------|
-| `ClassPathDirEntry` | false | false | `open()` 系统调用直接读文件 |
-| `ClassPathZipEntry` | true | false | 调前面 dlsym 加载的 `ZIP_Open`/`ZIP_FindEntry`/`ZIP_ReadEntry` |
-| `ClassPathImageEntry` | false | true | 调 `JIMAGE_FindResource`/`JIMAGE_GetResource` |
-
-`open_stream(name)` 是核心方法——传入类名（如 `"java/lang/String"`），返回 `ClassFileStream*`（class 文件的字节流），后续 ClassFileParser 解析这个流。
-
-### 实际的搜索路径长什么样
-
-在 jdk11u-copy 构建输出里，`Arguments::get_sysclasspath()` 返回的第一段是：
-
-```
-/data/workspace/jdk11u-copy/build/linux-x86_64-normal-server-slowdebug/jdk/modules
-```
-
-注意这是 **exploded build**（展开构建）——`modules` 是个**目录**而不是打包的 jimage 文件。目录里直接放的就是 .class 文件：
-
-```
-$ ls jdk/modules/java.base/
-com/  java/  javax/  jdk/  META-INF/  module-info.class  sun/
-
-$ find jdk/modules/java.base/ -name "String.class"
-jdk/modules/java.base/java/lang/String.class    ← 直接就是 .class 文件
-```
-
-JVM 从这个目录读 class 文件时走的是 `ClassPathDirEntry`——直接用 `open()` 系统调用读文件。
-
-### jimage 是什么格式
-
-标准安装的 JDK（如 KonaJDK）的 `lib/modules` 不是目录，而是**一个文件**：
-
-```
-$ file /usr/lib/jvm/java-11-konajdk/lib/modules
-Java module image (little endian), version 1.0
-
-$ du -sh /usr/lib/jvm/java-11-konajdk/lib/modules
-137M
-
-$ xxd /usr/lib/jvm/java-11-konajdk/lib/modules | head -3
-00000000: dada feca 0000 0100 0000 0000 dd84 0000  ................
-```
-
-`file` 命令识别为 "Java module image"——这是 JDK 9 引入的 **jimage** 格式。开头 4 字节 `0xdadafeca` 是 jimage 的魔数（和 class 文件的 `0xCAFEBABE` 不同）。137MB 的文件里打包了所有核心类的 .class 文件，但**不是 zip/jar 格式**，而是专门为 JVM 快速加载设计的格式——所有 class 内容紧凑排列，mmap 后直接用偏移量定位，不用解压。
-
-### 为什么 jdk11u-copy 是目录而标准 JDK 是文件
-
-| | jdk11u-copy（编译输出） | 标准 JDK（安装版） |
-|---|---|---|
-| `modules` 是什么 | **目录** | **jimage 文件** |
-| class 在哪 | 直接是 `java.base/java/lang/String.class` | 打包在 137MB 的文件里 |
-| JVM 用哪个子类 | `ClassPathDirEntry`（`open()` 直接读文件） | `ClassPathImageEntry`（用 `JIMAGE_FindResource` 定位） |
-| 为什么 | `make` 编译后默认是展开形式，方便改代码重新编译立即生效 | 发布前用 `jlink` 工具把目录打包成 jimage，减少文件数量、加快启动 |
-
-jdk11u-copy 是开发用的——改了某个 .java 文件，`make` 重新编译后直接生成新的 .class 文件放在目录里，JVM 立即能读到。如果每次改代码都要重新打包 jimage，开发效率太低。标准 JDK 是发布给用户用的——打包成 jimage 减少文件数量（从几万个 .class 变成 1 个文件），启动时 mmap 一次就全加载了。
-
-### 对 ClassPathEntry 的影响
-
-`setup_boot_search_path()` 遍历搜索路径时，根据每个条目是目录还是文件创建不同的 `ClassPathEntry` 子类：
-
-| 条目类型 | 创建的子类 | 怎么读 class |
-|---------|----------|------------|
-| 目录（如 jdk11u-copy 的 `modules/`） | `ClassPathDirEntry` | `open()` 系统调用直接读 .class 文件 |
-| jar/zip 文件 | `ClassPathZipEntry` | 调 `ZIP_Open`/`ZIP_FindEntry`/`ZIP_ReadEntry` |
-| jimage 文件（如标准 JDK 的 `lib/modules`） | `ClassPathImageEntry` | 调 `JIMAGE_FindResource`/`JIMAGE_GetResource` |
-
-这就是为什么 `load_zip_library()` 要在 `setup_bootstrap_search_path()` 之前执行——如果搜索路径里有 jar/zip，`ClassPathZipEntry` 要用 ZIP 函数。
-
-如果有 `-Xbootclasspath/a:/path/to/app.jar`，app.jar 会作为后续条目追加，创建 `ClassPathZipEntry`。
+后续 JVM 加载类时（如加载 `java.lang.String`），就遍历这个 `ClassPathEntry` 链表，对每个条目调 `open_stream("java/lang/String")`——如果返回非 NULL 就找到了。
 
 ### 和前面步骤的关系
 
-第 4 步依赖第 2 步——`ClassPathZipEntry` 要用 `load_zip_library()` 加载的 ZIP 函数（`ZipOpen`/`FindEntry`/`ReadEntry` 等）才能从 jar 里读 class 文件。`ClassPathImageEntry` 要用 `JIMAGE_Open` 等 jimage 函数（但这些在 `lookup_vm_options()` 更早加载，不在 `classLoader_init1` 里）。所以 `load_zip_library()` 必须在 `setup_bootstrap_search_path()` 之前执行。
+第 4 步依赖第 2 步——如果搜索路径里有 jar/zip 文件，`ClassPathZipEntry` 要用 `load_zip_library()` 加载的 ZIP 函数才能从 jar 里读 class 文件。所以 `load_zip_library()` 必须在 `setup_bootstrap_search_path()` 之前执行。
 
 第 4 步也依赖第 3 步（仅在 CDS dump 时）——如果 `DumpSharedSpaces`，把 boot classpath 写入 `SharedPathsMiscInfo`，写入 CDS 归档文件头。
-
 ---
 
 ## load_zip_library()：dlsym 加载 7 个 ZIP 函数
