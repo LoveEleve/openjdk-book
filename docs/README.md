@@ -67,6 +67,7 @@
   * [4.2 management_init — JMX 子系统的 C++ 侧地基](openjdk/vol-01/ch04/02-management.md)
   * [4.3 bytecodes_init — JVM 字节码表的初始化](openjdk/vol-01/ch04/03-bytecodes.md)
   * [4.4 classLoader_init1 边界 + os_init_globals 空实现](openjdk/vol-01/ch04/04-classloader-boundary.md)
+  * [4.5 四个 trivial 函数合并](openjdk/vol-01/ch04/05-trivial-merged.md)
 
   </div>
 </details>
