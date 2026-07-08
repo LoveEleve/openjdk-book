@@ -56,6 +56,12 @@
   * [3.6 第一个 JavaThread：主线程登记](openjdk/vol-01/ch03/06-main-thread-create.md)
   * [前置概念：三套 Handle 体系](openjdk/vol-01/ch03/background/handles-all.md)
   * [前置概念：Thread-SMR](openjdk/vol-01/ch03/background/smr.md)
+  * [前置概念：_oops_do_parity — GC 并行标记的去重锁](openjdk/vol-01/ch03/background/oops-do-parity.md)
+  * [前置概念：GlobalCounter — RCU 风格的宽限期等待](openjdk/vol-01/ch03/background/global-counter.md)
+  * [前置概念：_SR_lock — 线程自我挂起的信号锁](openjdk/vol-01/ch03/background/suspend-resume.md)
+  * [前置概念：ThreadSafepointState — 线程安全点状态机](openjdk/vol-01/ch03/background/safepoint-state.md)
+  * [前置概念：Parker — Unsafe.park/unpark 的底层实现](openjdk/vol-01/ch03/background/parker.md)
+  * [前置概念：主线程附着 — set_as_starting_thread](openjdk/vol-01/ch03/background/attach-main-thread.md)
 * [第四章 — init.cpp 全局初始化](openjdk/vol-01/ch04/01-overview.md) - init_globals() 30 项核心子系统初始化
   * [4.1 init_globals() 总览](openjdk/vol-01/ch04/01-overview.md)
   * [4.2 management_init — JMX 子系统的 C++ 侧地基](openjdk/vol-01/ch04/02-management.md)

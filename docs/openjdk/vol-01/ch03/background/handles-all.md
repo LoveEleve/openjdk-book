@@ -121,7 +121,7 @@ public class Foo {
 }
 ```
 
-这个 `getName` 的 C 实现（`Foo.c`）大概是：
+这个 `getName` 的 C 实现（`Foo.c`）如下：
 
 ```c
 JNIEXPORT jstring JNICALL Java_Foo_getName(JNIEnv *env, jclass cls, jobject obj) {
@@ -132,7 +132,7 @@ JNIEXPORT jstring JNICALL Java_Foo_getName(JNIEnv *env, jclass cls, jobject obj)
 }
 ```
 
-**问题来了**：`obj`（`jobject`）本质上是一个指向 Java 堆上对象的指针（oop）。但在 native 代码执行期间，GC 随时可能发生——如果 GC 把这个 Java 对象移动了，`obj` 就变成了悬空指针。
+**为什么需要 JNIHandleBlock**：`obj`（`jobject`）本质上是一个指向 Java 堆上对象的指针（oop）。但在 native 代码执行期间，GC 随时可能发生——如果 GC 把这个 Java 对象移动了，`obj` 就变成了悬空指针。
 
 HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起来，这样 GC 来了可以：
 1. 找到这些 oop（标记为 GC 根，不被回收）
@@ -276,7 +276,7 @@ HotSpot 支持 **RedefineClasses**——不需要重启 JVM，运行时替换类
 - Metaspace 里会出现一个**新的 `Method` 对象**（新版本的 `add`）
 - 旧的 `Method` 对象需要被回收
 
-**问题来了**：如果某个线程此刻正好在执行旧的 `add` 方法，它的 C++ 调用栈上有 `Method*` 指针指向旧的方法对象——直接把旧的 `Method` 回收掉，那个线程就崩溃了。
+如果某个线程此刻正好在执行旧的 `add` 方法，它的 C++ 调用栈上有 `Method*` 指针指向旧的方法对象——直接把旧的 `Method` 回收掉，那个线程就崩溃了。
 
 这就是 `_metadata_handles` 存在的理由：**登记"哪些 Metadata 对象正在被某个线程引用"，RedefineClasses 来回收时先检查登记表，看看有没有人还拿着。**
 
