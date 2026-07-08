@@ -109,7 +109,7 @@ b1       return           // 返回
 
 操作数里的 `#2`/`#3`/`#4` 是**常量池索引**——指向常量池里的 Fieldref（System.out）、String（"Hello, World!"）、Methodref（println）。
 
-> **常量池是什么？** 常量池是 class 文件里的一张"符号表"——存了类名、方法名、字段名、字符串常量等。字节码不直接写 "System.out" 这样的名字，而是写一个索引 #2，指向常量池第 2 项。运行时 JVM 查常量池才知道 #2 是 "java/lang/System.out"。常量池在 JVM 内部有完整的实现（`ConstantPool` 类、`ConstantPoolCache` 类等），后续在 ch14（SymbolTable + StringTable + ResolvedMethodTable）和 ch10（ClassLoaderData）会单独展开，本节只需要知道"字节码操作数是常量池索引"即可。
+> **常量池是什么？** 常量池是 class 文件里的一张"符号表"——存了类名、方法名、字段名、字符串常量等。字节码不直接写 "System.out" 这样的名字，而是写一个索引 #2，指向常量池第 2 项。运行时 JVM 查常量池才知道 #2 是 "java/lang/System.out"。常量池在 JVM 内部有完整的实现（`ConstantPool` 类、`ConstantPoolCache` 类等），后续在讲 universe_init 的章节（ClassLoaderData 部分）和讲符号表的章节（SymbolTable + StringTable）会单独展开，本节只需要知道"字节码操作数是常量池索引"即可。
 
 ### JVM 执行字节码时需要知道什么
 
