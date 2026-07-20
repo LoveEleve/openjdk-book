@@ -12,7 +12,7 @@ Stage 4 结束时（参见 [3.6](#/openjdk/vol-01/ch03/06-main-thread-create)）
 
 `init_globals()` 定义在 `src/hotspot/share/runtime/init.cpp`，函数体依次调用 **30 个子函数**，把 JVM 从"有线程没业务"推进到"能跑字节码的运行时"。这 30 个函数的代码量普遍不大——最大的 `universe_post_init` 只有 111 行，12 个是 trivial 单行委托——但它们背后的 JVM 子系统原理极为庞大。一个函数代码少不代表原理少：`bytecodes_init` 只有 3 行，但背后是 JVM 字节码规范 + Bytecode class 体系(12 子类) + Rewriter 改写机制；`os_init_globals` 只有 1 行空 hook，但背后是 os::init/init_2 的真实初始化路径。
 
-因此本卷（vol-01 的 ch04-ch32）不按函数数量分组，而是**按背后的子系统/原理分章**，共 29 章 120 篇文档。本章（4.1）是总览，给出 30 项时序图、依赖链和 29 章地图。
+因此本卷（vol-01 的 ch04-ch32）不按函数数量分组，而是**按背后的子系统/原理分章**，共 28 章 117 篇文档。本章（4.1）是总览，给出 30 项时序图、依赖链和 28 章地图。
 
 ---
 
@@ -167,7 +167,7 @@ init_globals()
    └─ JVMFlag::printFlags()              标志最终打印
 ```
 
-30 个子函数里，**12 个是 trivial 单行委托**（如 `bytecodes_init`、`accessFlags_init` 仅 `assert`）。但 trivial 不等于没原理——`os_init_globals` 是空 hook 但要讲清楚为什么空、真实初始化在哪；`accessFlags_init` 仅 sizeof 断言但要讲 JVM_ACC_* 位域和 RedefineClasses 用的内部位。本卷按子系统分章展开，trivial 函数合并到 ch04/05 一篇，其余按原理独立成章。
+30 个子函数中，**12 个是 trivial 单行委托**（如 `bytecodes_init`、`accessFlags_init` 仅 `assert`）。但 trivial 不等于没原理——`os_init_globals` 是空 hook 但要讲清楚为什么空、真实初始化在哪；`accessFlags_init` 仅 sizeof 断言但要讲 JVM_ACC_* 位域和 RedefineClasses 用的内部位。本卷按子系统分章展开，trivial 函数合并到 ch04 一篇，`classLoader_init1` 的空壳委托在 ch04/4.4 完整覆盖（不再单独成章），其余按原理独立成章。
 
 ---
 
@@ -248,12 +248,11 @@ universe_init()
 
 ## 章节地图
 
-30 个函数背后的子系统原理极为庞大，按子系统/原理分章，共 29 章（ch04-ch32）120 篇文档：
+30 个函数背后的子系统原理极为庞大，按子系统/原理分章，共 28 章（ch04-ch32）117 篇文档：
 
 | 章 | 子系统 | 篇数 | 覆盖的 init_globals 函数 |
 |----|--------|------|--------------------------|
-| ch04 | 总览 + 轻量函数合并 | 5 | management_init / bytecodes_init / os_init_globals + trivial(accessFlags/invocationCounter/InterfaceSupport/VMRegImpl) |
-| ch05 | classLoader_init1 | 3 | classLoader_init1 |
+| ch04 | 总览 + 轻量函数合并 | 5 | management_init / bytecodes_init / classLoader_init1 / os_init_globals + trivial(accessFlags/invocationCounter/InterfaceSupport/VMRegImpl) |
 | ch06 | compilationPolicy_init | 4 | compilationPolicy_init |
 | ch07 | codeCache_init | 5 | codeCache_init |
 | ch08 | VM_Version_init | 6 | VM_Version_init |
@@ -286,6 +285,6 @@ universe_init()
 
 **5 篇级**：ch07 codeCache / ch09 stubRoutines1 / ch11 initialize_heap / ch16 interpreter / ch18 generate_stubs / ch19 universe2 / ch29 universe_post / ch30 stubRoutines2
 
-写作顺序按依赖关系：ch04 → ch05-ch09（Block A）→ ch10-ch15（Block B）→ ch16-ch24（Block C）→ ch25-ch28（Block D）→ ch29-ch32（Block E）。
+写作顺序按依赖关系：ch04 → ch06-ch09（Block A）→ ch10-ch15（Block B）→ ch16-ch24（Block C）→ ch25-ch28（Block D）→ ch29-ch32（Block E）。
 
-下一章（ch05）从 `classLoader_init1` 开始——用 `dlsym` 加载 7 个 zip 函数、从 jimage 读取 VM 选项、构建 bootstrap classpath。它是 `universe_init` 的前置依赖之一，和 ch01 的 `dlopen` 形成 Java↔C++ 的对称。
+下一章（ch06）从 `compilationPolicy_init` 开始——选择编译策略（C1/C2/Tiered）、设置编译阈值、计算编译线程数。它是 `universe_init` 的前置依赖之一。
