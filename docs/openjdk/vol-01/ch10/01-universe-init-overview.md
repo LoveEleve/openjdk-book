@@ -213,10 +213,11 @@ ResolvedMethodTable::create_table();
 | 04 | [04-javaclasses-offsets.md](04-javaclasses-offsets.md) | hc_ 偏移量转换 + member_offset 公式 + InjectedField |
 | 05 | [05-jvmflag-constraints.md](05-jvmflag-constraints.md) | JVMFlag 约束系统——3 个检查时机 + 注册机制 |
 | 06 | [06-auxiliary-trivial.md](06-auxiliary-trivial.md) | MetaspaceCounters/CompressedClassSpaceCounters/AOTLoader |
+| 07 | [07-metaspace.md](07-metaspace.md) | Metaspace 背景——VSL/Node/ChunkManager/SpaceManager + OccupancyMap + MetaspaceGC + purge + JEP 387 演进 |
 
 不属于 ch10 的 `universe_init` 子函数：
-- `Universe::initialize_heap()` → ch11
-- `Metaspace::global_initialize()` → ch12
+- `Universe::initialize_heap()` → ch11（10 篇，按设计决策组织）
+- `Metaspace::global_initialize()` → 核心机制在 ch10/07，深入诊断在 ch12（2 篇）
 - `MetaspaceShared::initialize_shared_spaces()` → ch13
 - SymbolTable/StringTable/ResolvedMethodTable → ch14
 - 6× LatestMethodCache → ch15
