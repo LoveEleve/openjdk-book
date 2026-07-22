@@ -76,6 +76,9 @@ Universe::initialize_heap()
   | 执行位置: GCConfig::create_heap()
   | 覆盖: 选 GC + new G1Policy + new G1CollectedHeap + 构造函数字段
   | 核心: G1Policy 的 4 个核心子对象（Analytics/MMU/IHOP/PhaseTimes）+ 构造/init 两段式
+  | 次要组件: _workers（WorkGang 线程池）+ _verifier（G1HeapVerifier）+ _allocator（G1Allocator）+ _heap_sizing_policy（G1HeapSizingPolicy）+ _task_queues（RefToScanQueueSet，GC 并行扫描用）+ _gc_tracer_stw（GC 事件追踪，JFR 用）
+  | 备注: 旧 04-g1policy-skeleton.md 重新组织
+  | 核心: G1Policy 的 4 个核心子对象（Analytics/MMU/IHOP/PhaseTimes）+ 构造/init 两段式
   | 备注: 旧 04-g1policy-skeleton.md 重新组织
 
 - [ ] **05 内存布局：CardTable + 6 Mapper + HRM**（阶段 2 前半）
@@ -84,7 +87,7 @@ Universe::initialize_heap()
   | 核心: 6 份独立内存（heap/BOT/cardTable/cardCounts/prevBitmap/nextBitmap）+ Region 级 commit
   | 写屏障详细: 卡值状态（clean/dirty/g1_young_gen/claimed/deferred）+ 偏置数组技巧（_byte_map_base）+ 写前/写后屏障工作流程 + 两级队列结构概貌（thread-local + 全局 QueueSet，详细在 08）+ HotCardCache insert 流程 + 热阈值 G1ConcRSHotCardLimit=4
   | Mapper详细: 两种子类策略（G1RegionsLargerThanCommitSizeMapper——Region 跨多页，直接 commit；G1RegionsSmallerThanCommitSizeMapper——页跨多 Region，用 CommitRefcountArray 引用计数，0→1 才 commit，1→0 才 uncommit）
-  | 次要组件: G1CardTableChangedListener（on_commit 回调——新 Region commit 时批量标 young）+ G1PageBasedVirtualSpace（ch11/03 讲过，05 引用）+ G1ThreadLocalData（per-thread SATB/DCQ 队列持有）
+  | 次要组件: G1CardTableChangedListener（on_commit 回调——新 Region commit 时批量标 young）+ G1RegionMappingChangedListener（注册在 heap_storage 上，Region commit 时重置 G1FromCardCache）+ G1PageBasedVirtualSpace（ch11/03 讲过，05 引用）+ G1ThreadLocalData（per-thread SATB/DCQ 队列持有）
   | 备注: 新 04-region-memory-management.md 重新组织
 
 - [ ] **06 跨 Region 引用：RemSet + BOT + CSet 快速测试**（阶段 2 中段）
@@ -93,7 +96,7 @@ Universe::initialize_heap()
   | 核心: RSet 怎么追踪入引用 + BOT 怎么定位对象边界 + CSet 快速测试位图
   | RemSet详细: G1FromCardCache（per-thread × per-Region 缓存，add_reference 第一步查命中跳过）+ OtherRegionsTable 三层结构（Sparse→Fine→Coarse 退化路径）+ refine_card_concurrently 7 步流程 + G1RemSetScanState 并行扫描协调 + HeapRegionRemSet vs OtherRegionsTable 关系
   | BOT详细: _offset_array 指数编码 + 两阶段定位（BOT 粗定位 + 对象链细定位）
-  | 次要组件: HeapRegionRemSet 的 code roots（G1CodeRootSet——存 nmethod 引用）+ HeapRegionRemSet 状态机（Untracked/Updating/Complete——决定 add_reference 是否生效）+ SparsePRT 双缓冲（_cur + _next，便于并发 expand）+ PerRegionTable 的 free list + 双向链表（bulk free）+ FreeRegionList（MasterFreeRegionListMtSafeChecker 并发检查）
+  | 次要组件: HeapRegionRemSet 的 code roots（G1CodeRootSet——存 nmethod 引用）+ HeapRegionRemSet 状态机（Untracked/Updating/Complete——决定 add_reference 是否生效）+ SparsePRT 双缓冲（_cur + _next，便于并发 expand）+ PerRegionTable 的 free list + 双向链表（bulk free）+ FreeRegionList（MasterFreeRegionListMtSafeChecker 并发检查，`set_unrealistically_long_length` 初始化防溢出）
 
 - [ ] **07 并发标记：ConcurrentMark + CMThread**（阶段 2 中后段）
   | 执行位置: g1CollectedHeap.cpp:1663-1668
@@ -107,7 +110,7 @@ Universe::initialize_heap()
   | 执行位置: g1CollectedHeap.cpp:1671-1707
   | 覆盖: expand + policy->init + SATB queue + ConcurrentRefinement + DirtyCardQueue
   | 核心: expand 到 init heap size + Policy 绑定 heap + 队列初始化
-  | 队列详细: PtrQueue 基础 + thread-local vs 全局 QueueSet 两级结构 + completed buffer 管理 + free list + 阈值激活 + ConcurrentRefine 3 区模型（green/yellow/red）+ 阶梯唤醒链 + 自适应 adjust
+  | 队列详细: PtrQueue 基础 + thread-local vs 全局 QueueSet 两级结构 + completed buffer 管理 + free list + 阈值激活 + ConcurrentRefine 3 区模型（green 只缓存 / yellow 逐步激活 / red 全部 Refine / 超过 red+padding → mutator 背压参与处理）+ 阶梯唤醒链 + 自适应 adjust + handle_zero_index → process_or_enqueue_complete_buffer 背压路径 + 两个 DCQS 的职责区分（全局 `G1BarrierSet::dirty_card_queue_set` 管理 completed buffers + 实例级 `dirty_card_queue_set()` 委托全局）
   | expand详细: HRM::commit_regions → 6 Mapper 同步 + policy->init 绑定 _g1h/_collection_set + update_young_list_target_length + YoungGenSamplingThread
   | 次要组件: SATB filter()（双指针压缩——保留"仍需标记且未被 next bitmap 标记"的条目）+ _shared_satb_queue / _shared_dirty_card_queue（非 Java 线程用，持锁）+ _free_ids（并行 worker id 分配）+ _processed_buffers_mut / _processed_buffers_rs_thread（分别统计 mutator 和 rs 线程处理的 buffer 数）+ G1YoungRemSetSamplingThread（周期性采样 young region 的 rs_lengths，修正预测）
   | 备注: 05 讲 G1BarrierSet 时只提 QueueSet 两级结构概貌，详细机制在本文展开
