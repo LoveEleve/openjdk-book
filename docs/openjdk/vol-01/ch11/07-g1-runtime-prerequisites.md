@@ -72,16 +72,26 @@ typedef enum {
 } Tag;
 ```
 
-**设计要点**：Tag 用高位区分大类、低位区分子类：
+**设计要点**：Tag 不是"枚举值依次递增"，而是**独立属性的位域**——5 个 bit 分别对应 5 个可以独立查询的属性，组合使用时用 OR 拼起来。
 
 ```
-Tag bits:
-  bit 4 (16): Old     → is_old()
-  bit 3 (8):  Pinned  → is_pinned()
-  bit 2 (4):  Humongous → is_humongous()
-  bit 1 (2):  Young   → is_young()
-  bit 0 (1):  子类型   → is_eden() vs is_survivor(), is_starts_humongous() vs is_continues_humongous()
+Tag 是一个 bitfield:
+
+bit 5 (32): Archive  — CDS 归档 Region（flag 可叠加在 Old 上）
+bit 4 (16): Old      ─┐
+bit 3 (8):  Pinned   │  这几位是"属性标志"，
+bit 2 (4):  Humongous│  一个 Tag 可以同时设置多个，
+bit 1 (2):  Young   ─┘  用 OR 组合出复合角色
+bit 0 (1):  后缀     — 区分同一大类的两种变体（Eden vs Survivor / Start vs Continues）
 ```
+
+**不是每个 bit 独立代表一种角色**——比如 Humongous 永远是 Pinned（HumongousMask | PinnedMask = 12），它不是"bit2 和 bit3 各自独立"，而是"Humongous 这个角色天生需要 Pinned 属性"。类似地，Archive 总是 Old+Pinned 的组合。
+
+**bit 0 是"后缀"而非"独立属性"**——它区分：
+- Eden(2, `0b00010`) vs Survivor(3, `0b00011`)  ← Young + bit0
+- StartsHumongous(12, `0b01100`) vs ContinuesHumongous(13, `0b01101`)  ← Humongous|Pinned + bit0
+
+Old(16) 和 Free(0) 没有 bit0 变体——它们的 is_*() 直接用位掩码或精确等于判断。
 
 **四个关键的 is_X() 方法**（heapRegionType.hpp:123-143）：
 
