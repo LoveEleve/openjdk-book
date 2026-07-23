@@ -197,9 +197,9 @@ inline void HeapRegionManager::insert_into_free_list(HeapRegion* hr) {
 }
 
 // 取出分配:
-HeapRegion* hr = _free_list.remove_region(is_old);
-// is_old=true  → 从头部取（低地址，倾向于 old allocation 使用低地址）
-// is_old=false → 从尾部取（高地址，倾向于 young allocation 使用高地址）
+HeapRegion* hr = _free_list.remove_region(from_head);
+// from_head=true  → 从头取（低地址，old allocation 取低地址）
+// from_head=false → 从尾取（高地址，young allocation 取高地址）
 ```
 
 这种有序+分头尾的设计帮助堆地址保持分离：Old Region 聚在低地址，Young Region 聚在高地址。
@@ -285,7 +285,7 @@ os::make_polling_page_unreadable();        // 标记 polling page 不可读
 | 检测方式 | 读线程本地标志位 | 读全局内存页 |
 | 速度 | 快（本地缓存） | 较慢（跨核访问） |
 | 覆盖范围 | JIT 编译的方法 | 解释器 + 模板解释器 |
-| 何时用 | `UseFastSafepoints` 开启时优先 | 始终作为兜底 |
+| 何时用 | 编译代码中的显式 poll 指令 | 解释器 + 未插桩的 native 方法 |
 
 #### Step 3: 自旋等待所有线程到达
 
@@ -655,7 +655,7 @@ Worker 2 遍历某个引用 → 读到 &A
         → 进入 Full GC 或在下一轮 GC 重试
 ```
 
-`evac_failure` 会增加 `_evacuation_failed` 计数器。累积到一定次数后触发 Full GC 降级。
+`_evacuation_failed` 是一个 per-Region 的 `bool` 标记（heapRegion.hpp:236）——设为 true 表示该 Region 有对象没搬走。G1CollectedHeap 中另有 `_evacuation_failed_info_array` 数组汇总全局统计。
 
 ### 4.5 与传统 GC 的 forwarding 对比
 
