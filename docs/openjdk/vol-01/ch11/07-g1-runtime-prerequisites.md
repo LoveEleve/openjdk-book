@@ -708,7 +708,7 @@ enum G1H_process_roots_tasks {
 };
 ```
 
-**核心方法**（g1RootProcessor.hpp:130-131）：
+**核心方法**（g1RootProcessor.hpp:106）：
 
 ```cpp
 void evacuate_roots(G1ParScanThreadState* pss, uint worker_id);
