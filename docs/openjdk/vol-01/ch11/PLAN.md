@@ -2,7 +2,7 @@
 
 ## ch11 目标
 
-读者读完 15 篇后能回答以下核心问题（面试可考）：
+读者读完 16 篇后能回答以下核心问题（面试可考）：
 
 1. **G1 为什么用 Region 而不是连续分代？**（设计决策 + trade-off）
 2. **G1 怎么管理 Region 化的堆？**（6 Mapper + HRM + Region 级 commit）
@@ -26,32 +26,33 @@
 2. **做了什么**——创建/初始化/执行了哪些组件
 3. **为什么**——这些组件解决什么问题（设计决策）
 
-**依赖规则**：A 依赖 B，则 B 必须排在 A 前面。不允许在讲解 A 时用"B 将在后面解释"搪塞。
+**依赖规则**：A 依赖 B，则 B 必须排在 A 前面。不允许在讲解 A 时用"B 将在后面���释"搪塞。
 
 ## 理解顺序总览
 
 ```
-初始化（01-06）→ Young GC 运行时（07-08）→ 回来讲初始化收尾（09-10）→ CM（11-13）→ Mixed GC（14）→ 回顾（15）
+初始化（01-06）→ 前置知识桥（07）→ Young GC 运行时（08-09）→ 初始化收尾（10-11）→ CM（12-14）→ Mixed GC（15）→ 回顾（16）
 
   G1CollectedHeap::initialize() 执行顺序              文档顺序（理解路径）
   ─────────────────────────────                      ──────────────────
   reserve_heap (mmap)                    → ch11/03    01 全景 → 02 Region → 03 mmap
   CardTable + 6 Mapper + HRM            → ch11/05    04 Policy → 05 布局 → 06 RemSet
   RemSet + BOT + CSet                   → ch11/06    ──────────────────────────
-  ConcurrentMark + CMThread             → (延后到11) 07 Young GC 流程（新）
-  expand + policy->init + SATB/DCQ      → ch11/09    08 Young GC 机制（新）
-  Dummy + AllocRegion + TLAB +收尾       → ch11/10    ──────────────────────────
-  ─────────────────────────────                      09 队列+expand（原07）
-                                                     10 分配+TLAB（原08）
+  ConcurrentMark + CMThread             → (延后到12) 07 运行时前置知识（桥章）
+  expand + policy->init + SATB/DCQ      → ch11/10    08 Young GC 流程
+  Dummy + AllocRegion + TLAB +收尾       → ch11/11    09 Young GC 机制
+  ─────────────────────────────                      ──────────────────────────
+                                                     10 队列+expand
+                                                     11 分配+TLAB
                                                      ──────────────────────────
-                                                     11 CM 数据结构
-                                                     12 CM 周期前半
-                                                     13 CM 周期后半
-                                                     14 Mixed GC
-                                                     15 全生命周期回顾
+                                                     12 CM 数据结构
+                                                     13 CM 周期前半
+                                                     14 CM 周期后半
+                                                     15 Mixed GC
+                                                     16 全生命周期回顾
 ```
 
-## 文章列表（15 篇）
+## 文章列表（16 篇）
 
 ### 已发表（01-06）
 
@@ -85,13 +86,69 @@
   | 覆盖: G1RemSet + G1BlockOffsetTable + in_cset_fast_test + humongous_reclaim_candidates
   | 核心: RSet 怎么追踪入引用 + BOT 怎么定位对象边界 + CSet 快速测试位图
 
-### 待写——Young GC 运行时（07-08）
+### 待写——运行时前置知识桥（07）
 
-- [ ] **07 Young GC：Evacuation 周期**（运行时 1/2）
-  | 文件: `07-young-gc-evacuation.md`
+- [ ] **07 G1 运行时前置知识**（桥章——连接初始化和运行时）
+  | 文件: `07-g1-runtime-prerequisites.md`
+  | 定位: 本章不讲任何具体 GC 流程——只把后续 7 篇（08-14）依赖的通用概念一次性铺平
+  | 字数: 无上限，以讲透为准
+  | 覆盖:
+
+  **Section 1. Region 角色全景**
+  - G1 中"分代"不是物理区域，是 Region 的标签
+  - 五种角色：Eden / Survivor / Old / Humongous / Free
+  - 每个角色的分配者、GC 行为、对象特征
+  - Region 的角色会变化（Eden → Survivor → Old / 回收后 → Free → 重新分配）
+  - Humongous 的特殊性（start region + continues region）
+
+  **Section 2. GC 暂停是什么**
+  - STW（Stop-The-World）——所有 mutator 线程停在 safepoint
+  - GC 线程并行工作的模型（WorkGang）
+  - 暂停期间"安全"的原因——mutator 全停，没有并发写入
+  - 暂停 vs 并发阶段
+
+  **Section 3. G1 GC 暂停类型总览**
+  - Young-only pause：只回收 young（eden + survivor）
+  - Initial-mark pause：Young GC + 标记 survivor 为 root（piggyback）
+  - Mixed pause：回收 young + 部分 old（由 CM 结果驱动）
+  - Full GC：降级兜底（Serial/Parallel）
+  - 频率递进关系：Young（高频）→ Mixed（中频，由 IHOP 控制）→ Full（低频，极少发生）
+
+  **Section 4. Evacuation 基本概念**
+  - G1 的"回收"不是删除死对象——是**搬走活对象**
+  - 搬运三部曲：拷贝 → 写 forwarding pointer（旧位置）→ 更新所有引用（新位置）
+  - Forwarding pointer 存储在对象 mark word 里——覆盖但不丢失（G1FullForwarding 协议）
+  - "自愈"引用：更新的引用指向新地址后，旧地址的 mark 可以还原
+  - 为什么 G1 选择"搬活"而不是"删死"——Region 化堆，死对象区域直接整块回收无需逐个处理
+  - 与 CMS sweep（原位标记-清扫，碎片化）的对比
+
+  **Section 5. GC Root 扫描**
+  - GC Roots 是什么——堆外到堆内的"入口引用"
+  - 五大根源：Java 线程栈 / JNI handles / 系统类（Universe / SystemDictionary）/ JVM 内部结构（CodeCache、StringTable）/ JFR 等特定持有者
+  - 扫描方向：从根出发 → 找到堆内被引对象 → 标记为活 → 递归扫描
+  - 根扫描为什么必须 STW——根在 mutator 运行期间一直在变（栈帧进出、JNI 创建销毁）
+  - G1 的根扫描处理器：G1RootProcessor 抽象 + 多种 G1RootClosure 子类
+
+  **Section 6. CSet 全景**
+  - CSet（Collection Set）——本次 GC 要回收的 Region 集合
+  - 06 讲了"怎么测试在不在 CSet"（in_cset_fast_test），但没讲"CSet 从哪来"
+  - CSet 有两类：young-only（eden + survivor 全部）vs mixed（young + 精选 old candidate）
+  - 选择约束：pause time 预测 → CSet 内的"工作量"不能超出目标暂停
+  - CSet 生命周期：构建 → 扫描 → 疏散 → 释放 → 重建
+
+  **Section 7. 分配与 GC 的因果关系**
+  - 闭环全景：mutator 分配 → TLAB 用尽 → 堆内存不足 → 触发 GC → 回收释放 Region → Region 返回 free list → mutator 重新分配
+  - 这是一条因果链——读者理解这条链后，才懂得为什么 GC 是"不可避免的必然事件"
+  - 简单版本（TLAB 细节留给 11）："分配→用尽→GC→释放→分配"
+
+### 待写——Young GC 运行时（08-09）
+
+- [ ] **08 Young GC：Evacuation 周期**（运行时 1/2）
+  | 文件: `08-young-gc-evacuation.md`
   | 执行位置: `g1CollectedHeap.cpp` 中 `collect()` → `do_collection_pause()` → Young-only pause 分支
   | 覆盖: 触发条件 + CSet 选择 + RSet 扫描 + Evacuation + 引用更新
   | 核心: 一个 Young GC pause 内部到底做了什么
+  | 前置: 07 全部概念（Region 角色 / STW / Evacuation / Root / CSet / 分配-GC 链）
   | 详细:
     - **触发条件**: eden 用尽（allocation failure）+ IHOP 触发时的 initial-mark piggyback
     - **CSet 选择**（young-only）: eden + survivor 全部 + 预测的 pause time 不超目标
@@ -106,16 +163,17 @@
     - `G1ParScanThreadState`（per-GC-worker 状态对象）
     - `G1ParScanClosure`（引用更新闭包）
     - `evac_failure` 处理（promotion 失败的 fallback）
-  | 备注: 这是读者第一次看到初始化建好的数据结构**真正用起来**
+  | 备注: 读者第一次看到 01-06 建的 + 07 铺垫的数据结构**真正跑起来**
 
-- [ ] **08 Young GC：内部机制**（运行时 2/2）
-  | 文件: `08-young-gc-internals.md`
+- [ ] **09 Young GC：内部机制**（运行时 2/2）
+  | 文件: `09-young-gc-internals.md`
   | 覆盖: PLAB + Preserved Marks + Dirty Card 处理 + Humongous Eager Reclaim + TLAB 交互
   | 核心: 让 evacuation 并行且安全的细节机制
+  | 前置: 08（Young GC 流程）
   | 详细:
     - **PLAB**: per-GC-worker 本地分配缓冲 + 三个 PLAB（gclab/eden/survivor）+ 自适应大小 + 末尾 flush
     - **Preserved Marks**: forwarding pointer 与 mark 冲突时用 `G1PreservedMark` 暂存 + `PreservedMarksSet` 跨 worker 汇总 + 统一回填
-    - **Dirty Card 处理**（GC 期间）: refine 线程在 pause 中处理 DCQ → 更新 RSet → 为下次 GC 准备
+    - **Dirty Card 处���**（GC 期间）: refine 线程在 pause 中处理 DCQ → 更新 RSet → 为下次 GC 准备
     - **Humongous Eager Reclaim**: `humongous_reclaim_candidates` 位图（06 建的）+ Young GC 中尝试回收
     - **TLAB 交互**: GC 结束后 `_mutator_alloc_region` retire → 新 TLAB 申请
     - `G1PostEvacuateCollectionSetClosure` 收尾
@@ -123,15 +181,16 @@
     - `G1PLABStats`（浪费率统计反馈给 PLAB 大小调整）
     - `G1ParScanThreadState::allocate` 在 PLAB 失败时的 fallback
     - `fixup_root_set`（Reference 引用修复，跨 worker 同步）
-  | 备注: 与 07 互补——07 讲流程主干，08 讲"为什么暂停时间可控"
+  | 备注: 与 08 互补——08 讲流程主干，09 讲"为什么暂停时间可控"
 
-### 待写——初始化收尾（09-10）
+### 待写——初始化收尾（10-11）
 
-- [ ] **09 expand + policy->init + 队列系统**（阶段 2 后段）
-  | 文件: `09-expand-policy-queue.md`
+- [ ] **10 expand + policy->init + 队列系统**（阶段 2 后段）
+  | 文件: `10-expand-policy-queue.md`
   | 执行位置: g1CollectedHeap.cpp:1671-1707
   | 覆盖: HRM::commit_regions → 6 Mapper 同步 → policy->init → SATB/DCQ 队列初始化
   | 核心: expand 到 init heap size + Policy 绑定 heap + 队列系统完整初始化
+  | 前置: 07-09（理解了 Young GC 运行时，知道队列是干什么用的）
   | 详细:
     - `expand()`: HRM::commit_regions 调用链 + 6 Mapper 同步 commit
     - `policy->init()`: 绑定 _g1h/_collection_set + update_young_list_target_length + YoungGenSamplingThread
@@ -144,17 +203,18 @@
     - `_free_ids`（并行 worker id 分配）
     - `_processed_buffers_mut` / `_processed_buffers_rs_thread`
     - `G1YoungRemSetSamplingThread`
-  | 备注: 此时读者已理解 Young GC 运行时，所以 3 区模型的**动机**（"GC 暂停时不能积压太多 dirty card"）自然清晰
+  | 备注: 此时读者已理解 Young GC 运行时，3 区模型的动机（"GC 暂停时不能积压 dirty card"）自然清晰
 
-- [ ] **10 对象分配 + TLAB + 初始化收尾**
-  | 文件: `10-allocation-tlab-finalize.md`
+- [ ] **11 对象分配 + TLAB + 初始化收尾**
+  | 文件: `11-allocation-tlab-finalize.md`
   | 执行位置: g1CollectedHeap.cpp:1711-1732 + compressed oops + TLAB + post_initialize
   | 覆盖: Dummy region + AllocRegion + TLAB + CompressedOops + Monitoring + PreservedMarks + CSet + initialize_serviceability
   | 核心: mutator 怎么分配对象 + compressed oops 设置 + TLAB 启动 + 初始化收尾
+  | 前置: 07-09（读者理解 GC 运行时，自然懂 TLAB 满为什么触发 GC）
   | 详细:
     - `G1AllocRegion` 三态（Mutator/Survivor/Old）+ Dummy region 作用（非空不变式）
     - `attempt_allocation` vs `locked` 两段式
-    - PLAB 概述（GC 期间 by evacuation——已在 08 详细讲，本文只对比 TLAB vs PLAB）
+    - PLAB 概述（GC 期间 by evacuation——已在 09 详细讲，本文只对比 TLAB vs PLAB）
     - TLAB 启动: `TLAB::startup_initialization()`
     - CompressedOops: 窄指针 + base + shift 偏置
     - `post_initialize`: 双 `ReferenceProcessor` + `G1StringDedup`
@@ -165,14 +225,15 @@
     - `G1HeapSizingPolicy` + `G1HeapVerifier`
     - `G1PLABAllocator`
     - `MutatorAllocRegion::retire` 的 `should_retain`
-  | 备注: "TLAB 满 → 分配失败 → 触发 Young GC"这条链路现在自然闭合——读者已在 07/08 理解 Young GC
+  | 备注: "TLAB 满 → 分配失败 → 触发 Young GC"闭环——读者在 07-09 已理解 GC，现在看懂 TLAB 在这条链上的位置
 
-### 待写——并发标记（11-13）
+### 待写——并发标记（12-14）
 
-- [ ] **11 并发标记：数据结构**（CM 1/3）
-  | 文件: `11-concurrent-mark-data-structures.md`
+- [ ] **12 并发标记：数据结构**（CM 1/3）
+  | 文件: `12-concurrent-mark-data-structures.md`
   | 覆盖: 双缓冲位图 + Mark Stack + SATB 队列 + G1CMTask + Root Region + CM 初始化
   | 核心: 并发标记需要哪些数据结构、各自怎么设计
+  | 前置: 07（Root 概念、STW vs 并发、暂停类型）、10（SATB/DCQ 队列已初始化）
   | 详细:
     - **双缓冲位图**（`_prev_mark_bitmap` / `_next_mark_bitmap`）: swap 机制
     - **Mark Stack**: 全局 chunk 化 + per-worker 本地队列（无锁）+ overflow 路径
@@ -186,14 +247,15 @@
     - `G1CMObjArrayProcessor`（大数组分片）
     - 三个 WorkGang task
     - `_marking_task_overheads`
-  | 备注: 09 已讲 SATB 队列初始化，本篇讲 SATB 在 CM 阶段的驱动
+  | 备注: 10 已讲 SATB 队列初始化，本篇讲 SATB 在 CM 阶段的驱动
 
-- [ ] **12 并发标记：周期前半**（CM 2/3）
-  | 文件: `12-concurrent-mark-cycle-first-half.md`
+- [ ] **13 并发标记：周期前半**（CM 2/3）
+  | 文件: `13-concurrent-mark-cycle-first-half.md`
   | 覆盖: Initial-mark + Root Region Scan + Concurrent Mark + Preclean + Overflow
   | 核心: 应用线程不停顿的并发部分
+  | 前置: 07（STW vs 并发区别、暂停类型中 Initial-mark 的位置）、08（piggyback 机制）、12（数据结构）
   | 详细:
-    - **Initial-mark**（STW，piggyback 在 Young GC——读者已从 07 理解 piggyback）
+    - **Initial-mark**（STW，piggyback 在 Young GC——读者已从 08 理解 piggyback）
     - **Root Region Scan**（并发）: 扫描 survivor 区找对 old 区的引用
     - **Concurrent Mark**: GC worker + CM thread 一起跑 + 工作窃取
     - **Preclean**: SATB 队列 + dirty card 队列一起处理
@@ -201,35 +263,37 @@
     - **regular_clock 主动 abort**: 每 100ms 检查 SATB 队列长度
   | 备注: "并发"的真正实现——应用线程不被阻塞
 
-- [ ] **13 并发标记：周期后半**（CM 3/3）
-  | 文件: `13-concurrent-mark-cycle-second-half.md`
+- [ ] **14 并发标记：周期后半**（CM 3/3）
+  | 文件: `14-concurrent-mark-cycle-second-half.md`
   | 覆盖: Remark + Cleanup + Rebuild RSet + 终止协议 + 标记结果落盘
   | 核心: STW 收尾 + 输出 per-region liveness 给 Mixed GC
+  | 前置: 13（CM 前半）、06（RSet 状态机 rebuild）
   | 详细:
     - **Remark**（STW）: 终止 CM 任务 + 排空 SATB 队列
     - **Cleanup**（STW）: 计算 per-region liveness + 排序 + 标记 candidate
     - **Rebuild RSet**: 用 06 讲的状态机 `update_after_rebuild`
     - **ParallelTaskTerminator**: 所有 worker 忙等在 barrier + 最后 worker 偷活推进
-    - **标记结果传递**: liveness → 14 Mixed GC 用于老年代回收目标选择
+    - **标记结果传递**: liveness → 15 Mixed GC 用于老年代回收目标选择
   | 备注: 输出的"per-region 存活字节数"是 Mixed GC 的输入
 
-### 待写——Mixed GC + 回顾（14-15）
+### 待写——Mixed GC + 回顾（15-16）
 
-- [ ] **14 Mixed GC + Full GC 降级**
-  | 文件: `14-mixed-gc-and-fallback.md`
+- [ ] **15 Mixed GC + Full GC 降级**
+  | 文件: `15-mixed-gc-and-fallback.md`
   | 覆盖: IHOP 触发 + 老年代 CSet 选择 + 与 Young GC 的区别 + Full GC 兜底
   | 核心: 怎么用 CM 标记结果回收老年代
+  | 前置: 08-09（Young GC 流程和机制）、14（CM 各 Region 的 liveness 输出）
   | 详细:
     - **IHOP 触发**: 标记结束后预测老年代增长 → 达阈值 → 启动 Mixed GC
-    - **老年代 CSet 选择**: 13 Cleanup 的 liveness + `G1MixedGCCountTarget`（分批）+ `G1HeapWastePercent`（浪费阈值）
-    - **执行**: 复用 07 的 evacuation 流程，CSet 多了 old region
+    - **老年代 CSet 选择**: 14 Cleanup 的 liveness + `G1MixedGCCountTarget`（分批）+ `G1HeapWastePercent`（浪费阈值）
+    - **执行**: 复用 08 的 evacuation 流程，CSet 多了 old region
     - **收敛**: 每轮回收数递减 → 最终放弃
     - **Full GC 降级**: 触发条件 + 流程 + 为什么 G1 尽量避免
   | 备注: G1 一个完整周期结束
 
-- [ ] **15 全生命周期回顾**
-  | 文件: `15-full-lifecycle-recap.md`
-  | 覆盖: 01-14 串成完整故事 + 回答 9 个核心问题 + 设计决策复盘
+- [ ] **16 全生命周期回顾**
+  | 文件: `16-full-lifecycle-recap.md`
+  | 覆盖: 01-15 串成完整故事 + 回答 9 个核心问题 + 设计决策复盘
   | 核心: 读者能从 0 到完整 G1 设计
   | 详细:
     - **时间线**: 启动 → 初始化 → Young GC 首次触发 → IHOP 触发 CM → Mixed GC → Full GC 兜底
@@ -248,45 +312,50 @@
 | 04 | `04-heap-policy-construction.md` | ✅ |
 | 05 | `05-memory-layout-mapper.md` | ✅ |
 | 06 | `06-remset-bot.md` | ✅ |
-| 07 | `07-young-gc-evacuation.md` | 待写 |
-| 08 | `08-young-gc-internals.md` | 待写 |
-| 09 | `09-expand-policy-queue.md` | 待写 |
-| 10 | `10-allocation-tlab-finalize.md` | 待写 |
-| 11 | `11-concurrent-mark-data-structures.md` | 待写 |
-| 12 | `12-concurrent-mark-cycle-first-half.md` | 待写 |
-| 13 | `13-concurrent-mark-cycle-second-half.md` | 待写 |
-| 14 | `14-mixed-gc-and-fallback.md` | 待写 |
-| 15 | `15-full-lifecycle-recap.md` | 待写 |
+| 07 | `07-g1-runtime-prerequisites.md` | 待写 |
+| 08 | `08-young-gc-evacuation.md` | 待写 |
+| 09 | `09-young-gc-internals.md` | 待写 |
+| 10 | `10-expand-policy-queue.md` | 待写 |
+| 11 | `11-allocation-tlab-finalize.md` | 待写 |
+| 12 | `12-concurrent-mark-data-structures.md` | 待写 |
+| 13 | `13-concurrent-mark-cycle-first-half.md` | 待写 |
+| 14 | `14-concurrent-mark-cycle-second-half.md` | 待写 |
+| 15 | `15-mixed-gc-and-fallback.md` | 待写 |
+| 16 | `16-full-lifecycle-recap.md` | 待写 |
 
 ## 关键决策
 
-### 为什么 Young GC 必须排在 07/08
+### 为什么需要 07 前置知识桥
 
-06 RemSet 讲完了"怎么追踪跨 Region 引用"，读者迫切想知道**这些数据结构在 GC 里怎么用**。如果跳过 Young GC 直接讲队列初始化（SATB/DCQ/ConcurrentRefinement 3 区模型），读者没有 GC 运行时上下文，只看到"在初始化这些东西"但不理解为什么。
+01-06 讲的是初始化（堆怎么建、数据结构怎么搭），08 开始讲运行时（Young GC 怎么跑）。但读者缺少通用的 GC 词汇和概念——"Region 可以是 eden 还是 survivor"、"STW 是什么"、"evacuation 是什么意思"、"GC Roots 有哪些"。
 
-反之，07/08 讲 Young GC 时：
-- "eden 分配失败触发 GC"——不需要 TLAB 细节（TLAB 只是一种快速分配方式）
-- "RSet 扫描出 CSet 的入引用"——直接引用 06，读者已懂
-- "GC 暂停时 refine 线程继续处理 dirty card"——简单提及，详细留给 09 队列系统
+如果在 08 讲解这些概念的同时还要讲 Young GC 的具体流程，读者会迷失在"通用概念"和"特定流程"之间。07 专门承担"先建好所有概念砖块"的职责——内容不复杂，但覆盖必须全面。后续 08-14 引用这些概念时不再解释，直接使用。
 
-Young GC 拆 2 篇（07 + 08）的理由：
-- 内容量大（CSet/RSet扫描/Evacuation/引用更新/PLAB/PreservedMarks/DirtyCard/Humongous/交互），合并超 50KB
-- 逻辑分层：07 是"流程主干"（GC 做了什么），08 是"并行安全机制"（为什么能做好）
-- 可独立阅读：07 读完已能回答 "Young GC 是什么"
+### 为什么 07 字数无上限
 
-### 为什么 CM 拆 3 篇（11-13）
+读者一旦在这一章没学懂某个概念，后续 8 篇都会半懂不懂。"讲透"比"精简"重要得多。每个 Section 允许用到足够的篇幅——需要画 ASCII 图的画图、需要例子的举例子、需要对比的拉 CMS 或 Serial 做对比。
 
-- 11 数据结构: 准备"工具箱"（bitmap/stack/SATB/task/root region）
-- 12 周期前半: 用工具做"并发标记"（应用线程不停的那段）
-- 13 周期后半: STW 收尾 + 输出结果给 Mixed GC
+### 为什么 Young GC 在 07 之后（08-09）
 
-13 的 per-region liveness 直接传入 14 Mixed GC，形成数据传递链。
+06 讲了"RSet 怎么追踪跨 Region 引用"，读者想看到这些数据结构在 GC 里怎么用。而 07 给了通用概念（STW / Evacuation / Root / CSet 全景），读者读 08 Young GC 时能直接调用这些概念，注意力集中在"Young GC 具体怎么做"。
 
-### CM 初始化代码放 11 开头
+Young GC 拆 2 篇（08 + 09）的理由：
+- 内容量大（CSet/RSet扫描/Evacuation/引用更新/PLAB/PreservedMarks/DirtyCard/Humongous/交互）
+- 逻辑分层：08 是"流程主干"（GC 做了什么），09 是"并行安全机制"（为什么能做好）
 
-CM 在 init 里的初始化只有 5 行（`new G1ConcurrentMark` + `cm_thread()` + 字段初设）。放在 11"数据结构"开头，自然衔接"数据结构怎么建的"。
+### 为什么 CM 拆 3 篇（12-14）
 
-09（队列系统）简要提及"CM 已创建（详见 11）"即可。
+- 12 数据结构: 准备"工具箱"（bitmap/stack/SATB/task/root region）
+- 13 周期前半: 用工具做"并发标记"（应用线程不停的那段）
+- 14 周期后半: STW 收尾 + 输出结果给 Mixed GC
+
+14 的 per-region liveness 直接传入 15 Mixed GC，形成数据传递链。
+
+### CM 初始化代码放 12 开头
+
+CM 在 init 里的初始化只有 5 行（`new G1ConcurrentMark` + `cm_thread()` + 字段初设）。放在 12"数据结构"开头，自然衔接"数据结构怎么建的"。
+
+10（队列系统）简要提及"CM 已创建（详见 12）"即可。
 
 ## 写作进度
 
@@ -298,7 +367,7 @@ CM 在 init 里的初始化只有 5 行（`new G1ConcurrentMark` + `cm_thread()`
 | 04 | ✅ | 07/20 |
 | 05 | ✅ | 07/21 |
 | 06 | ✅ | 07/23 |
-| 07-15 | — | — |
+| 07-16 | — | — |
 
 ## 论文引用
 
