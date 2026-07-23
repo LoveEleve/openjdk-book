@@ -390,9 +390,9 @@ static jint _n_coarsenings; // 全局 coarsen 次数统计
 
 ### 3.3.1 为什么需要
 
-**先理解 add_reference 做什么**——当 ConcurrentRefine 线程扫描 dirty card 时，发现 card 里有对象引用了另一个 Region（比如"Region 0 的 card 5 引用了 Region 3"），需要把这个引用关系记录到 Region 3 的 RSet 里。`add_reference(from, tid)` 就是做这件事的方法——"card 5（from）引用了本 Region，请记录下来"。
+**G1FromCardCache 在 RSet 更新路径上**——ConcurrentRefine 线程消费 dirty card 后，扫描 card 里的对象引用，发现"Region 0 的 card 5 引用了 Region 3"，就需要把这个引用关系记录到 Region 3 的 RSet（HeapRegionRemSet）里。`add_reference(from, tid)` 就是做这件事的方法——"card 5（from）引用了本 Region，请更新我的 RSet"。
 
-每次 `add_reference` 都要查三层结构（Coarse→Sparse→Fine）来判断"这个引用应该记录在哪一层"，这个过程有开销。
+每次 `add_reference` 都要查 RSet 的三层结构（Coarse→Sparse→Fine）来判断"这个引用应该记录在哪一层"，这个过程有开销。
 
 **问题**——同一张 card 可能反复产生引用。比如循环里多次写同一个对象的不同字段，每次都触发 `add_reference(card_5, tid)`。如果不缓存，每次都要查三层结构——即使 card 5 的引用关系已经记录过了（Fine BitMap 里 bit 5 已经置位），每次重复 `add_reference` 还是会走一遍三层查找。
 
@@ -463,9 +463,20 @@ add_reference(from_card, to_region, tid):
 
 **效果**——同一张 card 反复产生引用（比如循环里同一对象多次写同一字段），FromCardCache 命中后直接跳过，不走三层结构。只有**不同的 card** 才需要查三层。注意：缓存只记住"最近一张 card"，不是所有 card 的集合——如果 card 5 和 card 6 交替产生引用，每次都会 miss + 替换。
 
+**鸡肋吗？——命中率依赖"同 card 多引用"场景**。考虑 512B 的 card 能装十几个对象：如果这些对象都引用了同一个目标 Region（比如同一数组的多个元素指向同一个类），第一个对象的 `add_reference` 走三层记录，后续同 card 内的对象全部命中缓存跳过。但如果线程处理的 card 各不相同——每次缓存都被替换，确实没用。per-thread 设计牺牲了全局命中率（不同线程不共享缓存），换取了无锁访问。
+
 ### 3.3.4 为什么是 per-thread
 
 多个 refine 线程可能同时处理同一张 card（不同对象）。如果共享缓存需要加锁——但 `add_reference` 是热路径。per-thread 缓存每个线程有自己的视图，无锁访问。代价是同一张 card 可能被多个线程各记录一次（冗余但不影响正确性——BitMap 置位是幂等的）。
+
+**为什么二维数组就够了**——三类线程都在写 `_cache[region_idx][worker_id]`，如果两个线程恰好用同一个 worker_id，就会写到同一个槽位。用两种机制防止冲突：
+
+**Mutator 和 CR 之间——编号分段，给不同编号**：
+- Mutator 背压：`_free_ids->claim_par_id()` 返回 0, 1, 2...（范围 `[0, num_par_ids)`，`dirtyCardQueue.cpp:213`）
+- ConcurrentRefine：**故意加了一个偏移量** `worker_id_offset() = num_par_ids()`（`g1ConcurrentRefine.cpp:419-421,444`），实际编号 = 原生编号 + 偏移量。比如 CR 的"worker 0"实际写到槽位 100——和 Mutator 的"worker 0"（槽位 0）不冲突
+
+**GC 和它们之间——时间互斥，不让同时跑**：
+- GC Worker 使用的编号范围 `[0, ParallelGCThreads)` 和 Mutator 重叠——但 GC 只在 safepoint 运行，此时所有 mutator 和 CR 线程已暂停。GC 结束后恢复。不会同时写同一个槽位
 
 ---
 
@@ -498,7 +509,9 @@ add_reference(from_card, to_region, tid):
 | **单个 from-Region 的 card 数量** | Sparse: 4 个 | Sparse → Fine（升级） | card 太多 |
 | **不同 from-Region 的个数** | Fine: 256 个 | Fine → Coarse（退化） | 引用方太多 |
 
-### 3.5 HeapRegionRemSet——RSet 的外层包装
+### 3.5 HeapRegionRemSet——RSet 本身
+
+`HeapRegionRemSet` **就是每个 Region 的 RSet**。跨 Region 引用数据的实际存储委托给内部组件 `OtherRegionsTable`（三层结构），HeapRegionRemSet 自身只加控制：状态机控制是否接受新引用、锁保护并发、BOT 辅助定位、code roots 记录 JIT 引用。
 
 ```cpp
 class HeapRegionRemSet {
@@ -510,25 +523,75 @@ class HeapRegionRemSet {
 };
 ```
 
-- **`_state` 状态机**——控制 `add_reference` 是否生效：
+- **`_state` 状态机**——控制 `add_reference` 是否生效。Region 从出生到死亡经过三个状态，但不是所有 Region 类型都走同样的路径：
 
 ```
-Untracked ←──→ Updating ──→ Complete
-  ↑                ↑              │
-  │                │              │
-  Region 释放    并发标记开始    RSet 更新完成
-  /回收          (safepoint)     (safepoint)
+新 old Region 分配
+  → Untracked ────────────→ Updating ──────────→ Complete
+       ↑ 不维护 RSet       (rebuild 前)           ↑ RSet 完整
+       │                   add_reference 生效       │ add_reference 继续
+       │                                           │
+       └──────────── GC 回收后重置 ────────────────┘
+
+young / humongous Region：始终 Complete（分配时就设置，不经过 Untracked/Updating）
 ```
 
 | 状态 | 含义 | add_reference 行为 | 什么时候进入 |
 |---|---|---|---|
-| `Untracked` | 不跟踪引用 | 直接返回（不记录） | Region 释放/回收后 |
-| `Updating` | 正在更新 RSet | 正常记录到 OtherRegionsTable | 并发标记开始时（safepoint） |
-| `Complete` | RSet 完整 | 正常记录 | RSet 更新完成后（safepoint） |
+| `Untracked` | 不维护 RSet | 直接 `return`（`heapRegionRemSet.hpp:265-266`） | 新分配的 old Region（`g1RemSetTrackingPolicy.cpp:53`）+ 被 GC 回收后重置 |
+| `Updating` | 正在收集 RSet，但还不完整 | 正常记录 | rebuild 前，对选中的 old Region 调用 `update_before_rebuild()`（`:132`） |
+| `Complete` | RSet 完整可用 | 正常记录 | young/humongous 始终 Complete（`:44,47`）；old Region rebuild 后 `update_after_rebuild()`（`:146`） |
 
-**为什么需要状态机**——并非所有 Region 都需要跟踪 RSet。新建的 Region 在被分配为 old/humongous 之前不需要 RSet（young Region 会被整体回收）。通过状态机控制 `add_reference` 是否生效，避免对不需要 RSet 的 Region 做无用记录。
+**每种 Region 类型的状态**（`g1RemSetTrackingPolicy.cpp:41-57`）：
 
-- **`_code_roots`**——存指向本 Region 的 nmethod（JIT 编译代码里的引用），底层是 chunked list（每个 chunk 存多个 nmethod*），避免单链表过长。GC 时 `strong_code_roots_do()` 遍历扫描这些代码引用。
+| Region 类型 | 分配时的状态 | 为什么 |
+|---|---|---|
+| **young** | Complete（始终） | Young GC 全量 evacuate，outgoing 引用自然处理，但 **incoming RSet 需要维护**——GC 要知道"谁引用了 young Region" |
+| **humongous** | Complete（始终） | 急切回收需要 RSet 判断"是否有引用" |
+| **新分配的 old** | **Untracked** | 刚分配的 old Region 还没对象引用它，先省掉 add_reference 开销 |
+| **标记后被选中的 old** | Untracked → Updating → Complete | rebuild 一次性补上之前漏掉的引用（详见下文 RSet 重建） |
+
+**具体例子**——一个 old Region 的完整生命周期：
+
+```
+Region 5 分配为 old（刚 commit）:
+  _state = Untracked → 任何 add_reference 直接返回
+  （标记还没开始，先不维护 RSet）
+
+并发标记完成，Region 5 存活数据少、值得回收:
+  update_before_rebuild() → _state = Updating
+  开始接受 add_reference，增量记录新引用
+
+RSet 重建（扫描 Region 5 所有存活对象 → 更新被引用方的 RSet）:
+  update_after_rebuild() → _state = Complete
+  RSet 完整可用，之后日常 add_reference 增量维护
+
+Next GC 回收 Region 5:
+  set_state_empty() → _state = Untracked
+  重新从 Untracked 开始
+```
+
+**为什么需要这套设计**——新分配的 old Region 默认 Untracked，**省掉 add_reference 的开销**（因为还没对象引用它）。等标记结束，知道哪些 old Region 值得回收后，再通过 rebuild **一次性补上**之前漏掉的引用。用"先省后补"换 CPU 时间。
+
+#### 3.5a RSet 重建——批量补上漏掉的引用
+
+**什么时候**——并发标记的 remark 之后、cleanup 之前，作为一个并发阶段运行
+
+**为什么需要**——新分配的 old Region 标记期间是 Untracked（不维护 RSet），重建时一次性弥补
+
+**重建什么、往哪写**——扫描**被选中的 old/humongous Region** 里所有存活对象的引用字段，更新**被引用方目标 Region 的 RSet**（`g1OopClosures.inline.hpp:293-295`）：
+
+```cpp
+HeapRegion* to = _g1h->heap_region_containing(obj);  // 被引用的目标 Region
+HeapRegionRemSet* rem_set = to->rem_set();            // 目标 Region 的 RSet
+rem_set->add_reference(p, _worker_id);                // 更新目标 Region 的 RSet
+```
+
+**和 add_reference 的关系**——add_reference 是**增量**维护（dirty card 触发，来一个加一个），rebuild 是**批量**补全（扫描所有存活对象，一次性补上 Untracked 期间漏掉的）。rebuild 完成后回到 add_reference 增量维护。
+
+**young/humongous 不需要 rebuild**（`needs_scan_for_rebuild` 返回 false，`:32-38`）——young Region outgoing 引用在 Young GC evacuate 时自然处理，humongous 始终 Complete。
+
+- **`_code_roots`**（G1CodeRootSet）——RSet 不只存堆里对象的引用，还存 **JIT 编译代码（nmethod）里的引用**。C2 编译时可能把对象地址嵌入机器码常量区——这些引用不在堆里，GC 扫不到。`_code_roots` 记录"哪些 nmethod 引用了本 Region 的对象"。底层用 chunked list（分块链表，每个 chunk 存多个 nmethod*），避免单链表过长。GC 时 `strong_code_roots_do()` 遍历扫描。
 
 ---
 
@@ -536,7 +599,9 @@ Untracked ←──→ Updating ──→ Complete
 
 ### 4.1 为什么需要 BOT
 
-GC 扫描 dirty card 时，card 里有多个对象（大小不一）。给定一个地址，要找到"它属于哪个对象"——即向前找到对象起始地址。但对象大小不一，不能直接算。
+GC 扫描 dirty card 时，card 的起始地址**可能切到某个对象的中间**——对象从上个 card 跨过来了。如果直接从 card 起始扫描，读到的不是合法对象头。
+
+**例子**——对象 A 从偏移 400B 开始，大小 200B（结束于 600B）。Card 0 覆盖 0~512B，Card 1 覆盖 512~1024B。Card 1 的起始地址 512B 落在对象 A 的内部（肚子），不是对象头。GC 需要找到"512B 属于哪个对象"——即向前找到对象 A 的起始地址 400B。BOT 就是做这件事的。
 
 ### 4.2 类结构
 
@@ -551,15 +616,66 @@ class G1BlockOffsetTable {
 
 ### 4.3 指数编码——1 字节覆盖整个 Region
 
-| entry 值 | 含义 | 回退多少 |
-|---|---|---|
-| 0~63 | 线性偏移 | 回退 entry 个 word（512B 内） |
-| 64 | 指数起点 | 回退 1 个 card（512B） |
-| 65 | | 回退 16 个 card（8KB） |
-| 66 | | 回退 256 个 card（128KB） |
-| 67 | | 回退 4096 个 card（2MB） |
+BOT 每个 entry 只有 1 字节（256 个值），但要能表示"回退多远"——最近的可能只有几个 word（8 字节），最远的可能要回退整个 Region（32MB）。怎么用 1 字节同时覆盖近和远？
 
-**为什么用指数**——1 字节只有 256 个值，线性编码最多覆盖 256×8B=2KB。指数编码（底数 16）可以覆盖 16^4 × 512B = 32MB，够覆盖最大的 Region（32MB）。
+**编码结构**——把 256 个值分成两段：
+
+```
+entry 值:  0 ────────────────── 63 │ 64 ─────────────────────── 255
+含义:      线性偏移（word）         指数偏移（card）
+          回退 0~63 个 word         回退 16^(entry-64) 个 card
+          覆盖 0~512B（1 card 内）   覆盖 1 card ~ 16^191 card
+```
+
+| entry 值 | 编码方式 | 回退多少 | 回退距离 |
+|---|---|---|---|
+| 0~63 | 线性：`q -= entry`（word） | entry 个 word | 0~504B（1 card 内） |
+| 64 | 指数：`16^(64-64) = 16^0` | 1 个 card | 512B |
+| 65 | 指数：`16^(65-64) = 16^1` | 16 个 card | 8KB |
+| 66 | 指数：`16^(66-64) = 16^2` | 256 个 card | 128KB |
+| 67 | 指数：`16^(67-64) = 16^3` | 4096 个 card | 2MB |
+| 68 | 指数：`16^4` | 65536 个 card | 32MB |
+
+**为什么分两段**——如果全部线性（1 值=1 word），256 个值最多覆盖 256×8B=2KB——连半个 Region 都不到的。如果全部指数，近处跳太远。分段让近处精密（word 级），远处大步（card 级），1 字节覆盖 32MB。
+
+**entry 的计算公式**（`g1BlockOffsetTable.inline.hpp:67-73`）：`entry = pointer_delta(threshold, blk_start)` = `(slot起点 - 对象头) / 8`，以 word 计。
+
+**两个具体例子**：
+
+```
+例1: 对象头刚好在 slot 起点
+  slot 起点 = 1024B，对象头 = 1024B
+  entry = (1024 - 1024) / 8 = 0
+  查: q = 1024, q -= 0 → 对象头就在这
+
+例2: 对象头在 slot 起点之前 24 字节
+  slot 起点 = 1024B，对象头 = 1000B
+  entry = (1024 - 1000) / 8 = 3 words
+  查: q = 1024, q -= 3×8 = 1000 → 对象头
+```
+
+**例3：对象跨 slot，对象头在 slot 0 内部**——对象从 slot 0 内部（200B）跨到 slot 1（512~1024B），slot 0 和 slot 1 的 entry 各不同：
+
+```
+slot 0 (含对象头): BOT[0] = 0  ← 初始化为 0（zero_bottom_entry_raw），永不修改
+                    含义：搜索起点——查 slot 0 时跳到 region bottom，阶段 2 逐对象前进到 200B
+
+slot 1 (跨边界):   BOT[1] = 39  ← alloc_block_work 设的
+                    entry = pointer_delta(512, 200) = (512-200)/8 = 39 words
+                    查 slot 1: q=512, q-=39×8=200 → 对象头
+```
+
+含对象头的 slot entry 永远是初始值 0（保守搜索起点），跨 slot 边界的中间 slot entry 存精确回退距离。
+
+**大对象的 BOT 布局**——对象头的 card 存线性 entry（<64），中间 card 存指数 entry（≥64），指向头卡方向：
+
+```
+对象头卡      近处中间卡        远处中间卡
+entry=3      entry=64         entry=66
+(线性:3w)    (退1card→头卡)   (退256card→近处→头卡)
+```
+
+查远处卡时，沿指数链逐段回退（`block_at_or_preceding` 的 while 循环），每退一段重读 entry，直到进入线性段精确定位。
 
 ### 4.4 两阶段定位
 
@@ -623,7 +739,35 @@ return 512                                 → 对象 B 起始地址
 
 ### 4.5 G1BlockOffsetTablePart——per-Region 视图
 
-每个 HeapRegion 持有一个 `G1BlockOffsetTablePart`——把全局 BOT 数组的对应区段包装成 per-Region 视图，维护 `_next_offset_threshold`（下次该更新 BOT 的分配边界）。对象分配跨越 threshold 时更新 BOT entry。
+全局 BOT 是一个覆盖整个堆的大数组，**每个 HeapRegion 持有一个 `G1BlockOffsetTablePart`**（`heapRegion.hpp:101`：`_bot_part`）。2048 个 Part 都指向同一个全局 BOT 数组——每个 Part 只读写自己 Region 对应的那一段。
+
+```
+G1BlockOffsetTablePart:
+  _bot                    → 指向全局 BOT 数组（G1BlockOffsetTable*）
+  _space                  → 指向当前 Region 的空间（知道 bottom/top）
+  _next_offset_threshold  → 下次填表的那条线（地址）
+  _next_offset_index      → 那条线对应的 BOT 数组下标
+```
+
+Part 不存"各格的数值"——数值直接存在全局 BOT 数组里。Part 只管一件事：**"下条线在哪"**。
+
+**工作方式**——当 Region 内分配对象，对象尾部跨过了 `_next_offset_threshold`，`alloc_block_work` 被触发：更新当前行的 BOT entry（存回退距离），然后 threshold 推到下一个 slot 的起点、index 加 1。
+
+**初始化**——Region 初始化时，`_next_offset_threshold` 指向第二个 slot 的起点（`initialize_threshold_raw`），第一行 BOT[0] 设为 0（`zero_bottom_entry_raw`）。所以第一个 slot 的 entry 永远是 0（搜索起点），从第二个 slot 开始才被 `alloc_block_work` 更新。
+
+**具体流程**——以 Region 刚构建、分配第一个对象（从 200B 到 800B）为例：
+
+```
+初始:    BOT[0]=0     BOT[1]未知   BOT[2]未知 ...
+          ↑线0=0B     ↑线1=512B（_next_offset_threshold 指向这里，_next_offset_index=1）
+
+对象 200B→800B 跨过线1(512B) → 触发 alloc_block_work:
+  BOT[1] = (512-200)/8 = 39 words
+  线推到 slot 2 起点(1024B)，_next_offset_index=2
+
+之后:    BOT[0]=0     BOT[1]=39    BOT[2]未知 ...
+                      ↑旧线1       ↑新线2=1024B
+```
 
 ---
 
@@ -631,13 +775,27 @@ return 512                                 → 对象 B 起始地址
 
 ### 5.1 为什么需要
 
-GC 回收时，对每个对象引用要判断"这个引用指向的对象在不在 CSet"——如果在，要疏散它。这个判断在 GC 热路径上，每次引用遍历都要做，必须极快。
+GC 扫描引用时（如 `A → B`），必须快速判断"B 在不在 CSet"——如果在，B 需要被搬走。这个判断在 GC 热路径上，每次引用遍历都要做，不能遍历 CSet 列表逐一比对——太慢。
 
-### 5.2 InCSetState 枚举
+**方案：不存列表，存地图**。一个偏置数组，每个 Region 占一个格子。格子里存一个小数字（-1/0/1/2），直接告诉 GC"这个 Region 在不在 CSet"。
+
+### 5.2 数据结构和查询
+
+`_in_cset_fast_test`（`G1InCSetStateFastTestBiasedMappedArray`）继承 `G1BiasedMappedArray<InCSetState>`（偏置数组技巧，详见 ch11/05）。给定对象地址，`地址 >> RegionShift` 直接定位到对应的格子，O(1)：
+
+```
+obj_addr >> RegionShift  →  格子编号  →  biased_base[格子编号]  →  InCSetState
+```
+
+和 cardtable 的 `_byte_map_base` 同一技巧，区别是粒度：cardtable 是 512B（`>> 9`），这里是 Region 大小（`>> RegionShift`）。
+
+### 5.3 InCSetState 枚举
+
+每个格子存 1 字节（`int8_t`），四种值：
 
 ```cpp
 struct InCSetState {
-  static const in_cset_state_t Humongous  = -1;  // 大对象 Region
+  static const in_cset_state_t Humongous  = -1;  // 大对象 Region 在 CSet
   static const in_cset_state_t NotInCSet  =  0;  // 不在 CSet
   static const in_cset_state_t Young      =  1;  // young Region 在 CSet
   static const in_cset_state_t Old        =  2;  // old Region 在 CSet
@@ -646,18 +804,16 @@ struct InCSetState {
 
 **设计巧妙**——正值表示在 CSet，`is_in_cset() = (_value > 0)` 一条比较覆盖 Young+Old。负值（Humongous）走独立路径。
 
-### 5.3 偏置数组实现
-
-`_in_cset_fast_test`（`G1InCSetStateFastTestBiasedMappedArray`）——继承 `G1BiasedMappedArray<InCSetState>`（偏置数组技巧，详见 ch11/05），对象地址直接映射到 InCSetState，O(1) 查询。
+### 5.4 生命周期
 
 ```
-GC 开始时:
-  register_young_region_with_cset(r)   → _in_cset_fast_test.set_in_young(idx)    // = 1
-  register_old_region_with_cset(r)     → _in_cset_fast_test.set_in_old(idx)      // = 2
-  register_humongous_region_with_cset  → _in_cset_fast_test.set_humongous(idx)   // = -1
+GC 开始时（start_new_collection_set）:
+  register_young_region_with_cset(r)   → 设对应格子 = 1
+  register_old_region_with_cset(r)     → 设对应格子 = 2
+  register_humongous_region_with_cset  → 设对应格子 = -1
 
 GC 扫描时:
-  is_in_cset(obj) = _in_cset_fast_test.at(obj_addr) > 0    // 一条比较
+  is_in_cset(obj) = obj_addr >> RegionShift → 读格子 → value > 0    // 一条比较
 
 GC 结束时:
   clear_cset_fast_test() → 全部重置为 NotInCSet (0)
