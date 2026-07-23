@@ -72,6 +72,28 @@ typedef enum {
 } Tag;
 ```
 
+**二进制前缀 `0b`**：`0b` 是二进制表示法（C++14 语法），`0x` 才是十六进制。比如 `0b00010` = 十进制 2，`0b01100` = 十进制 12。下面用表格直观展示每个值在三种进制下的对应关系，以及每一位承载的含义：
+
+```
+                    binary          dec  hex   含义
+FreeTag:             0b0 0000       0    0x00  全零
+EdenTag:             0b0 0010       2    0x02  bit1=Young
+SurvTag:             0b0 0011       3    0x03  bit1=Young + bit0=Survivor后缀
+HumongousMask:       0b0 0100       4    0x04  bit2=Humongous
+PinnedMask:          0b0 1000       8    0x08  bit3=Pinned
+StartsHumongousTag:  0b0 1100      12    0x0C  bit2|bit3 = Humongous+Pinned
+ContinuesHumongous:  0b0 1101      13    0x0D  bit2|bit3|bit0 = 上面再加后缀
+OldTag:              0b1 0000      16    0x10  bit4=Old
+ArchiveMask:         1b0 0000      32    0x20  bit5=Archive
+
+观察规律:
+  - FreeTag 的每个 bit 都是 0
+  - Young 相关:   bit1=1  (Eden),   bit1+bit0=1 (Survivor)
+  - Humongous:    bit2+bit3=1 (天生Pinned)
+  - Old:          bit4=1
+  - Pinned/Archive: 叠加在 Humongous 或 Old 上的额外属性
+```
+
 **设计要点**：Tag 不是"枚举值依次递增"，而是**独立属性的位域**——5 个 bit 分别对应 5 个可以独立查询的属性，组合使用时用 OR 拼起来。
 
 ```
