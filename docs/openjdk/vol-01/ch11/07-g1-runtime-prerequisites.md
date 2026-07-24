@@ -72,61 +72,170 @@ typedef enum {
 } Tag;
 ```
 
-**二进制前缀 `0b`**：`0b` 是二进制表示法（C++14 语法），`0x` 才是十六进制。比如 `0b00010` = 十进制 2，`0b01100` = 十进制 12。下面用表格直观展示每个值在三种进制下的对应关系，以及每一位承载的含义：
+看到枚举值第一眼可能困惑——为什么 `EdenTag=2`、`SurvTag=3`、`OldTag=16` 跳这么大？为什么 `StartsHumongousTag=12` 不是 4？答案在二进制。
+
+**`0b` 是二进制前缀**（C++14 语法，不是十六进制）。例如 `0b00010` = 十进制 2，`0b01100` = 十进制 12。
+
+### 为什么需要二进制——位域 (bitfield)
+
+要表示 5 个独立的"是/否"属性（Region 是不是 Young？是不是 Old？是不是 Humongous？是不是 Pinned？是不是 Archive？），用十进制一个个枚举需要 2^5 = 32 个值。**位域**的做法是：用 5 个二进制位分别承载 5 个属性，每个位独立开关。
 
 ```
-                    binary          dec  hex   含义
-FreeTag:             0b0 0000       0    0x00  全零
-EdenTag:             0b0 0010       2    0x02  bit1=Young
-SurvTag:             0b0 0011       3    0x03  bit1=Young + bit0=Survivor后缀
-HumongousMask:       0b0 0100       4    0x04  bit2=Humongous
-PinnedMask:          0b0 1000       8    0x08  bit3=Pinned
-StartsHumongousTag:  0b0 1100      12    0x0C  bit2|bit3 = Humongous+Pinned
-ContinuesHumongous:  0b0 1101      13    0x0D  bit2|bit3|bit0 = 上面再加后缀
-OldTag:              0b1 0000      16    0x10  bit4=Old
-ArchiveMask:         1b0 0000      32    0x20  bit5=Archive
+一个二进制位只能存 0 或 1:
+  位 = 0 → 该属性"否"
+  位 = 1 → 该属性"是"
 
-观察规律:
-  - FreeTag 的每个 bit 都是 0
-  - Young 相关:   bit1=1  (Eden),   bit1+bit0=1 (Survivor)
-  - Humongous:    bit2+bit3=1 (天生Pinned)
-  - Old:          bit4=1
-  - Pinned/Archive: 叠加在 Humongous 或 Old 上的额外属性
+5 个位拼在一起 = 一个数字，能同时编码 5 个属性的任意组合:
+   ... bit4  bit3  bit2  bit1  bit0
+   ...  Old Pinned Humong Young 后缀
 ```
 
-**设计要点**：Tag 不是"枚举值依次递增"，而是**独立属性的位域**——5 个 bit 分别对应 5 个可以独立查询的属性，组合使用时用 OR 拼起来。
+每个位的"权重"是 2 的幂：
 
 ```
-Tag 是一个 bitfield:
-
-bit 5 (32): Archive  — CDS 归档 Region（flag 可叠加在 Old 上）
-bit 4 (16): Old      ─┐
-bit 3 (8):  Pinned   │  这几位是"属性标志"，
-bit 2 (4):  Humongous│  一个 Tag 可以同时设置多个，
-bit 1 (2):  Young   ─┘  用 OR 组合出复合角色
-bit 0 (1):  后缀     — 区分同一大类的两种变体（Eden vs Survivor / Start vs Continues）
+bit0 (最右) 权重 = 2^0 = 1
+bit1        权重 = 2^1 = 2
+bit2        权重 = 2^2 = 4
+bit3        权重 = 2^3 = 8
+bit4        权重 = 2^4 = 16
+bit5 (最左) 权重 = 2^5 = 32
 ```
 
-**不是每个 bit 独立代表一种角色**——比如 Humongous 永远是 Pinned（HumongousMask | PinnedMask = 12），它不是"bit2 和 bit3 各自独立"，而是"Humongous 这个角色天生需要 Pinned 属性"。类似地，Archive 总是 Old+Pinned 的组合。
+**"bit1=1"不是"值等于 1"**——是指"这个位上写 1，它贡献的数值 = 2^1 = 2"。同理 bit4=1 贡献 16。OR 组合多个位就是权重相加。
 
-**bit 0 是"后缀"而非"独立属性"**——它区分：
-- Eden(2, `0b00010`) vs Survivor(3, `0b00011`)  ← Young + bit0
-- StartsHumongous(12, `0b01100`) vs ContinuesHumongous(13, `0b01101`)  ← Humongous|Pinned + bit0
+### 逐值拆解
 
-Old(16) 和 Free(0) 没有 bit0 变体——它们的 is_*() 直接用位掩码或精确等于判断。
+**FreeTag = 0**
 
-**四个关键的 is_X() 方法**（heapRegionType.hpp:123-143）：
+```
+bit4 bit3 bit2 bit1 bit0
+  0    0    0    0    0  = 0
+
+所有位=0 → 该 Region 已被释放，不属任何角色
+```
+
+**EdenTag = 2**
+
+```
+bit4 bit3 bit2 bit1 bit0
+  0    0    0    1    0  = 2
+
+bit1 = 1 → Young 属性"是"
+bit0 = 0 → 子类型是 Eden（不是 Survivor）
+```
+
+**SurvTag = 3**
+
+```
+bit4 bit3 bit2 bit1 bit0
+  0    0    0    1    1  = 3
+
+和 Eden 的唯一区别：bit0 从 0 变 1
+```
+
+**`&`（按位与）vs `==`（精确等于）是两种判断逻辑：**
+
+| 方法 | 实现 | 含义 |
+|------|------|------|
+| `is_young()` | `(get() & YoungMask) != 0` | "**只要** bit1 是 1 就 true"——不管 bit0 是啥，Eden 和 Survivor 都满足 |
+| `is_eden()` | `get() == EdenTag` | "必须精确等于 2，bit0 也是 0 才行" |
+| `is_survivor()` | `get() == SurvTag` | "必须精确等于 3，bit0 也是 1 才行" |
+
+**HumongousMask = 4**
+
+```
+bit4 bit3 bit2 bit1 bit0
+  0    0    1    0    0  = 4
+
+bit2 = 1 → 这是掩码（Mask），不是完整 Tag。单独值 4 没有对应的 Region 角色。
+```
+
+**StartsHumongousTag = 12**
+
+```
+bit4 bit3 bit2 bit1 bit0
+  0    1    1    0    0  = 12
+       ↑    ↑
+     Pinned Humongous
+
+12 = HumongousMask(4) | PinnedMask(8) = 4 + 8
+
+为什么 Humongous 一定是 Pinned？巨对象跨多个 Region，开始 Region
+不能移动——一搬就乱。Pinned 不是"可选属性"，是 Humongous 的固有部分。
+```
+
+**ContinuesHumongousTag = 13**
+
+```
+bit4 bit3 bit2 bit1 bit0
+  0    1    1    0    1  = 13
+
+13 = StartsHumongousTag(12) + bit0(1)
+
+和 Eden/Survivor 的模式一致：bit0=0→Start，bit0=1→Continues
+```
+
+**OldTag = 16**
+
+```
+bit4 bit3 bit2 bit1 bit0
+  1    0    0    0    0  = 16
+
+bit4 = 1 → Old
+
+is_old() 用位测试: (16 & 16) = 16 ≠ 0 → true
+is_young() 用位测试: (16 & 2) = 0 → false
+
+Old 没有子类型——没有"OldEden"和"OldSurvivor"，所以 bit0 对 Old 无意义
+```
+
+**ArchiveMask = 32**
+
+```
+bit5 bit4 bit3 bit2 bit1 bit0
+  1    0    0    0    0    0  = 32
+
+CDS 归档 Region。Archive 本质是 Old+Pinned+Archive 的组合:
+  OpenArchiveTag = 56 = 32 | 16 | 8
+```
+
+### 核心规律
+
+**每一位是一个"属性开关"**，不是"数值递增枚举"：
+
+```
+位              权重      代表什么
+bit0            1        子类型后缀 (Eden=0, Survivor=1 / Start=0, Continues=1)
+bit1 (YoungMask)  2        是不是 Young Region
+bit2 (Humongous)  4        是不是巨对象 Region
+bit3 (Pinned)     8        是不是被"钉住"不能搬的
+bit4 (OldMask)    16       是不是 Old Region
+bit5 (Archive)    32       是不是 CDS 归档 Region
+```
+
+**复合角色 = OR 组合**：
+
+```
+Eden             = Young(2)                           = 2
+Survivor         = Young(2) | bit0(1)                 = 3
+Old              = Old(16)                            = 16
+StartsHumongous  = Humongous(4) | Pinned(8)           = 12
+ContinuesHumongous = Humongous(4) | Pinned(8) | bit0(1) = 13
+OpenArchive      = Archive(32) | Old(16) | Pinned(8)  = 56
+```
+
+这代表着 G1 中"这个 Region 是什么角色"不靠地址判断——靠一条位掩码查询。同一个 Region 物理位置不变，角色改变只需要改 Tag。
+
+**源码中的 is_X() 查询**（heapRegionType.hpp:123-143）：
 
 ```cpp
-bool is_free()      const { return get() == FreeTag; }             // 只有 0
-bool is_young()     const { return (get() & YoungMask) != 0; }     // 0bxxxx1x
-bool is_eden()      const { return get() == EdenTag; }             // 精确 2
-bool is_survivor()  const { return get() == SurvTag; }             // 精确 3
-bool is_humongous() const { return (get() & HumongousMask) != 0; } // 0bxx1xx
-bool is_old()       const { return (get() & OldMask) != 0; }       // 0b1xxxx
+bool is_free()      const { return get() == FreeTag; }             // 精确等于 0
+bool is_young()     const { return (get() & YoungMask) != 0; }     // bit1=1 就行
+bool is_eden()      const { return get() == EdenTag; }             // 精确等于 2
+bool is_survivor()  const { return get() == SurvTag; }             // 精确等于 3
+bool is_humongous() const { return (get() & HumongousMask) != 0; } // bit2=1 就行
+bool is_old()       const { return (get() & OldMask) != 0; }       // bit4=1 就行
 ```
-
-这代表 G1 中"这个 Region 是什么角色"不靠地址判断——靠一条位掩码查询。同一个 Region 物理位置不变，角色改变只需要改 Tag。
 
 ### 1.3 五种核心角色详解
 
