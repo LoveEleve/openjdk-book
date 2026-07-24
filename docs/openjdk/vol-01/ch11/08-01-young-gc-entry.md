@@ -11,35 +11,63 @@
 
 ## 1. 谁触发的 Young GC
 
-### 1.1 从分配说起——完整的调用链
+### 1.1 从分配说起——追一次 `new Object()` 到底
 
-Java 代码里写 `new Object()`，最终走到 G1 的分配逻辑。完整路径如下——本章的 §1 覆盖了这条链上从 "TLAB 慢速路径" 到 "触发 Young GC" 的全部内容：
+Java 代码里写 `new Object()`。这条分配调用经历了三层决策，每层失败后才进入下一层。按执行顺序：
+
+---
+
+**第 0 层：`new` 字节码 → 分配入口**
+
+字节码 `new` 被 JIT 编译器或模板解释器编译成对 `CollectedHeap::obj_allocate()` 的调用，最终进入 GC 无关的通用分配层 `MemAllocator::mem_allocate()`（memAllocator.cpp:362）。从这里开始，决策分叉。
+
+---
+
+**第 1 层：TLAB——线程本地的快速通道（§1.2）**
+
+`allocate_inside_tlab()` 是 G1 的第一道分配尝试，和具体的 GC 无关——所有 JVM GC 都走这层。
+
+- **快路径**：`tlab.allocate()` 做一次 **pointer bump**——`_top + size ≤ _end` → `_top += size` 返回。约 10 条 CPU 指令，无锁，每个线程在自己的 TLAB 里独立操作。
+- **慢路径**：快路径失败（当前 TLAB 剩余空间不够）→ `allocate_inside_tlab_slow()`。这里有一个**容差判断**——如果 TLAB 剩余空间 > `_refill_waste_limit`（= TLAB 大小 / 64），G1 选择不退休 TLAB，而是跳过 TLAB 直接在 Eden Region 上用 CAS 分配这一次。如果剩余空间 ≤ waste limit，退休当前 TLAB，申请新的。
+
+如果第 1 层返回 NULL（TLAB 退休了但拿不到新 TLAB），进入第 2 层。
+
+---
+
+**第 2 层：Eden Region——G1 的 Region 级分配（§1.3）**
+
+`allocate_outside_tlab()` → `G1CollectedHeap::mem_allocate()`（g1CollectedHeap.cpp:398）→ `attempt_allocation()`。这一层是 G1 特有的——不再通过 TLAB，直接操作 Eden Region。
+
+- **快路径**：`attempt_allocation()` 先试 `attempt_retained_allocation()`（上一轮退休保留的 retained region），再试 active region 上的 CAS bump-pointer。无锁。
+- **三级挽救**：快路径全失败 → `attempt_allocation_slow()`。三级挽救依次是：持锁重试当前 Region → 退休它、从 free list 拿新 Eden Region → GCLocker 紧急扩展用 max 做上限。每一级都先试能不能分配，成功了就不往后走。
+
+---
+
+**第 3 层：触发 Young GC（§1.4）**
+
+如果三级挽救的持锁重试（第二级）里 `new_mutator_alloc_region()` 返回 NULL——意味着当前 young Region 数已达 `_young_list_target_length`，不能再扩——GC 被触发。
+
+`attempt_allocation_slow()` 的持锁阶段里 `should_try_gc = !GCLocker::needs_gc()`。如果 GCLocker 不拦着，调用 `do_collection_pause()` 提交 `VM_G1CollectForAllocation` 给 VMThread，阻塞等待 GC 完成。
+
+三层总览：
 
 ```
 new 字节码
-  └→ Template Interpreter / JIT 编译代码
-      └→ CollectedHeap::obj_allocate()
-          └→ MemAllocator::allocate()                    [memAllocator.cpp]
-              └→ MemAllocator::mem_allocate()            [memAllocator.cpp:362]
-                  ├─ allocate_inside_tlab()               ← TLAB 快路径（§1.1）
-                  │   ├─ tlab.allocate()                  ← pointer bump
-                  │   └─ allocate_inside_tlab_slow()      ← TLAB 慢路径（§1.2）
-                  │       ├─ waste > limit → return NULL → 跳过TLAB（§1.2）
-                  │       └─ waste ≤ limit → retire TLAB + 申请新TLAB
-                  │
-                  └─ allocate_outside_tlab()              ← 不走TLAB（§1.2）
-                      └─ G1CollectedHeap::mem_allocate()  [g1CollectedHeap.cpp:398]
-                          └─ attempt_allocation()
-                              ├─ retained region（第一级）    ← §1.3
-                              ├─ active region CAS（快路径）
-                              └─ attempt_allocation_slow()  ← §1.4（本章核心）
-                                  ├─ 持锁重试（第二级）
-                                  ├─ GCLocker 扩展（第三级）
-                                  ├─ do_collection_pause()  ← 触发 Young GC
-                                  └─ GCLocker::stall_until_clear()
+  └→ MemAllocator::mem_allocate()
+      ├─ allocate_inside_tlab()         §1.2  TLAB 快慢路径
+      │   ├─ tlab.allocate()            pointer bump (≈10 CPU inst)
+      │   └─ allocate_inside_tlab_slow()  waste_limit容差 → retire or skip
+      │
+      └─ allocate_outside_tlab()        §1.3  Region 级分配
+          └─ attempt_allocation()
+              ├─ retained region (第一级)
+              ├─ active region CAS
+              └─ attempt_allocation_slow()  §1.4  触发GC
+                  ├─ 持锁重试 (第二级)
+                  ├─ GCLocker 紧急扩展 (第三级)
+                  ├─ do_collection_pause()     → Young GC
+                  └─ GCLocker::stall_until_clear()
 ```
-
-TLAB 不是 G1 特有的——它是 JVM 通用的分配优化。G1 特有的是 TLAB 背后的 Eden Region 管理（哪个 Region 当 Eden、Eden 用完了从 free list 拿新区、新区数量由 `_young_list_target_length` 控制）。这条分配链覆盖了三层：TLAB → Region → GC 触发。
 
 ### 1.2 TLAB——线程本地的 pointer bump
 
