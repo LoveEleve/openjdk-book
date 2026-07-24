@@ -40,11 +40,26 @@ TLAB 内部:
 
 3. **申请新 TLAB** — `compute_size()` 算出新 TLAB 大小（约 `Eden / (线程数 × target_refills)`），从 MutatorAllocRegion 里切一块新空间
 
-4. **MutatorAllocRegion 也满了** — 当前 Eden Region 撑不下一个完整的 TLAB → Policy 判断 `should_allocate_mutator_region()`：
+4. **MutatorAllocRegion 也满了** — 当前 Eden Region 装不下新 TLAB（或 `allocate_outside_tlab` 的 CAS 分配失败）。此时不直接触发 GC——G1 还有三级"挽救"：
+
+   **第一级（无锁）**：检查 **retained region**（`_retained_alloc_region`）。上一轮 Region 退休时如果剩余空间还能装一个 TLAB（`should_retain()` 判断 `free ≥ MinTLABSize`），G1 会保留它备用。先在 retained region 上尝试分配——命中率高，避免了锁。
+
+   **第二级（持锁）**：`attempt_allocation_locked()`（g1AllocRegion.inline.hpp:98）：
+   - 持 `Heap_lock` 后重新尝试当前 Region（其他线程可能在等锁期间释放了空间）
+   - 如果还是失败 → 退休当前 Region（`retire(true)` + fill dummy + 可能保留为 retained）
+   - 调用 `new_mutator_alloc_region()` → `should_allocate_mutator_region()`：
+     ```
+     if (当前 young regions 数 < _young_list_target_length)  →  从 FreeList 拿新 Region 当 Eden
+     else                                                    →  NULL（无法再扩）
+     ```
+
+   **第三级（GCLocker 紧急扩展）**：如果 GCLocker 活跃（JNI critical section 持有者）且 young list 还能扩：
    ```
-   if (当前 young regions 数 < _young_list_target_length)  →  分配新 Eden Region
-   else                                                    →  触发 GC
+   if (GCLocker::is_active_and_needs_gc() && g1_policy()->can_expand_young_list())
+     → attempt_allocation_force() → 绕过 _young_list_target_length，用 _young_list_max_length 做上限
    ```
+
+   **Region 和 TLAB 有一个关键区别**：TLAB 有 `_refill_waste_limit`（剩余太多就不退休，省掉重建 TLAB 的开销）。Region **没有类似机制**——Region 退休时不看"浪费了多少"，而是退休后通过 `should_retain()` 判断"还值不值得保留"。保留的不是"剩余空间里的碎片"，而是整个 Region 留给下次用。Region 剩余空间在 retirement 时被 `fill_up_remaining_space()` 填成 dummy object（GC 遍历 Eden 时不撞空洞）。
 
 此时进入 **slow path**——具体调用链（g1CollectedHeap.cpp）：
 
