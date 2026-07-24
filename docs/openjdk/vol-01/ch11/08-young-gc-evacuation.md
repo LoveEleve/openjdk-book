@@ -1,361 +1,167 @@
 # G1 Young GC：Evacuation 周期
 
-> **本文定位**：ch11 运行时系列第一篇。讲解一次 Young-only pause 从触发到结束的完整流程——每一步在哪个文件、哪个方法里做了什么。
+> **本文定位**：ch11 运行时系列第一篇。沿单一线索讲完一次 Young GC 暂停的全部阶段——为什么要做、每一步做什么、源码在哪。
 >
-> **前置依赖**：ch11/07（Region 角色 / STW / Evacuation / Root / CSet / 分配-GC 链）。概念定义请查 07，本文只讲具体流程。
+> **前置概念**：Eden / Survivor / Old 角色、STW 和 safepoint、Evacuation（搬活不删死）、GC Roots（ch11/07）。
 >
-> **阅读提示**：本文按暂停执行顺序组织，每一步给出源码位置。读完能跟踪一次完整 Young GC 暂停的全部阶段。
+> **阅读提示**：读完你能回答"一次 Young GC 从触发到结束，JVM 做了哪些事、每件事为什么重要"。细节（TLAB 分配、young target 算法）在附录。
 
 ---
 
-## 1. 入口——谁触发的、从哪进来
+## 1. 为什么要做 Young GC——eden 满了
 
-### 1.1 触发概览
+mutator 线程（应用线程）不停地创建对象。每个线程有自己专属的 TLAB（线程本地分配缓冲区），分配对象时只做一次指针碰撞——约 10 条 CPU 指令，非常快。
 
-GC 不是定时事件——是分配失败的自然终点。一句话版：
+但 TLAB 总有用完的时候。用完 → 找 MutatorAllocRegion（当前 Eden Region）要一块新空间 → 如果 Eden Region 也被切光了 → 需要一个新的 Eden Region。
 
-> mutator 分配对象 → TLAB（线程本地缓冲区）满了 → Eden Region 也没多余空间了 → JVM 无法继续分配 → 触发 GC 回收空间 → GC 完成后重新分配
+G1Policy 控制着"堆里最多能有多少 Young Region"（§3.1 的 `_young_list_target_length`）。当 Eden Region 的数量已经达到这个上限，就无法再从一个新区了——**分配失败，触发 GC**。
 
-具体到 G1：当 mutator 线程在 TLAB 里分配失败、慢速路径也无法从 Eden 获取新空间时，调用到达 `G1CollectedHeap::attempt_allocation_slow()`（g1CollectedHeap.cpp:410），由它负责决定"是否要 GC"：
-
-```
-attempt_allocation_slow(word_size)
-  ├─ 持 Heap_lock 后重试一次分配（别的线程可能刚释放了空间）
-  ├─ 如果还是不行 → 尝试获取新的 Eden Region
-  │    → 如果 young regions 数已到 _young_list_target_length 上限 → 无法再扩
-  ├─ 无法扩 → do_collection_pause(word_size, GCCause::_g1_inc_collection_pause)
-  └─ VMThread::execute(VM_G1CollectForAllocation) → Safepoint → GC 开始
+```cpp
+// g1CollectedHeap.cpp:459-460
+do_collection_pause(word_size, gc_count_before, &succeeded,
+                    GCCause::_g1_inc_collection_pause);
 ```
 
-### 1.2 分配链路详情——从 TLAB 到 GC 的完整路径
-
-前述"TLAB 满 → Eden 满 → GC"每一步内部都有更细致的机制。本节展开这些细节，着急看 GC 流程的可以直接跳到 §2。
-
-**TLAB 的 pointer bump**（threadLocalAllocBuffer.inline.hpp:34-54）：`_top + size ≤ _end` → `_top += size`，约 10 条 CPU 指令，无锁。
-
-```
-TLAB 内部:
-  _start ─────────────────── _top ────── _end
-  已分配的对象                 ↑          上限
-                          下一个对象从这里开始
-```
-
-**TLAB 空间不够时——不是每次都退休**。G1 用 `_refill_waste_limit` 做容差（threadLocalAllocBuffer.hpp:57）：
-
-```
-if (TLAB剩余 > _refill_waste_limit)  →  不退休，直接在 Eden Region 上用 CAS 分配
-                                         （绕过 TLAB 的本地 bump，但对象还在 Eden）
-if (TLAB剩余 ≤ _refill_waste_limit)  →  退休 TLAB，申请新的
-```
-
-`_refill_waste_limit` = `TLAB大小 / 64`。每次走 CAS 路径时递增 4（`TLABWasteIncrement`），逐步扩大容忍度，避免频繁重建 TLAB。
-
-**TLAB 退休**（`clear_before_allocation()`, threadLocalAllocBuffer.cpp:43-46）：
-- `top`→`hard_end` 填 dummy filler object（GC 遍历 Eden 不撞空洞）
-- `used_bytes()` 记入线程分配量
-- 指针清零（start/top/end/allocation_end）——**空间不"捐回"**，TLAB 本就属于 Eden Region，退了只是"我不再用了"
-
-**Region 也满了时——三级挽救**（g1AllocRegion.inline.hpp:98-131）：
-
-| 级别 | 机制 | 条件 |
-|------|------|------|
-| 第一级 | `attempt_retained_allocation()` | 上一轮退休保留的 retained region 还有空间 |
-| 第二级 | `attempt_allocation_locked()` → retire → `new_mutator_alloc_region()` | young count < `_young_list_target_length` |
-| 第三级 | `attempt_allocation_force()` (GCLocker 紧急) | young count < `_young_list_max_length` |
-
-**Region 没有 `_refill_waste_limit`**——退休时剩余空间被 `fill_up_remaining_space()` 填 dummy，Region 通过 `MutatorAllocRegion::should_retain()` 判断 `free < MinTLABSize` 则丢弃、否则保留为 retained。TLAB 控制和 Region 控制是两个维度的独立机制。
-### 1.3 执行位置
-
-`G1CollectedHeap::do_collection_pause_at_safepoint()`（g1CollectedHeap.cpp:2793-3123）——约 330 行的方法，编排了下面 7 个阶段。
+VMThread 发起 safepoint，所有 mutator 停下来。进入 `do_collection_pause_at_safepoint()`（g1CollectedHeap.cpp:2793）——下面六个阶段。
 
 ---
 
-## 2. 阶段全景——六步走完一次 Young GC
+## 2. 六步走完一次 Young GC
 
 ```
-目标暂停时间: MaxGCPauseMillis（默认 200ms）
-
-┌─ 阶段 1: CSet 选择 ─────────────────────────┐
-│  finalize_collection_set()                   │
-│  → Eden + Survivor Region 全量纳入 CSet      │
-└──────────────────────────────────────────────┘
-                     │
-┌─ 阶段 2: Pre-Evacuation ─────────────────────┐
-│  prepare_for_oops_into_collection_set_do()   │
-│  → 合并 dirty card 日志 / 重置 scan state    │
-└──────────────────────────────────────────────┘
-                     │
-┌─ 阶段 3: Evacuation（核心）──────────────────┐
-│  G1ParTask 并行执行:                         │
-│   3a. Root 扫描 (evacuate_roots)             │
-│   3b. RSet 扫描 (oops_into_collection_set_do)│
-│   3c. 干活+偷活 (steal_and_trim_queue)       │
-└──────────────────────────────────────────────┘
-                     │
-┌─ 阶段 4: Post-Evacuation ────────────────────┐
-│  引用处理 + 弱引用清理 + 字符串去重           │
-│  → process_discovered_references()           │
-│  → WeakProcessor + StringDedup               │
-└──────────────────────────────────────────────┘
-                     │
-┌─ 阶段 5: Free CSet ──────────────────────────┐
-│  G1FreeCollectionSetTask（并行）             │
-│  → 成功撤离的 Region → Free                  │
-│  → 失败的 Region → Old                       │
-└──────────────────────────────────────────────┘
-                     │
-┌─ 阶段 6: 启动下一个 CSet ────────────────────┐
-│  start_new_collection_set()                  │
-│  → 上一轮 Survivor → 下一轮 CSet             │
-└──────────────────────────────────────────────┘
+┌─ 阶段 1: CSet 选择 ──────── 确认本次回收哪些 Region
+│  finalize_collection_set()
+│
+├─ 阶段 2: Pre-Evacuation ── 准备工作：合并 dirty card + 重置 scan state
+│  prepare_for_oops_into_collection_set_do()
+│
+├─ 阶段 3: Evacuation（核心）─ GC Workers 并行搬活对象
+│  3a. Root 扫描 → 3b. RSet 扫描 → 3c. 搬活+追踪引用
+│
+├─ 阶段 4: Post-Evacuation ── 引用处理 + 弱引用 + 字符串去重
+│  process_discovered_references()
+│
+├─ 阶段 5: Free CSet ──────── 空 Region 归还 FreeList
+│  G1FreeCollectionSetTask (并行)
+│
+├─ 阶段 6: 启动下一个 CSet ─── 本轮 Survivor → 下一轮 CSet
+│  start_new_collection_set()
 ```
 
 ---
 
-## 3. 阶段 1: CSet 选择——把 Eden + Survivor 全加进去
+## 3. 阶段 1: CSet 选择——确认回收清单
 
-### 3.1 前置：谁决定了有多少 Eden Region
+**做什么**：决定本次 GC 要回收哪些 Region。
 
-"把 Eden + Survivor 全加进 CSet"的前提是——**堆里当前到底有多少 Young Region？** 这个数量不是随机的，由 G1Policy 的 `_young_list_target_length` 持续管控（g1Policy.hpp:82）。计算分两种情况：
-
-#### 情况 A：初始值（无历史 GC 数据）
-
-`G1Policy::init()`（g1Policy.cpp:92）在 VM 启动阶段调用 `update_young_list_max_and_target_length()` 计算初始 target。此时**没有任何 GC 历史数据**——所有 analytics 序列都是空的。
-
-缺少历史时 G1Analytics 用**硬编码默认值**代替（g1Analytics.cpp:41-66）：
-
-| 预测项 | 无历史时的值 | 含义 |
-|--------|-----------|------|
-| RSet 扫描成本 | 0.0015~0.01 ms/card（取决于 GC 线程数） | 每张 card 的扫描时间 |
-| 拷贝成本 | 0.000009~0.00006 ms/byte | 每字节的拷贝时间 |
-| 固定开销 | 5.0 ms | 每次 GC 的底线耗时 |
-| 存活率 | 0.4 / age | 每个年龄约有 40% 对象存活 |
-| RS 长度 | 0 | 无历史，假设没有 RS 要扫描 |
-| 分配速率 | 0 | 空序列——前 3 次 GC 不用分配速率做约束 |
-
-有了这些默认值，二分搜索（§3.1 已经描述）仍然能算出一个合理的初始 target——靠的是"把所有能估算的部分都估算进去"。以 4GB 堆为例，初始 target 大约 25 个 Region（~50MB）。
-
-#### 情况 B：运行时（每次 GC 后动态调整）
-
-每次 GC 结束后，`record_collection_pause_end()`（g1Policy.cpp:710）把**本次 GC 的真实数据**喂进 analytics 序列：
-
-```
-report_alloc_rate_ms()  — eden_region_count / app_time  → 分配速率
-report_cost_per_card_ms() — scan_time / cards_scanned   → 卡片扫描成本
-report_cost_per_byte_ms() — copy_time / bytes_copied     → 拷贝成本
-report_rs_lengths()     — _max_rs_lengths                → RS 实际大小
-report_pending_cards()  — _pending_cards                 → 积压 dirty card 数
-```
-
-序列越长，EWMA 预测越准。比如第一次 GC 发现分配速率是 50 MB/s，第二次是 80 MB/s——analytics 会逐渐收敛到真实值，后续的 target 也更精准。
-
-**Mutator 阶段的动态修正**——`G1YoungRemSetSamplingThread` 每 300ms 采样 young Region 的 RSet 实际大小。如果当前 RS 长度超过了 GC 结束时的预测值，触发 `revise_young_list_target_length_if_necessary()`（g1Policy.cpp:392）——用 `×1.1` 的容错系数重新算 target。必要时**可能触发一次提前 GC**（RSet 比预期大 → 暂停会比预期长 → 缩小 target → 下一次 GC 更早到来）。
-
-### 3.2 `finalize_collection_set()` 入口
+Young GC 的 CSet = **所有 Eden Region + 所有 Survivor Region**（全量加入，无需选择）。这些 Region 在 GC 之前已经被增量地（incremental）加入 CSet——每分配一个新 Eden Region，它就自动进入 CSet 数组。GC 开始时 `finalize_collection_set()` 只是**锁定**这个集合，不再追加：
 
 ```cpp
 // g1CollectedHeap.cpp:2944
 g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
+  └─ collection_set->finalize_young_part(target_pause_time_ms, survivor)
+       ├─ finalize_incremental_building()      // Active→Inactive，锁定增量计数器
+       ├─ init_region_lengths(eden, survivor)   // 记下各多少 Region
+       ├─ survivors->convert_to_eden()          // 上一轮 Survivor 变成本轮 Eden
+       └─ 返回剩余时间（Young-only 不调 finalize_old_part）
 ```
 
-**它的职责**——§3.1 的 `_young_list_target_length` 决定了 mutator 在两轮 GC 之间分配了多少 Eden Region。这些 Region 被**增量地**加入 CSet（详见 §3.5）。`finalize_collection_set()` 在 GC 暂停开始的那一刻，把所有这些累积的 Region **锁定**为本次 GC 的正式 CSet，不再接受新的增量追加。
+**为什么先做这个**：后续所有阶段都需要知道"回收谁"——Root 扫描看哪些根指向 CSet、RSet 扫描看谁引用了 CSet、搬运时要把 CSet Region 里的活对象搬走。
 
-### 3.3 内部两步
-
-`G1CollectionSet::finalize_young_part()`（g1CollectionSet.cpp:356-398）做五件事：
-
-1. **`finalize_incremental_building()`** — 将增量构建状态从 Active 切 Inactive，锁定构建期累积的各项计数器
-2. **算 time budget** — `target_pause_time_ms - base_time_ms`（减掉 expected base overhead）。G1Policy 用历史数据预测基开销——CSet 选择不能超过剩余时间
-3. **`init_region_lengths(eden_count, survivor_count)`** — 记录本次 CSet 里各有多少 region
-4. **`survivors->convert_to_eden()`** — 上一轮 GC 的 survivor regions 转换身份为 eden
-5. **返回剩余时间** — 如果有余额且是 Mixed GC，`finalize_old_part()` 继续往里加 old region。Young-only 时直接忽略这一步
-
-### 3.4 Young-only vs Mixed 的区别
-
-| | Young-only | Mixed |
-|---|---|---|
-| CSet 内容 | Eden + Survivor（全量） | Eden + Survivor + 精选 Old（candidate list） |
-| `finalize_old_part()` | 不执行 | 从 candidate list 选（由 `G1MixedGCCountTarget` 分批 + pause time 约束） |
-
-Young-only 阶段 `in_mixed_phase()` 返回 false，所以根本不会走进 `finalize_old_part()` 的逻辑。
-
-### 3.5 Region 怎么进入 CSet
-
-每个 Eden/Survivor Region 在 GC 之前已经被增量地（incremental）加入 CSet：
-
-```cpp
-// g1CollectionSet.cpp:229-278
-void G1CollectionSet::add_young_region_common(HeapRegion* hr) {
-    hr->set_young_index_in_cset(cur_length);      // 在 CSet 中的序号
-    _collection_set_regions[cur_length] = hr->hrm_index();
-    _collection_set_cur_length++;                 // 数组长度 +1
-    _g1h->register_young_region_with_cset(hr);    // 设 in_cset_fast_test 位图
-}
-```
-
-`finalize_young_part()` 结束时只是**锁定这些累积值不再变化**，真正的"加入"操作在 GC 之前的增量构建阶段已经完成。
+**附录 A** 讲了 `_young_list_target_length` 怎么决定"堆里该有多少 Eden"——它在 GC 之间持续调控，影响本次 CSet 的大小。
 
 ---
 
-## 4. 阶段 2: Pre-Evacuation——GC 前的最后准备
+## 4. 阶段 2: Pre-Evacuation——最后准备
 
-### 4.1 `pre_evacuate_collection_set()`
+**做什么**：搬活对象之前，把"脏卡"信息准备好。
 
 ```cpp
 // g1CollectedHeap.cpp:4039-4058
 void G1CollectedHeap::pre_evacuate_collection_set() {
-    _hot_card_cache->set_use_cache(false);  // 关闭热卡缓存（GC 期间直接处理）
+    _hot_card_cache->set_use_cache(false);           // 关闭热卡缓存
     g1_rem_set()->prepare_for_oops_into_collection_set_do();
-    // 如果是 Initial Mark: 清理 ClassLoaderData 的 claimed 标记
 }
 ```
 
-### 4.2 RSet 扫描准备——`prepare_for_oops_into_collection_set_do()`
+`prepare_for_oops_into_collection_set_do()`（g1RemSet.cpp:511-516）做了两件事：
 
-```cpp
-// g1RemSet.cpp:511-516
-void G1RemSet::prepare_for_oops_into_collection_set_do() {
-    DirtyCardQueueSet& dcqs = G1BarrierSet::dirty_card_queue_set();
-    dcqs.concatenate_logs();   // 把所有线程的 partial dirty card buffers
-                               // 拼接到全局 completed buffer list
-    _scan_state->reset();      // 重置 _scan_top 数组（ch11/06 §2.3）
-}
-```
+1. **`concatenate_logs()`**——把所有 mutator 线程还没提交的 dirty card buffer 拼到全局队列。这些 buffer 里记录了"哪个 card 被写过了"——mutator 在 GC 开始前还在写对象，最后一个 buffer 可能还没提交，必须赶在 GC 扫描之前合并进来，否则会漏掉引用。
 
-`concatenate_logs()` 确保 GC 开始前所有线程的 dirty card 都对 GC worker 可见。`_scan_state->reset()` 为每个 Region 重新计算 `_scan_top[i]`——不在 CSet 中的 old/humongous Region 设 `top()`（需要扫描它的 card），CSet 内的 young Region 设 `bottom()`（不需要——CSet 内部的引用在 evacuation 时自然处理）。
+2. **`_scan_state->reset()`**——为每个 Region 重算 `_scan_top[i]`（ch11/06 §2.3 讲过的机制）：不在 CSet 中的 old/humongous Region 设 `top()`（需要扫描它的 card），CSet 内的 Region 设 `bottom()`（不需要——CSet 内部引用在 evacuation 时自然处理）。
+
+**为什么先做这个**：阶段 3 里 GC Workers 要去扫描 RSet（通过 `_scan_top`）和处理 dirty card（通过全局队列里的 buffer）。这些数据在这之前必须准备好。
 
 ---
 
 ## 5. 阶段 3: Evacuation——核心搬运
 
-### 5.1 G1ParTask——并行工作入口
-
-```cpp
-// g1CollectedHeap.cpp:4063-4097
-void G1CollectedHeap::evacuate_collection_set(G1ParScanThreadStateSet* psss) {
-    G1RootProcessor root_processor(this, n_workers);
-    G1ParTask g1_par_task(this, psss, _task_queues, &root_processor, n_workers);
-    workers()->run_task(&g1_par_task);  // ★ 所有 GC Worker 并行执行
-}
-```
-
-每个 Worker 执行 `G1ParTask::work(worker_id)`（g1CollectedHeap.cpp:3185-3202），其中三个阶段严格串行：
+GC Workers 并行执行 `G1ParTask`（g1CollectedHeap.cpp:3185），每个 Worker 走三个阶段：
 
 ```cpp
 void work(uint worker_id) {
     G1ParScanThreadState* pss = psss->state_for_worker(worker_id);
 
-    // ===== 阶段 3a: Root 扫描 =====
+    // 子阶段 a: Root 扫描
     _root_processor->evacuate_roots(pss, worker_id);
 
-    // ===== 阶段 3b: RSet 扫描 =====
+    // 子阶段 b: RSet 扫描
     _g1h->g1_rem_set()->oops_into_collection_set_do(pss, worker_id);
 
-    // ===== 阶段 3c: 工作窃取 + 排空 =====
+    // 子阶段 c: 工作窃取——追踪所有"搬出来的对象"的引用
     G1ParEvacuateFollowersClosure evac(_g1h, pss, _queues, &_terminator);
     evac.do_void();
 }
 ```
 
-### 5.2 阶段 3a: Root 扫描（`evacuate_roots`）
+### 5a. Root 扫描——从"根"出发找到第一批活对象
 
-ch11/07 §5 讲了 13 类 Root 的分类和并行机制，这里聚焦它们在 Young GC 中的执行顺序：
+**为什么从 Root 开始**：GC 判断对象是否存活的标准是"从 GC Roots 出发，沿引用链能否到达"。如果连 Root 都到不了的对象就是死的——不需要处理。
 
+Root 扫描（`evacuate_roots`, g1RootProcessor.cpp:78）依次遍历所有 5 类 Root（ch11/07 §5 详细讲过）：
+
+```
+线程栈 → JNI handles → 系统类 → CodeCache → StringTable
+```
+
+**每种 Root 扫描的实质**：找到每一个指向 CSet Region 内对象的引用 → 发现这个对象"是活的" → **立刻把它搬走**。
+
+具体怎么搬——GC Worker 调用 `G1ParCopyClosure::do_oop()`：
+1. 读引用 → 指向 CSet 内的对象 A
+2. 检查 A 的 mark word：如果已经被搬过（mark word 低 2 位 = 11，是 forwarding pointer），直接更新引用到新地址
+3. 如果没搬过：在 Survivor/Old Region 中分配空间 → memcpy 整个对象过去 → 把 A 的旧地址压入 Worker 的工作队列（后续 5c 会追踪它的引用字段）→ 在 A 的旧位置写 forwarding pointer（mark word = 新地址 | 11）
+
+### 5b. RSet 扫描——找到"谁引用了 CSet"
+
+Root 扫描只覆盖了从 JVM 根出发的引用链。但 CSet 里的对象还可能被**不在 CSet 中的 old/humongous Region** 引用——Root 扫描完全看不到这些引用（因为 old Region 不是根）。
+
+**RSet 就是解决这个问题的**——每个 Region 的 RSet 记录了"哪些其他 Region 的哪些 card 引用了我"（详见 ch11/06）。扫描 RSet = 遍历 CSet Region 的 RSet → 找到来自 old Region 的入引用 → 同样调用 `G1ParCopyClosure::do_oop()` 搬对象。
+
+`oops_into_collection_set_do()`（g1RemSet.cpp:506）分两步：
+1. `update_rem_set()`——处理那些 refinement 线程还没来得处理的 dirty card，先更新 RSet
+2. `scan_rem_set()`——扫描所有 CSet Region 的 RSet，Worker 通过原子操作抢 card block 并行扫描
+
+### 5c. 工作窃取——追踪到底
+
+5a 和 5b 搬的对象被推进每个 Worker 的队列。但这些对象的**引用字段**还指向别的对象——那些对象可能也需要搬。
+
+`G1ParEvacuateFollowersClosure::do_void()`（g1CollectedHeap.cpp:3157）：
 ```cpp
-// g1RootProcessor.cpp:78-136
-void G1RootProcessor::evacuate_roots(G1ParScanThreadState* pss, uint worker_i) {
-    // 1. Java 根: Universe/JNIHandle/ObjectSynchronizer/Management/
-    //    SystemDictionary/ClassLoaderDataGraph/JVMTI/AOT
-    process_java_roots(closures, phase_times, worker_i);
-
-    // 2. VM 根: CodeCache
-    process_vm_roots(closures, phase_times, worker_i);
-
-    // 3. StringTable 根
-    process_string_table_roots(closures, phase_times, worker_i);
-
-    // 4. CM ref_processor roots（如果有）
-    // 5. Weak CLD 第二遍（如果 trace_metadata）
-    // 6. SATB buffer filtering（如果 mark_or_rebuild_in_progress）
-
-    _process_strong_tasks.all_tasks_completed(n_workers());
-}
+pss->trim_queue();                    // 先排空自己的队列
+do {
+    pss->steal_and_trim_queue(queues());  // 从别人那偷活
+} while (!offer_termination());           // 直到活儿全干完
 ```
 
-**并行机制**：13 个子任务（G1RP_PS_*）不是每个 Worker 各做一份——所有 Worker 通过 `SubTasksDone::try_claim_task()` 抢任务，抢到就执行，抢完就换下一个。
+**工作窃取**：每个 Worker 处理完自己的队列后，从其他 Worker 的队列里偷作业。被偷到的作业又是一个引用 → 同样走 `G1ParCopyClosure::do_oop()` → 搬对象 → 产生新的引用 → 推队列 → 继续偷。BFS 扩散，直到整棵引用树遍历完。
 
-每个 Root 扫描子任务的本质是：遍历 Root 数据结构 → 找到指向 CSet Region 的引用 → 调用 `G1ParCopyClosure::do_oop()` → **触发 evacuation**。
-
-`G1ParCopyClosure` 对每个引用做的事：
-```
-读引用 ref → 指向 CSet 内的对象 A
-  → A 不在 CSet? → 跳过
-  → A 在 CSet 中:
-      → A 的 mark_word = forwarding pointer? → 已经被别人搬了 → 更新 ref → 结束
-      → A 还没搬 → COPY A 到 Survivor/Old → 写 forwarding pointer → 把 A 放进工作队列 → 结束
-```
-
-### 5.3 阶段 3b: RSet 扫描（`oops_into_collection_set_do`）
-
-```cpp
-// g1RemSet.cpp:506-508
-void G1RemSet::oops_into_collection_set_do(G1ParScanThreadState* pss, uint worker_i) {
-    update_rem_set(pss, worker_i);    // 先更新 RSet——处理 dirty card
-    scan_rem_set(pss, worker_i);      // 再扫描 RSet——找到跨 Region 引用
-}
-```
-
-**`update_rem_set()`** — 处理 Refinement 线程还没来得及处理的 dirty card，把 card 上的引用记录更新到目标 Region 的 RSet 中。
-
-**`scan_rem_set()`** — 遍历 CSet Region 的 RSet，找到"哪些不在 CSet 中的 Region 引用了 CSet Region"。每个 Worker 通过 `_iter_claims` 用原子操作抢 card block 来并行扫描（ch11/06 §2.3 详细讲过）。
-
-RSet 扫描也是通过 `G1ParCopyClosure` 处理引用——和 Root 扫描一样的逻辑：读到引用 → 发现对象在 CSet → 搬。
-
-### 5.4 阶段 3c: 干活+偷活（`G1ParEvacuateFollowersClosure`）
-
-Root 扫描和 RSet 扫描会往每个 Worker 的工作队列（`RefToScanQueue`）里推任务——每个被搬走对象的引用字段需要被"追踪到底"。所有 Worker 通过工作窃取持续干活直到全局队列全空：
-
-```cpp
-// g1CollectedHeap.cpp:3157-3163
-void G1ParEvacuateFollowersClosure::do_void() {
-    pss->trim_queue();                  // 先排空自己的队列
-    do {
-        pss->steal_and_trim_queue(queues());  // 从其他 Worker 偷活
-    } while (!offer_termination());          // 直到所有活儿都干完
-}
-```
-
-**工作窃取**（taskqueue.inline.hpp:257-267）：
-
-```cpp
-bool GenericTaskQueueSet::steal(uint queue_num, int* seed, E& t) {
-    for (uint i = 0; i < 2 * _n; i++) {
-        if (steal_best_of_2(queue_num, seed, t))  // 随机选两个队列，偷更好的那个
-            return true;
-    }
-    return false;
-}
-```
-
-每个窃取到的引用同样走 `G1ParCopyClosure` → 产生新的引用 → 继续推队列 → 继续偷——BFS 扩散直到整棵引用树被遍历完。
-
-### 5.5 `G1ParScanThreadState`——每个 Worker 手里的"工具箱"
-
-每个 GC Worker 持有自己的 `G1ParScanThreadState` 实例（g1ParScanThreadState.hpp:45），包含：
-
-| 字段 | 作用 |
-|------|------|
-| `_refs` | 该 Worker 的任务队列（push/pop/steal 的载体） |
-| `_plab_allocator` | PLAB 空间分配器（在 Survivor/Old 中分配目标空间） |
-| `_age_table` | 对象年龄表（累积统计，驱动晋升阈值） |
-| `_closures` | 闭包集——对不同 Root 类型的引用分别用哪个闭包 |
-| `_worker_id` | 当前 Worker 编号 |
+**为什么需要这个阶段**：5a 和 5b 只覆盖了"直接引用到的对象"——但 A 引用了 B、B 引用了 C、C 是活的——如果不追踪，B 和 C 会被漏掉。工作窃取保证了"只要有一个 Worker 还不够忙，就继续找活干"，直到跟踪完所有引用。
 
 ---
 
-## 6. 阶段 4: Post-Evacuation——引用处理 + 收尾
+## 6. 阶段 4: Post-Evacuation——引用处理和收尾
 
-### 6.1 `post_evacuate_collection_set()`
+**做什么**：所有对象都搬完了，还有"软/弱/虚/终"引用需要处理。
 
 ```cpp
 // g1CollectedHeap.cpp:4099-4166
@@ -363,111 +169,167 @@ void G1CollectedHeap::post_evacuate_collection_set(...) {
     // 1. RSet 扫描收尾
     g1_rem_set()->cleanup_after_oops_into_collection_set_do();
 
-    // 2. 引用处理（Soft/Weak/Final/Phantom）
+    // 2. 引用处理——Soft/Weak/Final/Phantom
     process_discovered_references(per_thread_states);
 
-    // 3. 弱引用清理（StringTable/ResolvedMethodTable）
+    // 3. 弱引用清理——StringTable/ResolvedMethodTable
     WeakProcessor::weak_oops_do(...);
 
     // 4. 字符串去重
     G1StringDedup::unlink_or_oops_do(...);
 
-    // 5. 恢复热卡缓存
+    // 5. 恢复热卡缓存 + re-dirty logged cards
     _hot_card_cache->reset_hot_cache();
-
-    // 6. Re-dirty logged cards
     redirty_logged_cards();
 }
 ```
 
-### 6.2 引用处理——四阶段
+**为什么放在这里**：引用处理需要知道"referent 还活着吗"——必须在所有对象都搬完、整个对象图都追踪完之后才能回答。
 
-`ReferenceProcessor::process_discovered_references()`（referenceProcessor.cpp:201-261）按优先级分四轮：
-
-```
-Phase 1: Soft 引用重新判定（根据 timestamp 决定是否回收）
-Phase 2: Soft/Weak/Final 引用处理（referent 死了 → 入队；活着 → keep-alive）
-Phase 3: Final 引用的 keep-alive（确保 finalize() 过程的对象不提前回收）
-Phase 4: Phantom 引用批量排队
-```
+**为什么清理 StringTable**：intern 的字符串如果没人引用了，对应的 StringTable 条目也需要清掉——这也是 GC 的一部分，但不是"搬对象"，属于弱引用的清理范畴。
 
 ---
 
-## 7. 阶段 5: Free CSet——把空 Region 还给系统
+## 7. 阶段 5: Free CSet——搬完收地
 
-### 7.1 `free_collection_set()`
+**做什么**：CSet 里的所有活对象都被搬走了（阶段 3），空 Region 还给 FreeList。
 
-```cpp
-// g1CollectedHeap.cpp:2980
-free_collection_set(&_collection_set, evacuation_info, surviving_young_words);
-```
+`free_collection_set()`（g1CollectedHeap.cpp:2980）创建并行的 `G1FreeCollectionSetTask`：
 
-这个调用创建 `G1FreeCollectionSetTask`——一个并行的 WorkGang 任务：
-
-**串行部分**（一个 Worker 执行，持 `OldSets_lock`）：
+**串行部分**（一个 Worker 持 `OldSets_lock` 执行）：
 - 遍历 CSet 每个 Region
-- 如果 `!r->evacuation_failed()` → `free_region()` → 归还 `_local_free_list` → Region 变 Free
-- 如果 `r->evacuation_failed()` → `r->set_old()` → 加入 old set（搬不走就留在那里当 Old）
+- 如果 `!r->evacuation_failed()` → `free_region()` → Region 变 Free
+- 如果 `r->evacuation_failed()` → `r->set_old()` → 留在 old set（搬不走就当 Old）
 
-**并行部分**（所有 Worker 并行）：
-- `r->rem_set()->clear_locked()` —— 清空 RSet（Region 要重用了，旧 RSet 不能留）
-- 清空 hot card cache 计数
+**并行部分**（所有 Worker）：
+- `r->rem_set()->clear_locked()`——清空 RSet（Region 要重用了，旧 RSet 不能留）
+- 清空 hot card cache 计���
 
-**最后**：`prepend_to_freelist(&_local_free_list)` → 在 `FreeList_lock` 保护下把局部 free list 合并到全局 `_hrm._free_list`。
+最后 `prepend_to_freelist()` 在 `FreeList_lock` 保护下把局部 free list 合并到全局 `_hrm._free_list`。
 
-### 7.2 什么情况会 evacuation_failed
-
-如果 Survivor/Old Region 空间不足以接收搬来的对象——promotion 失败。失败的 Region 不能被释放（里面还有活对象），只能标记为 Old 留在堆里。反复出现 evac failure 最终会触发 Full GC 降级。
+**evacuation_failed 是什么**：如果 Survivor/Old Region 空间不足，对象搬不走——这个 Region 不能释放（里面还有活对象），只能标记为 Old 留在堆里。反复出现会最终触发 Full GC。
 
 ---
 
-## 8. 阶段 6: 启动下一个 CSet
-
-### 8.1 `start_new_collection_set()`
+## 8. 阶段 6: 启动下一个 CSet——本轮结束，下轮开始
 
 ```cpp
 // g1CollectedHeap.cpp:2784-2791
 void G1CollectedHeap::start_new_collection_set() {
     collection_set()->start_incremental_building();   // _inc_build_state = Active
     clear_cset_fast_test();                           // 清空 in_cset_fast_test 位图
-    g1_policy()->transfer_survivors_to_cset(survivor()); // 上一轮的 survivor → 下一轮 CSet
+    g1_policy()->transfer_survivors_to_cset(survivor()); // Survivor → 新 CSet 种子
 }
 ```
 
-**关键**：上一轮 Young GC 存活下来的对象在 Survivor Region 中。这些 Survivor Region **在 GC 结束后就被增量加入下一个 CSet**——因为下一次 Young GC 时它们就是"本次 CSet 中的 survivor 部分"。
+**关键**：本轮 GC 存活下来的对象在 Survivor Region 中。这些 Survivor Region 在 GC 结束后就被加入**下一轮**的 CSet——因为下一次 Young GC 时它们就是"本次要回收的 survivor 部分"。
+
+一轮完整的 Young GC 到这里结束。Safepoint 解除，mutator 恢复运行。GC 日志显示的时间就是 T5 到 T11（不含 TTSP）。
 
 ---
 
-## 9. 一条完整的时间线
+## 9. 完整时间线（T4-T11）
 
 ```
-T4: SafepointSynchronize::begin() → 所有 mutator 线程停下
-T5: finalize_collection_set() → CSet = {Eden_1, Eden_2, ..., Survivor_1}
-T6: pre_evacuate() → concatenate dirty card logs / reset scan_state
-T7: evacuate_collection_set():
-    ┌─ Worker 0: evacuate_roots(0) → Universe + CodeCache → 发现引用 → 搬第一批对象
-    │            oops_into_cset_do(0) → 扫描 RSet → 搬更多对象
-    │            steal_and_trim() → 从 Worker 1 偷活儿 → 继续搬 → 空
-    ├─ Worker 1: evacuate_roots(1) → JNIHandle + SystemDictionary → 搬
-    │            ...
-    └─ (所有 Worker 并行推进，直到队列全空)
-T8: post_evacuate() → 处理 Soft/Weak/Final/Phantom 引用 → 清 StringTable
-T9: free_collection_set() → Eden_1/Eden_2/... 归还 FreeList
-T10: start_new_collection_set() → Survivor → 新 CSet
-T11: SafepointSynchronize::end() → mutator 恢复运行
+T4: safepoint → 所有 mutator 停下
+T5: finalize_collection_set()         → CSet = {Eden_1, ..., Survivor_1}
+T6: pre_evacuate()                    → dirty card merge + scan_state reset
+T7: evacuate:
+    ┌Worker 0: evacuate_roots → 发现引用 → 搬第一批 → 
+    │         oops_into_cset_do → RS 扫描 → 搬更多
+    │         steal_and_trim → 偷活 → 继续搬 → 空
+    ├Worker 1,2,... 并行推进
+    └－ 直到所有队列空
+T8: post_evacuate()                   → 引用处理 + WeakProcessor + StringDedup
+T9: free_collection_set()             → Eden_1,Eden_2... → FreeList
+T10: start_new_collection_set()        → Survivor → 新 CSet
+T11: VMThread::end()                   → mutator 恢复
 ```
-
-GC 日志显示的时间是 T5 到 T11 的总和（不含 TTSP）。
 
 ---
 
 ## 10. 总结——读 GC 日志时的对应关系
 
-| GC 日志行 | 对应本文哪个阶段 |
-|-----------|---------------|
-| `Pause Young (Normal) (G1 Evacuation Pause)` | §1.2 入口 |
+| GC 日志行 | 对应本文 |
+|-----------|---------|
+| `Pause Young (Normal) (G1 Evacuation Pause)` | §1 触发（Normal = YoungOnlyGC） |
 | `128M->64M(1024M)` | §7 Free CSet 后的堆使用量变化 |
 | `8.234ms` | 不含 TTSP 的纯 GC 工作时间（T5→T11） |
-| `User=0.12s Sys=0.01s` | CPU 时间（user + system） |
 
-下一篇：**ch11/09 Young GC 内部机制**——PLAB / Preserved Marks / Dirty Card 在 GC 期间的处理 / Humongous Eager Reclaim。
+---
+
+## 附录 A: `_young_list_target_length` 怎么算
+
+G1Policy 通过 `_young_list_target_length` 控制堆里该有多少 Young Region。计算分两种情况：
+
+### A.1 初始值（无历史 GC 数据）
+
+VM 启动时 `G1Policy::init()`（g1Policy.cpp:92）调用 `update_young_list_max_and_target_length()`。此时所有 analytics（预测数据的滑动窗口序列）为空——G1Analytics 用硬编码默认值代替：
+
+| 预测项 | 默认值 |
+|--------|--------|
+| 拷贝成本 | 0.000009~0.00006 ms/byte |
+| 固定开销 | 5.0 ms |
+| 存活率 | 0.4 / age |
+| RSet 扫描成本 | 0.0015~0.01 ms/card |
+| RS 长度 / 分配速率 | 0（空序列） |
+
+这些默认值代入 `G1YoungLengthPredictor` 的二分搜索，算出初始 target（4GB 堆约 25 个 Region）。
+
+### A.2 运行时（每次 GC 后）
+
+`record_collection_pause_end()`（g1Policy.cpp:710）把本次 GC 的真实数据喂进 analytics：
+
+```
+分配速率 = eden_region_count / app_time_ms
+卡片扫描成本 = scan_time / cards_scanned
+拷贝成本     = copy_time / bytes_copied
+RS 长度      = _max_rs_lengths
+积压卡片数   = _pending_cards
+```
+
+序列越长，EWMA 预测越准。`G1YoungRemSetSamplingThread` 还每 300ms 采样 RS 实际大小，超标时触发提前修正（×1.1 容错重新算）。
+
+### A.3 二分搜索
+
+`G1YoungLengthPredictor::will_fit(young_length)` 对每个候选值检查：
+1. 空间：`young_length < free_regions - reserve`
+2. 暂停：`base_time + copy_time + other_time ≤ MaxGCPauseMillis`
+3. 拷贝安全：有足够剩余空间装搬来的活对象
+
+上下界：`G1NewSizePercent`（5% 堆）~ `G1MaxNewSizePercent`（60% 堆）。
+
+---
+
+## 附录 B: 分配故障——从 TLAB 到 GC 的完整路径
+
+本节展开 §1 中被压缩的"为什么分配会失败"的细节。
+
+### B.1 TLAB 的 pointer bump
+
+`_top + size ≤ _end` → `_top += size`，约 10 条 CPU 指令，无锁。
+
+### B.2 TLAB 用完后——不是每次都退休
+
+G1 用 `_refill_waste_limit`（TLAB 大小 / 64）做容差：
+- 剩余 > waste_limit → **不退休**，直接在 Eden Region 上用 CAS 分配（绕过 TLAB，对象仍在 Eden）
+- 剩余 ≤ waste_limit → 退休 TLAB，申请新的
+
+每次走 CAS 路径时 waste limit 递增 4，逐步扩大容忍度。
+
+### B.3 TLAB 退休做什么
+
+`clear_before_allocation()`（threadLocalAllocBuffer.cpp:43）：
+- 剩余空间填 dummy filler object（GC 遍历 Eden 时不撞空洞）
+- 记入线程分配量
+- 指针清零——空间不"捐回"，TLAB 本就属于 Eden
+
+### B.4 Region 也满了——三级挽救
+
+| 级别 | 机制 | 条件 |
+|------|------|------|
+| 第一级 | `attempt_retained_allocation()` | 上一轮保留的 retained region 还有空间 |
+| 第二级 | `attempt_allocation_locked()` → retire → `new_mutator_alloc_region()` | young count < target |
+| 第三级 | `attempt_allocation_force()` | GCLocker 活跃 + young count < max |
+
+Region 没有 `_refill_waste_limit`——退休时剩余空间填 dummy，通过 `should_retain()` 判断是否保留。
