@@ -110,6 +110,8 @@ bool SubTasksDone::is_task_claimed(uint t) {
 }
 ```
 
+**[`_tasks`]** — `SubTasksDone::volatile uint*`, workgroup.hpp:341, CAS 声明数组 —— 每个元素对应一个子任务（0=未声明，1=已声明）。Worker 通过 `Atomic::cmpxchg` 原子地将 0→1，第一个成功者成为该子任务的独占执行者。`all_tasks_completed()` 时全复位为 0，为下次 GC 重用。
+
 **执行逻辑**：12 个子任务，N 个 Worker。每个 Worker 调 `try_claim_task(N)`：
 - 任务 N 的锁位 = 0 → Worker 执行 `Atomic::cmpxchg(1, &_tasks[N], 0)` → 成功（返回 0）→ Worker 成为 claimant，执行该任务
 - 任务 N 的锁位 = 1 → 已经有人 claim 过了 → Worker 跳过，尝试下一个任务
@@ -117,6 +119,10 @@ bool SubTasksDone::is_task_claimed(uint t) {
 **最后一个 Worker 到屏障时**（`all_tasks_completed(n_workers)`），将所有锁位重置为 0——为下次 GC 的重用准备。
 
 ### 3.4 evacuate_roots 的调用顺序
+
+**`_process_strong_tasks` 字段**负责驱动这 12 个子任务的分工：
+
+**[`_process_strong_tasks`]** — `G1RootProcessor::SubTasksDone`, g1RootProcessor.hpp:51, 12 子任务声明管理器 —— 底层用 `SubTasksDone::_tasks[]` CAS 数组，协调 N 个 Worker 原子地认领 12 个 Root 扫描子任务（`G1RP_PS_*`）。每个 Worker 尝试 claim 未完成的任务，已被 claim 的跳过。`all_tasks_completed(n_workers)` 在结束时全复位，为下次 GC 重用。
 
 ```cpp
 // g1RootProcessor.cpp:78-136
@@ -164,6 +170,8 @@ void G1RootProcessor::evacuate_roots(G1ParScanThreadState* pss, uint worker_i) {
                  —— 后续 §5 会追踪 A 的引用字段
               e. 更新 ref → A'
 ```
+
+**[`RefToScanQueue`]** — typedef `OverflowTaskQueue<StarTask, mtGC>`, g1CollectedHeap.hpp:98, 带溢出栈的工作窃取任务队列 —— 元素 `StarTask` 可以是 `oop*`（64 位）或 `narrowOop*`（32 位压缩指针），由 `UseCompressedOops` 决定。队列满时新任务溢出到 overflow stack，防止深层对象图遍历时阻塞 push。Worker push 刚搬完的对象引用（本步骤 d），pop 来追踪其引用字段（§5.2 `trim_queue()`），空 Worker 从别人的 steal（§5.3）。
 
 **forwarding pointer 编码**（markOop.hpp:325, 356）：
 ```cpp
@@ -298,10 +306,19 @@ class G1ParScanThreadState {
 };
 ```
 
-**三种队列的角色**：
-- `_refs`——任务队列（push 作业 / pop 作业 / steal 作业）
-- `_dcq`——这个 Worker 在扫描引用时如果产生了 dirty card，不会直接更新 RSet，而是放进这个队列，等 GC 收尾时批处理
-- `_plab_allocator`——在 Survivor/Old Region 中为搬来的对象分配空间（下一篇 08-03 展开 PLAB）
+**核心字段解释**（按在源代码中的声明顺序）：
+
+**[`_refs`]** — `G1ParScanThreadState::RefToScanQueue*`, g1ParScanThreadState.hpp:47, per-worker 任务队列 —— 该 Worker 的本地工作窃取队列。Worker 把刚搬完的对象引用 push 进去（§3.5 步骤 d），pop 出来追踪其引用字段（§5.2 `trim_queue()`），空 Worker 从别的 Worker 偷活（§5.3 `steal_and_trim_queue()`）。是整个 evacuation BFS 扩散的"活水源头"——有活儿就干、没活儿就偷。
+
+**[`_plab_allocator`]** — `G1ParScanThreadState::G1PLABAllocator*`, g1ParScanThreadState.hpp:52, per-worker PLAB 分配器 —— 在 Survivor/Old Region 中为搬来的对象无锁分配空间。`G1PLABAllocator` 内部为每个目标代（Survivor 和 Old）维护独立的 `PLAB` 缓冲区，Worker 从自己的 PLAB bump-pointer 分配，用完再向全局堆申请新 Region 块，避免多 Worker 竞争全局堆锁。下一篇 08-03 展开 PLAB 细节。
+
+**[`_age_table`]** — `G1ParScanThreadState::AgeTable`, g1ParScanThreadState.hpp:54, per-worker 年龄追踪表 —— 记录本 Worker 搬了多少字节到 Survivor 的各年龄层（0-15）。每搬一个对象调用 `AgeTable::add(obj, age, obj_size)`——在该 age 的 size 计数器上 +obj_size。GC 结束时所有 Worker 的 `_age_table` 合并到全局 `_surviving_young_words`（在 `G1Policy`），用于计算下一个 `_tenuring_threshold`。
+
+**[`_tenuring_threshold`]** — `G1ParScanThreadState::uint`, g1ParScanThreadState.hpp:57, 晋升阈值 —— `age >= 此值` 的对象直接晋升到 Old（不复制到 Survivor）。值由 `G1Policy::compute_survivor_next_tenuring_threshold()` 基于 survivor space 占比在每次 GC 结束时重新计算（08-03 详述），Worker 初始化时从 `G1Policy` 读入当前值，在 `G1ParCopyClosure::do_oop()` 的对象去向决策中使用。
+
+**[`_closures`]** — `G1ParScanThreadState::G1EvacuationRootClosures*`, g1ParScanThreadState.hpp:50, Root 扫描闭包集 —— `G1EvacuationRootClosures` 打包了三类闭包：`strong_oops()`（处理强引用 Root，最终调 `G1ParCopyClosure`）、`weak_oops()`（处理弱引用 Root）、`code_oops()`（处理 CodeCache）。传递给 `G1RootProcessor::evacuate_roots()`（§3.4），每种 Root 类型（`G1RP_PS_*`）用对应的闭包。Worker 初始化时从全局 `closures()` 拿到一份。
+
+**[`_dcq`]** — `G1ParScanThreadState::DirtyCardQueue`, g1ParScanThreadState.hpp:55, 脏卡队列 —— Worker 扫描引用字段时如果更新了 card table（产生 dirty card），不直接更新 RSet，而是放入此队列。等 GC 收尾阶段通过 `flush_dirty_card_queues()` 批量处理，避免 RSet 更新与并行扫描冲突。
 
 
 ---
