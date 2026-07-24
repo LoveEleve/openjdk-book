@@ -340,26 +340,37 @@ Humongous 对象的 RSet 为空?
 
 `humongous_reclaim_candidates` 位图在 ch11/06 详细讲解——它缓存了"哪些 Humongous Region 的 RSet 为空"的判断结果，供 GC 暂停时直接使用。
 
-### 1.6 FreeRegionList——空闲 Region 栈
+### 1.6 FreeRegionList——有序空闲链表
 
-`HeapRegionManager` 维护一个按 `hrm_index` **有序**的双向链表 `_free_list`：
+G1 回收一个 Region 后，把它归还给 `_free_list`（heapRegionManager.hpp:83）。这个链表按 `hrm_index`**升序排列**——Region 0 在表头，Region 2047 在表尾，中间严格递增：
 
-```cpp
-// heapRegionManager.hpp:83
-FreeRegionList _free_list;
-
-// 插入 (heapRegionManager.inline.hpp):
-inline void HeapRegionManager::insert_into_free_list(HeapRegion* hr) {
-  _free_list.add_ordered(hr);  // 保持 hrm_index 升序
-}
-
-// 取出分配:
-HeapRegion* hr = _free_list.remove_region(from_head);
-// from_head=true  → 从头取（低地址，old allocation 取低地址）
-// from_head=false → 从尾取（高地址，young allocation 取高地址）
+```
+_free_list:
+  head ──→ R0 ──→ R3 ──→ R7 ──→ R12 ──→ ... ──→ R2047 ←── tail
+  (低地址)                                              (高地址)
 ```
 
-这种有序+分头尾的设计帮助堆地址保持分离：Old Region 聚在低地址，Young Region 聚在高地址。
+**插入**（heapRegionManager.inline.hpp）：
+```cpp
+inline void HeapRegionManager::insert_into_free_list(HeapRegion* hr) {
+  _free_list.add_ordered(hr);
+  // 遍历链表找到 hrm_index 的排序位置插入，保证 head→tail 地址递增
+}
+```
+
+**取出**：`allocate_free_region(is_old)`（heapRegionManager.hpp:170-178）把 `is_old` 传进去作为取的方向：
+
+```cpp
+HeapRegion* allocate_free_region(bool is_old) {
+    HeapRegion* hr = _free_list.remove_region(is_old);
+    // is_old=true  → remove_from_head() → 取最低地址的 free Region
+    // is_old=false → remove_from_tail() → 取最高地址的 free Region
+}
+```
+
+**为什么这样分**——Old Region 里的对象长期存活，一旦放进去基本不会搬走。从低地址开始分配，Old Region 自然向低地址堆积。Young Region（Eden/Survivor）频繁创建和释放，从高地址开始分配，两者互不干扰。
+
+**但这不是硬保证**——这只是一种"顺势而为"。如果 free list 里只剩一个 Region，不管 old 还是 young 分配都会取到它。所谓"Old 在低地址、Young 在高地址"大部分时候成立，但不是一个可以依赖的强约束。
 
 ### 1.7 读者心理模型
 
