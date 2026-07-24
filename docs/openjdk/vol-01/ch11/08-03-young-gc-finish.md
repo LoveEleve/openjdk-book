@@ -31,7 +31,17 @@ post_evacuate_collection_set(&per_thread_states);
 
 为什么放在所有对象都搬完之后？因为这四种引用类型的判定都需要知道 **"referent 还活着吗"**——而"是否活着"只有在整个对象图遍历完之后才能回答。
 
-`process_discovered_references()`（g1CollectedHeap.cpp:3953-4021）调用标准的 `ReferenceProcessor::process_discovered_references()`（referenceProcessor.cpp:201-261），分四轮处理：
+`process_discovered_references()`（g1CollectedHeap.cpp:3953-4021）调用标准的 `ReferenceProcessor::process_discovered_references()`（referenceProcessor.cpp:201-261）。
+
+`ReferenceProcessor` 内部用以下五个字段管理四种引用类型的已被发现链表——在 GC 开始前由并发引用发现线程填充对应的 `DiscoveredList`：
+
+- **`_discovered_refs`** — `ReferenceProcessor`:`DiscoveredList*`, referenceProcessor.hpp:264, 存储四种引用链表的主数组——由 `ReferenceProcessor` 构造函数一次性固定分派四个槽位。`_discoveredSoftRefs`/`_discoveredWeakRefs`/`_discoveredFinalRefs`/`_discoveredPhantomRefs` 四个命名指针分别指向该数组中对应引用的槽位——这样只需一次 `_discovered_refs[i]` 索引即可统一遍历
+- **`_discoveredSoftRefs`** — `ReferenceProcessor`:`DiscoveredList*`, referenceProcessor.hpp:267, 指向 `_discovered_refs` 中 Soft 引用类型的槽位——并发引用发现线程在 GC 前将发现的 Soft 引用链表填入。处理阶段依据 `SoftReference` timestamp 和堆使用率分自老弱判定：太旧→回收 referent；否则→保留
+- **`_discoveredWeakRefs`** — `ReferenceProcessor`:`DiscoveredList*`, referenceProcessor.hpp:268, 指向 `_discovered_refs` 中 Weak 引用类型的槽位——referent 在 GC 后死亡则弱引用入队（ReferenceQueue）、referent 存活则通过 `keep_alive` 闭包保持存活
+- **`_discoveredFinalRefs`** — `ReferenceProcessor`:`DiscoveredList*`, referenceProcessor.hpp:269, 指向 `_discovered_refs` 中 Final 引用类型的槽位——`finalize()` 方法未执行完毕前 referent 必须保持存活；第三轮 keep-alive 专门处理这种情况，防止 Finalizer 线程运行时对象已被回收
+- **`_discoveredPhantomRefs`** — `ReferenceProcessor`:`DiscoveredList*`, referenceProcessor.hpp:270, 指向 `_discovered_refs` 中 Phantom 引用类型的槽位——Phantom 引用从不在 GC 中保持 referent 存活。referent 死亡后 PhantomReference 入队，向 `ReferenceQueue.poll()` 返回一个 "referent 已死" 的通知，供用户代码处理资源清理
+
+分四轮处理：
 
 **第一轮：Soft 引用重新判定**。Soft 引用的 referent 不一定被回收——JVM 根据 `SoftReference` 的 timestamp 和堆使用率决定 "这个 soft reference 是不是太旧了，该回收了"。如果 timestamp 太旧，referent 被回收；否则保留。
 
@@ -75,6 +85,10 @@ free_collection_set(&_collection_set, evacuation_info, surviving_young_words);
 ### 2.2 串行部分：释放 Region
 
 `FreeCollectionSetTask` 的串行部分（只有一个 Worker 执行——第一个用 `Atomic::add` 抢到 `_serial_work_claim` 的）：
+
+> **`_serial_work_claim`** — `G1FreeCollectionSetTask`:`volatile jint`, g1CollectedHeap.cpp:4342, 串行工作 CAS 声明值——初始值为 0。第一个 Worker 用 `Atomic::add(1, &_serial_work_claim)` CAS 加 1 抢到工作权（返回旧值 0 = 未声明 → 声明成功）；第二个 Worker CAS 返回 1 → 放弃串行部分，进入 §2.3 的并行部分
+>
+> **`_cl`** — `G1FreeCollectionSetTask`:`G1SerialFreeCollectionSetClosure`, g1CollectedHeap.cpp:4337, 嵌套在 `G1FreeCollectionSetTask` 内部的串行释放闭包实例，由抢占到 `_serial_work_claim` 的 Worker 调用。遍历 CSet 中每个 Region 执行 `free_region()` 释放搬家成功的 Region，或对 evacuation failed 的 Region 调用 `r->set_old()` 保留在堆中
 
 遍历 CSet 每个 Region，对每个 Region 判断：
 
@@ -130,6 +144,10 @@ void HeapRegion::hr_clear(bool keep_remset, bool clear_space, bool locked) {
 ### 2.3 并行部分：清空 RSet 和 hot card cache
 
 所有 Worker 并行执行——按 32 个 Region 为一批，用 `Atomic::add` 抢任务：
+
+> **`_parallel_work_claim`** — `G1FreeCollectionSetTask`:`volatile size_t`, g1CollectedHeap.cpp:4356, 并行工作 CAS 声明值——所有 Worker 用 `Atomic::add(chunk_size(), &_parallel_work_claim)` 抢 32 个 Region 一批的并行任务分片。`chunk_size()` 返回常量 32，保证每个 Worker 一次领到 32 个 Region 的 RSet 清除工作
+>
+> **`_work_items`** — `G1FreeCollectionSetTask`:`WorkItem*`, g1CollectedHeap.cpp:4358, 预分配的工作项数组——构造函数中将 CSet 每个 Region 的元数据（region_idx / is_young / evacuation_failed）填充入 `_work_items[i]`，总长度存于 `_num_work_items`。Worker 从 `_parallel_work_claim` 抢到索引后直接查表找对应 Region，避免多线程争用 CSet 迭代器
 
 ```cpp
 static uint chunk_size() { return 32; }
