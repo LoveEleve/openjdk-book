@@ -30,7 +30,7 @@ TLAB 内部：
 
 TLAB 不够放下一个对象时，线程不是直接触发 GC——先判断 "值不值得换一个新 TLAB"。
 
-G1 用 `_refill_waste_limit` 做容差（threadLocalAllocBuffer.hpp:57）。这个值初始等于 `TLAB 大小 / TLABRefillWasteFraction`（默认 64）。如果 TLAB 剩余空间大于这个阈值，**不退休 TLAB**——直接在 Eden Region 上用 CAS 做一次分配（绕过 TLAB 的本地� bump，目标仍是 Eden）。只有剩余空间小于等于阈值时才退休当前 TLAB、申请新的。
+G1 用 `_refill_waste_limit` 做容差（threadLocalAllocBuffer.hpp:57）。这个值初始等于 `TLAB 大小 / TLABRefillWasteFraction`（默认 64）。如果 TLAB 剩余空间大于这个阈值，**不退休 TLAB**——直接在 Eden Region 上用 CAS 做一次分配（绕过 TLAB 的本地 bump，目标仍是 Eden）。只有剩余空间小于等于阈值时才退休当前 TLAB、申请新的。
 
 "退休"TLAB 不是 "归还碎片"——TLAB 本就属于当前的 Eden Region（`MutatorAllocRegion`），退役只做三件事：
 
@@ -461,7 +461,7 @@ void G1Policy::revise_young_list_target_length_if_necessary(size_t rs_lengths) {
 
 | 维度 | TLAB 退休 | Region 退休 |
 |------|----------|-----------|
-| 触地� | `_refill_waste_limit` 判断 | Region 无法分配（`par_allocate` 返回 NULL） |
+| 触发 | `_refill_waste_limit` 判断 | Region 无法分配（`par_allocate` 返回 NULL） |
 | 退休动作 | fill dummy filler + 清零指针 | `fill_up_remaining_space()` 填 dummy + `retire_mutator_alloc_region()` 入 CSet |
 | 保留机制 | 无——TLAB 退休就不存在了 | `MutatorAllocRegion::should_retain()`——如果剩余空间 ≥ MinTLABSize，保留为 retained region |
 | waste 阈值 | `_refill_waste_limit`（TLAB 大小 / 64，动态调整） | 无——Region 退休时不看 waste，看"还能不能装一个完整 TLAB" |
