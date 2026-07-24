@@ -461,32 +461,75 @@ os::make_polling_page_unreadable();        // 标记 polling page 不可读
 | 覆盖范围 | JIT 编译的方法 | 解释器 + 模板解释器 |
 | 何时用 | 编译代码中的显式 poll 指令 | 解释器 + 未插桩的 native 方法 |
 
-#### Step 3: 自旋等待所有线程到达
+#### Step 3: 自旋等待线程到达——但 native 线程跳过
+
+**不是所有线程都需要停下。** JVM 用 `JavaThreadState` 区分线程当前在做什么（globalDefinitions.hpp:890-903）：
 
 ```cpp
-// safepoint.cpp — begin() 中的等待循环
+enum JavaThreadState {
+  _thread_in_native   =  4,   // 在执行 JNI/native 代码
+  _thread_in_vm       =  6,   // 在 JVM 内部（执行 VM 操作）
+  _thread_in_Java     =  8,   // 在执行 Java 字节码或 JIT 代码
+  _thread_blocked     = 10,   // 被锁/IO 阻塞
+};
+```
+
+**native 线程不需要停**——它在 native 代码里无法触碰 Java 堆对象，所以对 GC 天然安全。VM Thread 看到 `_thread_in_native` 的线程时**不等它**，直接把它从 `still_running` 和 `_waiting_to_block` 中移除。
+
+具体实现（safepoint.cpp:289-312）：
+
+```cpp
 while (still_running > 0) {
     for (JavaThread *cur : all_threads) {
-        if (!cur->safepoint_state()->is_running()) {
-            still_running--;  // 这个线程已到达
+        ThreadSafepointState *cur_state = cur->safepoint_state();
+        if (cur_state->is_running()) {
+            cur_state->examine_state_of_thread();  // ← 核心判断
+            if (!cur_state->is_running()) {
+                still_running--;  // native 线程在这一步被移除
+            }
         }
     }
-    if (still_running > 0) {
-        // 自旋 N 次 → yield → 短暂 sleep → 回到自旋
-        // 逐渐递增等待间隔，避免空转浪费 CPU
-    }
+    // 自旋 → yield → 短暂 sleep → 回到自旋
 }
 ```
 
-#### Step 4: 所有线程等待阻塞确认
+`examine_state_of_thread()`（safepoint.cpp:1045-1100）根据线程状态做分类处理：
+
+| 线程状态 | VM 怎么处理 | 从 still_running 移除？ | _waiting_to_block 变化 |
+|---------|-----------|----------------------|---------------------|
+| `_thread_in_native` | 调用 `safepoint_safe()` 验证栈可走 → 立即标记为"已到达" | ✅ 是 | `--`（不等待） |
+| `_thread_blocked` | 已在阻塞 → 标记为"已到达" | ✅ 是 | `--`（不等待） |
+| `_thread_in_vm` | 给它发回调，VM 操作完成后自阻塞 | ✅ 是 | 在 block() 中减 |
+| `_thread_in_Java` | **需要等它自己走到 poll 点停下** | ❌ 继续等 | 在 block() 中减 |
+
+**safepoint_safe()**（safepoint.cpp:760-774）是判断 native 线程是否安全的函数——检查线程是否 "没有 Java 栈帧" 或 "栈帧可安全遍历"：
+
+```cpp
+bool SafepointSynchronize::safepoint_safe(JavaThread *thread, JavaThreadState state) {
+  switch(state) {
+  case _thread_in_native:
+    return !thread->has_last_Java_frame() || thread->frame_anchor()->walkable();
+  case _thread_blocked:
+    return true;
+  default:
+    return false;
+  }
+}
+```
+
+**为什么 native 线程必须等它返回时再处理**——native 线程从 JNI 返回 Java 时，经过 `transition_from_native()`（interfaceSupport.inline.hpp:158-177），检查 `SafepointMechanism::poll(thread)`。如果发现 safepoint 正在进行，调用 `SafepointSynchronize::block(thread)` 自阻塞。
+
+#### Step 4: 等待剩余的 Java 线程阻塞
 
 ```cpp
 while (_waiting_to_block > 0) {
     Safepoint_lock->wait(true);  // 等待最后一个线程确认已阻塞
 }
-// 此时 _waiting_to_block == 0
-// _state = _synchronized
+// _waiting_to_block == 0 → 所有需要停的线程都停了
+// _state = _synchronized         → GC 可以开始了
 ```
+
+注意此时 `_waiting_to_block` **不包含 native 线程**——它们在 Step 3 已被移除。
 
 #### Step 5: GC 完成，恢复
 
@@ -504,12 +547,12 @@ Threads_lock->unlock();
 
 线程不是在任何位置都能停下的。`_synchronizing` 状态请求后，线程在**下一个检查点**检测到请求并停下：
 
-| 线程状态 | 检查点在哪里 | 到达 safepoint 的延迟 |
-|---------|------------|---------------------|
-| **运行 Java 代码** | 方法返回（`return` 指令后）、循环回边（`goto` 前） | 取决于方法大小和循环长度（最长可达数 ms） |
-| **运行 native 代码** | 返回 Java 时（`JNI_CreateJavaVM` 边界） | 取决于 native 调用时长 |
-| **阻塞中**（I/O、锁等待） | 被唤醒时立即检查 | 几乎为零 |
-| **已停在 safepoint** | 已经是了 | 零 |
+| 线程状态 | 需要停吗？ | 检查点在哪里 | 到达延迟 |
+|---------|-----------|------------|---------|
+| **`_thread_in_Java`**（执行 Java/JIT 代码） | **必须停** | 方法返回（return 后）、循环回边（goto 前） | 取决于方法/循环长度（最长可达数 ms） |
+| **`_thread_in_native`**（执行 JNI/native 代码） | **不需要**——native 代码不碰堆，GC 天然安全 | 返回 Java 时才检查并阻塞（`transition_from_native`） | 对 safepoint 到达无影响 |
+| **`_thread_blocked`**（锁等待、IO 阻塞） | 已在安全状态 | 被唤醒时检查，但已被 `safepoint_safe()` 标记为到达 | 几乎为零 |
+| **`_thread_in_vm`**（执行 VM 操作） | **必须停** | VM 操作完成后自阻塞 | 取决于 VM 操作时长 |
 
 **长循环是主要延迟来源**——如果一个方法里有一个不含 safepoint 检查的紧凑循环，线程可能数毫秒都无法到达 safepoint。G1 的并发标记阶段用 `regular_clock` 主动检查就是为了避免这个问题。
 
