@@ -116,31 +116,40 @@ if (TLAB剩余 ≤ _refill_waste_limit)  →  退休 TLAB，申请新的
 
 ### 3.1 前置：谁决定了有多少 Eden Region
 
-"把 Eden + Survivor 全加进 CSet"的前提是——**堆里当前到底有多少 Eden 和 Survivor Region？** 这个数量不是随机的，由 G1Policy 的 `_young_list_target_length` 持续管控（g1Policy.hpp:82）：
+"把 Eden + Survivor 全加进 CSet"的前提是——**堆里当前到底有多少 Young Region？** 这个数量不是随机的，由 G1Policy 的 `_young_list_target_length` 持续管控（g1Policy.hpp:82）。计算分两种情况：
 
-```cpp
-uint _young_list_target_length;   // 目标：堆里应该有多少 Young Region (Eden+Survivor)
-uint _young_list_max_length;      // 上限：GC locker 下 Eden 可扩展的最大值
+#### 情况 A：初始值（无历史 GC 数据）
+
+`G1Policy::init()`（g1Policy.cpp:92）在 VM 启动阶段调用 `update_young_list_max_and_target_length()` 计算初始 target。此时**没有任何 GC 历史数据**——所有 analytics 序列都是空的。
+
+缺少历史时 G1Analytics 用**硬编码默认值**代替（g1Analytics.cpp:41-66）：
+
+| 预测项 | 无历史时的值 | 含义 |
+|--------|-----------|------|
+| RSet 扫描成本 | 0.0015~0.01 ms/card（取决于 GC 线程数） | 每张 card 的扫描时间 |
+| 拷贝成本 | 0.000009~0.00006 ms/byte | 每字节的拷贝时间 |
+| 固定开销 | 5.0 ms | 每次 GC 的底线耗时 |
+| 存活率 | 0.4 / age | 每个年龄约有 40% 对象存活 |
+| RS 长度 | 0 | 无历史，假设没有 RS 要扫描 |
+| 分配速率 | 0 | 空序列——前 3 次 GC 不用分配速率做约束 |
+
+有了这些默认值，二分搜索（§3.1 已经描述）仍然能算出一个合理的初始 target——靠的是"把所有能估算的部分都估算进去"。以 4GB 堆为例，初始 target 大约 25 个 Region（~50MB）。
+
+#### 情况 B：运行时（每次 GC 后动态调整）
+
+每次 GC 结束后，`record_collection_pause_end()`（g1Policy.cpp:710）把**本次 GC 的真实数据**喂进 analytics 序列：
+
+```
+report_alloc_rate_ms()  — eden_region_count / app_time  → 分配速率
+report_cost_per_card_ms() — scan_time / cards_scanned   → 卡片扫描成本
+report_cost_per_byte_ms() — copy_time / bytes_copied     → 拷贝成本
+report_rs_lengths()     — _max_rs_lengths                → RS 实际大小
+report_pending_cards()  — _pending_cards                 → 积压 dirty card 数
 ```
 
-**target 怎么算的**（g1Policy.cpp:213-378）：G1Policy 用历史数据预测"到下一次 GC 能分配多少字节"，除以 Region 大小得到需要多少 Regions，然后用二分搜索在 [min, max] 区间内找**能把下次 GC 控制在目标暂停时间内的最大 young gen 大小**：
+序列越长，EWMA 预测越准。比如第一次 GC 发现分配速率是 50 MB/s，第二次是 80 MB/s——analytics 会逐渐收敛到真实值，后续的 target 也更精准。
 
-```
-预测器（G1YoungLengthPredictor）对每个候选值回答"will_fit?":
-  1. 空间够吗？（young_length < free_regions - reserve）
-  2. 暂停会超吗？（base_time + copy_time + other_time ≤ target_pause_time_ms）
-  3. 拷贝安全吗？（有足够空间装搬来的活对象？）
-```
-
-**上下界**：
-
-| 界 | 如何确定 | 默认值 |
-|----|---------|--------|
-| 下界 | `G1NewSizePercent` × 堆 Region 数 + 当前 survivor 数 | 5% 堆（最小 1 个 Region） |
-| 上界 | `G1MaxNewSizePercent` × 堆 Region 数 | 60% 堆 |
-| 还可以被覆盖 | 用户显式设 `-XX:NewSize` / `-XX:MaxNewSize` | — |
-
-每次 GC 结束后，`update_young_list_max_and_target_length()` 重新计算这个 target——下次 Young GC 时 CSet 里的 Eden 数量就是这个 target 驱动的分配结果。
+**Mutator 阶段的动态修正**——`G1YoungRemSetSamplingThread` 每 300ms 采样 young Region 的 RSet 实际大小。如果当前 RS 长度超过了 GC 结束时的预测值，触发 `revise_young_list_target_length_if_necessary()`（g1Policy.cpp:392）——用 `×1.1` 的容错系数重新算 target。必要时**可能触发一次提前 GC**（RSet 比预期大 → 暂停会比预期长 → 缩小 target → 下一次 GC 更早到来）。
 
 ### 3.2 `finalize_collection_set()` 入口
 
