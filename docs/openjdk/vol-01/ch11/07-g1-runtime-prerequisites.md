@@ -660,11 +660,45 @@ Threads_lock->unlock();
 
 ---
 
-## 3. G1 暂停类型——决策树 + GC 日志
+## 3. G1 暂停类型——全景映射 + 决策树 + GC 日志
 
-### 3.1 决策树（完整版）
+### 3.0 全景：PauseKind（7 种）vs GC 日志（4 种前缀）
 
-G1 每次 GC 暂停的类型由 `G1Policy::young_gc_pause_kind()` 决定（g1Policy.cpp:1034-1051）：
+G1 内部用 `PauseKind` 枚举区分暂停类型（g1Policy.hpp:267-275），共 **7 种值**。但 GC 日志上前缀只有 **4 种**——4 种 Young 类暂停共用 `Pause Young`，通过后缀区分：
+
+| # | PauseKind（内部） | GC 日志前缀 | GC 日志完整示例 | 走 young_gc_pause_kind()? |
+|---|------------------|-----------|--------------|-------------------------|
+| 1 | `YoungOnlyGC` | `Pause Young (Normal)` | `Pause Young (Normal) (G1 Evacuation Pause)` | ✅ 是 |
+| 2 | `InitialMarkGC` | `Pause Young (Concurrent Start)` | `Pause Young (Concurrent Start) (G1 Evacuation Pause)` | ✅ 是 |
+| 3 | `LastYoungGC` | `Pause Young (Prepare Mixed)` | `Pause Young (Prepare Mixed) (G1 Evacuation Pause)` | ✅ 是 |
+| 4 | `MixedGC` | `Pause Young (Mixed)` | `Pause Young (Mixed) (G1 Evacuation Pause)` | ✅ 是 |
+| 5 | `FullGC` | `Pause Full` | `Pause Full (G1 Evacuation Pause)` | ❌ 否（独立路径） |
+| 6 | `Remark` | `Pause Remark` | `Pause Remark` | ❌ 否（CM 线程调度） |
+| 7 | `Cleanup` | `Pause Cleanup` | `Pause Cleanup` | ❌ 否（CM 线程调度） |
+
+**GC 日志的构造方式**（g1CollectedHeap.cpp:2856-2872）：
+
+```cpp
+FormatBuffer<> gc_string("Pause Young ");       // 固定前缀 "Pause Young"
+if (collector_state()->in_initial_mark_gc()) {
+    gc_string.append("(Concurrent Start)");       // InitialMarkGC
+} else if (collector_state()->in_young_only_phase()) {
+    if (collector_state()->in_young_gc_before_mixed()) {
+        gc_string.append("(Prepare Mixed)");      // LastYoungGC
+    } else {
+        gc_string.append("(Normal)");             // YoungOnlyGC
+    }
+} else {
+    gc_string.append("(Mixed)");                  // MixedGC
+}
+GCTraceTime(Info, gc) tm(gc_string, NULL, gc_cause(), true);
+```
+
+**不是 switch(PauseKind)**——是靠 `collector_state()` 的布尔标志用 if-else 拼出来的。日志中的 `(G1 Evacuation Pause)` 来自 `gc_cause()` 参数，不是暂停类型名。
+
+### 3.1 决策树——Young 类暂停的选择
+
+G1 每次 Young GC 的暂停类型由 `G1Policy::young_gc_pause_kind()` 决定（g1Policy.cpp:1034-1051）。注意这个函数**不覆盖** FullGC / Remark / Cleanup——那三种走独立路径：
 
 ```cpp
 G1Policy::PauseKind G1Policy::young_gc_pause_kind() const {
@@ -681,33 +715,27 @@ G1Policy::PauseKind G1Policy::young_gc_pause_kind() const {
 开始 GC
   │
   ├─ collector_state()->in_initial_mark_gc()?
-  │   YES → InitialMarkGC (Young GC + 标记 survivor 为 root)
-  │         ↑ 什么时候设这个标志？
-  │           IHOP 触发 → 设置 initiation 标志 → 下次 Young GC 自动变成 Initial-mark
+  │   YES → InitialMarkGC → 日志: Pause Young (Concurrent Start)
+  │         ↑ IHOP 触发 → 设置 initiation 标志 → 下次 Young GC 自动变成 Initial-mark
   │
   ├─ collector_state()->in_young_gc_before_mixed()?
-  │   YES → LastYoungGC (Mixed GC 前的最后一次纯 Young GC)
-  │         ↑ 保证 CSet 候选列表准备好
+  │   YES → LastYoungGC → 日志: Pause Young (Prepare Mixed)
+  │         ↑ Mixed GC 前最后一次纯 Young，保证 CSet 候选列表准备好
   │
   ├─ collector_state()->in_mixed_phase()?
-  │   YES → MixedGC (回收 Eden + Survivor + 精选 Old Region)
+  │   YES → MixedGC → 日志: Pause Young (Mixed)
+  │         ↑ 回收 Eden + Survivor + 精选 Old Region
   │
-  └─ 以上全 NO → YoungOnlyGC (纯 Young GC)
+  └─ 以上全 NO → YoungOnlyGC → 日志: Pause Young (Normal)
 ```
 
-完整 PauseKind 枚举（g1Policy.hpp:267-275）：
+**不在这个决策树里的三种**：
 
-```cpp
-enum PauseKind {
-    FullGC,         // 降级兜底
-    YoungOnlyGC,    // 纯 young 回收
-    MixedGC,        // young + old
-    LastYoungGC,    // Mixed 前的最后一次 young
-    InitialMarkGC,  // young + 标记 survivor root（启动 CM）
-    Cleanup,        // CM 收尾，计算 liveness
-    Remark          // CM 的 STW 收尾，排空 SATB
-};
-```
+| PauseKind | 触发路径 | 代码位置 |
+|-----------|---------|---------|
+| `FullGC` | `G1CollectedHeap::do_full_collection()` 直接调用 `record_pause(FullGC, ...)` | g1Policy.cpp:453 |
+| `Remark` | CM 线程通过 `VM_CGC_Operation op(&cl, "Pause Remark")` 调度 STW | g1ConcurrentMarkThread.cpp:343 |
+| `Cleanup` | CM 线程通过 `VM_CGC_Operation op(&cl, "Pause Cleanup")` 调度 STW | g1ConcurrentMarkThread.cpp:374 |
 
 ### 3.2 YoungOnlyGC——最频繁的暂停
 
@@ -718,11 +746,11 @@ enum PauseKind {
 **典型 GC 日志**：
 
 ```
-[0.456s][info][gc] GC(3) Pause Young (G1 Evacuation Pause) 128M->64M(1024M) 8.234ms
+[0.456s][info][gc] GC(3) Pause Young (Normal) (G1 Evacuation Pause) 128M->64M(1024M) 8.234ms
 [0.456s][info][gc,cpu] GC(3) User=0.12s Sys=0.01s Real=0.01s
 ```
 
-解读：GC 编号 3，Young-only pause。堆使用量 128M→64M（总容量 1024M）。耗时 8.234ms。
+解读：`Pause Young (Normal)`=YoungOnlyGC。`(G1 Evacuation Pause)` 是 GCCause，`128M→64M(1024M)` 是堆使用量变化和总容量，`8.234ms` 是耗时。
 
 **内部流程**（08 展开）：
 1. CSet = 所有 Eden + Survivor
@@ -741,7 +769,7 @@ enum PauseKind {
 [5.234s][info][gc] GC(42) Pause Young (Concurrent Start) (G1 Evacuation Pause) 512M->256M(1024M) 15.678ms
 ```
 
-关键差异：`(Concurrent Start)` 标记——表示本次同时启动并发标记周期。
+`(Concurrent Start)` 表示本次同时启动并发标记周期。
 
 **注意**：IHOP 是什么、怎么算的——留到 15（Mixed GC）展开。这里只需知道"IHOP 阈值到了，Policy 给这次 Young GC 多安排了一个任务——标记 survivor 为 CM root"。
 
@@ -757,7 +785,7 @@ enum PauseKind {
 [5.890s][info][gc] GC(43) Pause Young (Mixed) (G1 Evacuation Pause) 512M->384M(1024M) 22.345ms
 ```
 
-`(Mixed)` 标记表示本次回收包含了 Old Region。
+`(Mixed)` 表示本次回收包含 Old Region。
 
 **分批策略**：不是一次回收全部 Old——`G1MixedGCCountTarget`（默认 8）次分批进行。每轮回收效率低的 Old Region 被放弃。
 
@@ -777,20 +805,44 @@ enum PauseKind {
 
 `Pause Full`——不是 Young 也不是 Mixed。停顿时间长（几百毫秒到几秒），希望永远不会出现。
 
-### 3.6 暂停类型频率递进
+### 3.6 LastYoungGC——Mixed 前的最后一次纯 Young
+
+**触发条件**：`collector_state()->in_young_gc_before_mixed()` 为 true。
+
+**与 YoungOnlyGC 的区别**：回收行为完全相同（只收 Eden+Survivor），但 GC 日志打 `(Prepare Mixed)` 标记——提醒你下一轮开始就是 Mixed GC 了。
+
+**典型 GC 日志**：
+
+```
+[5.750s][info][gc] GC(41) Pause Young (Prepare Mixed) (G1 Evacuation Pause) 512M->256M(1024M) 10.234ms
+```
+
+### 3.7 Remark 和 Cleanup——CM 周期的 STW 节点
+
+这两种不通过 Young GC 触发，而是 CM 线程完成并发标记后主动调度 STW：
+
+| PauseKind | 做什么 | GC 日志 | 代码位置 |
+|-----------|--------|---------|---------|
+| `Remark` | 终止所有 CM 任务、排空 SATB 队列、完成最后标记 | `Pause Remark` | g1ConcurrentMarkThread.cpp:343 |
+| `Cleanup` | 计算 per-region liveness、排序 candidate、回收空 Region | `Pause Cleanup` | g1ConcurrentMarkThread.cpp:374 |
+
+两者都通过 `VM_CGC_Operation op(&cl, "Pause Remark")` 或 `"Pause Cleanup"` 提交给 VMThread 执行 STW。详细流程在 ch11/14（CM 后半）展开。
+
+### 3.8 暂停类型频率递进
 
 ```
 时间 →
 |──── 启动 ────|──── 正常运行 ────|──── CM 周期 ────|──── Mixed 回收 ────|──── 正常 ────|
 
-YoungOnly:      ██  ██  ██  ██  ██  ██  ██  ██  ██  ██
+YoungOnly:      ██  ██  ██  ██  ██  ██  ██  ██  ██  ██        ██
 InitialMark:                                     ██
 LastYoungGC:                                              ██
 MixedGC:                                                       ██  ██  ██
-YoungOnly:                                                                       ██  ██
+Remark/Cleanup:                                   ██   ██
+YoungOnly:                                                                       ██
 ```
 
-典型频率：每 10-50 次 YoungOnly 触发 1 次 InitialMark → CM 完成 → 1 次 LastYoung → 数 次 Mixed → 回到 YoungOnly。
+典型频率：每 10-50 次 YoungOnly 触发 1 次 InitialMark → CM 并发阶段 → 1 次 Remark + 1 次 Cleanup → 1 次 LastYoung → 数次 Mixed → 回到 YoungOnly。
 
 ---
 
