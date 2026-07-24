@@ -25,10 +25,12 @@ TLAB 内部:
 
 1. **先判断"值不值得退休"** — 不是所有"剩余不够"都会退休。G1 用 `_refill_waste_limit` 做容差判断（threadLocalAllocBuffer.hpp:57）：
    ```
-   if (TLAB剩余 > _refill_waste_limit)  →  不退休，直接走 shared heap 分配
+   if (TLAB剩余 > _refill_waste_limit)  →  不退休，直接在 Eden 上分配
    if (TLAB剩余 ≤ _refill_waste_limit)  →  退休 TLAB，申请新的
    ```
-   `_refill_waste_limit` 初始值 = `TLAB大小 / TLABRefillWasteFraction`（默认 64）。每次走 shared heap 分配时还会递增 `TLABWasteIncrement`（默认 4），逐步扩大容忍度——避免频繁退休导致性能抖动。
+   `_refill_waste_limit` 初始值 = `TLAB大小 / TLABRefillWasteFraction`（默认 64）。每次走这条路径时还会递增 `TLABWasteIncrement`（默认 4），逐步扩大容忍度——避免频繁退休导致性能抖动。
+
+   **"直接在 Eden 上分配"不意味着对象去了别的地方**——分配目标仍然是当前的 Eden Region，只是绕过了 TLAB 的本地 pointer bump，改为在 `G1AllocRegion` 上用 CAS 做 bump-pointer。速度比 TLAB 慢（需要原子操作），但比触发 GC 快。
 
 2. **TLAB 退休** — 调用 `clear_before_allocation()`（threadLocalAllocBuffer.cpp:43-46）：
    - 在 `top` 到 `hard_end` 之间填充一个 **dummy filler object**（让 GC 遍历 Eden 时不撞到空洞）
