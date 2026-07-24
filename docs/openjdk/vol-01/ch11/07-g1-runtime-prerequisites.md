@@ -600,10 +600,9 @@ Threads_lock->unlock();
     sum += array[i];        // 简单循环体，无方法调用
   }
   // JIT 可能把 poll 提到循环外 → 1000万次迭代 = 全程无 poll → VM Thread 空等
-
-G1 的解决方案: 并发标记阶段用 `regular_clock`（定时自检）
-主动检查 SATB 队列长度并 abort 当前 task，避免标记线程成为 TTSP 瓶颈。
 ```
+
+这是 JIT 编译器在"插入 poll（慢）"与"执行效率（快）"之间的 trade-off。HotSpot 有 `-XX:+UseCountedLoopSafepoints` 等标志可以调整 poll 的插入策略，但会增加运行时开销。
 
 **time-to-safepoint 是否可见**——HotSpot 内部有完整的测量和日志机制：
 
