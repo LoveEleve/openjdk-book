@@ -11,9 +11,37 @@
 
 ## 1. 谁触发的 Young GC
 
-### 1.1 从分配说起
+### 1.1 从分配说起——完整的调用链
 
-mutator（应用线程）不停地 `new` 对象。每个 Java 线程在 Eden Region 里独占一小块私有的 **TLAB**（Thread-Local Allocation Buffer）。在 TLAB 里分配对象只需一次 **pointer bump**：
+Java 代码里写 `new Object()`，最终走到 G1 的分配逻辑。完整路径如下——本章的 §1 覆盖了这条链上从 "TLAB 慢速路径" 到 "触发 Young GC" 的全部内容：
+
+```
+new 字节码
+  └→ Template Interpreter / JIT 编译代码
+      └→ CollectedHeap::obj_allocate()
+          └→ MemAllocator::allocate()                    [memAllocator.cpp]
+              └→ MemAllocator::mem_allocate()            [memAllocator.cpp:362]
+                  ├─ allocate_inside_tlab()               ← TLAB 快路径（§1.1）
+                  │   ├─ tlab.allocate()                  ← pointer bump
+                  │   └─ allocate_inside_tlab_slow()      ← TLAB 慢路径（§1.2）
+                  │       ├─ waste > limit → return NULL → 跳过TLAB（§1.2）
+                  │       └─ waste ≤ limit → retire TLAB + 申请新TLAB
+                  │
+                  └─ allocate_outside_tlab()              ← 不走TLAB（§1.2）
+                      └─ G1CollectedHeap::mem_allocate()  [g1CollectedHeap.cpp:398]
+                          └─ attempt_allocation()
+                              ├─ retained region（第一级）    ← §1.3
+                              ├─ active region CAS（快路径）
+                              └─ attempt_allocation_slow()  ← §1.4（本章核心）
+                                  ├─ 持锁重试（第二级）
+                                  ├─ GCLocker 扩展（第三级）
+                                  ├─ do_collection_pause()  ← 触发 Young GC
+                                  └─ GCLocker::stall_until_clear()
+```
+
+TLAB 不是 G1 特有的——它是 JVM 通用的分配优化。G1 特有的是 TLAB 背后的 Eden Region 管理（哪个 Region 当 Eden、Eden 用完了从 free list 拿新区、新区数量由 `_young_list_target_length` 控制）。这条分配链覆盖了三层：TLAB → Region → GC 触发。
+
+### 1.2 TLAB——线程本地的 pointer bump
 
 ```
 TLAB 内部：
