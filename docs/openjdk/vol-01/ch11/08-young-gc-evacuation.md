@@ -1,10 +1,69 @@
 # G1 Young GC：Evacuation 周期
 
-> **本文定位**：ch11 运行时系列第一篇。讲解一次 Young-only pause 从触发到结束的完整流程——每一步在哪个文件、哪个方法里做了什么。
+> **本文定位**：ch11 运行时系列第一篇。从 0 开始讲解一次 Young GC 暂停的全部阶段——所有相关概念（Region 角色、STW、Evacuation、Root、CSet）在本文内自建，不依赖任何其他运行时文档。
 >
-> **前置依赖**：ch11/07（Region 角色 / STW / Evacuation / Root / CSet / 分配-GC 链）。本文不再重述这些概念。
+> **可引用的前置**：ch11/01-06（Region 大小 / mmap / Policy 组件 / CardTable / RemSet / BOT / CSet 快速测试）。
 >
-> **阅读提示**：本文按暂停执行顺序组织，每一步给出源码位置。读完能跟踪一次完整 Young GC 暂停的全部阶段。
+> **不可引用的**：ch11/07——当作不存在，本文覆盖前者全部相关概念。
+
+---
+
+## 0. 前置概念——读本文需要的全部砖块
+
+### 0.1 Region 角色——Eden/Survivor/Old
+
+G1 把堆切成等大 Region（大小由 ch11/02 的 `setup_heap_region_size` 确定），但 Regions 不按物理位置分代——每个 Region 上的"角色"由 Tag 位决定（heapRegionType.hpp:64-91）：
+
+| 角色 | Tag 值 | 谁往里分配 | GC 行为 |
+|------|--------|----------|--------|
+| **Eden** | 2 | mutator（TLAB 慢速路径） | Young GC **全量回收**——搬走所有活对象，空 Region 归还 FreeList |
+| **Survivor** | 3 | Young GC evacuation（搬过来的） | 下次 Young GC 再次扫描——活对象晋升到 Old 或搬另一个 Survivor |
+| **Old** | 16 | Survivor 晋升 / mutator 直接分配 | **不参与 Young GC**——只有 Mixed GC 或 Full GC 才回收 |
+| **Free** | 0 | 无 | 空闲，等待分配 |
+
+Eden + Survivor = **Young Generation**（`is_young()` 返回 true 的 Region 集合）。Young GC 的 CSet 就是这些 Region 的全部。
+
+### 0.2 STW——所有 mutator 线程停在 safepoint
+
+GC 需要搬活对象、更新引用——这些操作要求堆状态不变（mutator 不能同时读写堆）。方案：**Stop-The-World（STW）**——所有 mutator（应用/Java）线程停在 safepoint。
+
+Safepoint 不是 OS 的强制挂起，是 JVM 的**协作式协议**：VM Thread 设置 `_state = _synchronizing` → arm polling page → 每个 mutator 线程在下一个检查点（方法返回/循环回边）检测到请求 → 自己停下 → 所有线程到齐 → GC 开始。
+
+注意：`_thread_in_native`（JNI 代码）和 `_thread_blocked`（锁等待）的线程不需要停——它们不碰堆。
+
+### 0.3 Evacuation——搬活不删死
+
+G1 的"回收"不是删除死对象——是**搬走活对象，整块 Region 归还**。因为 Region 是 G1 的回收粒度：回收一个 Region = 搬活 → 整块 Free。三步：
+
+1. **COPY** —— 把活对象完整拷贝到 Survivor/Old Region
+2. **FORWARD** —— 原位置 mark word 最低 2 位置 11（`marked_value=3`），前 62 位写 forwarding pointer 指向新地址
+3. **UPDATE** —— 更新所有指向旧地址的引用 → 新地址
+
+### 0.4 GC Roots——活对象追踪的起点
+
+GC 判断对象是否存活的唯一标准：**从 GC Roots 出发沿引用链能否到达**。五大类 Root：
+
+- Java 线程栈（栈帧中的局部变量）
+- JNI handles（全局/局部引用）
+- 系统类（SystemDictionary + Universe 的静态字段）
+- CodeCache（JIT 编译后机器码中嵌入的对象引用）
+- StringTable（intern 的字符串）
+
+Root 扫描 = 遍历所有 Root → 找到指向 CSet Region 的引用 → 触发 Evacuation。
+
+### 0.5 CSet——本次 GC 要回收的 Region 集合
+
+CSet（Collection Set）= 本次 GC 暂停要回收的 Regions。ch11/06 讲了 `in_cset_fast_test`（O(1) 判断某个地址在不在 CSet），但没讲 CSet 是怎么选出来的。
+
+Young GC 的 CSet = **所有 Eden + Survivor Region**（全量加入，不需要选）。G1Policy 通过 `_young_list_target_length` 持续控制堆里应该有多少 Young Regions——CSet 的大小就是这个 target 驱动的分配结果。
+
+### 0.6 分配 → GC 因果链
+
+GC 不是定时事件——是分配的自然终点：
+
+```
+mutator 分配 → TLAB 满 → Eden 无空间 → 触发 GC → 回收 Region → Region 归还 → 重新分配
+```
 
 ---
 
@@ -12,7 +71,7 @@
 
 ### 1.1 触发链路
 
-ch11/07 §7 讲了"分配失败 → GC"的因果链。具体到 Young GC：
+分配失败的具体路径：
 
 ```
 mutator TLAB 满 → 新 TLAB 分配失败 → Eden 无可用 Region
@@ -210,7 +269,7 @@ void work(uint worker_id) {
 
 ### 5.2 阶段 3a: Root 扫描（`evacuate_roots`）
 
-ch11/07 §5 讲了 13 类 Root 的分类，这里聚焦它们在 Young GC 中的执行顺序：
+§0.4 讲了 5 类 GC Root 的分类，这里聚焦它们在 Young GC 中的执行顺序：
 
 ```cpp
 // g1RootProcessor.cpp:78-136
