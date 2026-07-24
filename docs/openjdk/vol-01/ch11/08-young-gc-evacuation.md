@@ -54,15 +54,24 @@ VMThread 发起 safepoint，所有 mutator 停下来。进入 `do_collection_pau
 
 **做什么**：决定本次 GC 要回收哪些 Region。
 
-Young GC 的 CSet = **所有 Eden Region + 所有 Survivor Region**（全量加入，无需选择）。这些 Region 在 GC 之前已经被增量地（incremental）加入 CSet——每分配一个新 Eden Region，它就自动进入 CSet 数组。GC 开始时 `finalize_collection_set()` 只是**锁定**这个集合，不再追加：
+Young GC 的 CSet = **所有 Eden Region + 所有 Survivor Region**（全量加入，无需选择）。这些 Region 如何进入 CSet——分三种情况：
+
+| 谁加进来的 | 什么时候 | 源码 |
+|-----------|---------|------|
+| 本轮 Eden Region（填满退休时） | mutator 运行期间——当前 Eden 分配满后被 `retire_mutator_alloc_region()` 加入 CSet | g1CollectedHeap.cpp:4875 `collection_set()->add_eden_region(alloc_region)` |
+| 上一轮 Survivor Region | 上轮 GC 结束时——`start_new_collection_set()` → `transfer_survivors_to_cset()` 加入**下一轮** CSet | g1Policy.cpp:1148-1176 遍历 survivors → `_collection_set->add_survivor_regions(curr)` |
+
+**注意**：新分配的 Eden Region **不是**一分配就进 CSet——它被标记为 Eden（`set_region_short_lived_locked` → `_eden.add(hr)`），但只有等到它被填满退休时（mutator 的 `attempt_allocation_locked` 里），才通过 `retire_mutator_alloc_region()` → `add_eden_region()` 正式进入 CSet 数组。源码注释（g1CollectionSet.cpp:244-251）明确说这发生在 "in-between safepoints by mutator threads"。
+
+GC 开始时 `finalize_collection_set()` 只是**锁定**这个集合：
 
 ```cpp
 // g1CollectedHeap.cpp:2944
 g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
   └─ collection_set->finalize_young_part(target_pause_time_ms, survivor)
        ├─ finalize_incremental_building()      // Active→Inactive，锁定增量计数器
-       ├─ init_region_lengths(eden, survivor)   // 记下各多少 Region
-       ├─ survivors->convert_to_eden()          // 上一轮 Survivor 变成本轮 Eden
+       ├─ init_region_lengths(eden, survivor)   // CSet = [本轮退休加入的 Eden] + [上一轮留下的 Survivor]
+       ├─ survivors->convert_to_eden()          // 这些 Survivor 在本次 GC 中将被当作 Eden 回收
        └─ 返回剩余时间（Young-only 不调 finalize_old_part）
 ```
 
@@ -218,11 +227,13 @@ void G1CollectedHeap::post_evacuate_collection_set(...) {
 void G1CollectedHeap::start_new_collection_set() {
     collection_set()->start_incremental_building();   // _inc_build_state = Active
     clear_cset_fast_test();                           // 清空 in_cset_fast_test 位图
-    g1_policy()->transfer_survivors_to_cset(survivor()); // Survivor → 新 CSet 种子
+    g1_policy()->transfer_survivors_to_cset(survivor()); // ★ 本轮 Survivor → 下一轮 CSet
 }
 ```
 
-**关键**：本轮 GC 存活下来的对象在 Survivor Region 中。这些 Survivor Region 在 GC 结束后就被加入**下一轮**的 CSet——因为下一次 Young GC 时它们就是"本次要回收的 survivor 部分"。
+**`transfer_survivors_to_cset()`**（g1Policy.cpp:1148-1176）遍历本轮 GC 存活下来的所有 Survivor Region，对每个调用 `add_survivor_regions(curr)`——**它们被加入下一轮 GC 的 CSet 数组**。等到下一次 Young GC 的 §3 阶段，`finalize_young_part()` 会调用 `survivors->convert_to_eden()` 把它们的 Tag 从 `SurvTag(3)` 改为 `EdenTag(2)`（`set_eden_pre_gc()`, g1SurvivorRegions.cpp:42-50）。
+
+**为什么这么做**——这一轮的 Survivor 是下一轮的"老 eden"。它们在下一次 GC 时必须被全量扫描——里面可能有对象要被晋升到 Old，也可能有对象已经死了。
 
 一轮完整的 Young GC 到这里结束。Safepoint 解除，mutator 恢复运行。GC 日志显示的时间就是 T5 到 T11（不含 TTSP）。
 
