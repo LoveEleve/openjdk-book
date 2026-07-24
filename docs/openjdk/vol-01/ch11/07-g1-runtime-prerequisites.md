@@ -314,15 +314,25 @@ Humongous 对象跨越连续的 Region：
 
 每个 Continues Region 通过 `_humongous_start_region` 反向指针指向 Start Region。
 
-#### 1.5.3 三种 GC 路径
+#### 1.5.3 什么时候回收——RSet 判断死活的快捷路径
 
-| GC 类型 | Humongous 行为 | 条件 |
-|---------|---------------|------|
-| **Young GC（急切回收）** | 如果 RSet 为空（无入引用）→ 立即回收所有连续 Region | `is_humongous() && rem_set()->is_empty()` |
-| **Young GC（保留）** | RSet 非空 → 标记为活，保留 | 有入引用 |
-| **Full GC** | 标准标记-整理——如果死了才回收 | 堆满降级 |
+Humongous 对象与普通 Old Region 有一个根本区别：**它是"全有或全无"的**——要么整个对象都活着（有人引用它），要么整个对象都死了（没人引用）。不像 Old Region 可以"部分存活"（97% 对象死了但 3% 还活着）。
 
-急切回收的位图 `humongous_reclaim_candidates` 在 ch11/06 详细讲解。
+这就给了 G1 一个快捷判断法：**如果 Humongous 对象的 RSet 为空，说明没有其他 Region 引用它 → 它一定是死的 → 可以立刻回收，不用等并发标记的结果。**
+
+```
+Humongous 对象的 RSet 为空?
+  ├─ YES → 对象已死 → 立即回收所有连续 Region（无需等 Mixed GC 或标记结果）
+  │        → 回收 = Start + 所有 Continues Region → Free
+  │
+  └─ NO  → 有引用指向它 → 对象可能活着 → 保留，不回收
+           → 等到下一次判断（下一次 GC 暂停）
+           → 最终如果堆真满了 → 全堆整理时一起处理
+```
+
+**为什么普通 Old Region 不能走这个捷径**——一个 Old Region 里可能有 10 个对象，3 个被引用、7 个没有被引用。RSet 非空只能说明"至少有一个引用"，不能说明"全活"。要精确知道哪些对象还活着，必须靠并发标记遍历整个对象图。Humongous 对象整个 Region 只有一个对象，RSet 空就等于全死。
+
+`humongous_reclaim_candidates` 位图在 ch11/06 详细讲解——它缓存了"哪些 Humongous Region 的 RSet 为空"的判断结果，供 GC 暂停时直接使用。
 
 ### 1.6 FreeRegionList——空闲 Region 栈
 
