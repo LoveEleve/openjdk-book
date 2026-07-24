@@ -465,3 +465,46 @@ void G1Policy::revise_young_list_target_length_if_necessary(size_t rs_lengths) {
 | 退休动作 | fill dummy filler + 清零指针 | `fill_up_remaining_space()` 填 dummy + `retire_mutator_alloc_region()` 入 CSet |
 | 保留机制 | 无——TLAB 退休就不存在了 | `MutatorAllocRegion::should_retain()`——如果剩余空间 ≥ MinTLABSize，保留为 retained region |
 | waste 阈值 | `_refill_waste_limit`（TLAB 大小 / 64，动态调整） | 无——Region 退休时不看 waste，看"还能不能装一个完整 TLAB" |
+
+---
+
+## 附录 C: 本文涉及的字段速查
+
+| 字段 | 所在类 | 类型 | 源码位置 | 用途 |
+|------|--------|------|---------|------|
+|  |  |  | threadLocalAllocBuffer.hpp:57 | TLAB 剩余超过此值则不做退休——直接在 Region 上 CAS 分配 |
+|  |  |  | threadLocalAllocBuffer.hpp:67 | TLAB slow-path refill 的浪费累计计数 |
+|  |  |  | g1AllocRegion.hpp:213 | 退休时保留的 Region——下次优先从它分配，提高命中率 |
+|  |  |  | g1AllocRegion.hpp:208 | 当前 mutator 阶段产生的总浪费字节数 |
+|  |  |  | g1Policy.hpp:82 | Young Region (Eden+Survivor) 的目标总数——由暂停预测模型计算 |
+|  |  |  | g1Policy.hpp:87 | GCLocker 活跃时可扩展的 Eden 最大 Region 数 |
+|  |  |  | gcLocker.hpp:45 | 当前处在 JNI critical section 中的线程计数 |
+|  |  |  | gcLocker.hpp:46 | 堆空间不足需要 GC，但有 critical section 拦着的标志 |
+|  |  |  | gcLocker.hpp:48 | unlock_critical 正在为所有线程执行 GC 的标志 |
+|  |  |  | g1CollectionSet.hpp:55 | CSet 的实际存储——不是链表，是普通 C 数组，存 region 索引（hrm_index） |
+|  |  |  | g1CollectionSet.hpp:56 | 当前 CSet 的有效条目数——volatile，支持并发读 |
+|  |  |  | g1CollectionSet.hpp:76 | 枚举：Active（增量构建中）或 Inactive（已锁定） |
+|  |  |  | g1CollectionSet.hpp:88 | 增量构建期间累加的 RSet 总长度——用于暂停预测 |
+|  |  |  | g1CollectionSet.hpp:101 | 增量构建期间累加的预测耗时（毫秒） |
+
+
+---
+
+## 附录 C: 本文涉及的字段速查
+
+| 字段 | 所在类 | 类型 | 源码位置 | 用途 |
+|------|--------|------|---------|------|
+| `_refill_waste_limit` | `ThreadLocalAllocBuffer` | `size_t` | threadLocalAllocBuffer.hpp:57 | TLAB 剩余超过此值不退休——直接在 Region 上 CAS 分配 |
+| `_slow_refill_waste` | `ThreadLocalAllocBuffer` | `unsigned` | threadLocalAllocBuffer.hpp:67 | TLAB slow-path refill 的浪费累计计数 |
+| `_retained_alloc_region` | `MutatorAllocRegion` | `HeapRegion* volatile` | g1AllocRegion.hpp:213 | 退休时保留的 Region——下次优先从它分配 |
+| `_wasted_bytes` | `MutatorAllocRegion` | `size_t` | g1AllocRegion.hpp:208 | 当前 mutator 阶段产生的总浪费字节数 |
+| `_young_list_target_length` | `G1Policy` | `uint` | g1Policy.hpp:82 | Young Region (Eden+Survivor) 的目标总数 |
+| `_young_list_max_length` | `G1Policy` | `uint` | g1Policy.hpp:87 | GCLocker 活跃时 Eden 的最大 Region 数 |
+| `_jni_lock_count` | `GCLocker` | `static volatile jint` | gcLocker.hpp:45 | 当前在 JNI critical section 中的线程计数 |
+| `_needs_gc` | `GCLocker` | `static volatile bool` | gcLocker.hpp:46 | 堆需要 GC 但被 critical section 拦住的标志 |
+| `_doing_gc` | `GCLocker` | `static volatile bool` | gcLocker.hpp:48 | unlock_critical 正在替大家执行 GC 的标志 |
+| `_collection_set_regions` | `G1CollectionSet` | `uint*` | g1CollectionSet.hpp:55 | CSet 实际存储——C 数组，存 region 索引 |
+| `_collection_set_cur_length` | `G1CollectionSet` | `volatile size_t` | g1CollectionSet.hpp:56 | 当前 CSet 有效条目数，volatile 支持并发读 |
+| `_inc_build_state` | `G1CollectionSet` | `CSetBuildType` | g1CollectionSet.hpp:76 | 枚举 Active/Inactive——控制增量构建开关 |
+| `_inc_recorded_rs_lengths` | `G1CollectionSet` | `size_t` | g1CollectionSet.hpp:88 | 增量构建期间累加的 RSet 总长度 |
+| `_inc_predicted_elapsed_time_ms` | `G1CollectionSet` | `double` | g1CollectionSet.hpp:101 | 增量构建期间累加的预测耗时（毫秒） |

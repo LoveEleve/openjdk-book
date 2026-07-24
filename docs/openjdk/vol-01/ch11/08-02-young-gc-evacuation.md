@@ -302,3 +302,19 @@ class G1ParScanThreadState {
 - `_refs`——任务队列（push 作业 / pop 作业 / steal 作业）
 - `_dcq`——这个 Worker 在扫描引用时如果产生了 dirty card，不会直接更新 RSet，而是放进这个队列，等 GC 收尾时批处理
 - `_plab_allocator`——在 Survivor/Old Region 中为搬来的对象分配空间（下一篇 08-03 展开 PLAB）
+
+
+---
+
+## 附录: 本文涉及的字段速查
+
+| 字段 | 所在类 | 类型 | 源码位置 | 用途 |
+|------|--------|------|---------|------|
+| `_refs` | `G1ParScanThreadState` | `RefToScanQueue*` | g1ParScanThreadState.hpp:47 | Worker 的本地任务队列——push/pop/steal 的载体 |
+| `_plab_allocator` | `G1ParScanThreadState` | `G1PLABAllocator*` | g1ParScanThreadState.hpp:52 | PLAB 分配器——在 Survivor/Old Region 中为搬来的对象分配空间 |
+| `_closures` | `G1ParScanThreadState` | `G1EvacuationRootClosures*` | g1ParScanThreadState.hpp:50 | Root 遍历所需的所有闭包集合 |
+| `_age_table` | `G1ParScanThreadState` | `AgeTable` | g1ParScanThreadState.hpp:54 | 本地对象年龄表——驱动晋升阈值计算 |
+| `_tenuring_threshold` | `G1ParScanThreadState` | `uint` | g1ParScanThreadState.hpp:57 | 当前晋升阈值——age >= 此值的对象晋升到 Old |
+| `_process_strong_tasks` | `G1RootProcessor` | `SubTasksDone` | g1RootProcessor.hpp:51 | 12 个强根扫描子任务的任务声明管理器 |
+| `_tasks` | `SubTasksDone` | `volatile uint*` | workgroup.hpp:341 | 任务声明数组——每个元素 0=未声明，通过 CAS 抢 |
+| `RefToScanQueue` | (typedef) | `OverflowTaskQueue<StarTask, mtGC>` | g1CollectedHeap.hpp:98 | 带溢出栈的工作窃取队列——StarTask 可以是 oop* 或 narrowOop* |

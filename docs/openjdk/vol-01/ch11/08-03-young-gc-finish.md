@@ -284,3 +284,20 @@ Pause Young (Normal) (G1 Evacuation Pause) 128M→64M(1024M) 8.234ms
 | Post-Evac | 引用处理 / 弱引用 / 去重 | g1CollectedHeap.cpp:4099 |
 | Free CSet | 释放空 Region / evac_failed → Old | g1CollectedHeap.cpp:2980 |
 | New CSet | Survivor → 下一轮 CSet 种子 | g1CollectedHeap.cpp:2784 |
+
+
+---
+
+## 附录: 本文涉及的字段速查
+
+| 字段 | 所在类 | 类型 | 源码位置 | 用途 |
+|------|--------|------|---------|------|
+| `_serial_work_claim` | `G1FreeCollectionSetTask` | `volatile jint` | g1CollectedHeap.cpp:4342 | 串行工作声明——单线程释放 CSet Region 到 free list |
+| `_parallel_work_claim` | `G1FreeCollectionSetTask` | `volatile size_t` | g1CollectedHeap.cpp:4356 | 并行工作声明——多线程抢 32 个 Region 一批清除 RSet/hot card |
+| `_work_items` | `G1FreeCollectionSetTask` | `WorkItem*` | g1CollectedHeap.cpp:4358 | 预分配的工作项数组（region_idx / is_young / evacuation_failed） |
+| `_cl` | `G1FreeCollectionSetTask` | `G1SerialFreeCollectionSetClosure` | g1CollectedHeap.cpp:4337 | 嵌套类实例——执行实际的 Region 释放和统计记录 |
+| `_discovered_refs` | `ReferenceProcessor` | `DiscoveredList*` | referenceProcessor.hpp:264 | 四种引用合在一起的主数组 |
+| `_discoveredSoftRefs` | `ReferenceProcessor` | `DiscoveredList*` | referenceProcessor.hpp:267 | 指向主数组的 Soft 引用槽位 |
+| `_discoveredWeakRefs` | `ReferenceProcessor` | `DiscoveredList*` | referenceProcessor.hpp:268 | 指向主数组的 Weak 引用槽位 |
+| `_discoveredFinalRefs` | `ReferenceProcessor` | `DiscoveredList*` | referenceProcessor.hpp:269 | 指向主数组的 Final 引用槽位 |
+| `_discoveredPhantomRefs` | `ReferenceProcessor` | `DiscoveredList*` | referenceProcessor.hpp:270 | 指向主数组的 Phantom 引用槽位 |
