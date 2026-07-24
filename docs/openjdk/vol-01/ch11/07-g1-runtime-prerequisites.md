@@ -474,7 +474,12 @@ enum JavaThreadState {
 };
 ```
 
-**native 线程不需要停**——它在 native 代码里无法触碰 Java 堆对象，所以对 GC 天然安全。VM Thread 看到 `_thread_in_native` 的线程时**不等它**，直接把它从 `still_running` 和 `_waiting_to_block` 中移除。
+**两种线程不需要停**——都是通过 `safepoint_safe()` 判断（safepoint.cpp:760-774）：
+
+1. `_thread_in_native` — native 代码无法触碰 Java 堆，对 GC 天然安全
+2. `_thread_blocked` — 被锁或 I/O 挡住的线程，已经是"静止"状态
+
+VM Thread 看到这两种状态的线程时**不等它**，直接把它从 `still_running` 和 `_waiting_to_block` 中移除。
 
 具体实现（safepoint.cpp:289-312）：
 
@@ -485,7 +490,7 @@ while (still_running > 0) {
         if (cur_state->is_running()) {
             cur_state->examine_state_of_thread();  // ← 核心判断
             if (!cur_state->is_running()) {
-                still_running--;  // native 线程在这一步被移除
+                still_running--;  // native/blocked 线程在这一步被移除
             }
         }
     }
@@ -502,7 +507,7 @@ while (still_running > 0) {
 | `_thread_in_vm` | 给它发回调，VM 操作完成后自阻塞 | ✅ 是 | 在 block() 中减 |
 | `_thread_in_Java` | **需要等它自己走到 poll 点停下** | ❌ 继续等 | 在 block() 中减 |
 
-**safepoint_safe()**（safepoint.cpp:760-774）是判断 native 线程是否安全的函数——检查线程是否 "没有 Java 栈帧" 或 "栈帧可安全遍历"：
+**safepoint_safe()**（safepoint.cpp:760-774）——判断指定状态的线程是否已经安全，不需要等它走到 poll 点。对 `_thread_blocked` 直接返回 true，对 `_thread_in_native` 检查栈是否可安全遍历：
 
 ```cpp
 bool SafepointSynchronize::safepoint_safe(JavaThread *thread, JavaThreadState state) {
@@ -519,17 +524,17 @@ bool SafepointSynchronize::safepoint_safe(JavaThread *thread, JavaThreadState st
 
 **为什么 native 线程必须等它返回时再处理**——native 线程从 JNI 返回 Java 时，经过 `transition_from_native()`（interfaceSupport.inline.hpp:158-177），检查 `SafepointMechanism::poll(thread)`。如果发现 safepoint 正在进行，调用 `SafepointSynchronize::block(thread)` 自阻塞。
 
-#### Step 4: 等待剩余的 Java 线程阻塞
+#### Step 4: 等待剩余需要阻塞的线程确认
 
 ```cpp
 while (_waiting_to_block > 0) {
-    Safepoint_lock->wait(true);  // 等待最后一个线程确认已阻塞
+    Safepoint_lock->wait(true);
 }
 // _waiting_to_block == 0 → 所有需要停的线程都停了
 // _state = _synchronized         → GC 可以开始了
 ```
 
-注意此时 `_waiting_to_block` **不包含 native 线程**——它们在 Step 3 已被移除。
+此时 `_waiting_to_block` 只包含 `_thread_in_Java` 和 `_thread_in_vm` 的线程——native 和 blocked 线程在 Step 3 已被移除。
 
 #### Step 5: GC 完成，恢复
 
