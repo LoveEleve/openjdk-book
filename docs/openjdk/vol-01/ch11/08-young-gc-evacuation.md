@@ -42,7 +42,7 @@ TLAB 内部:
 
 4. **MutatorAllocRegion 也满了** — 当前 Eden Region 装不下新 TLAB（或 `allocate_outside_tlab` 的 CAS 分配失败）。此时不直接触发 GC——G1 还有三级"挽救"：
 
-   **第一级（无锁）**：检查 **retained region**（`_retained_alloc_region`）。上一轮 Region 退休时如果剩余空间还能装一个 TLAB（`should_retain()` 判断 `free ≥ MinTLABSize`），G1 会保留它备用。先在 retained region 上尝试分配——命中率高，避免了锁。
+   **第一级（无锁）**：检查 **retained region**（`_retained_alloc_region`）。上一轮 Region 退休时如果剩余空间还能装一个 TLAB（`MutatorAllocRegion::should_retain()` 判断 `free ≥ MinTLABSize`——源码是 `free < MinTLABSize` 则拒绝），G1 会保留它备用。先在 retained region 上尝试分配——命中率高，避免了锁。
 
    **第二级（持锁）**：`attempt_allocation_locked()`（g1AllocRegion.inline.hpp:98）：
    - 持 `Heap_lock` 后重新尝试当前 Region（其他线程可能在等锁期间释放了空间）
