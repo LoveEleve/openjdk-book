@@ -422,11 +422,17 @@ Safepoint 不是 OS 级别的强制挂起——是 JVM 的**协作式协议**。
 
 #### Step 1: VM Thread 发起请求
 
+`SafepointSynchronize`（safepoint.hpp:61-108）是一个全部由静态成员组成的工具类——没有实例。`_state` 和 `_waiting_to_block` 都是它的静态字段：
+
 ```cpp
+// safepoint.hpp:107-108
+static volatile SynchronizeState _state;    // 当前 safepoint 状态
+static volatile int _waiting_to_block;       // 还需要等待多少个线程阻塞
+
 // safepoint.cpp — SafepointSynchronize::begin()
-Threads_lock->lock();           // 获取全局线程锁
-_state = _synchronizing;        // 设置状态：正在同步
-_waiting_to_block = nof_threads; // 初始化等待计数器 = 活跃线程数
+Threads_lock->lock();                       // 获取全局线程锁
+_state = _synchronizing;                    // 切换到"正在同步"状态
+_waiting_to_block = nof_threads;            // 计数器 = 总共需要停下的线程数
 ```
 
 #### Step 2: Arm 所有线程的 Poll
