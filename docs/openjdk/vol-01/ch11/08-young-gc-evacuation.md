@@ -54,14 +54,15 @@ VMThread 发起 safepoint，所有 mutator 停下来。进入 `do_collection_pau
 
 **做什么**：决定本次 GC 要回收哪些 Region。
 
-Young GC 的 CSet = **所有 Eden Region + 所有 Survivor Region**（全量加入，无需选择）。这些 Region 如何进入 CSet——分三种情况：
+Young GC 的 CSet = **所有 Eden Region + 所有 Survivor Region**（全量加入，无需选择）。每个 Region 进入 CSet 的路径：
 
-| 谁加进来的 | 什么时候 | 源码 |
-|-----------|---------|------|
-| 本轮 Eden Region（填满退休时） | mutator 运行期间——当前 Eden 分配满后被 `retire_mutator_alloc_region()` 加入 CSet | g1CollectedHeap.cpp:4875 `collection_set()->add_eden_region(alloc_region)` |
-| 上一轮 Survivor Region | 上轮 GC 结束时——`start_new_collection_set()` → `transfer_survivors_to_cset()` 加入**下一轮** CSet | g1Policy.cpp:1148-1176 遍历 survivors → `_collection_set->add_survivor_regions(curr)` |
+| 哪种 Region | 什么时候进入 CSet | 源码 |
+|-----------|-----------------|------|
+| 已填满退休的 Eden | mutator 运行时——填满后 `retire_mutator_alloc_region()` → `add_eden_region()` | g1CollectedHeap.cpp:4874 |
+| **当前活跃的 Eden**（还没满，mutator 正在用的那个） | GC 开始时——`release_mutator_alloc_region()` 退休它，走同一路径入 CSet | g1CollectedHeap.cpp:2926 → 4869 → 4874 |
+| 上一轮 Survivor | 上轮 GC 结束时——`transfer_survivors_to_cset()` | g1Policy.cpp:1148 |
 
-**注意**：新分配的 Eden Region **不是**一分配就进 CSet——它被标记为 Eden（`set_region_short_lived_locked` → `_eden.add(hr)`），但只有等到它被填满退休时（mutator 的 `attempt_allocation_locked` 里），才通过 `retire_mutator_alloc_region()` → `add_eden_region()` 正式进入 CSet 数组。源码注释（g1CollectionSet.cpp:244-251）明确说这发生在 "in-between safepoints by mutator threads"。
+**关键**：活跃 Eden Region 也是在退休时进入 CSet，只是退休发生在 GC 刚开始的 safepoint 阶段（由 `release_mutator_alloc_region()` 触发），而非 mutator 运行期间。所有 Eden Region 最终都走 `retire_mutator_alloc_region()` → `add_eden_region()` 这同一条路径。
 
 GC 开始时 `finalize_collection_set()` 只是**锁定**这个集合：
 
