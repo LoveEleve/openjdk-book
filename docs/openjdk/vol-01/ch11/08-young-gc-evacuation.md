@@ -23,10 +23,26 @@ TLAB 内部:
 
 **TLAB 满了怎么办** — 当前要分配的对象大小超出 `_end - _top`：
 
-1. **TLAB 退休** — 调用 `retire_current_tlab()`，剩余碎片捐回 Eden 全局空间
-2. **申请新 TLAB** — 从 `MutatorAllocRegion`（即一个 Eden Region）里切一块新空间
-3. **MutatorAllocRegion 也满了** — 当前 Eden Region 剩余空间不够装一个新对象 → 向 G1Policy 申请新的 Eden Region
-4. **没有可用的 Eden Region** — 当前 young regions 数已到达 `_young_list_target_length`（§3.1）→ Policy 说"不能再加了"
+1. **先判断"值不值得退休"** — 不是所有"剩余不够"都会退休。G1 用 `_refill_waste_limit` 做容差判断（threadLocalAllocBuffer.hpp:57）：
+   ```
+   if (TLAB剩余 > _refill_waste_limit)  →  不退休，直接走 shared heap 分配
+   if (TLAB剩余 ≤ _refill_waste_limit)  →  退休 TLAB，申请新的
+   ```
+   `_refill_waste_limit` 初始值 = `TLAB大小 / TLABRefillWasteFraction`（默认 64）。每次走 shared heap 分配时还会递增 `TLABWasteIncrement`（默认 4），逐步扩大容忍度——避免频繁退休导致性能抖动。
+
+2. **TLAB 退休** — 调用 `clear_before_allocation()`（threadLocalAllocBuffer.cpp:43-46）：
+   - 在 `top` 到 `hard_end` 之间填充一个 **dummy filler object**（让 GC 遍历 Eden 时不撞到空洞）
+   - 把 `used_bytes()` 记入线程的总分配量
+   - 把所有指针（`start/top/end/allocation_end`）清零
+   - **剩余空间不"捐回"**——TLAB 是从 MutatorAllocRegion 里切出来的一块，退了只是"我不再用了"，Region 还在
+
+3. **申请新 TLAB** — `compute_size()` 算出新 TLAB 大小（约 `Eden / (线程数 × target_refills)`），从 MutatorAllocRegion 里切一块新空间
+
+4. **MutatorAllocRegion 也满了** — 当前 Eden Region 撑不下一个完整的 TLAB → Policy 判断 `should_allocate_mutator_region()`：
+   ```
+   if (当前 young regions 数 < _young_list_target_length)  →  分配新 Eden Region
+   else                                                    →  触发 GC
+   ```
 
 此时进入 **slow path**——具体调用链（g1CollectedHeap.cpp）：
 
