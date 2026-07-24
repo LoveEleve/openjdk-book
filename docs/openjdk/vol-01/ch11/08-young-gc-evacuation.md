@@ -158,6 +158,8 @@ report_pending_cards()  — _pending_cards                 → 积压 dirty card
 g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
 ```
 
+**它的职责**——§3.1 的 `_young_list_target_length` 决定了 mutator 在两轮 GC 之间分配了多少 Eden Region。这些 Region 被**增量地**加入 CSet（详见 §3.5）。`finalize_collection_set()` 在 GC 暂停开始的那一刻，把所有这些累积的 Region **锁定**为本次 GC 的正式 CSet，不再接受新的增量追加。
+
 ### 3.3 内部两步
 
 `G1CollectionSet::finalize_young_part()`（g1CollectionSet.cpp:356-398）做五件事：
