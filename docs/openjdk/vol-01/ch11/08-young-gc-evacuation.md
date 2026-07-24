@@ -12,19 +12,46 @@
 
 ### 1.1 触发链路
 
-分配失败的具体调用链（ch11/07 §7 解释了为什么分配会触发 GC——这里是源码路径）：
+**TLAB（Thread-Local Allocation Buffer）** — 每个 mutator 线程在 Eden 里独占一小块空间，分配对象时执行 **pointer bump**：`_top + size ≤ _end` 就直接 `_top += size` 返回，约 10 条 CPU 指令，无锁。
 
 ```
-mutator TLAB 满 → 新 TLAB 分配失败 → Eden 无可用 Region
-  → G1CollectedHeap::attempt_allocation_slow()    (g1CollectedHeap.cpp:410)
-    → attempt_allocation_locked()                  (g1Allocator.inline.hpp:54)
-      → do_collection_pause(word_size, gc_count, ..., 
-                             GCCause::_g1_inc_collection_pause)  (:459-460)
-        → VM_G1CollectForAllocation op            (:2506)
-          → VMThread::execute(&op)                 (:2511)
-            → SafepointSynchronize::begin()         ← 所有 mutator 线程停下
-              → do_collection_pause_at_safepoint()  ← ★ 本文从这里开始
+TLAB 内部:
+  _start ─────────────────── _top ────── _end
+  已分配的对象                 ↑          上限
+                          下一个对象从这里开始
 ```
+
+**TLAB 满了怎么办** — 当前要分配的对象大小超出 `_end - _top`：
+
+1. **TLAB 退休** — 调用 `retire_current_tlab()`，剩余碎片捐回 Eden 全局空间
+2. **申请新 TLAB** — 从 `MutatorAllocRegion`（即一个 Eden Region）里切一块新空间
+3. **MutatorAllocRegion 也满了** — 当前 Eden Region 剩余空间不够装一个新对象 → 向 G1Policy 申请新的 Eden Region
+4. **没有可用的 Eden Region** — 当前 young regions 数已到达 `_young_list_target_length`（§3.1）→ Policy 说"不能再加了"
+
+此时进入 **slow path**——具体调用链（g1CollectedHeap.cpp）：
+
+```
+G1CollectedHeap::attempt_allocation_slow(word_size, ...)        // line 410
+  │
+  ├─ MutexLockerEx x(Heap_lock);                                // line 432
+  │
+  ├─ _allocator->attempt_allocation_locked(word_size, ...)      // line 433
+  │    └─ 在 Heap_lock 保护下重试分配（可能在别的线程释放后被抢到了）
+  │       如果成功 → 返回对象，不触发 GC
+  │
+  └─ 如果重试也失败了:
+       if (should_try_gc)                                       // line 452
+         do_collection_pause(word_size, gc_count_before, 
+                             &succeeded,                        // lines 459-460
+                             GCCause::_g1_inc_collection_pause);
+           │
+           ├─ VM_G1CollectForAllocation op(...);                // line 2506
+           └─ VMThread::execute(&op);                           // line 2511
+              → SafepointSynchronize::begin()                   // 所有 mutator 停下
+              → do_collection_pause_at_safepoint()              // ★ Young GC 开始
+```
+
+**注意 `attempt_allocation_locked()` 在 GC 之前的那次重试**——两个线程可能同时走到 slow path，先到的触发 GC，后到的在 `Heap_lock` 上排队。GC 完成后 Eden 有空闲 Region，后到的线程直接分配成功——这就是"GC 不是我自己触发的，但我受益了"的情况。
 
 ### 1.2 执行位置
 
