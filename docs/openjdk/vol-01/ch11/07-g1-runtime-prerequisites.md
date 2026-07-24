@@ -524,6 +524,39 @@ bool SafepointSynchronize::safepoint_safe(JavaThread *thread, JavaThreadState st
 
 **为什么 native 线程必须等它返回时再处理**——native 线程从 JNI 返回 Java 时，经过 `transition_from_native()`（interfaceSupport.inline.hpp:158-177），检查 `SafepointMechanism::poll(thread)`。如果发现 safepoint 正在进行，调用 `SafepointSynchronize::block(thread)` 自阻塞。
 
+**blocked 线程醒来怎么办——`Threads_lock` 第二道防线**
+
+刚才说 blocked 线程"不需要停"，但这里有个关键问题：如果 GC 进行到一半，锁释放了或 I/O 完成了，blocked 线程被 OS 唤醒了——它能继续执行 Java 代码吗？
+
+**不能。** 机制分两层：
+
+**第一层（VM 线程侧）**：`examine_state_of_thread()` → `safepoint_safe()` → `roll_forward(_at_safepoint)` 只是从计数上"收编"了这个线程——VM Thread 不等它。但**线程自己在睡觉，完全不知道这件事。**
+
+**第二层（Java 线程侧，醒来时的自检）**：线程离开 `_thread_blocked` 必须经过状态转换：
+
+```
+_thread_blocked → _thread_blocked_trans → transition_and_fence() → _thread_in_vm
+                                                ↑
+                                    SafepointMechanism::block_if_requested(thread)
+```
+
+`transition()` 或 `transition_and_fence()`（interfaceSupport.inline.hpp:114-128, 137-151）在所有状态转换中**强制调用** `SafepointMechanism::block_if_requested(thread)`。这个函数检查 polling page 是否被武装——如果 GC 还在进行，polling page 处于 armed 状态 → 进入 `SafepointSynchronize::block(thread)`。
+
+在 `block()` 内部（safepoint.cpp:889-917），`_thread_blocked_trans` 状态匹配的路径是：
+
+```cpp
+case _thread_blocked_trans:
+  thread->set_thread_state(_thread_blocked);                     // 回到 blocked 态
+  Threads_lock->lock_without_safepoint_check();                  // ★ 阻塞在此！
+  thread->set_thread_state(state);                               // 恢复原状态
+  Threads_lock->unlock();
+  break;
+```
+
+**`Threads_lock` 是整个 safepoint 期间被 VM Thread 持有的全局锁。** `SafepointSynchronize::begin()` 一开始就拿了它，`end()` 最后才放。任何线程在 GC 期间醒来试图获取 `Threads_lock` 都会被阻塞，直到 GC 完成。
+
+**一句话总结**：blocked 线程醒来 → 经历 `block_if_requested()` 安检 → 发现 GC 在进行 → 在 `Threads_lock` 上被拦住 → GC 结束释放锁 → 线程恢复执行。这是和 native 线程回来时相同的核心机制，只是走的状态转换路径不同（`transition` 而非 `transition_from_native`）。
+
 #### Step 4: 等待剩余需要阻塞的线程确认
 
 ```cpp
