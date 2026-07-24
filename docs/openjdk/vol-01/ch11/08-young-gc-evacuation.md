@@ -10,9 +10,28 @@
 
 ## 1. 入口——谁触发的、从哪进来
 
-### 1.1 触发链路
+### 1.1 触发概览
 
-**TLAB（Thread-Local Allocation Buffer）** — 每个 mutator 线程在 Eden 里独占一小块空间，分配对象时执行 **pointer bump**：`_top + size ≤ _end` 就直接 `_top += size` 返回，约 10 条 CPU 指令，无锁。
+GC 不是定时事件——是分配失败的自然终点。一句话版：
+
+> mutator 分配对象 → TLAB（线程本地缓冲区）满了 → Eden Region 也没多余空间了 → JVM 无法继续分配 → 触发 GC 回收空间 → GC 完成后重新分配
+
+具体到 G1：当 mutator 线程在 TLAB 里分配失败、慢速路径也无法从 Eden 获取新空间时，调用到达 `G1CollectedHeap::attempt_allocation_slow()`（g1CollectedHeap.cpp:410），由它负责决定"是否要 GC"：
+
+```
+attempt_allocation_slow(word_size)
+  ├─ 持 Heap_lock 后重试一次分配（别的线程可能刚释放了空间）
+  ├─ 如果还是不行 → 尝试获取新的 Eden Region
+  │    → 如果 young regions 数已到 _young_list_target_length 上限 → 无法再扩
+  ├─ 无法扩 → do_collection_pause(word_size, GCCause::_g1_inc_collection_pause)
+  └─ VMThread::execute(VM_G1CollectForAllocation) → Safepoint → GC 开始
+```
+
+### 1.2 分配链路详情——从 TLAB 到 GC 的完整路径
+
+前述"TLAB 满 → Eden 满 → GC"每一步内部都有更细致的机制。本节展开这些细节，着急看 GC 流程的可以直接跳到 §2。
+
+**TLAB 的 pointer bump**（threadLocalAllocBuffer.inline.hpp:34-54）：`_top + size ≤ _end` → `_top += size`，约 10 条 CPU 指令，无锁。
 
 ```
 TLAB 内部:
@@ -21,72 +40,31 @@ TLAB 内部:
                           下一个对象从这里开始
 ```
 
-**TLAB 满了怎么办** — 当前要分配的对象大小超出 `_end - _top`：
-
-1. **先判断"值不值得退休"** — 不是所有"剩余不够"都会退休。G1 用 `_refill_waste_limit` 做容差判断（threadLocalAllocBuffer.hpp:57）：
-   ```
-   if (TLAB剩余 > _refill_waste_limit)  →  不退休，直接在 Eden 上分配
-   if (TLAB剩余 ≤ _refill_waste_limit)  →  退休 TLAB，申请新的
-   ```
-   `_refill_waste_limit` 初始值 = `TLAB大小 / TLABRefillWasteFraction`（默认 64）。每次走这条路径时还会递增 `TLABWasteIncrement`（默认 4），逐步扩大容忍度——避免频繁退休导致性能抖动。
-
-   **"直接在 Eden 上分配"不意味着对象去了别的地方**——分配目标仍然是当前的 Eden Region，只是绕过了 TLAB 的本地 pointer bump，改为在 `G1AllocRegion` 上用 CAS 做 bump-pointer。速度比 TLAB 慢（需要原子操作），但比触发 GC 快。
-
-2. **TLAB 退休** — 调用 `clear_before_allocation()`（threadLocalAllocBuffer.cpp:43-46）：
-   - 在 `top` 到 `hard_end` 之间填充一个 **dummy filler object**（让 GC 遍历 Eden 时不撞到空洞）
-   - 把 `used_bytes()` 记入线程的总分配量
-   - 把所有指针（`start/top/end/allocation_end`）清零
-   - **剩余空间不"捐回"**——TLAB 是从 MutatorAllocRegion 里切出来的一块，退了只是"我不再用了"，Region 还在
-
-3. **申请新 TLAB** — `compute_size()` 算出新 TLAB 大小（约 `Eden / (线程数 × target_refills)`），从 MutatorAllocRegion 里切一块新空间
-
-4. **MutatorAllocRegion 也满了** — 当前 Eden Region 装不下新 TLAB（或 `allocate_outside_tlab` 的 CAS 分配失败）。此时不直接触发 GC——G1 还有三级"挽救"：
-
-   **第一级（无锁）**：检查 **retained region**（`_retained_alloc_region`）。上一轮 Region 退休时如果剩余空间还能装一个 TLAB（`MutatorAllocRegion::should_retain()` 判断 `free ≥ MinTLABSize`——源码是 `free < MinTLABSize` 则拒绝），G1 会保留它备用。先在 retained region 上尝试分配——命中率高，避免了锁。
-
-   **第二级（持锁）**：`attempt_allocation_locked()`（g1AllocRegion.inline.hpp:98）：
-   - 持 `Heap_lock` 后重新尝试当前 Region（其他线程可能在等锁期间释放了空间）
-   - 如果还是失败 → 退休当前 Region（`retire(true)` + fill dummy + 可能保留为 retained）
-   - 调用 `new_mutator_alloc_region()` → `should_allocate_mutator_region()`：
-     ```
-     if (当前 young regions 数 < _young_list_target_length)  →  从 FreeList 拿新 Region 当 Eden
-     else                                                    →  NULL（无法再扩）
-     ```
-
-   **第三级（GCLocker 紧急扩展）**：如果 GCLocker 活跃（JNI critical section 持有者）且 young list 还能扩：
-   ```
-   if (GCLocker::is_active_and_needs_gc() && g1_policy()->can_expand_young_list())
-     → attempt_allocation_force() → 绕过 _young_list_target_length，用 _young_list_max_length 做上限
-   ```
-
-   **Region 和 TLAB 有一个关键区别**：TLAB 有 `_refill_waste_limit`（剩余太多就不退休，省掉重建 TLAB 的开销）。Region **没有类似机制**——Region 退休时不看"浪费了多少"，而是退休后通过 `should_retain()` 判断"还值不值得保留"。保留的不是"剩余空间里的碎片"，而是整个 Region 留给下次用。Region 剩余空间在 retirement 时被 `fill_up_remaining_space()` 填成 dummy object（GC 遍历 Eden 时不撞空洞）。
-
-此时进入 **slow path**——具体调用链（g1CollectedHeap.cpp）：
+**TLAB 空间不够时——不是每次都退休**。G1 用 `_refill_waste_limit` 做容差（threadLocalAllocBuffer.hpp:57）：
 
 ```
-G1CollectedHeap::attempt_allocation_slow(word_size, ...)        // line 410
-  │
-  ├─ MutexLockerEx x(Heap_lock);                                // line 432
-  │
-  ├─ _allocator->attempt_allocation_locked(word_size, ...)      // line 433
-  │    └─ 在 Heap_lock 保护下重试分配（可能在别的线程释放后被抢到了）
-  │       如果成功 → 返回对象，不触发 GC
-  │
-  └─ 如果重试也失败了:
-       if (should_try_gc)                                       // line 452
-         do_collection_pause(word_size, gc_count_before, 
-                             &succeeded,                        // lines 459-460
-                             GCCause::_g1_inc_collection_pause);
-           │
-           ├─ VM_G1CollectForAllocation op(...);                // line 2506
-           └─ VMThread::execute(&op);                           // line 2511
-              → SafepointSynchronize::begin()                   // 所有 mutator 停下
-              → do_collection_pause_at_safepoint()              // ★ Young GC 开始
+if (TLAB剩余 > _refill_waste_limit)  →  不退休，直接在 Eden Region 上用 CAS 分配
+                                         （绕过 TLAB 的本地 bump，但对象还在 Eden）
+if (TLAB剩余 ≤ _refill_waste_limit)  →  退休 TLAB，申请新的
 ```
 
-**注意 `attempt_allocation_locked()` 在 GC 之前的那次重试**——两个线程可能同时走到 slow path，先到的触发 GC，后到的在 `Heap_lock` 上排队。GC 完成后 Eden 有空闲 Region，后到的线程直接分配成功——这就是"GC 不是我自己触发的，但我受益了"的情况。
+`_refill_waste_limit` = `TLAB大小 / 64`。每次走 CAS 路径时递增 4（`TLABWasteIncrement`），逐步扩大容忍度，避免频繁重建 TLAB。
 
-### 1.2 执行位置
+**TLAB 退休**（`clear_before_allocation()`, threadLocalAllocBuffer.cpp:43-46）：
+- `top`→`hard_end` 填 dummy filler object（GC 遍历 Eden 不撞空洞）
+- `used_bytes()` 记入线程分配量
+- 指针清零（start/top/end/allocation_end）——**空间不"捐回"**，TLAB 本就属于 Eden Region，退了只是"我不再用了"
+
+**Region 也满了时——三级挽救**（g1AllocRegion.inline.hpp:98-131）：
+
+| 级别 | 机制 | 条件 |
+|------|------|------|
+| 第一级 | `attempt_retained_allocation()` | 上一轮退休保留的 retained region 还有空间 |
+| 第二级 | `attempt_allocation_locked()` → retire → `new_mutator_alloc_region()` | young count < `_young_list_target_length` |
+| 第三级 | `attempt_allocation_force()` (GCLocker 紧急) | young count < `_young_list_max_length` |
+
+**Region 没有 `_refill_waste_limit`**——退休时剩余空间被 `fill_up_remaining_space()` 填 dummy，Region 通过 `MutatorAllocRegion::should_retain()` 判断 `free < MinTLABSize` 则丢弃、否则保留为 retained。TLAB 控制和 Region 控制是两个维度的独立机制。
+### 1.3 执行位置
 
 `G1CollectedHeap::do_collection_pause_at_safepoint()`（g1CollectedHeap.cpp:2793-3123）——约 330 行的方法，编排了下面 7 个阶段。
 
