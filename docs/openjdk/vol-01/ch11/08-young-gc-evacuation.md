@@ -76,14 +76,42 @@ mutator TLAB 满 → 新 TLAB 分配失败 → Eden 无可用 Region
 
 ## 3. 阶段 1: CSet 选择——把 Eden + Survivor 全加进去
 
-### 3.1 `finalize_collection_set()` 入口
+### 3.1 前置：谁决定了有多少 Eden Region
+
+"把 Eden + Survivor 全加进 CSet"的前提是——**堆里当前到底有多少 Eden 和 Survivor Region？** 这个数量不是随机的，由 G1Policy 的 `_young_list_target_length` 持续管控（g1Policy.hpp:82）：
+
+```cpp
+uint _young_list_target_length;   // 目标：堆里应该有多少 Young Region (Eden+Survivor)
+uint _young_list_max_length;      // 上限：GC locker 下 Eden 可扩展的最大值
+```
+
+**target 怎么算的**（g1Policy.cpp:213-378）：G1Policy 用历史数据预测"到下一次 GC 能分配多少字节"，除以 Region 大小得到需要多少 Regions，然后用二分搜索在 [min, max] 区间内找**能把下次 GC 控制在目标暂停时间内的最大 young gen 大小**：
+
+```
+预测器（G1YoungLengthPredictor）对每个候选值回答"will_fit?":
+  1. 空间够吗？（young_length < free_regions - reserve）
+  2. 暂停会超吗？（base_time + copy_time + other_time ≤ target_pause_time_ms）
+  3. 拷贝安全吗？（有足够空间装搬来的活对象？）
+```
+
+**上下界**：
+
+| 界 | 如何确定 | 默认值 |
+|----|---------|--------|
+| 下界 | `G1NewSizePercent` × 堆 Region 数 + 当前 survivor 数 | 5% 堆（最小 1 个 Region） |
+| 上界 | `G1MaxNewSizePercent` × 堆 Region 数 | 60% 堆 |
+| 还可以被覆盖 | 用户显式设 `-XX:NewSize` / `-XX:MaxNewSize` | — |
+
+每次 GC 结束后，`update_young_list_max_and_target_length()` 重新计算这个 target——下次 Young GC 时 CSet 里的 Eden 数量就是这个 target 驱动的分配结果。
+
+### 3.2 `finalize_collection_set()` 入口
 
 ```cpp
 // g1CollectedHeap.cpp:2944
 g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
 ```
 
-### 3.2 内部两步
+### 3.3 内部两步
 
 `G1CollectionSet::finalize_young_part()`（g1CollectionSet.cpp:356-398）做五件事：
 
@@ -93,7 +121,7 @@ g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
 4. **`survivors->convert_to_eden()`** — 上一轮 GC 的 survivor regions 转换身份为 eden
 5. **返回剩余时间** — 如果有余额且是 Mixed GC，`finalize_old_part()` 继续往里加 old region。Young-only 时直接忽略这一步
 
-### 3.3 Young-only vs Mixed 的区别
+### 3.4 Young-only vs Mixed 的区别
 
 | | Young-only | Mixed |
 |---|---|---|
@@ -102,7 +130,7 @@ g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
 
 Young-only 阶段 `in_mixed_phase()` 返回 false，所以根本不会走进 `finalize_old_part()` 的逻辑。
 
-### 3.4 Region 怎么进入 CSet
+### 3.5 Region 怎么进入 CSet
 
 每个 Eden/Survivor Region 在 GC 之前已经被增量地（incremental）加入 CSet：
 
