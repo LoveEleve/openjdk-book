@@ -312,15 +312,15 @@ JNI 提供了 `GetPrimitiveArrayCritical()` 函数——它返回一个 **指向
 
 **这条指针指向堆里的对象。GC 是标记-复制——它会搬走活对象。** 如果 `GetPrimitiveArrayCritical` 的持有者还在通过这条原始指针读写数组时，GC 把数组搬到了另一个地址——指针立刻变成野指针，进程 crash。
 
-### 2.2 GCLocker 的解决方案——两个关键状态
+### 2.2 GCLocker 的解决方案——三个关键状态
 
-GCLocker（gcLocker.hpp:38-154）维护两个 volatile 变量：
+GCLocker（gcLocker.hpp:38-154）用三个 `static volatile` 变量实现了一个协议——不需要在 safepoint 里等待 mutator 线程释放 JNI critical section，而是让最后一个退出的线程替大家做 GC：
 
-```cpp
-static volatile jint  _jni_lock_count;  // 当前活跃的 JNI critical section 数
-static volatile bool  _needs_gc;        // "堆满了，需要 GC——但有 critical section 拦着"
-static volatile bool  _doing_gc;        // unlock_critical 正在替大家做 GC
-```
+**`_jni_lock_count`** — `GCLocker`:`static volatile jint`，gcLocker.hpp:45。JVM 全局唯一计数器，初始值为 0。`lock_critical()` 进入 critical section 时 +1（`jni_lock()` → `Atomic::inc(&_jni_lock_count)`），`unlock_critical()` 退出时 -1（`jni_unlock()` → `Atomic::dec(&_jni_lock_count)`）。解决的问题——GC 通过 `check_active_before_gc()` 在 safepoint 中读它：`_jni_lock_count != 0` 意味着有线程正握着原生指针，GC 不能搬对象 → 必须 abort 本次 safepoint GC。
+
+**`_needs_gc`** — `GCLocker`:`static volatile bool`，gcLocker.hpp:46。静态变量，初始 `false`——VM 启动时堆是空的。设置时机——分配失败需要 GC 但 `_jni_lock_count > 0` 时，`set_needs_gc()` 将其置为 `true`。解决的问题——"堆满了但有人不让做 GC"——把这个意愿记下来，等最后一个 critical section 退出时由 `unlock_critical()` 检查。如果它看到 `_needs_gc == true`，就调用 `jni_unlock()` 执行一次 GC（`collect(GCCause::_gc_locker)`），完成后设回 `false`。
+
+**`_doing_gc`** — `GCLocker`:`static volatile bool`，gcLocker.hpp:48。静态变量，初始 `false`。设置时机——`jni_unlock()` 在 `_needs_gc == true` 时设 `_doing_gc = true`，GC 完成后设回 `false`。解决的问题——其他线程在 `lock_critical()` 里检查 `_jni_lock_count == 0 && _doing_gc == true` 时，说明"已经没有 critical section 了，但有人正在替大家做 GC"——在 `JNICritical_lock` 上等待，避免在 GC 完成前进入新的 critical section。
 
 `lock_critical()`——进入 critical section（gcLocker.inline.hpp:31-42）：
 ```cpp
@@ -474,26 +474,36 @@ void G1Policy::transfer_survivors_to_cset(const G1SurvivorRegions* survivors) {
 }
 ```
 
-`add_eden_region()` 和 `add_survivor_regions()` 都委托给同一个底层方法 `add_young_region_common()`（g1CollectionSet.cpp:229-278）：
+`add_eden_region()` 和 `add_survivor_regions()` 都委托给同一个底层方法 `add_young_region_common()`。这个方法操作的核心数据结构——`G1CollectionSet` 的五大字段：
+
+**`_collection_set_regions`** — `G1CollectionSet`:`uint*`，g1CollectionSet.hpp:55。普通 C 数组指针。构造函数中 `NEW_C_HEAP_ARRAY(uint, max_regions, mtGC)` 分配，大小 = 堆的最大 Region 数。存的不是 `HeapRegion*` 指针，而是 `hrm_index()`——Region 在 `HeapRegionManager` 数组中的稳定索引。遍历时通过 `_g1h->region_at(index)` 反查。解决的问题——需要快速遍历 CSet（内存连续比链表 cache 好），存索引而非指针因为 hrm_index 不受 Region 重定位影响。
+
+**`_collection_set_cur_length`** — `G1CollectionSet`:`volatile size_t`，g1CollectionSet.hpp:56。有效条目计数，不等于数组容量。构造函数初始为 0。每加一个 Region 递增 1，GC 开始后 `finalize_incremental_building()` 锁定不再变。标记 `volatile` 是因为 mutator 在 safepoint 间写（`add_eden_region`），VMThread/Worker 在 safepoint 内读——需保证跨线程可见性。解决的问题——区分"数组能装多少"（max_regions）和"实际有了多少"（cur_length）——遍历上限，不是容量。
+
+**`_inc_build_state`** — `G1CollectionSet`:`CSetBuildType`（枚举 `{Active, Inactive}`），g1CollectionSet.hpp:76。构造函数置 `Inactive`，GC 结束时 `start_incremental_building()` 切 `Active`——mutator 期间退休 Eden Region 时往 CSet 增量添加。GC 开始时 `finalize_incremental_building()` 切回 `Inactive`——CSet 锁定，不再接受新 Region。解决的问题——并发安全：`add_young_region_common()` 首行 `assert(_inc_build_state == Active)`（g1CollectionSet.cpp:232）确保 mutator 不会在 GC 期间往已锁定的 CSet 里加 Region。
+
+**`_inc_recorded_rs_lengths`** — `G1CollectionSet`:`size_t`，g1CollectionSet.hpp:88。增量累加器。每次 `start_incremental_building()` 重置为 0。`add_young_region_common()` 每次把新增 Region 的 RSet 实际长度累加上去。解决的问题——暂停预测的输入。`finalize_young_part()` 读它计算 "这次 GC 要扫描多少 card"，与 time budget 对比决定 CSet 是否太大。
+
+**`_inc_predicted_elapsed_time_ms`** — `G1CollectionSet`:`double`，g1CollectionSet.hpp:101。增量累加器。每次 `start_incremental_building()` 重置为 0.0。`add_young_region_common()` 每次调 `predict_region_elapsed_time_ms(hr)` 估算这个 Region 的清理耗时（sweep card table、更新 stats），累加入内。解决的问题——暂停预测的另一个输入。与 `_inc_recorded_rs_lengths` 一起决定"本次 CSet 的总预测工作量会不会超 pause time target"。
 
 ```cpp
+// g1CollectionSet.cpp:229-278
 void G1CollectionSet::add_young_region_common(HeapRegion* hr) {
-    assert(_inc_build_state == Active, "Precondition");
+    assert(_inc_build_state == Active, "Precondition");        // ← 构建状态门
 
-    hr->set_young_index_in_cset((int)_collection_set_cur_length);  // CSet 中的序号
-    _collection_set_regions[_collection_set_cur_length] = hr->hrm_index(); // 存 Region 索引
-    _collection_set_cur_length++;               // 长度 +1
+    hr->set_young_index_in_cset((int)_collection_set_cur_length);
+    _collection_set_regions[_collection_set_cur_length] = hr->hrm_index(); // ← 存索引
+    _collection_set_cur_length++;                               // ← 有效长度 +1
 
-    _g1h->register_young_region_with_cset(hr);  // 设置 in_cset_fast_test 位图
+    _g1h->register_young_region_with_cset(hr);
 
-    // 为 G1Policy 的暂停预测缓存 RSet 长度和预测时间
-    _inc_recorded_rs_lengths += rs_length;
-    _inc_predicted_elapsed_time_ms += predict_region_elapsed_time_ms(hr);
+    // 为 G1Policy 的暂停预测累加数据
+    size_t rs_length = hr->rem_set()->occupied_locked();
+    _inc_recorded_rs_lengths += rs_length;                      // ← RSet 扫描工作量
+    _inc_predicted_elapsed_time_ms += predict_region_elapsed_time_ms(hr); // ← 清理耗时
     _inc_bytes_used_before += hr->used();
 }
 ```
-
-**CSet 的存储结构**——`_collection_set_regions` 是一个普通的 `uint*` C 数组（g1CollectionSet.hpp:55），存的不是 `HeapRegion*` 指针，而是 `hrm_index()`（Region 在 `HeapRegionManager` 数组中的索引）。遍历时通过 `_g1h->region_at(index)` 反查 `HeapRegion*`。**不是链表，是简单的位置写入数组。**
 
 ### 4.3 GC 开始时的锁定——finalize_collection_set
 
@@ -683,28 +693,6 @@ void G1Policy::revise_young_list_target_length_if_necessary(size_t rs_lengths) {
 | 退休动作 | fill dummy filler + 清零指针 | `fill_up_remaining_space()` 填 dummy + `retire_mutator_alloc_region()` 入 CSet |
 | 保留机制 | 无——TLAB 退休就不存在了 | `MutatorAllocRegion::should_retain()`——如果剩余空间 ≥ MinTLABSize，保留为 retained region |
 | waste 阈值 | `_refill_waste_limit`（TLAB 大小 / 64，动态调整） | 无——Region 退休时不看 waste，看"还能不能装一个完整 TLAB" |
-
----
-
-## 附录 C: 本文涉及的字段速查
-
-| 字段 | 所在类 | 类型 | 源码位置 | 用途 |
-|------|--------|------|---------|------|
-|  |  |  | threadLocalAllocBuffer.hpp:57 | TLAB 剩余超过此值则不做退休——直接在 Region 上 CAS 分配 |
-|  |  |  | threadLocalAllocBuffer.hpp:67 | TLAB slow-path refill 的浪费累计计数 |
-|  |  |  | g1AllocRegion.hpp:213 | 退休时保留的 Region——下次优先从它分配，提高命中率 |
-|  |  |  | g1AllocRegion.hpp:208 | 当前 mutator 阶段产生的总浪费字节数 |
-|  |  |  | g1Policy.hpp:82 | Young Region (Eden+Survivor) 的目标总数——由暂停预测模型计算 |
-|  |  |  | g1Policy.hpp:87 | GCLocker 活跃时可扩展的 Eden 最大 Region 数 |
-|  |  |  | gcLocker.hpp:45 | 当前处在 JNI critical section 中的线程计数 |
-|  |  |  | gcLocker.hpp:46 | 堆空间不足需要 GC，但有 critical section 拦着的标志 |
-|  |  |  | gcLocker.hpp:48 | unlock_critical 正在为所有线程执行 GC 的标志 |
-|  |  |  | g1CollectionSet.hpp:55 | CSet 的实际存储——不是链表，是普通 C 数组，存 region 索引（hrm_index） |
-|  |  |  | g1CollectionSet.hpp:56 | 当前 CSet 的有效条目数——volatile，支持并发读 |
-|  |  |  | g1CollectionSet.hpp:76 | 枚举：Active（增量构建中）或 Inactive（已锁定） |
-|  |  |  | g1CollectionSet.hpp:88 | 增量构建期间累加的 RSet 总长度——用于暂停预测 |
-|  |  |  | g1CollectionSet.hpp:101 | 增量构建期间累加的预测耗时（毫秒） |
-
 
 ---
 
