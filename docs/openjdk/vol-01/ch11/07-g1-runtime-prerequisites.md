@@ -522,7 +522,7 @@ bool SafepointSynchronize::safepoint_safe(JavaThread *thread, JavaThreadState st
 }
 ```
 
-**为什么 native 线程必须等它返回时再处理**——native 线程从 JNI 返回 Java 时，经过 `transition_from_native()`（interfaceSupport.inline.hpp:158-177），检查 `SafepointMechanism::poll(thread)`。如果发现 safepoint 正在进行，调用 `SafepointSynchronize::block(thread)` 自阻塞。
+**native 线程回来时怎么办**——VM Thread 不等它（Step 3），但 native 线程总会执行完 JNI 调用的。当它准备从 native 返回 Java 时，必须经过 `transition_from_native()`（interfaceSupport.inline.hpp:158-177）。这个函数里调了 `SafepointMechanism::poll(thread)` 检查 polling page 有没有被 armed——如果 GC 还在进行，polling page 就是 armed 状态 → 线程进入 `SafepointSynchronize::block(thread)` 自阻塞，等 GC 结束再继续。
 
 **blocked 线程醒来怎么办——`Threads_lock` 第二道防线**
 
