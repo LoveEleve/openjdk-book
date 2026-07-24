@@ -46,7 +46,7 @@ evacuate_collection_set(&per_thread_states);
   → workers()->run_task(&g1_par_task);    // 所有 GC Worker 并行执行
 ```
 
-每个 Worker（GC 线程）执行 `G1ParTask::work(worker_id)`（g1CollectedHeap.cpp:3185-3202）。这是一个严格的三阶段：
+每个 Worker（GC 线程）执行 `G1ParTask::work(worker_id)`（g1CollectedHeap.cpp:3185-3251）。这是一个严格的三阶段：
 
 ```cpp
 void work(uint worker_id) {
@@ -269,7 +269,7 @@ void G1ParScanThreadState::steal_and_trim_queue(RefToScanQueueSet *task_queues) 
 }
 ```
 
-`steal_best_of_2()`（taskqueue.inline.hpp:257-267）——每次随机选两个 Worker 的队列，"偷其中更好的那个"（队列更长、更有料）。
+`steal_best_of_2()`（taskqueue.inline.hpp:235-255）——每次随机选两个 Worker 的队列，"偷其中更好的那个"（队列更长、更有料）。
 
 ### 5.4 终止协议——什么时候全体收工
 
