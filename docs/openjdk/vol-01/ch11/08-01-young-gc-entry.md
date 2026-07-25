@@ -266,6 +266,13 @@ JNI critical section 没有锁。它只是一个全局计数器 `_jni_lock_count
 static volatile jint _jni_lock_count;   // 当前在 critical section 中的线程数
 ```
 
+**"线程在 critical section 里" 是怎么记录的**——每线程独立追踪，不是只看全局计数器：
+
+- **全局**：`GCLocker::_jni_lock_count`——多少个线程当前在 critical section 里
+- **每线程**：`JavaThread::_jni_active_critical`（thread.hpp:1152）——**这个**线程的嵌套深度。`in_critical()` = `_jni_active_critical > 0`，`in_last_critical()` = `_jni_active_critical == 1`
+
+两个计数器通过 `lock_critical()` / `unlock_critical()` 同步：进入时两者各 +1，退出时各 -1。safepoint 时 `verify_critical_count()` 遍历所有线程检查 per-thread 的和是否等于全局计数器。
+
 任意多个线程可以同时进入 critical section（各自握着不同数组的指针），互不干扰。`lock_critical()` 在正常情况下只做 `_jni_lock_count++`，约几条 CPU 指令，无锁：
 
 ```cpp
