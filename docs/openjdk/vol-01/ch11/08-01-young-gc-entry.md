@@ -199,7 +199,11 @@ if (_retained_alloc_region != NULL) {
 
 **第二级：持锁重试 + `_young_list_target_length` 的约束**
 
-拿不到 retained region → 持 `Heap_lock`。`attempt_allocation_locked()`（g1AllocRegion.inline.hpp:98-118）做三件事：
+拿不到 retained region → 持 **`Heap_lock`**。
+
+`Heap_lock` 是一个 JVM 全局的 `Monitor*` 对象（mutexLocker.hpp:55——`extern Monitor* Heap_lock`）。它不是任何类的字段，是一个**全局单例**——所有 HotSpot GC 实现（Serial/Parallel/CMS/G1）共享同一把锁。在 `mutex_init()` 中初始化为 `PaddedMonitor` 实例，类型为 `nonleaf+1`（高优先级内部锁），safepoint check 策略为 `_safepoint_check_sometimes`——意味着持这把锁的线程在 safepoint 时不需要特殊处理。
+
+`attempt_allocation_locked()`（g1AllocRegion.inline.hpp:98-118）做三件事：
 
 1. **持锁后重试当前 Region**——等锁期间别的线程可能做完了 GC，释放了空间
 2. 如果还是失败 → **退休当前 Region**（`retire(true)`——fill dummy + 可能保留为 retained region）
