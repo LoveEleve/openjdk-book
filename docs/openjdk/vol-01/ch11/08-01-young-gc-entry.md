@@ -235,104 +235,95 @@ bool can_expand_young_list() const {
 
 ## 4. GCLocker——JNI critical section 如何阻止 GC
 
-### 4.1 问题：JNI Critical Section 和 GC 互斥
+### 4.1 什么是 JNI critical section
 
-**"JNI critical section" 是什么**——当 Java 代码把自己手里的数组传给 native 方法时，正常情况下 JNI 会拷贝一份副本给 native 代码操作。但 `GetPrimitiveArrayCritical()` 不拷贝——它直接返回一个**指向 Java 数组堆内存的原始指针**。从调用 `GetPrimitiveArrayCritical` 到调用 `ReleasePrimitiveArrayCritical` 之间的这段时间叫 "JNI critical section"。
+当 Java 把数组传给 native 方法时，正常 JNI 会拷贝一份副本。但 `GetPrimitiveArrayCritical()` 不拷贝——直接返回指向 Java 堆内存的原始指针。从 `Get` 到 `Release` 的区间叫 "JNI critical section"。
 
 ```java
 // Java 侧
 byte[] buffer = new byte[1024 * 1024];
-nativeProcess(buffer);  // 调 native 方法
+nativeProcess(buffer);
 
 // C/C++ 侧（JNI）
 void nativeProcess(JNIEnv* env, jbyteArray arr) {
-    // ★ 进入 critical section——拿到指向堆内存的原始指针
     jbyte* raw = (*env)->GetPrimitiveArrayCritical(env, arr, NULL);
-    
-    // 直接操作 Java 堆里的原始字节——不经过任何 JVM 包装
-    for (int i = 0; i < len; i++) raw[i] = ...;
-    
-    // ★ 退出 critical section——释放原始指针
+    for (int i = 0; i < len; i++) raw[i] = ...;   // 直接操作堆内存
     (*env)->ReleasePrimitiveArrayCritical(env, arr, raw, 0);
 }
 ```
 
-**问题**——这条 raw 指针指向堆里的对象。GC 是标记-复制——它会搬走活对象。如果临界区内的 native 代码正通过这个 raw 指针读写数组时，GC 把数组搬到了另一个地址——**指针立刻变成野指针，进程 crash**。所以 GC 必须在所有 JNI critical section 都结束之后才能进行。
+**问题**——raw 指针指向堆里的对象。GC 会搬走活对象。如果 native 代码正通过 raw 指针写数据时 GC 搬走了数组——野指针，进程 crash。
 
-### 4.2 GCLocker 的三个关键状态
+### 4.2 没有 GC 时——只是个计数器
 
-所有字段都是全局 `static`（gcLocker.hpp:45-48），全 JVM 共享：
+JNI critical section 没有锁。它只是一个全局计数器 `_jni_lock_count`：
 
-| 字段 | 类型 | 含义 | 初始值 |
-|------|------|------|--------|
-| `_jni_lock_count` | `static volatile jint` | 当前在 JNI critical section 中的线程数 | 0 |
-| `_needs_gc` | `static volatile bool` | 堆需要 GC 但被 critical section 拦住的标志 | false |
-| `_doing_gc` | `static volatile bool` | 有线程正在触发 GC（等 VMThread 执行）的标志 | false |
+```cpp
+// gcLocker.hpp:45
+static volatile jint _jni_lock_count;   // 当前在 critical section 中的线程数
+```
 
-**"JNI critical section" 本身没有锁**——它只是一个计数器 `_jni_lock_count`。任意多个应用线程可以同时进入 critical section（各自握着不同的数组的原始指针），互不干扰。正常情况下（`_needs_gc == false`），`lock_critical()` 只做 `_jni_lock_count++`，不加任何锁。
-
-**只有 GC 被拦着时，后来的人才需要等**。一旦 `_needs_gc == true`，后续想进入 critical section 的线程走慢路径——在 `JNICritical_lock` 上休眠等 GC 完成。已经在 critical section 里的线程不受影响——它们继续执行 native 代码，等它们自己退出。
-
-**所以**：没有 GC 时，`JNICritical_lock` 从不被触碰。`_needs_gc == true` 的那一刻起，`JNICritical_lock` 才开始起作用——协调 "最后一个退出的线程触发 GC" 和 "新来的线程别进来添乱"。
-
-**这两个标志谁设置**：
-
-| 标志 | 谁设 true | 什么时候 | 谁设 false | 什么时候 |
-|------|----------|---------|----------|---------|
-| `_needs_gc` | **VMThread**→`check_active_before_gc()` | safepoint 中发现 GCLocker 活跃 + 需要 GC | **应用线程**（最后一个退出 critical section 的）→`jni_unlock()` | GC 执行完成后 |
-| `_doing_gc` | **应用线程**（最后一个退出 critical section 的）→`jni_unlock()` | 准备调 `collect()` 执行 GC 之前 | **应用线程**（同一个）→`jni_unlock()` | `collect()` 返回后 |
-
-`_doing_gc` 额外保护一种并发场景——当最后一个 critical section 正在退出并执行 GC 时，如果有**新的**线程尝试进入 critical section（调 `GetPrimitiveArrayCritical`），`jni_lock()` 检查 `_doing_gc == true` → 不进入，在 `JNICritical_lock` 上等 GC 完成。防止 "刚做完一个 GC，又有新 critical section 拦着" 的乒乓效应。
-
-**"进入 critical section" 需要加锁吗？——大部分时候不需要。**
-
-`lock_critical()` 有两条路径，取决于 `_needs_gc` 标志：
+任意多个线程可以同时进入 critical section（各自握着不同数组的指针），互不干扰。`lock_critical()` 在正常情况下只做 `_jni_lock_count++`，约几条 CPU 指令，无锁：
 
 ```cpp
 // gcLocker.inline.hpp:31-42
 void GCLocker::lock_critical(JavaThread* thread) {
     if (_needs_gc == false) {
-        // ★ 快路径——99.9% 的情况。_needs_gc 为 false，没有 GC 被拦着。
-        // 只是递增 _jni_lock_count，标记线程进入 critical section。无锁，约几条 CPU 指令。
-        thread->enter_critical();
+        thread->enter_critical();       // ★ 快路径——99.9% 的情况
     } else {
-        // ★ 慢路径——_needs_gc 为 true。此时有一个 GC 正等着所有 critical section 结束。
-        // 如果这个线程也进入 critical section，GC 要等更久——所以必须先等 GC 做完。
-        // 这块才需要拿 JNICritical_lock 并休眠等待。
-        jni_lock(thread);
+        jni_lock(thread);               // 慢路径——GC 正在排队，在 JNICritical_lock 上等
     }
 }
 ```
 
-`jni_lock()` 做的事：在 `JNICritical_lock` 上 `wait()`，直到 GC 完成、`_needs_gc` 变成 false、被 `notify_all()` 唤醒——然后再 `enter_critical()`。
+### 4.3 GC 来了——三个步骤
 
-**所以**：正常情况下 `GetPrimitiveArrayCritical()` 是 O(1) 的无锁操作——只是递增了一个计数器。只有当 GC 被拦着的时候才走慢路径。
+**步骤 1：VMThread 发现被拦，设标志，abort GC**
 
-### 4.3 GC 被拦截的完整流程
-
-线程 A 调 `GetPrimitiveArrayCritical()` → `lock_critical()` → `_jni_lock_count++` → 进入 `_thread_in_native` 状态，握着原始指针写数据。
-
-此时分配失败触发 GC → VMThread 发起 safepoint → 在 `do_collection_pause_at_safepoint()` 中检查：
+分配失败 → GC 触发 → VMThread 发起 safepoint → 在 `do_collection_pause_at_safepoint()` 中检查：
 
 ```cpp
 // g1CollectedHeap.cpp:2798
 if (GCLocker::check_active_before_gc()) {
-    return false;  // 有 critical section → abort 本次 GC（不是"等"）
+    return false;  // 有 critical section → abort 本次 GC
 }
 ```
 
-VMThread **不等待**——因为线程 A 在 `_thread_in_native` 状态下执行 native 代码，不参与 safepoint。VMThread 在 safepoint 里干等 = 死锁。唯一的方法是解除 safepoint，让线程 A 恢复运行，等它主动释放。
+`check_active_before_gc()` 做的事（gcLocker.cpp:94-101）——如果 `_jni_lock_count > 0` 且 `_needs_gc` 还没设：
 
-### 4.4 谁来做 GC——最后一个退出的人
+```cpp
+_needs_gc = true;   // "我需要 GC，但有人在 critical section 里拦着"
+```
 
-线程 A 执行完 native 代码 → 调 `ReleasePrimitiveArrayCritical()` → `unlock_critical()`：
+然后 VMThread abort GC，解除 safepoint，mutator 恢复运行。**VMThread 不等待**——在 critical section 里的线程在 `_thread_in_native` 状态，不参与 safepoint，VMThread 干等 = 死锁。
+
+**步骤 2：走 slow path 的 mutator 等**
+
+在 `attempt_allocation_slow()` 里，`should_try_gc = !GCLocker::needs_gc()`。`_needs_gc` 为 true → `should_try_gc = false` → 不触发 GC → 调 `GCLocker::stall_until_clear()` 在 `JNICritical_lock` 上休眠，等 `_needs_gc` 被清零。
+
+**步骤 3：最后一个退出的人触发 GC**
+
+`_needs_gc = true` 期间，如果有新来的线程想进 critical section，`jni_lock()` 也会在 `JNICritical_lock` 上等——因为 `_needs_gc || _doing_gc` 条件为 true：
+
+```cpp
+// gcLocker.cpp:123-137
+void GCLocker::jni_lock(JavaThread* thread) {
+    MutexLocker mu(JNICritical_lock);
+    while (is_active_and_needs_gc() || _doing_gc) {
+        JNICritical_lock->wait();     // 释放锁 + 休眠
+    }
+    thread->enter_critical();
+}
+```
+
+已经在 critical section 里的线程不受影响——它们继续跑 native 代码。当线程 A（最后一个退出 critical section 的）调 `ReleasePrimitiveArrayCritical()` → `unlock_critical()`：
 
 ```cpp
 // gcLocker.inline.hpp:44-55
 void GCLocker::unlock_critical(JavaThread* thread) {
-    if (thread->in_last_critical()) {   // 自己是最后一个退出 critical section 的线程？
+    if (thread->in_last_critical()) {   // 我是最后一个？
         if (needs_gc()) {
-            jni_unlock(thread);         // 负责触发 GC（等 VMThread 执行）
+            jni_unlock(thread);         // 触发 GC
             return;
         }
     }
@@ -340,39 +331,33 @@ void GCLocker::unlock_critical(JavaThread* thread) {
 }
 ```
 
-`jni_unlock()` 设置 `_doing_gc = true`，释放 `JNICritical_lock` 后直接调 `Universe::heap()->collect(GCCause::_gc_locker)` 触发 GC（阻塞等待 VMThread 执行）。完成后 `_needs_gc = false`，`notify_all()` 唤醒所有等在 `JNICritical_lock` 上的线程。
-
-**为什么新来的线程必须等**——`jni_lock()` 的实现（gcLocker.cpp:123-137）：
+`jni_unlock()`（gcLocker.cpp:139-163）：
 
 ```cpp
-void GCLocker::jni_lock(JavaThread* thread) {
-    MutexLocker mu(JNICritical_lock);           // 短暂获取锁
-    while (is_active_and_needs_gc() || _doing_gc) {
-        JNICritical_lock->wait();               // 释放锁 + 休眠
+_jni_lock_count--;
+thread->exit_critical();
+
+if (needs_gc() && !is_active_internal()) {     // 确认最后一个
+    _doing_gc = true;                           // 设标志——新来的人别进来
+    {
+        MutexUnlocker munlock(JNICritical_lock);
+        Universe::heap()->collect(GCCause::_gc_locker);  // ★ 触发 GC
     }
-    thread->enter_critical();                   // 醒来后进入 critical section
+    _doing_gc = false;
+    _needs_gc = false;                          // 清标志
+    JNICritical_lock->notify_all();             // 叫醒所有等的人
 }
 ```
 
-`JNICritical_lock` 不是"有人一直持锁"——它是当**条件变量**用的。每个新来的线程拿锁、看一眼 `_needs_gc`、如果为 true 就 `wait()`（自动放锁、休眠）、被 `notify_all()` 唤醒后再检查一次、条件满足就进入 critical section。整个过程里锁只在检查和修改的瞬间被持有，没有谁"占着不放"。
+`collect()` 内部创建 `VM_G1CollectForAllocation` 提交给 VMThread——应用线程阻塞等待 VMThread 在 safepoint 中执行 GC。GC 完成后 `_needs_gc = false`、`notify_all()`——所有等在 `JNICritical_lock` 上的线程被唤醒，分配重试。
 
-如果 `_needs_gc == true` 时还不拦着新来的——`_jni_lock_count` 永远不会降到 0，"最后一个退出的线程"永远不会出现，GC 永远做不了。所以 `jni_lock()` 的语义是："GC 在排队，你别再进来了，等它做完再说。"
+### 4.4 三个标志的职责总结
 
-### 4.5 GCLocker stall——等 JNI critical section 释放
-
-在 `attempt_allocation_slow()` 里，`should_try_gc = false` 意味着 `GCLocker::needs_gc()` 为 true。此时有三方在同时运行：
-
-| 谁 | 在哪 | 在干什么 |
-|----|------|---------|
-| 线程 A（JNI critical 持有者） | `_thread_in_native` | 握着原始指针——还没调用 `Release` |
-| VMThread | safepoint 中 | 发现 GCLocker → **abort GC**（返回 false） |
-| 线程 B（走 slow path 的 mutator） | `attempt_allocation_slow` 循环 | 判断 `should_try_gc = false`（JNI 临界区还在）→ 放弃自己触发 GC → 调 `stall_until_clear()` **休眠在 `JNICritical_lock` 上**，等待线程 A 释放临界区 |
-
-**"休眠在 JNICritical_lock 上"是什么意思**——`JNICritical_lock` 是 JVM 的一个 `Monitor` 对象（和 `Heap_lock` 同类，只是不同用途）。`stall_until_clear()` 内部调 `JNICritical_lock->wait()`——线程 B 在这个锁上**进入休眠状态**，不消耗 CPU。当线程 A 释放临界区并触发 GC 后，调 `JNICritical_lock->notify_all()`——JVM 唤醒所有睡在这个锁上的线程。线程 B 醒来，发现 `_needs_gc == false`（GC 已经完成了），继续循环，重新尝试分配。
-
-线程 A 释放时调用 `collect(GCCause::_gc_locker)` 触发 GC——实际 GC 仍然由 VMThread 在 safepoint 中执行，线程 A 阻塞等待。GC 完成后 `notify_all()` 叫醒所有人。
-
----
+| 标志 | 类型 | 设 true 的人 | 什么时候 | 设 false 的人 | 什么时候 |
+|------|------|-----------|---------|------------|---------|
+| `_jni_lock_count` | `static volatile jint` | 应用线程→`lock_critical()` | 进入 critical section 时 +1 | 应用线程→`jni_unlock()` | 退出时 -1 |
+| `_needs_gc` | `static volatile bool` | **VMThread**→`check_active_before_gc()` | safepoint 发现 GCLocker 拦着 GC | **应用线程**→`jni_unlock()` | GC 完成后 |
+| `_doing_gc` | `static volatile bool` | **应用线程**→`jni_unlock()` | 调 `collect()` 之前 | **应用线程**→`jni_unlock()` | `collect()` 返回后 |
 
 ## 5. attempt_allocation_slow——触发 GC 的决策循环
 
