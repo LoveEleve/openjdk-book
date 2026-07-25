@@ -455,7 +455,7 @@ for (uint try_count = 1, gclocker_retry_count = 0; /* we'll return */; try_count
 
 **③ `should_try_gc`**：决定接下来走哪条岔路。`GCLocker::needs_gc()` 为 false → 可以自己做 GC（走 §5.3）；为 true → 有 JNI critical section 拦着，走 §5.4 的 stall。
 
-**④ `gc_count_before`**：快照当前的 `total_collections()`。后面 `do_collection_pause()` 会对比这个值——如果没变，说明 GC 被 GCLocker 拦了或被别的线程抢先了。
+**④ `gc_count_before`**：快照当前的 `total_collections()`——"在我试图做 GC 之前，已经发生了多少次 GC"。这个值传给 `do_collection_pause()`，后者在 `VM_G1CollectForAllocation` 的 `prologue` 阶段对比：如果 `total_collections()` 已经变了——说明**别的线程已经替我做了一次 GC**（在同一个循环迭代或多个线程竞争场景中），本次 VM 操作不需要再执行一次。结果 `succeeded=false`，回到循环头重试分配——别的线程做完 GC 释放了空间，很可能 §5.5 的无锁重试就能拿到。如果没变——本次 VM 操作确实需要执行 GC。
 
 ### 5.3 GC 阶段——自己做 GC
 
