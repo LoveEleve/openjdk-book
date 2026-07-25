@@ -101,7 +101,7 @@ G1RP_PS_NumElements               ← 13.（计数哨兵）
 **12 个子任务不能每个 Worker 各做一遍**——那样会产生指数级的重复工作。G1 用 `SubTasksDone` 类（workgroup.cpp:446-460）做原子 claim：
 
 ```cpp
-bool SubTasksDone::is_task_claimed(uint t) {
+bool SubTasksDone::try_claim_task(uint t) {
     uint old = _tasks[t];
     if (old == 0) {
         old = Atomic::cmpxchg(1u, &_tasks[t], 0u);  // CAS——第一个成功的人拿 0，后续拿 1
@@ -138,7 +138,7 @@ void G1RootProcessor::evacuate_roots(G1ParScanThreadState* pss, uint worker_i) {
     process_string_table_roots(closures, phase_times, worker_i);
 
     // 4. CM ref_processor roots（如果有并发标记）
-    if (!_process_strong_tasks.is_task_claimed(G1RP_PS_refProcessor_oops_do)) {
+    if (!_process_strong_tasks.try_claim_task(G1RP_PS_refProcessor_oops_do)) {
         _g1h->ref_processor_cm()->weak_oops_do(closures->strong_oops());
     }
 

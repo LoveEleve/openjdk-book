@@ -104,7 +104,7 @@ if (TLAB剩余 ≤ _refill_waste_limit)  →  退休 TLAB，申请新的
 // threadLocalAllocBuffer.inline.hpp:82-97
 void ThreadLocalAllocBuffer::record_slow_allocation(size_t obj_size) {
     set_refill_waste_limit(refill_waste_limit() + refill_waste_limit_increment());
-    // refill_waste_limit_increment() 返回 TLABWasteIncrement（默认 4）
+    _slow_allocations++;
 }
 ```
 
@@ -187,7 +187,10 @@ inline HeapWord* G1AllocRegion::attempt_allocation_locked(...) {
 
     // 步骤 3: 从 free list 拿新 Eden Region
     result = new_alloc_region_and_allocate(desired_word_size, false);
-    if (result != NULL) return result;
+    if (result != NULL) {
+        *actual_word_size = desired_word_size;
+        return result;
+    }
 
     return NULL;
 }
@@ -353,6 +356,7 @@ void GCLocker::jni_unlock(JavaThread* thread) {
   decrement_debug_jni_lock_count();
   thread->exit_critical();                     // 退出 critical section
   if (needs_gc() && !is_active_internal()) {   // 确认最后一个
+    _total_collections = Universe::heap()->total_collections();  // 快照——防止下次 safepoint 时重复 GC
     _doing_gc = true;                          // 设标志——新来的人别进来
     {
       MutexUnlocker munlock(JNICritical_lock); // 暂时放锁——collect 内部会到 safepoint
