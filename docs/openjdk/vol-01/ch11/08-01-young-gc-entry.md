@@ -241,7 +241,9 @@ bool should_allocate_mutator_region() const {
 
 ### 3.4 第三级：GCLocker 紧急扩展——用 `_young_list_max_length` 做缓冲
 
-GCLocker 活跃 + 需要 GC 时（见 §4），`attempt_allocation_force()` 用 `_young_list_max_length` 做上限——允许在 target 之上再临时扩展一些 Eden Region，避免一次多余的 safepoint 往返：
+§3.3 的第二级分配失败时（`young_regions_count() >= target`），正常流程会进入 §5 的 `attempt_allocation_slow`，后者检查 `should_try_gc = !GCLocker::needs_gc()`。如果此时 GCLocker 活跃——意味着有线程正握着 `GetPrimitiveArrayCritical` 的原始指针（详见 §4），`needs_gc()` 返回 true——那么这个线程的命就是"必须等 JNI critical section 释放"。
+
+但在"等"之前，G1 还有最后一次尝试——**GCLocker 紧急扩展**。它不是用 `_young_list_target_length` 做上限（那个已经到了），而是用 `_young_list_max_length`——一个比 target 更大的值：
 
 ```cpp
 // g1Policy.cpp:867-871
@@ -250,7 +252,9 @@ bool can_expand_young_list() const {
 }
 ```
 
-`_young_list_max_length = target × (1 + GCLockerEdenExpansionPercent/100)`，默认 target × 1.05。
+`_young_list_max_length` 比 `_young_list_target_length` 大多少？默认多 5%（`GCLockerEdenExpansionPercent = 5`）——所以 `max = target × 1.05`。这个 5% 的 buffer 就是给 GCLocker 场景的"紧急额度"——如果有 GCLocker 拦着 GC，可以先临时多分配几个 Eden Region 顶一顶，避免一次多余的 safepoint 往返（发起 GC → 发现 GCLocker → abort → 循环重试）。
+
+`attempt_allocation_force()` 绕过 `should_allocate_mutator_region()`（用 target 做上限的），直接用这个 max 做上限。如果成功——分配到了新 Eden Region，省了一次 GC。如果 `young_regions_count()` 连 max 都到了——第三级也失败，必须进入 §5 的 for 循环。
 
 ---
 
