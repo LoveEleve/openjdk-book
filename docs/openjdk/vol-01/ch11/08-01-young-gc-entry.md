@@ -267,7 +267,7 @@ void nativeProcess(JNIEnv* env, jbyteArray arr) {
 |------|------|------|--------|
 | `_jni_lock_count` | `static volatile jint` | 当前在 JNI critical section 中的线程数 | 0 |
 | `_needs_gc` | `static volatile bool` | 堆需要 GC 但被 critical section 拦住的标志 | false |
-| `_doing_gc` | `static volatile bool` | 有线程正在替大家做 GC 的标志 | false |
+| `_doing_gc` | `static volatile bool` | 有线程正在触发 GC（等 VMThread 执行）的标志 | false |
 
 ### 4.3 GC 被拦截的完整流程
 
@@ -313,7 +313,7 @@ void GCLocker::unlock_critical(JavaThread* thread) {
 | VMThread | safepoint 中 | 发现 GCLocker → **abort GC**（返回 false） |
 | 线程 B（走 slow path 的 mutator） | `attempt_allocation_slow` 循环 | `stall_until_clear()` → 在 `JNICritical_lock` 上等 |
 
-线程 A 释放时替大家做 GC，做完后 `notify_all()` 叫醒所有人。
+线程 A 释放时调用 `collect(GCCause::_gc_locker)` 触发 GC——实际 GC 仍然由 VMThread 在 safepoint 中执行，线程 A 阻塞等待。GC 完成后 `notify_all()` 叫醒所有人。
 
 ---
 
@@ -540,7 +540,7 @@ VM 启动时 `G1Policy::init()`（g1Policy.cpp:92）调用计算。所有 analyt
 | `_young_list_max_length` | `G1Policy` | `uint` | g1Policy.hpp:87 | GCLocker 活跃时的 Eden 最大 Region 数 |
 | `_jni_lock_count` | `GCLocker` | `static volatile jint` | gcLocker.hpp:45 | JNI critical section 线程计数 |
 | `_needs_gc` | `GCLocker` | `static volatile bool` | gcLocker.hpp:46 | 堆需要 GC 但被 critical section 拦住的标志 |
-| `_doing_gc` | `GCLocker` | `static volatile bool` | gcLocker.hpp:48 | 有线程正在替大家做 GC 的标志 |
+| `_doing_gc` | `GCLocker` | `static volatile bool` | gcLocker.hpp:48 | 有线程正在通过 VMThread 触发 GC 的标志 |
 | `_collection_set_regions` | `G1CollectionSet` | `uint*` | g1CollectionSet.hpp:55 | CSet 的 C 数组——存 hrm_index |
 | `_collection_set_cur_length` | `G1CollectionSet` | `volatile size_t` | g1CollectionSet.hpp:56 | CSet 有效条目数 |
 | `_inc_build_state` | `G1CollectionSet` | `CSetBuildType` | g1CollectionSet.hpp:76 | Active/Inactive 增量构建开关 |
