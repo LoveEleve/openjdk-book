@@ -332,7 +332,7 @@ VMThread **不等待**——因为线程 A 在 `_thread_in_native` 状态下执�
 void GCLocker::unlock_critical(JavaThread* thread) {
     if (thread->in_last_critical()) {   // 自己是最后一个退出 critical section 的线程？
         if (needs_gc()) {
-            jni_unlock(thread);         // 负责执行 GC
+            jni_unlock(thread);         // 负责触发 GC（等 VMThread 执行）
             return;
         }
     }
@@ -340,7 +340,23 @@ void GCLocker::unlock_critical(JavaThread* thread) {
 }
 ```
 
-`jni_unlock()` 设置 `_doing_gc = true`，释放 `JNICritical_lock` 后直接调 `Universe::heap()->collect(GCCause::_gc_locker)` 执行一次 GC。完成后 `_needs_gc = false`，`notify_all()` 唤醒所有等在 `JNICritical_lock` 上的线程。
+`jni_unlock()` 设置 `_doing_gc = true`，释放 `JNICritical_lock` 后直接调 `Universe::heap()->collect(GCCause::_gc_locker)` 触发 GC（阻塞等待 VMThread 执行）。完成后 `_needs_gc = false`，`notify_all()` 唤醒所有等在 `JNICritical_lock` 上的线程。
+
+**为什么新来的线程必须等**——`jni_lock()` 的实现（gcLocker.cpp:123-137）：
+
+```cpp
+void GCLocker::jni_lock(JavaThread* thread) {
+    MutexLocker mu(JNICritical_lock);           // 短暂获取锁
+    while (is_active_and_needs_gc() || _doing_gc) {
+        JNICritical_lock->wait();               // 释放锁 + 休眠
+    }
+    thread->enter_critical();                   // 醒来后进入 critical section
+}
+```
+
+`JNICritical_lock` 不是"有人一直持锁"——它是当**条件变量**用的。每个新来的线程拿锁、看一眼 `_needs_gc`、如果为 true 就 `wait()`（自动放锁、休眠）、被 `notify_all()` 唤醒后再检查一次、条件满足就进入 critical section。整个过程里锁只在检查和修改的瞬间被持有，没有谁"占着不放"。
+
+如果 `_needs_gc == true` 时还不拦着新来的——`_jni_lock_count` 永远不会降到 0，"最后一个退出的线程"永远不会出现，GC 永远做不了。所以 `jni_lock()` 的语义是："GC 在排队，你别再进来了，等它做完再说。"
 
 ### 4.5 GCLocker stall——等 JNI critical section 释放
 
