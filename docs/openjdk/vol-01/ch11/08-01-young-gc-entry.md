@@ -278,7 +278,7 @@ static volatile jint _jni_lock_count;   // 当前在 critical section 中的线�
 ```cpp
 // gcLocker.inline.hpp:31-42——真实源码
 void GCLocker::lock_critical(JavaThread* thread) {
-  if (!thread->in_critical()) {
+  if (!thread->in_critical()) {   // in_critical() = 这个线程的 _jni_active_critical > 0吗？（每线程私有，嵌套深度）
     if (needs_gc()) {
       // 慢路径——GC 正在排队，在 JNICritical_lock 上等
       // jni_lock 内部会调 enter_critical
@@ -287,7 +287,8 @@ void GCLocker::lock_critical(JavaThread* thread) {
     }
     increment_debug_jni_lock_count();   // ★ 快路径——只递增计数
   }
-  thread->enter_critical();             // 两条路径最终都会执行这行
+  thread->enter_critical();             // 两条路径最终都会执行这行，递增 _jni_active_critical
+}
 }
 ```
 
