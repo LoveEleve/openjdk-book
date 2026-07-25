@@ -550,17 +550,11 @@ for (uint try_count = 1, gclocker_retry_count = 0; /* we'll return */; try_count
 
 
 
-## 6. InitialMark 决策——这次要不要顺便启动并发标记
+## 6. InitialMark 决策——这次 Young GC 要不要兼做
 
-每次 Young GC 进入 `do_collection_pause_at_safepoint()` 之后，在 CSet 选择之前，G1Policy 先判断一个问题：**"老年代是不是快满了，需要启动并发标记了？"**
+进入 `do_collection_pause_at_safepoint()` 后，CSet 选择之前，G1Policy 先判断一个问题：**这次 Young GC 是普通的 Normal，还是要顺便启动并发标记（InitialMark）？**
 
-每次 Young GC 之前，G1Policy 判断一个问题：**"老年代是不是快满了，需要启动并发标记了？"**
-
-决策依据叫 **IHOP**（Initiating Heap Occupancy Percent）——老年代占用占比的阈值。超过这个阈值意味着 "再不开始标记，标记完之前老年代就可能满了"。
-
-这个判断不是每次都看 IHOP——IHOP 上一次 **Normal Young GC** 结束时就已经算过了。`record_collection_pause_end()`（g1Policy.cpp:574）中，如果本次是 InitialMark GC（并发标记已经启动了），跳过 IHOP 检查（直接调 `record_concurrent_mark_init_end`）；只有 Normal Young GC 才会调 `maybe_start_marking()` 检查 IHOP。此外，Mixed GC 阶段结束回到 young-only 时（g1Policy.cpp:619）也会重新算一次。算出结果是一个标志位 `initiate_conc_mark_if_possible`，留给下一次 Young GC 兑现。当时的 `record_collection_pause_end()` 调用 `maybe_start_marking()` → `need_to_start_conc_mark()`，如果老年代占用量超过了 IHOP 阈值，就设一个标志 `initiate_conc_mark_if_possible = true`。这个标志留到**下一次** Young GC 来兑现——本次 Normal Young GC 检查的就是这个。（g1Policy.cpp:531-551），如果老年代占用量超过了 IHOP 阈值，就设一个标志 `initiate_conc_mark_if_possible = true`。这个标志留到下一次 Young GC 来兑现。
-
-所以每次 Young GC 进入 `do_collection_pause_at_safepoint()` 时，G1Policy 检查的**不是 IHOP，而是这个已经设好的标志**：
+判断不复杂——检查一个在**上一次 Normal Young GC 结束时**就已经设好的标志位：
 
 ```cpp
 // g1CollectedHeap.cpp:2826
@@ -569,30 +563,21 @@ if (!_cm_thread->should_terminate()) {
 }
 ```
 
-`decide_on_conc_mark_initiation()`（g1Policy.cpp:936-985）的逻辑很简单——如果标志为 true、当前在 young-only 阶段、还没开始 Mixed，就把本次 Young GC 升级为 InitialMarkGC：
+`decide_on_conc_mark_initiation()`（g1Policy.cpp:936-985）如果发现标志为 true、当前在 young-only 阶段、还没开始 Mixed，就把本次升级为 InitialMarkGC：
 
 ```cpp
-if (initiate_conc_mark_if_possible()     // 上次 GC 结束时设的
+if (initiate_conc_mark_if_possible()     // 上次 GC 结束时设的标志
     && in_young_only_phase()              // 还在 young-only
     && !about_to_start_mixed_phase()) {   // 还没进 Mixed
     initiate_conc_mark();  // _in_initial_mark_gc = true → GC 日志显示 (Concurrent Start)
 }
 ```
 
-那上次 GC 结束时 IHOP 判断了什么？`need_to_start_conc_mark()` 做的事情很简单——老年代占用量超过阈值就设标志：
+**谁设的这个标志**——上一次 Normal Young GC 结束时（`record_collection_pause_end()` 调 `maybe_start_marking()`），G1Policy 检查老年代占用量是否超过了 IHOP 阈值（Initiating Heap Occupancy Percent）。超过就设 `initiate_conc_mark_if_possible = true`，留给下一次 Young GC 来兑现。
 
-```cpp
-// g1Policy.cpp:531-551
-bool need_to_start_conc_mark() {
-    size_t threshold = _ihop_control->get_conc_mark_start_threshold();
-    size_t cur_used = _g1h->non_young_capacity_bytes();
-    return cur_used > threshold;
-}
-```
+Normal Young GC 时——上一次 Normal Young GC 没设这个标志（老年代还没到 IHOP 阈值）——走纯 young 回收路径。IHOP 的计算和并发标记的详细流程在 ch11/13 展开。
 
-IHOP 阈值的含义（自适应模式下）：`internal_threshold - (marking_time × promotion_rate + max_young_size)`。**"如果现在启动并发标记，标记完成时老年代还能装下标记期间晋升来的对象吗？"** 装不下就设标志——下一次 Young GC 就会变成 InitialMarkGC。
 
-Normal Young GC 时——上一次 Normal Young GC（或 Mixed GC 结束时）没设这个标志（老年代还没到 IHOP 阈值）——`initiate_conc_mark_if_possible()` 为 false——走纯 young 回收路径。并发标记的详细流程在 ch11/13 展开。
 
 ## 7. CSet 选择——确认本次回收哪些 Region
 
