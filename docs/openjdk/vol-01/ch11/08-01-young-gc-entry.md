@@ -407,7 +407,11 @@ void GCLocker::jni_unlock(JavaThread* thread) {
 | `_needs_gc` | `static volatile bool` | **VMThread**→`check_active_before_gc()` | safepoint 发现 GCLocker 拦着 GC | **应用线程**→`jni_unlock()` | GC 完成后 |
 | `_doing_gc` | `static volatile bool` | **应用线程**→`jni_unlock()` | 调 `collect()` 之前 | **应用线程**→`jni_unlock()` | `collect()` 返回后 |
 
+理解了 GCLocker 之后，回到分配故障的主线——下面 §5 把这些机制全部串进 `attempt_allocation_slow` 的 for 循环里。
+
 ## 5. attempt_allocation_slow——触发 GC 的决策循环
+
+回到 §3 的三级挽救——第三级（GCLocker 紧急扩展）也失败了。现在控制权到达 `attempt_allocation_slow()`（g1CollectedHeap.cpp:410-516），也就是 §1 全景图里分配链最底层的那个方法。§4 的 GCLocker 机制在这里被实际调用——`should_try_gc`、`stall_until_clear`、`check_active_before_gc` 全在这一处交汇。
 
 ### 5.1 为什么是 for 循环
 
