@@ -273,21 +273,21 @@ static volatile jint _jni_lock_count;   // 当前在 critical section 中的线�
 
 两个计数器通过 `lock_critical()` / `unlock_critical()` 同步：进入时两者各 +1，退出时各 -1。safepoint 时 `verify_critical_count()` 遍历所有线程检查 per-thread 的和是否等于全局计数器。
 
-任意多个线程可以同时进入 critical section（各自握着不同数组的指针），互不干扰。`lock_critical()` 在正常情况下只做 `_jni_lock_count++`，约几条 CPU 指令，无锁：
+任意多个线程可以同时进入 critical section（各自握着不同数组的指针），互不干扰。`lock_critical()` 在正常情况下只做 `_jni_lock_count++`，约几条 CPU 指令，无锁。
+
+**`!thread->in_critical()` 在防什么**——同一个线程可能**嵌套**进入 critical section。"嵌套"的意思是：线程已经握着 A 数组的 raw 指针了，又在同一段 native 代码里调了 `GetPrimitiveArrayCritical` 去拿 B 数组的指针。如果这时候再执行一次 `_jni_lock_count++`，线程退出时也只做一次 `_jni_lock_count--`——全局计数器就对不上了。所以 `!thread->in_critical()` 检查"我已经在里面了吗？"——是的话直接 `enter_critical()` 只递增 per-thread 的 `_jni_active_critical` 嵌套深度，不碰全局计数器。
 
 ```cpp
-// gcLocker.inline.hpp:31-42——真实源码
+// gcLocker.inline.hpp:31-42
 void GCLocker::lock_critical(JavaThread* thread) {
-  if (!thread->in_critical()) {   // in_critical() = 这个线程的 _jni_active_critical > 0吗？（每线程私有，嵌套深度）
+  if (!thread->in_critical()) {   // 第一次进入（不是嵌套）→ 需要调全局计数器
     if (needs_gc()) {
-      // 慢路径——GC 正在排队，在 JNICritical_lock 上等
-      // jni_lock 内部会调 enter_critical
-      jni_lock(thread);
+      jni_lock(thread);           // GC 在排队 → 拿锁等
       return;
     }
-    increment_debug_jni_lock_count();   // ★ 快路径——只递增计数
+    increment_debug_jni_lock_count();   // 全局计数器 +1
   }
-  thread->enter_critical();             // 两条路径最终都会执行这行，递增 _jni_active_critical
+  thread->enter_critical();       // 每次都要——递增 per-thread 嵌套深度（_jni_active_critical++）
 }
 }
 ```
