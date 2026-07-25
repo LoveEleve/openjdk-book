@@ -50,9 +50,27 @@ new 字节码
 - **第 2 层**（Region）：G1 特有。不再走 TLAB，直接用 CAS 操作 Eden Region 的 `_top` 指针。有 retained region + 持锁重试 + GCLocker 紧急扩展三级挽救。
 - **第 3 层**（GC 触发）：三级全失败 → 触发 Young GC。有一个 for 循环保证重试能力——GC 可能被 GCLocker 拒绝、也可能被别的线程抢先。
 
+一旦进入 GC，控制权到达 `do_collection_pause_at_safepoint()`（g1CollectedHeap.cpp:2793-3123）——约 330 行的主编排方法。它按顺序调用下面全部阶段，本文的 §4-§8 和后续 08-02、08-03 逐一展开：
+
+```
+do_collection_pause_at_safepoint(target_pause_time_ms)     // target = MaxGCPauseMillis (默认 200ms)
+│
+├─ [§4]  GCLocker 检查                                      // 有 JNI critical section 就 abort
+├─ [§6]  decide_on_conc_mark_initiation                     // 判断要不要 InitialMark
+├─ [§7]  finalize_collection_set                            // 锁定增量构建的 CSet
+│        └─ finalize_young_part() → finalize_old_part()
+├─ [§8]  pre_evacuate_collection_set                        // merge dirty cards + reset scan_state
+├─        evacuate_collection_set (08-02)                   // ★ 并行核心：Root 扫描 → RSet 扫描 → 搬活
+│        └─ G1ParTask: evacuate_roots → oops_into_cset_do → steal_and_trim
+├─        post_evacuate_collection_set (08-03 §1)           // 引用处理 + 弱引用 + 字符串去重
+├─        free_collection_set (08-03 §2)                    // 空 Region → FreeList
+│        └─ G1FreeCollectionSetTask (串行释放 + 并行清 RSet)
+└─        start_new_collection_set (08-03 §3)               // Survivor → 下一轮 CSet 种子
+```
+
 ---
 
-## 2. TLAB 分配——线程本地的快速通道
+## 2. TLAB 分配——线程本地的快速通���
 
 ### 2.1 TLAB 是什么
 
