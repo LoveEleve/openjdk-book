@@ -428,7 +428,7 @@ if (should_try_gc) {
 
 步（2）里没有 `succeeded=false` 的 return——它落在循环底部，等下次迭代重新走。
 
-**(3) GCLocker stall——等别人做的 GC**
+**(3) GCLocker stall——等 JNI critical section 释放**
 
 ```cpp
 // g1CollectedHeap.cpp:477-489
@@ -441,9 +441,21 @@ if (should_try_gc) {
 }
 ```
 
-`should_try_gc = false` 意味着 `GCLocker::needs_gc()` 为 true——有一个 JNI critical section 持有者，VMThread 会在 safepoint 中 abort 本次 GC。与其触发一次注定失败的 safepoint 往返，不如直接在 `JNICritical_lock` 上等——等 critical section 释放后，`unlock_critical()` 会替大家做 GC（设置 `_doing_gc = true`，在退出时直接调 `collect(GCCause::_gc_locker)`）。
+`should_try_gc = false` 意味着 `GCLocker::needs_gc()` 为 true——**有一个 mutator 线程正握着 `GetPrimitiveArrayCritical` 返回的原始指针，堆不能搬**。
 
-**终止条件**——`gclocker_retry_count > GCLockerRetryAllocationCount` 时放弃。防止 JNI critical section 永远不释放导致永久卡死。
+**此时有三方在运行**：
+
+| 谁 | 在哪 | 在干什么 |
+|----|------|---------|
+| **线程 A**（JNI critical section 持有者） | `_thread_in_native` 状态（执行 native 代码） | 正握着一条指向堆内存的原始指针——**还没调用 `ReleasePrimitiveArrayCritical`** |
+| **VMThread** | safepoint → 发现 `GCLocker::check_active_before_gc()` 返回 true | **abort 本次 GC**（不是"等"——直接放弃这次 safepoint，返回 `false`） |
+| **线程 B**（走 slow path 的 mutator） | 在 `attempt_allocation_slow()` 循环中 | `should_try_gc == false` → 调用 `stall_until_clear()`——在 `JNICritical_lock` 上等 |
+
+**VMThread 为什么不"等"而是 abort**——因为线程 A 在 `_thread_in_native` 状态下执行 native 代码——它不参与 safepoint。VMThread 在 safepoint 里干等是死锁。唯一的方法是解除 safepoint，让线程 A 恢复运行，等它主动调用 `ReleasePrimitiveArrayCritical`。
+
+**线程 A 释放时谁做 GC**——线程 A 执行 `ReleasePrimitiveArrayCritical` → `unlock_critical()` → 发现自己是最后一个退出 critical section 的线程，且 `_needs_gc == true` → 设置 `_doing_gc = true` → **线程 A 直接调 `collect(GCCause::_gc_locker)` 执行一次 GC** → 完成后设置 `_needs_gc = false` → `notify_all()` 唤醒所有等在 `JNICritical_lock` 上的线程。
+
+**所以"GCLocker stall"就是坐在 JNICritical_lock 上打盹——等那个握着原始指针的线程干完活、替大家把 GC 做了、然后敲铃铛叫醒所有人。**
 
 **(4) 无锁重试——别人的 GC 可能帮了我们**
 
