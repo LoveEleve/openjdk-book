@@ -1,111 +1,62 @@
-# G1 Young GC 详解（一）——触发 / GCLocker / CSet / 准备
+# G1 Young GC 详解（一）——从分配触发到 Pre-Evacuation
 
-> **系列定位**：三篇串讲一次 Normal Young GC（GC 日志中的 `Pause Young (Normal)`）。第一篇讲解 GC 启动前和启动时的准备工作：谁触发的、GCLocker 怎么拦、InitialMark 怎么判、CSet 怎么选、搬运之前要准备什么。
+> **系列定位**：三篇串讲一次 Normal Young GC。第一篇覆盖 GC 前半段：谁触发的、GCLocker 怎么拦、InitialMark 怎么判、CSet 怎么选、搬运前要准备什么。
 >
 > **前置概念**：Eden / Survivor / Old 角色、STW 和 safepoint、CSet 概念（ch11/07）。
 >
-> **第二篇**：Root 扫描 → RSet 扫描 → 工作窃取 → Post-Evacuation（08-02）。
-> **第三篇**：Free CSet → 启动下轮 → 时间线 → 附录（08-03）。
+> **第二篇**（08-02）：Root 扫描 → RSet 扫描 → 工作窃取。**第三篇**（08-03）：Post-Evacuation → Free CSet → 时间线。
 
 ---
 
-## 1. 谁触发的 Young GC
+## 目录
 
-### 1.1 从分配说起——追一次 `new Object()` 到底
-
-Java 代码里写 `new Object()`。这条分配调用经历了三层决策，每层失败后才进入下一层。按执行顺序：
-
----
-
-**第 0 层：`new` 字节码 → 分配入口**
-
-字节码 `new` 被 JIT 编译器或模板解释器编译成对 `CollectedHeap::obj_allocate()` 的调用，最终进入 GC 无关的通用分配层 `MemAllocator::mem_allocate()`（memAllocator.cpp:362）。从这里开始，决策分叉。
-
----
-
-**第 1 层：TLAB——线程本地的快速通道（§1.2）**
-
-`allocate_inside_tlab()` 是 G1 的第一道分配尝试，和具体的 GC 无关——所有 JVM GC 都走这层。
-
-- **快路径**：`tlab.allocate()` 做一次 **pointer bump**——`_top + size ≤ _end` → `_top += size` 返回。约 10 条 CPU 指令，无锁，每个线程在自己的 TLAB 里独立操作。
-- **慢路径**：快路径失败（当前 TLAB 剩余空间不够）→ `allocate_inside_tlab_slow()`。这里有一个**容差判断**——如果 TLAB 剩余空间 > `_refill_waste_limit`（= TLAB 大小 / 64），G1 选择不退休 TLAB，而是跳过 TLAB 直接在 Eden Region 上用 CAS 分配这一次。如果剩余空间 ≤ waste limit，退休当前 TLAB，申请新的。
-
-如果第 1 层返回 NULL（TLAB 退休了但拿不到新 TLAB），进入第 2 层。
+1. [全景——`new Object()` 到 GC 触发的完整路径](#1-全景new-object-到-gc-触发的完整路径)
+2. [TLAB 分配——线程本地的快速通道](#2-tlab-分配线程本地的快速通道)
+3. [Region 分配——G1 特有的三级挽救](#3-region-分配g1-特有的三级挽救)
+4. [GCLocker——JNI critical section 如何阻止 GC](#4-gclockerjni-critical-section-如何阻止-gc)
+5. [attempt_allocation_slow——触发 GC 的决策循环](#5-attempt_allocation_slow触发-gc-的决策循环)
+6. [InitialMark 决策——这次要不要顺便启动并发标记](#6-initialmark-决策这次要不要顺便启动并发标记)
+7. [CSet 选择——确认本次回收哪些 Region](#7-cset-选择确认本次回收哪些-region)
+8. [Pre-Evacuation——搬运前的最后准备](#8-pre-evacuation搬运前的最后准备)
+9. [附录 A: `_young_list_target_length` 算法](#附录-a-_young_list_target_length-算法)
+10. [附录 B: 字段速查](#附录-b-字段速查)
 
 ---
 
-**第 2 层：Eden Region——G1 的 Region 级分配（§1.4）**
+## 1. 全景——`new Object()` 到 GC 触发的完整路径
 
-第 1 层 TLAB 失败后，`mem_allocate()` 调用 `allocate_outside_tlab()`，它直接走到 G1 的堆分配入口：
-
-```cpp
-// memAllocator.cpp:270-282
-HeapWord* MemAllocator::allocate_outside_tlab(Allocation& allocation) const {
-    allocation._allocated_outside_tlab = true;
-    HeapWord* mem = _heap->mem_allocate(_word_size, &allocation._overhead_limit_exceeded);
-    // _heap 是多态的——在 G1 下就是 G1CollectedHeap
-    ...
-}
-```
-
-```cpp
-// g1CollectedHeap.cpp:398-408
-HeapWord* G1CollectedHeap::mem_allocate(size_t word_size, bool* gc_overhead_limit_was_exceeded) {
-    if (is_humongous(word_size)) {
-        return attempt_allocation_humongous(word_size);   // 巨对象走独立路径
-    }
-    size_t dummy = 0;
-    return attempt_allocation(word_size, word_size, &dummy);  // 普通对象走这里
-}
-```
-
-`attempt_allocation()`（g1CollectedHeap.cpp:730-753）分两步：
-
-```cpp
-// 快路径：无锁
-HeapWord* result = _allocator->attempt_allocation(min, desired, actual);
-// _allocator 是 G1Allocator 实例——它内部：
-//   (1) mutator_alloc_region()->attempt_retained_allocation(...)  ← 先试 retained region
-//   (2) mutator_alloc_region()->attempt_allocation(...)          ← 再试 active region CAS
-// 两步都是无锁 CAS 分配
-
-// 慢路径：快路径全失败
-if (result == NULL) {
-    result = attempt_allocation_slow(desired_word_size);    // ← §1.5 展开
-}
-```
-
-这一层是 G1 特有的——不再通过 TLAB，直接通过 `G1AllocRegion` 的 CAS bump-pointer 操作 Eden Region 上的 `_top` 指针。
-
----
-
-**第 3 层：触发 Young GC（§1.4）**
-
-如果三级挽救的持锁重试（第二级）里 `new_mutator_alloc_region()` 返回 NULL——意味着当前 young Region 数已达 `_young_list_target_length`，不能再扩——GC 被触发。
-
-`attempt_allocation_slow()` 的持锁阶段里 `should_try_gc = !GCLocker::needs_gc()`。如果 GCLocker 不拦着，调用 `do_collection_pause()` 提交 `VM_G1CollectForAllocation` 给 VMThread，阻塞等待 GC 完成。
-
-三层总览：
+Java 代码里写 `new Object()`。这条分配调用经历了三层决策，每层失败后才进入下一层：
 
 ```
 new 字节码
-  └→ MemAllocator::mem_allocate()
-      ├─ allocate_inside_tlab()         §1.2  TLAB 快慢路径
-      │   ├─ tlab.allocate()            pointer bump (≈10 CPU inst)
-      │   └─ allocate_inside_tlab_slow()  waste_limit容差 → retire or skip
+  └→ MemAllocator::mem_allocate()                    [memAllocator.cpp:362]
+      ├─ allocate_inside_tlab()          (§2)  TLAB 快慢路径
+      │   ├─ tlab.allocate()             pointer bump (≈10 CPU inst)
+      │   └─ allocate_inside_tlab_slow() _refill_waste_limit 容差 → retire or skip
       │
-      └─ allocate_outside_tlab()        §1.3  Region 级分配
-          └─ attempt_allocation()
-              ├─ retained region (第一级)
-              ├─ active region CAS
-              └─ attempt_allocation_slow()  §1.4  触发GC
-                  ├─ 持锁重试 (第二级)
-                  ├─ GCLocker 紧急扩展 (第三级)
-                  ├─ do_collection_pause()     → Young GC
-                  └─ GCLocker::stall_until_clear()
+      └─ allocate_outside_tlab()         (§3)  Region 级分配
+          └─ G1CollectedHeap::mem_allocate()          [g1CollectedHeap.cpp:398]
+              └─ attempt_allocation()
+                  ├─ retained region (第一级)
+                  ├─ active region CAS
+                  └─ attempt_allocation_slow()  (§4-5) 触发 GC
+                      ├─ 持锁重试 (第二级)
+                      ├─ GCLocker 紧急扩展 (第三级)
+                      ├─ do_collection_pause()     → Young GC
+                      └─ GCLocker::stall_until_clear()
 ```
 
-### 1.2 TLAB——线程本地的 pointer bump
+- **第 1 层**（TLAB）：JVM 通用分配优化，每个线程独立。快路径 pointer bump 约 10 条指令。慢路径有 waste limit 容差判断。
+- **第 2 层**（Region）：G1 特有。不再走 TLAB，直接用 CAS 操作 Eden Region 的 `_top` 指针。有 retained region + 持锁重试 + GCLocker 紧急扩展三级挽救。
+- **第 3 层**（GC 触发）：三级全失败 → 触发 Young GC。有一个 for 循环保证重试能力——GC 可能被 GCLocker 拒绝、也可能被别的线程抢先。
+
+---
+
+## 2. TLAB 分配——线程本地的快速通道
+
+### 2.1 TLAB 是什么
+
+每个 Java 线程在 Eden Region 里独占一小块私有的 **TLAB**（Thread-Local Allocation Buffer）。在 TLAB 里分配对象只需一次 **pointer bump**：
 
 ```
 TLAB 内部：
@@ -118,130 +69,145 @@ TLAB 内部：
       return _top += object_size;   // 约 10 条 CPU 指令，无锁
 ```
 
-### 1.3 TLAB 用完之后——`_refill_waste_limit` 的容差决策
+TLAB 不是 G1 特有的——它是 JVM 通用的分配优化，所有 HotSpot GC 都支持。
 
-TLAB 不够放下一个对象时，线程不是直接触发 GC——先判断 "值不值得换一个新 TLAB"。
+### 2.2 `_refill_waste_limit`——TLAB 退休的容差
 
-这个决策用一个字段完成：**`_refill_waste_limit`**。
+TLAB 不够放下一个对象时，线程不是直接退休它——先判断 "值不值得换一个新 TLAB"。决策用一个字段完成：
 
 | 属性 | 值 |
 |------|----|
 | 所在类 | `ThreadLocalAllocBuffer` |
 | 类型 | `size_t` |
+| 源码位置 | threadLocalAllocBuffer.hpp:57 |
 | 作用域 | 每个 Java 线程**各自持有**——线程 A 的 TLAB 里有自己的 waste limit，和线程 B 互不影响 |
 | 初始化 | 每次申请到新 TLAB 时重置——`threadLocalAllocBuffer.cpp:190`：`set_refill_waste_limit(initial_refill_waste_limit())` |
 | 初始值 | `TLAB 大小 / TLABRefillWasteFraction`（默认 64）。比如 1MB 的 TLAB，初始 waste limit = 16KB |
-| 动态调整 | 每次"TLAB 不够但 waste limit 说不用退休"时，waste limit 在 `record_slow_allocation()` 中自增 `TLABWasteIncrement`（默认 4） | threadLocalAllocBuffer.inline.hpp:82-97 |
-| 为什么自增 | 如果一个线程频繁"差一点点"导致每次都要绕过 TLAB 走 CAS 分配，不如提高容忍度——下次差得不多时直接退休，换个新 TLAB 省掉 CAS 开销。waste limit 变大意味着 TLAB 更早被退休，减少"频繁走慢速路径" | — |
 
 ```cpp
-// threadLocalAllocBuffer.hpp:57——每个 ThreadLocalAllocBuffer 实例都有自己的 waste limit
+// threadLocalAllocBuffer.hpp:57
 size_t _refill_waste_limit;   // TLAB 剩余超过此值则不退休
 ```
-
-**每次 "不退休、走 CAS" 时，waste limit 怎么变的**：
-
-```cpp
-// threadLocalAllocBuffer.inline.hpp:82-97
-void ThreadLocalAllocBuffer::record_slow_allocation(size_t obj_size) {
-    // 每次"TLAB剩余 > waste limit 所以不退休，而是走 CAS 分配"时调这个方法
-    set_refill_waste_limit(refill_waste_limit() + refill_waste_limit_increment());
-    // refill_waste_limit_increment() 返回 TLABWasteIncrement（默认 4）
-    _slow_allocations++;
-}
-```
-
-**为什么是 +4 而不是 +100**——如果调得太大，TLAB 会过度容忍碎片，大量浪费内存。+4 是一个温和的梯度——连续若干次"差一点"后 waste limit 会涨到足够退休的水平，避免同一线程长期在慢速路径上徘徊。
 
 **决策逻辑**（memAllocator.cpp:314-316）：
 
 ```
 if (TLAB剩余 > _refill_waste_limit)  →  不退休，直接在 Eden Region 上用 CAS 分配一次
-                                          （绕过 TLAB 的本地 bump，目标仍是 Eden）
 if (TLAB剩余 ≤ _refill_waste_limit)  →  退休 TLAB，申请新的
 ```
 
-**"退休"TLAB 不是 "归还碎片"**——TLAB 本就属于当前的 Eden Region（`MutatorAllocRegion`），退役只做三件事：
+**为什么不是每次都退休**——差得少时跳过 TLAB 单次 CAS 分配，省掉 TLAB 重建的开销。差得多时才退休，换个新的继续用。
+
+**动态调整**——每次 "不退休、走 CAS" 时，waste limit 在 `record_slow_allocation()` 中自增 `TLABWasteIncrement`（默认 4）。线程如果频繁 "差一点点"，waste limit 逐渐变大，TLAB 更早被退休，减少慢速路径次数：
+
+```cpp
+// threadLocalAllocBuffer.inline.hpp:82-97
+void ThreadLocalAllocBuffer::record_slow_allocation(size_t obj_size) {
+    set_refill_waste_limit(refill_waste_limit() + refill_waste_limit_increment());
+    // refill_waste_limit_increment() 返回 TLABWasteIncrement（默认 4）
+}
+```
+
+### 2.3 TLAB 退休——做什么
+
+`clear_before_allocation()`（threadLocalAllocBuffer.cpp:43-46）：
 
 - 在 `top` 到 `hard_end` 区间填充一个 **dummy filler object**（GC 遍历 Eden 时不会撞空洞）
 - 把已用字节数记入线程的总分配量
 - 把 `start/top/end/allocation_end` 全部清零
 
-代码路径：`clear_before_allocation()`（threadLocalAllocBuffer.cpp:43-46）。
-
-### 1.4 Region 也满了——三级挽救
-
-TLAB 退休了但拿不到新 TLAB → 当前 Eden Region（`MutatorAllocRegion`）也被切光了——不止 TLAB 不够，整个 Region 都放不下一个新的 TLAB。G1 不会立刻触发 GC，而是尝试三级挽救。
+**注意**：TLAB 本就属于当前的 Eden Region（`MutatorAllocRegion`），退休不是 "归还碎片"——TLAB 从未离开过 Eden。
 
 ---
 
-**第一级：`_retained_alloc_region`——上一轮留下的"备胎"**
+## 3. Region 分配——G1 特有的三级挽救
+
+### 3.1 从 TLAB 到 Region
+
+第 1 层（TLAB）失败后，`mem_allocate()` 调用 `allocate_outside_tlab()`，走到 G1 的堆分配入口：
+
+```cpp
+// memAllocator.cpp:270-282
+HeapWord* MemAllocator::allocate_outside_tlab(Allocation& allocation) const {
+    allocation._allocated_outside_tlab = true;
+    HeapWord* mem = _heap->mem_allocate(_word_size, ...);
+    // _heap 是多态的——在 G1 下就是 G1CollectedHeap
+}
+```
+
+```cpp
+// g1CollectedHeap.cpp:398-408
+HeapWord* G1CollectedHeap::mem_allocate(size_t word_size, bool* ...) {
+    if (is_humongous(word_size)) return attempt_allocation_humongous(word_size);
+    return attempt_allocation(word_size, word_size, &dummy);  // 普通对象走这里
+}
+```
+
+`attempt_allocation()`（g1CollectedHeap.cpp:730-753）分两步：
+
+- **快路径（无锁）**：先试 retained region（`attempt_retained_allocation()`），再试 active region 上的 CAS bump-pointer
+- 两步都失败 → `attempt_allocation_slow()`——三级挽救开始
+
+### 3.2 第一级：`_retained_alloc_region`——上一轮留下的 "备胎"
 
 | 属性 | 值 |
 |------|----|
 | 所在类 | `MutatorAllocRegion` |
-| 类型 | `HeapRegion* volatile`（指针 + volatile——其他线程可能在读） |
+| 类型 | `HeapRegion* volatile`（指针 + volatile——别的线程可能在读） |
 | 源码位置 | g1AllocRegion.hpp:213 |
-| 初始化 | 构造函数置 NULL；Region 退休时如果 `should_retain()` 返回 true，赋值为当前退休的 Region |
-| 作用 | 当一个 Eden Region 退休时（`retire_mutator_alloc_region` 把它加入 CSet，**不是**归还 free list），如果它还有剩余空间 ≥ MinTLABSize，`should_retain()` 把它存为 `_retained_alloc_region`。下次需要分配时优先从这里分配——命中率高，避免了持锁开销。一个 Region 只有在 GC 清空后才会进入 `_free_list` |
+| 初始化 | 构造函数置 NULL；Region 退休时如果 `should_retain()` 返回 true，设为当前退休的 Region |
+| 作用 | 当一个 Eden Region 退休时，如果它还有剩余空间 ≥ MinTLABSize，保留为 retained region。下次分配优先从这里分配——命中率高，避免了持锁开销 |
 
 ```cpp
 // g1AllocRegion.inline.hpp:133-144
 if (_retained_alloc_region != NULL) {
     result = par_allocate(_retained_alloc_region, ...);   // 无锁 CAS 分配
-    if (result != NULL) return result;                     // 命中 → 省了持锁
+    if (result != NULL) return result;
 }
 ```
 
-如果 retained region 有空间 → 分配成功 → 省掉下面两级。如果 NULL 或者空间不够 → 进入第二级。
+**关键**：retained region **不在 `_free_list` 里**——它被 `MutatorAllocRegion` 单独持有。只有 GC 清空后的 Region 才会进入 `_free_list`。
 
----
-
-**第二级：持锁重试 + `_young_list_target_length` 的约束**
+### 3.3 第二级：持锁重试 + `_young_list_target_length` 的约束
 
 拿不到 retained region → 持 **`Heap_lock`**。
 
-`Heap_lock` 是一个 JVM 全局的 `Monitor*` 对象（mutexLocker.hpp:55——`extern Monitor* Heap_lock`）。它不是任何类的字段，是一个**全局单例**——所有 HotSpot GC 实现（Serial/Parallel/CMS/G1）共享同一把锁。在 `mutex_init()` 中初始化为 `PaddedMonitor` 实例，类型为 `nonleaf+1`（高优先级内部锁），safepoint check 策略为 `_safepoint_check_sometimes`——意味着持这把锁的线程在 safepoint 时不需要特殊处理。
+`Heap_lock` 是 JVM 全局的 `Monitor*` 单例（mutexLocker.hpp:55——`extern Monitor* Heap_lock`），所有 HotSpot GC 实现共享同一把锁。在 `mutex_init()` 中初始化为 `PaddedMonitor`，优先级 `nonleaf+1`（高优先级内部锁），safepoint check 策略为 `_safepoint_check_sometimes`。
 
-`attempt_allocation_locked()`（g1AllocRegion.inline.hpp:98-118）做三件事——**三步都在 `Heap_lock` 持锁状态下执行**：
+`attempt_allocation_locked()`（g1AllocRegion.inline.hpp:98-118）三步全在 `Heap_lock` 持锁下：
 
 ```cpp
-// g1AllocRegion.inline.hpp:98-118
-inline HeapWord* G1AllocRegion::attempt_allocation_locked(size_t min_word_size,
-                                                           size_t desired_word_size,
-                                                           size_t* actual_word_size) {
-    // 步骤 1: 持锁后重试当前 Region——等锁期间别的线程可能做完了 GC，释放了空间
+inline HeapWord* G1AllocRegion::attempt_allocation_locked(...) {
+    // 步骤 1: 持锁后重试当前 Region——等锁期间别的线程可能做完了 GC
     HeapWord* result = attempt_allocation(min_word_size, desired_word_size, actual_word_size);
     if (result != NULL) return result;
 
     // 步骤 2: 还是失败 → 退休当前 Region
-    retire(true /* fill_up */);  // fill dummy object + 可能保留为 retained
+    retire(true /* fill_up */);
 
-    // 步骤 3: 从 free list 拿新 Eden Region 并尝试分配
-    result = new_alloc_region_and_allocate(desired_word_size, false /* force */);
+    // 步骤 3: 从 free list 拿新 Eden Region
+    result = new_alloc_region_and_allocate(desired_word_size, false);
     if (result != NULL) return result;
 
-    return NULL;  // 三步全失败
+    return NULL;
 }
 ```
 
-这里的 `attempt_allocation()`（步骤 1）和外面无锁版本的 `attempt_allocation()` 是**同一个方法**——唯一的区别是这次在锁保护下。
-
-这里出现两个关键的 Policy 字段——**`_young_list_target_length`** 和 **`_young_list_max_length`**：
+步骤 3 里检查 `should_allocate_mutator_region()`，用到了 `G1Policy` 的两个字段：
 
 | | `_young_list_target_length` | `_young_list_max_length` |
 |---|---|---|
 | 所在类 | `G1Policy` | `G1Policy` |
 | 类型 | `uint` | `uint` |
 | 源码位置 | g1Policy.hpp:82 | g1Policy.hpp:87 |
-| 含义 | Young Region (Eden+Survivor) 的**目标**总数 | Young Region 的**最大**总数（GCLocker 紧急扩展用） |
-| 如何确定 | 由 G1Policy 通过暂停预测模型（二分搜索）计算——附录 A 详解 | = target × (1 + GCLockerEdenExpansionPercent/100)，默认 target × 1.05 |
-| 正常分配用哪个 | `should_allocate_mutator_region()`——用 target 做上限 | — |
-| GCLocker 紧急时用哪个（详见 §1.5） | — | `can_expand_young_list()`——用 max 做上限 |
+| 含义 | Young Region 的**目标**总数 | Young Region 的**最大**总数 |
+| 何时用 | `should_allocate_mutator_region()` | `can_expand_young_list()` (GCLocker 紧急时) |
 
-当 `young_regions_count() >= target` 时，`should_allocate_mutator_region()` 返回 false——无法再分配新的 Eden Region。
+`young_regions_count()` 是 `G1CollectedHeap` 上的方法（g1CollectedHeap.hpp:1253），返回 `_eden.length() + _survivor.length()`：
 
-`young_regions_count()` 是 `G1CollectedHeap` 上的方法（g1CollectedHeap.hpp:1253），返回 `_eden.length() + _survivor.length()`
+```cpp
+uint young_regions_count() const { return _eden.length() + _survivor.length(); }
+```
 
 ```cpp
 // g1Policy.cpp:861-865
@@ -250,13 +216,11 @@ bool should_allocate_mutator_region() const {
 }
 ```
 
-如果第二级失败（ 已到 target 上限）→ 进入第三级。
+当 `young_regions_count() >= target` 时——不能再分配新的 Eden Region，进入第三级。
 
----
+### 3.4 第三级：GCLocker 紧急扩展——用 `_young_list_max_length` 做缓冲
 
-**第三级：GCLocker 紧急扩展——`_young_list_max_length` 作为缓冲**
-
-GCLocker 是什么——详见 §2。这里只说"它阻塞 GC 时怎么办"：GCLocker 活跃 + 需要 GC（`is_active_and_needs_gc()`）时，`attempt_allocation_force()` 用 `_young_list_max_length` 做上限——允许在 target 之上再临时扩展一些 Eden Region，避免一次多余的 safepoint 往返：
+GCLocker 活跃 + 需要 GC 时（见 §4），`attempt_allocation_force()` 用 `_young_list_max_length` 做上限——允许在 target 之上再临时扩展一些 Eden Region，避免一次多余的 safepoint 往返：
 
 ```cpp
 // g1Policy.cpp:867-871
@@ -265,95 +229,81 @@ bool can_expand_young_list() const {
 }
 ```
 
-这不违反 target 的语义——`_young_list_max_length` 的存在就是为了给 GCLocker 这类紧急场景提供缓冲，避免一次多余的 safepoint 往返（abort GC → 等 JNI critical section 释放 → 重新触发 GC → 再 safepoint → 再 abort...）。
+`_young_list_max_length = target × (1 + GCLockerEdenExpansionPercent/100)`，默认 target × 1.05。
 
-如果第三级也失败——GC 必须被触发。进入 §1.5。
+---
 
+## 4. GCLocker——JNI critical section 如何阻止 GC
 
-### 1.5 GCLocker——为什么要拦着 GC（§1.4-1.7 的前置）
+### 4.1 问题：JNI Critical Section 和 GC 互斥
 
-### 2.1 问题：JNI Critical Section 和 GC 互斥
+JNI 提供 `GetPrimitiveArrayCritical()`——返回一个**指向 Java 数组堆内存的原始指针**，让 native 代码直接操作，不经过 JVM 包装。
 
-JNI 提供了 `GetPrimitiveArrayCritical()` 函数——它返回一个 **指向 Java 数组堆内存的原始指针**，让 native 代码直接操作数组内容，不经过 JVM 的任何包装层。
+**这条指针指向堆里的对象。GC 是标记-复制——会搬走活对象。** 如果持有者还在通过这条指针读写数组时 GC 搬走了数组——野指针，进程 crash。
 
-**这条指针指向堆里的对象。GC 是标记-复制——它会搬走活对象。** 如果 `GetPrimitiveArrayCritical` 的持有者还在通过这条原始指针读写数组时，GC 把数组搬到了另一个地址——指针立刻变成野指针，进程 crash。
+### 4.2 GCLocker 的三个关键状态
 
-### 2.2 GCLocker 的解决方案——三个关键状态
+所有字段都是全局 `static`（gcLocker.hpp:45-48），全 JVM 共享：
 
-GCLocker（gcLocker.hpp:38-154）用三个 `static volatile` 变量实现了一个协议——不需要在 safepoint 里等待 mutator 线程释放 JNI critical section，而是让最后一个退出的线程替大家做 GC：
+| 字段 | 类型 | 含义 | 初始值 |
+|------|------|------|--------|
+| `_jni_lock_count` | `static volatile jint` | 当前在 JNI critical section 中的线程数 | 0 |
+| `_needs_gc` | `static volatile bool` | 堆需要 GC 但被 critical section 拦住的标志 | false |
+| `_doing_gc` | `static volatile bool` | 有线程正在替大家做 GC 的标志 | false |
 
-**`_jni_lock_count`** — `GCLocker`:`static volatile jint`，gcLocker.hpp:45。JVM 全局唯一计数器，初始值为 0。`lock_critical()` 进入 critical section 时 +1（`jni_lock()` → `Atomic::inc(&_jni_lock_count)`），`unlock_critical()` 退出时 -1（`jni_unlock()` → `Atomic::dec(&_jni_lock_count)`）。解决的问题——GC 通过 `check_active_before_gc()` 在 safepoint 中读它：`_jni_lock_count != 0` 意味着有线程正握着原生指针，GC 不能搬对象 → 必须 abort 本次 safepoint GC。
+### 4.3 GC 被拦截的完整流程
 
-**`_needs_gc`** — `GCLocker`:`static volatile bool`，gcLocker.hpp:46。静态变量，初始 `false`——VM 启动时堆是空的。设置时机——分配失败需要 GC 但 `_jni_lock_count > 0` 时，`set_needs_gc()` 将其置为 `true`。解决的问题——"堆满了但有人不让做 GC"——把这个意愿记下来，等最后一个 critical section 退出时由 `unlock_critical()` 检查。如果它看到 `_needs_gc == true`，就调用 `jni_unlock()` 执行一次 GC（`collect(GCCause::_gc_locker)`），完成后设回 `false`。
+线程 A 调 `GetPrimitiveArrayCritical()` → `lock_critical()` → `_jni_lock_count++` → 进入 `_thread_in_native` 状态，握着原始指针写数据。
 
-**`_doing_gc`** — `GCLocker`:`static volatile bool`，gcLocker.hpp:48。静态变量，初始 `false`。设置时机——`jni_unlock()` 在 `_needs_gc == true` 时设 `_doing_gc = true`，GC 完成后设回 `false`。解决的问题——其他线程在 `lock_critical()` 里检查 `_jni_lock_count == 0 && _doing_gc == true` 时，说明"已经没有 critical section 了，但有人正在替大家做 GC"——在 `JNICritical_lock` 上等待，避免在 GC 完成前进入新的 critical section。
+此时分配失败触发 GC → VMThread 发起 safepoint → 在 `do_collection_pause_at_safepoint()` 中检查：
 
-`lock_critical()`——进入 critical section（gcLocker.inline.hpp:31-42）：
 ```cpp
-void GCLocker::lock_critical(JavaThread* thread) {
-    if (!thread->in_critical()) {
-        if (needs_gc()) {
-            jni_lock(thread);   // slow path：_needs_gc 为 true → 在 JNICritical_lock 上等
-            return;
-        }
-        increment_debug_jni_lock_count();
-    }
-    thread->enter_critical();   // fast path：直接进入
+// g1CollectedHeap.cpp:2798
+if (GCLocker::check_active_before_gc()) {
+    return false;  // 有 critical section → abort 本次 GC（不是"等"）
 }
 ```
 
-`unlock_critical()`——退出 critical section（gcLocker.inline.hpp:44-55）：
+VMThread **不等待**——因为线程 A 在 `_thread_in_native` 状态下执行 native 代码，不参与 safepoint。VMThread 在 safepoint 里干等 = 死锁。唯一的方法是解除 safepoint，让线程 A 恢复运行，等它主动释放。
+
+### 4.4 谁来做 GC——最后一个退出的人
+
+线程 A 执行完 native 代码 → 调 `ReleasePrimitiveArrayCritical()` → `unlock_critical()`：
+
 ```cpp
+// gcLocker.inline.hpp:44-55
 void GCLocker::unlock_critical(JavaThread* thread) {
-    if (thread->in_last_critical()) {
+    if (thread->in_last_critical()) {   // 自己是最后一个退出 critical section 的线程？
         if (needs_gc()) {
-            jni_unlock(thread);  // slow path：最后一个退出的线程负责执行 GC
+            jni_unlock(thread);         // 负责执行 GC
             return;
         }
-        decrement_debug_jni_lock_count();
     }
     thread->exit_critical();
 }
 ```
 
-### 2.3 GC 侧的检查——abort, retry, expand
+`jni_unlock()` 设置 `_doing_gc = true`，释放 `JNICritical_lock` 后直接调 `Universe::heap()->collect(GCCause::_gc_locker)` 执行一次 GC。完成后 `_needs_gc = false`，`notify_all()` 唤醒所有等在 `JNICritical_lock` 上的线程。
 
-在 safepoint 中，GC 调用 `GCLocker::check_active_before_gc()`（g1CollectedHeap.cpp:2798-2800）：
+### 4.5 GCLocker stall——等 JNI critical section 释放
 
-```cpp
-if (GCLocker::check_active_before_gc()) {
-    return false;  // 有 critical section → 放弃本次 GC
-}
-```
+在 `attempt_allocation_slow()` 里，`should_try_gc = false` 意味着 `GCLocker::needs_gc()` 为 true。此时有三方在同时运行：
 
-返回 false 后——**本次 GC 整个 abort**。VMThread 解除 safepoint，所有 mutator 恢复运行。刚才分配失败的那位线程会重新触发 GC。一直循环，直到所有 JNI critical section 被释放（`unlock_critical()` → `jni_unlock()` 帮大家做了 GC → `_needs_gc = false` → 下次 GC 正常进入）。
+| 谁 | 在哪 | 在干什么 |
+|----|------|---------|
+| 线程 A（JNI critical 持有者） | `_thread_in_native` | 握着原始指针——还没调用 `Release` |
+| VMThread | safepoint 中 | 发现 GCLocker → **abort GC**（返回 false） |
+| 线程 B（走 slow path 的 mutator） | `attempt_allocation_slow` 循环 | `stall_until_clear()` → 在 `JNICritical_lock` 上等 |
 
-**为什么不在 safepoint 里等**——因为 `ReleasePrimitiveArrayCritical`（触发 `unlock_critical`）是 mutator 线程的 native 代码部分——必须让 mutator 恢复运行才能执行。VMThread 干等 = 死锁。所以策略是 abort + retry。
-
-### 2.4 GCLocker 紧急扩展
-
-在触发 GC 之前（§1.4 的 slow path 里），G1 还有一条 "GCLocker 紧急扩展" 路径：
-
-```cpp
-// g1CollectedHeap.cpp:441-448
-if (GCLocker::is_active_and_needs_gc() && g1_policy()->can_expand_young_list()) {
-    result = _allocator->attempt_allocation_force(word_size);
-    if (result != NULL) return result;  // 扩展成功 → 不用触发 GC
-}
-```
-
-`can_expand_young_list()`（g1Policy.cpp:867-871）用 `_young_list_max_length`（而非 `_young_list_target_length`）做上限——允许临时突破 target 来避免 GCLocker abort 的 safepoint 往返。`GCLockerEdenExpansionPercent` 默认 5%，即 `_young_list_max_length = target * 1.05`，给的就是这个 buffer。
-
-如果紧急扩展也不够，`GCLocker::stall_until_clear()` 在 `JNICritical_lock` 上等待所有 critical section 释放。
+线程 A 释放时替大家做 GC，做完后 `notify_all()` 叫醒所有人。
 
 ---
 
+## 5. attempt_allocation_slow——触发 GC 的决策循环
 
-### 1.6 触发 GC——attempt_allocation_slow 的决策循环
+### 5.1 为什么是 for 循环
 
-前面的三级挽救都失败了，控制权到达 `attempt_allocation_slow()`。这个方法的核心结构是一个 **for 循环**——不是单次尝试，因为 GC 可能被 GCLocker 拒绝、也可能被别的线程抢先，必须能重试。
-
-先看骨架。循环不设退出条件（`for (;;)`），所有出口靠内部的 `return`：
+前面三级挽救都失败了，控制权到达 `attempt_allocation_slow()`（g1CollectedHeap.cpp:410-516）。这个方法是 **for 循环**，不是单次尝试——因为 GC 可能被 GCLocker 拒绝、也可能被别的线程抢先，必须能重试。
 
 ```cpp
 // g1CollectedHeap.cpp:427
@@ -361,118 +311,68 @@ for (uint try_count = 1, gclocker_retry_count = 0; /* we'll return */; try_count
     bool should_try_gc;
     uint gc_count_before;
 
+    // (1) 持锁阶段: 持锁重试 + GCLocker 紧急扩展 + 判断能否做 GC
     {
-      MutexLockerEx x(Heap_lock);                            // (1) 持锁阶段
-      // ... 持锁重试 + GCLocker 扩展 + 判断能否做 GC ...
+      MutexLockerEx x(Heap_lock);
+      result = _allocator->attempt_allocation_locked(word_size);
+      if (result != NULL) return result;
+
+      if (GCLocker::is_active_and_needs_gc() && g1_policy()->can_expand_young_list()) {
+          result = _allocator->attempt_allocation_force(word_size);
+          if (result != NULL) return result;
+      }
+
+      should_try_gc = !GCLocker::needs_gc();
+      gc_count_before = total_collections();
     }
 
+    // (2) GC 阶段: 三个结果
     if (should_try_gc) {
-      // ... do_collection_pause ...                          // (2) GC 阶段
+        result = do_collection_pause(word_size, gc_count_before, &succeeded,
+                                     GCCause::_g1_inc_collection_pause);
+        if (result != NULL) return result;    // GC 成功 + 分配成功
+        if (succeeded) return NULL;            // GC 成功 + 分配失败 → 放弃
+        // !succeeded → GC 被抢先 → 循环头重试
     } else {
-      // ... GCLocker::stall_until_clear ...                  // (3) GCLocker stall
+        // (3) GCLocker stall: 等 JNI critical section 释放
+        if (gclocker_retry_count > GCLockerRetryAllocationCount) return NULL;
+        GCLocker::stall_until_clear();
+        gclocker_retry_count += 1;
     }
 
-    // 无锁重试：其他线程的 GC 可能刚释放了空间                    // (4)
+    // (4) 无锁重试: 别的线程的 GC 可能刚释放了空间
     result = _allocator->attempt_allocation(word_size, word_size, &dummy);
     if (result != NULL) return result;
 }
 ```
 
-**(1) 持锁阶段——最后的挽救努力**
+### 5.2 各阶段详解
 
-进入 slow path 等于说 "无锁手段全用完了"。在触发 GC 之前，G1 还有最后一次尝试——持 `Heap_lock` 后：
+**(1) 持锁阶段**——进入 slow path 等于说 "无锁手段全用完了"。在触发 GC 之前，持 `Heap_lock` 后做最后挽救：持锁重试当前 Region（等锁期间别的线程可能刚做完 GC）、GCLocker 紧急扩展（用 max 做上限）、判断能不能做 GC（`should_try_gc = !GCLocker::needs_gc()`）。
 
-- **持锁重试**：等锁期间别的线程可能刚做完 GC 释放了空间——持锁后立刻再试一次当前 Eden Region
-- **GCLocker 紧急扩展**：如果 GCLocker 活跃且需要 GC（`is_active_and_needs_gc()`），在持锁状态下用 `_young_list_max_length`（而非 `_young_list_target_length`）做上限，强行再分配一个 Eden Region
+**`gc_count_before`**——后面 `do_collection_pause()` 用它和当前 `total_collections()` 对比。如果 GC 计数没变——被 GCLocker 拦了或被抢先了——`succeeded=false`，回到循环头重试。
 
-```cpp
-// g1CollectedHeap.cpp:432-454
-MutexLockerEx x(Heap_lock);
-result = _allocator->attempt_allocation_locked(word_size);   // 持锁重试
-if (result != NULL) return result;                            // 成功了→不需要GC
-
-if (GCLocker::is_active_and_needs_gc()
-    && g1_policy()->can_expand_young_list()) {                // GCLocker紧急扩展
-    result = _allocator->attempt_allocation_force(word_size); // 绕过target限上限
-    if (result != NULL) return result;
-}
-
-should_try_gc = !GCLocker::needs_gc();   // 判断: 能自己做GC还是必须等GCLocker
-gc_count_before = total_collections();    // 记住当前GC计数(用于判断GC是否被抢先)
-```
-
-**为什么 `gc_count_before` 很重要**——后面 `do_collection_pause()` 会用它和 `total_collections()` 的当前值对比。如果 GC 计数没变——别的线程抢先了（或者 GCLocker 拦了）——`succeeded=false`，必须回到循环头重试。
-
-**(2) GC 阶段——do_collection_pause 的三个结果**
-
-```cpp
-// g1CollectedHeap.cpp:457-474
-if (should_try_gc) {
-    bool succeeded;
-    result = do_collection_pause(word_size, gc_count_before, &succeeded,
-                                 GCCause::_g1_inc_collection_pause);
-    if (result != NULL) return result;  // GC成功回收空间 + 分配成功
-
-    if (succeeded) return NULL;         // GC成功执行但分配失败 → 彻底放弃
-    // !succeeded → GC被抢先 → 继续循环
-}
-```
-
-`do_collection_pause()`（g1CollectedHeap.cpp:2501-2521）创建 `VM_G1CollectForAllocation` 提交给 VMThread，阻塞等待 GC 完成。返回时有三种可能：
+**(2) GC 阶段**——`do_collection_pause()`（g1CollectedHeap.cpp:2501-2521）创建 `VM_G1CollectForAllocation` 提交给 VMThread，阻塞等待 GC 完成。三种返回：
 
 | succeeded | result | 含义 | 动作 |
 |-----------|--------|------|------|
-| true | 非NULL | GC 成功执行，方法内部完成了分配 | return result |
-| true | NULL | GC 成功执行，但分配失败（如堆真的满了） | return NULL（放弃） |
-| false | NULL | GC 没执行——被 GCLocker 拦了或被别的线程抢先了 | 回到循环头 |
+| true | 非NULL | GC 成功，分配完成 | return result |
+| true | NULL | GC 成功但分配失败（堆满了） | return NULL（放弃） |
+| false | NULL | GC 没执行（被拦/抢先） | 回到循环头 |
 
-步（2）里没有 `succeeded=false` 的 return——它落在循环底部，等下次迭代重新走。
+**(3) GCLocker stall**——`should_try_gc = false` 意味着有 JNI critical section 持有者。VMThread 会在 safepoint 中 abort GC，所以与其来一次注定失败的 safepoint 往返，不如在 `JNICritical_lock` 上等。终止条件 `gclocker_retry_count > GCLockerRetryAllocationCount` 防止永久卡死。
 
-**(3) GCLocker stall——等 JNI critical section 释放**
+**(4) 无锁重试**——无论走了 (2) 还是 (3)，出锁后别的线程可能刚做完 GC 释放了空间。这一步不持锁、轻量快速——成功直接返回，失败回到循环头。
 
-```cpp
-// g1CollectedHeap.cpp:477-489
-} else {  // should_try_gc == false
-    if (gclocker_retry_count > GCLockerRetryAllocationCount) {
-        return NULL;                    // 等太多次了 → 放弃
-    }
-    GCLocker::stall_until_clear();      // 在 JNICritical_lock 上等
-    gclocker_retry_count += 1;
-}
-```
+### 5.3 关键——触发 GC ≠ 自己需要 GC
 
-`should_try_gc = false` 意味着 `GCLocker::needs_gc()` 为 true——**有一个 mutator 线程正握着 `GetPrimitiveArrayCritical` 返回的原始指针，堆不能搬**。
+N 个线程同时走到 slow path，一人触发 GC，其余人在 `Heap_lock` 上排队。GC 完成后 Eden 有空闲 Region，排队的人醒来后持锁重试（步骤 1）或出锁后无锁重试（步骤 4）直接分配成功——"GC 不是我触发的，但我受益了"。
 
-**此时有三方在运行**：
+---
 
-| 谁 | 在哪 | 在干什么 |
-|----|------|---------|
-| **线程 A**（JNI critical section 持有者） | `_thread_in_native` 状态（执行 native 代码） | 正握着一条指向堆内存的原始指针——**还没调用 `ReleasePrimitiveArrayCritical`** |
-| **VMThread** | safepoint → 发现 `GCLocker::check_active_before_gc()` 返回 true | **abort 本次 GC**（不是"等"——直接放弃这次 safepoint，返回 `false`） |
-| **线程 B**（走 slow path 的 mutator） | 在 `attempt_allocation_slow()` 循环中 | `should_try_gc == false` → 调用 `stall_until_clear()`——在 `JNICritical_lock` 上等 |
+## 6. InitialMark 决策——这次要不要顺便启动并发标记
 
-**VMThread 为什么不"等"而是 abort**——因为线程 A 在 `_thread_in_native` 状态下执行 native 代码——它不参与 safepoint。VMThread 在 safepoint 里干等是死锁。唯一的方法是解除 safepoint，让线程 A 恢复运行，等它主动调用 `ReleasePrimitiveArrayCritical`。
-
-**线程 A 释放时谁做 GC**——线程 A 执行 `ReleasePrimitiveArrayCritical` → `unlock_critical()` → 发现自己是最后一个退出 critical section 的线程，且 `_needs_gc == true` → 设置 `_doing_gc = true` → **线程 A 直接调 `collect(GCCause::_gc_locker)` 执行一次 GC** → 完成后设置 `_needs_gc = false` → `notify_all()` 唤醒所有等在 `JNICritical_lock` 上的线程。
-
-**所以"GCLocker stall"就是坐在 JNICritical_lock 上打盹——等那个握着原始指针的线程干完活、替大家把 GC 做了、然后敲铃铛叫醒所有人。**
-
-**(4) 无锁重试——别人的 GC 可能帮了我们**
-
-```cpp
-// g1CollectedHeap.cpp:499-503
-size_t dummy = 0;
-result = _allocator->attempt_allocation(word_size, word_size, &dummy);
-if (result != NULL) return result;
-```
-
-无论走了 (2) 还是 (3)，出锁后都可能已经有空闲 Eden Region 了——别的线程抢先做了 GC 释放了空间。这一步不持锁、轻量快速——成功直接返回，失败回到循环头下次迭代继续。
-
-**关键——触发 GC ≠ 自己需要 GC**。N 个线程同时走到 slow path，一人触发 GC，其余人在 `Heap_lock` 上排队。GC 完成后 Eden 有空闲 Region，排队的人醒来后持锁重试（步骤 1）或出锁后无锁重试（步骤 4）直接分配成功——"GC 不是我触发的，但我受益了"。
-
-## 2. InitialMark 决策——这次要不要兼做
-
-每次 Young GC 之前，G1Policy 判断一个关键问题——"老年代是不是快满了，需要启动并发标记了？"
+每次 Young GC 之前，G1Policy 判断："老年代是不是快满了，需要启动并发标记了？"
 
 ```cpp
 // g1CollectedHeap.cpp:2826
@@ -481,147 +381,80 @@ if (!_cm_thread->should_terminate()) {
 }
 ```
 
-`decide_on_conc_mark_initiation()`（g1Policy.cpp:936-985）的决策逻辑：
+`decide_on_conc_mark_initiation()`（g1Policy.cpp:936-985）：
 
 ```cpp
-if (collector_state()->initiate_conc_mark_if_possible()    // 上次 GC 结束时设的 flag
-    && collector_state()->in_young_only_phase()              // 还在 young-only 阶段
-    && !about_to_start_mixed_phase())                        // 还没开始 Mixed
-{
+if (initiate_conc_mark_if_possible()     // 上次 GC 结束时设的 flag
+    && in_young_only_phase()              // 还在 young-only 阶段
+    && !about_to_start_mixed_phase()) {   // 还没开始 Mixed
     initiate_conc_mark();  // _in_initial_mark_gc = true → 本次变成 InitialMarkGC
 }
 ```
 
-### 3.1 IHOP——谁设了这个 flag
-
-`initiate_conc_mark_if_possible` 是上一次 GC 结束时 `maybe_start_marking()` 设的。`maybe_start_marking()` 最终调 `need_to_start_conc_mark()`（g1Policy.cpp:531-551）：
+`initiate_conc_mark_if_possible` 是上一次 GC 结束时 `maybe_start_marking()` 设的。它最终调用 `need_to_start_conc_mark()`（g1Policy.cpp:531-551）：
 
 ```cpp
 bool need_to_start_conc_mark() {
-    size_t threshold = _ihop_control->get_conc_mark_start_threshold();
-    size_t cur_used = _g1h->non_young_capacity_bytes();  // old + humongous 占用量
+    size_t threshold = _ihop_control->get_conc_mark_start_threshold();  // IHOP!
+    size_t cur_used = _g1h->non_young_capacity_bytes();  // old + humongous
 
     return cur_used > threshold;
 }
 ```
 
-**IHOP 阈值——自适应模式下的含义**：
+IHOP 阈值 = `internal_threshold - (marking_time × promotion_rate + max_young_size)`。本质含义：**"如果现在启动并发标记，标记完成时老年代还能装下标记期间晋升来的对象吗？"** 装不下就启动。
 
-```
-threshold = internal_threshold - (marking_time × promotion_rate + max_young_size)
-
-其中：
-  internal_threshold = heap_capacity * (1 - G1ReservePercent) * InitiatingHeapOccupancyPercent
-  marking_time       = 历史并发标记耗时（EWMA 预测）
-  promotion_rate     = 历史晋升速率（MB/s）
-  max_young_size     = max young gen size
-```
-
-本质含义：**"如果现在启动并发标记，标记完成时老年代还能装下标记期间晋升来的对象 + 一个完整的 young gen 吗？"** 如果 IHOP 说 "装不下了"——那就是现在，立刻，下一次 Young GC 捎带上 InitialMark。
-
-### 3.2 Normal Young GC 的情况
-
-对于 Normal Young GC：
-- `initiate_conc_mark_if_possible()` 为 **false**（上次 GC 没设这个 flag）
-- 走纯 young-only 回收路径
-- `should_start_conc_mark` 保持 false
-
-如果上一次 GC 设了这个 flag，本次就会变成 **InitialMarkGC**——GC 日志显示 `Pause Young (Concurrent Start)`。除了 Young GC 的全部回收逻辑外，还多把 survivor Region 标记为并发标记的 root（ch11/13 展开）。
+Normal Young GC 时 `initiate_conc_mark_if_possible()` 为 false——走纯 young 回收路径。如果为 true，变 InitialMarkGC——日志显示 `Pause Young (Concurrent Start)`（ch11/13 展开）。
 
 ---
 
-## 3. CSet 选择——把哪些 Region 放进去
+## 7. CSet 选择——确认本次回收哪些 Region
 
-### 4.1 什么是 CSet
+### 7.1 什么是 CSet
 
-CSet（Collection Set）= 本次 GC 要回收的 Region 集合。ch11/06 讲了 `in_cset_fast_test`（O(1) 判断某个地址在不在 CSet）——那是使用者。本章讲的是构建者——这些 Region 是怎么被选进 CSet 的。
+CSet（Collection Set）= 本次 GC 要回收的 Region 集合。Normal Young GC 的 CSet = **所有 Eden + Survivor Region**，全量加入，无需选择。
 
-Normal Young GC 的 CSet = **所有 Eden Region + 所有 Survivor Region**。全量加入，不需要选择——凡是 Eden 或 Survivor 的 Region，一律收。
+### 7.2 Region 什么时候进 CSet——增量构建
 
-### 4.2 Region 什么时候进 CSet
+CSet 是**增量地**构建的——mutator 运行期间一小口一小口往里加：
 
-**关键认识：CSet 是增量构建的。** 不是在 GC 开始那一刻一次性堆进去——而是 mutator 运行期间一小口一小口往里加：
+- **已填满退休的 Eden**：mutator 把 Eden Region 分三亚后退了它 → `retire_mutator_alloc_region()` → `add_eden_region()`（g1CollectedHeap.cpp:4874）。这个调用发生在 mutator 时间里（safepoint 之间）。
+- **当前活跃的 Eden**：GC 开始时 `release_mutator_alloc_region()`（g1CollectedHeap.cpp:2926）也退休它 → 同路径入 CSet。
+- **上一轮 Survivor**：上轮 GC 结束时 `transfer_survivors_to_cset()`（g1Policy.cpp:1148-1176）把它们全部加入下一轮 CSet。
 
-**已填满退休的 Eden Region**——mutator 把一个 Eden Region 分三亚后退了它。退休操作 `retire_mutator_alloc_region()`（g1CollectedHeap.cpp:4869-4881）在最后一行调用：
+`add_young_region_common()`（g1CollectionSet.cpp:229-278）是底层方法——把 `hrm_index` 写入 `_collection_set_regions` 数组：
 
-```cpp
-collection_set()->add_eden_region(alloc_region);   // line 4874
-```
+| 字段 | 所在类 | 类型 | 源码位置 | 用途 |
+|------|--------|------|---------|------|
+| `_collection_set_regions` | `G1CollectionSet` | `uint*` | g1CollectionSet.hpp:55 | CSet 的 C 数组存储——存 hrm_index 而非 HeapRegion* |
+| `_collection_set_cur_length` | `G1CollectionSet` | `volatile size_t` | g1CollectionSet.hpp:56 | 当前有效条目数——volatile 支持并发读 |
+| `_inc_build_state` | `G1CollectionSet` | `CSetBuildType` (Active/Inactive) | g1CollectionSet.hpp:76 | 增量构建开关 |
+| `_inc_recorded_rs_lengths` | `G1CollectionSet` | `size_t` | g1CollectionSet.hpp:88 | 累加 RSet 长度——用于暂停预测 |
+| `_inc_predicted_elapsed_time_ms` | `G1CollectionSet` | `double` | g1CollectionSet.hpp:101 | 累加预测耗时 |
 
-这个 Region 就被加入增量 CSet 数组。**这个调用发生在 mutator 时间里（safepoint 之间），不是 GC 时间内。**
-
-**当前活跃的 Eden Region**（mutator 正用的、还没填满的那个）——GC 开始后 `release_mutator_alloc_region()`（g1CollectedHeap.cpp:2926）把它也退休了，走同一条路径（`retire_mutator_alloc_region()` → `add_eden_region()`）进入 CSet。所以**所有 Eden Region 最终都在 CSet 里**——只是退休时机不同。
-
-**上一轮 Survivor Region**——上轮 GC 结束时 `transfer_survivors_to_cset()`（g1Policy.cpp:1148-1176）把它们全部加入下一轮的增量 CSet。
-
-```cpp
-void G1Policy::transfer_survivors_to_cset(const G1SurvivorRegions* survivors) {
-    for (each survivor region) {
-        _collection_set->add_survivor_regions(curr);  // 加入下一轮 CSet
-    }
-}
-```
-
-`add_eden_region()` 和 `add_survivor_regions()` 都委托给同一个底层方法 `add_young_region_common()`。这个方法操作的核心数据结构——`G1CollectionSet` 的五大字段：
-
-**`_collection_set_regions`** — `G1CollectionSet`:`uint*`，g1CollectionSet.hpp:55。普通 C 数组指针。构造函数中 `NEW_C_HEAP_ARRAY(uint, max_regions, mtGC)` 分配，大小 = 堆的最大 Region 数。存的不是 `HeapRegion*` 指针，而是 `hrm_index()`——Region 在 `HeapRegionManager` 数组中的稳定索引。遍历时通过 `_g1h->region_at(index)` 反查。解决的问题——需要快速遍历 CSet（内存连续比链表 cache 好），存索引而非指针因为 hrm_index 不受 Region 重定位影响。
-
-**`_collection_set_cur_length`** — `G1CollectionSet`:`volatile size_t`，g1CollectionSet.hpp:56。有效条目计数，不等于数组容量。构造函数初始为 0。每加一个 Region 递增 1，GC 开始后 `finalize_incremental_building()` 锁定不再变。标记 `volatile` 是因为 mutator 在 safepoint 间写（`add_eden_region`），VMThread/Worker 在 safepoint 内读——需保证跨线程可见性。解决的问题——区分"数组能装多少"（max_regions）和"实际有了多少"（cur_length）——遍历上限，不是容量。
-
-**`_inc_build_state`** — `G1CollectionSet`:`CSetBuildType`（枚举 `{Active, Inactive}`），g1CollectionSet.hpp:76。构造函数置 `Inactive`，GC 结束时 `start_incremental_building()` 切 `Active`——mutator 期间退休 Eden Region 时往 CSet 增量添加。GC 开始时 `finalize_incremental_building()` 切回 `Inactive`——CSet 锁定，不再接受新 Region。解决的问题——并发安全：`add_young_region_common()` 首行 `assert(_inc_build_state == Active)`（g1CollectionSet.cpp:232）确保 mutator 不会在 GC 期间往已锁定的 CSet 里加 Region。
-
-**`_inc_recorded_rs_lengths`** — `G1CollectionSet`:`size_t`，g1CollectionSet.hpp:88。增量累加器。每次 `start_incremental_building()` 重置为 0。`add_young_region_common()` 每次把新增 Region 的 RSet 实际长度累加上去。解决的问题——暂停预测的输入。`finalize_young_part()` 读它计算 "这次 GC 要扫描多少 card"，与 time budget 对比决定 CSet 是否太大。
-
-**`_inc_predicted_elapsed_time_ms`** — `G1CollectionSet`:`double`，g1CollectionSet.hpp:101。增量累加器。每次 `start_incremental_building()` 重置为 0.0。`add_young_region_common()` 每次调 `predict_region_elapsed_time_ms(hr)` 估算这个 Region 的清理耗时（sweep card table、更新 stats），累加入内。解决的问题——暂停预测的另一个输入。与 `_inc_recorded_rs_lengths` 一起决定"本次 CSet 的总预测工作量会不会超 pause time target"。
+### 7.3 GC 开始时锁定——finalize_collection_set
 
 ```cpp
-// g1CollectionSet.cpp:229-278
-void G1CollectionSet::add_young_region_common(HeapRegion* hr) {
-    assert(_inc_build_state == Active, "Precondition");        // ← 构建状态门
-
-    hr->set_young_index_in_cset((int)_collection_set_cur_length);
-    _collection_set_regions[_collection_set_cur_length] = hr->hrm_index(); // ← 存索引
-    _collection_set_cur_length++;                               // ← 有效长度 +1
-
-    _g1h->register_young_region_with_cset(hr);
-
-    // 为 G1Policy 的暂停预测累加数据
-    size_t rs_length = hr->rem_set()->occupied_locked();
-    _inc_recorded_rs_lengths += rs_length;                      // ← RSet 扫描工作量
-    _inc_predicted_elapsed_time_ms += predict_region_elapsed_time_ms(hr); // ← 清理耗时
-    _inc_bytes_used_before += hr->used();
-}
+// g1CollectedHeap.cpp:2944
+g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
 ```
 
-### 4.3 GC 开始时的锁定——finalize_collection_set
+`finalize_young_part()`（g1CollectionSet.cpp:356-398）：
+1. `finalize_incremental_building()`——Active → Inactive，停止接受新 Region
+2. `init_region_lengths(eden_count, survivor_count)`——记下数量
+3. `survivors->convert_to_eden()`（g1SurvivorRegions.cpp:42-50）——SurvTag(3) → EdenTag(2)
+4. 算 time budget——`target_pause_time_ms - base_time_ms`
+5. Young-only 时 `finalize_old_part()` 不执行
 
-GC 进入 safepoint 后，`finalize_collection_set()`（g1CollectedHeap.cpp:2944）完成最后的锁定动作：
+### 7.4 `_young_list_target_length` 如何影响 CSet 大小
 
-```cpp
-// g1Policy.cpp:1143-1146
-void G1Policy::finalize_collection_set(target_pause_time_ms, &_survivor) {
-    double time_remaining = _collection_set->finalize_young_part(target_pause_time_ms, survivor);
-    _collection_set->finalize_old_part(time_remaining);
-}
-```
-
-`finalize_young_part()`（g1CollectionSet.cpp:356-398）做五件事：
-
-1. **`finalize_incremental_building()`**——把增量构建状态从 `Active` 切 `Inactive`："从现在开始不接受新的 Region 进入 CSet"
-2. **`init_region_lengths(eden_count, survivor_count)`**——记录本轮 CSet 里的 Eden 和 Survivor 各有多少
-3. **`survivors->convert_to_eden()`**（g1SurvivorRegions.cpp:42-50）——遍历上一轮留下的 Survivor Region，调用 `set_eden_pre_gc()` 把 Tag 从 `SurvTag(3)` 改为 `EdenTag(2)`——这些 Survivor 在本轮 GC 中作为 Eden 被回收
-4. **算 time budget**——`target_pause_time_ms - base_time_ms`，CSet 的预测工作量不能超过剩余时间
-5. **返回剩余时间**——Young-only GC 时 `finalize_old_part()` 不做任何事（`in_mixed_phase()` 返回 false）
-
-### 4.4 为什么 CSet 大小的控制不发生在 finalize 阶段
-
-`finalize_young_part()` 只是 "锁定量，不锁大小"。CSet 的大小是 GC 之间的 mutator 分配活动决定的——分配了多少 Eden Region，就有多少 Eden 进入 CSet。G1Policy 通过 `_young_list_target_length` 持续控制 "堆里该有多少 Young Region"，从而控制下一轮的 CSet 大小。附录 A 详解了这个值的计算。
+CSet 的大小是 GC 之间的 mutator 分配活动决定的——分配了多少 Eden Region，就有多少 Eden 进入 CSet。G1Policy 通过 `_young_list_target_length` 持续控制 "堆里该有多少 Young Region"。附录 A 详解了这个值的计算——分初始值（无历史数据，用硬编码默认值）和运行时（每次 GC 后把真实数据喂进 analytics 序列）。
 
 ---
 
-## 4. Pre-Evacuation——搬运前的最后准备
+## 8. Pre-Evacuation——搬运前的最后准备
 
-### 5.1 做什么
+### 8.1 做什么
 
 ```cpp
 // g1CollectedHeap.cpp:2972
@@ -630,175 +463,69 @@ pre_evacuate_collection_set();
 
 内部（g1CollectedHeap.cpp:4039-4058）：
 - 关闭热卡缓存——GC 期间 hot card cache 不能有 stale 数据
-- 调用 `g1_rem_set()->prepare_for_oops_into_collection_set_do()`
+- 调用 `prepare_for_oops_into_collection_set_do()`（g1RemSet.cpp:511-516）
 
-### 5.2 merge dirty card logs
-
-`prepare_for_oops_into_collection_set_do()`（g1RemSet.cpp:511-516）第一件事：
+### 8.2 合并 dirty card logs
 
 ```cpp
 void G1RemSet::prepare_for_oops_into_collection_set_do() {
     DirtyCardQueueSet& dcqs = G1BarrierSet::dirty_card_queue_set();
-    dcqs.concatenate_logs();    // ★ 关键——合并所有线程的 partial dirty card buffer
+    dcqs.concatenate_logs();    // ★ 合并所有线程的半满 dirty card buffer
     _scan_state->reset();
 }
 ```
 
-**`concatenate_logs()` 为什么重要**：mutator 线程在 GC 触发前最后一刻还在分配对象和写引用。这些写入会产生 dirty card，但写在 thread-local buffer 里——如果 buffer 还没满，就不会提交到全局队列。GC 必须主动把所有这些 "半满的 buffer" 拼到全局 completed buffer list 中。
+`concatenate_logs()`——mutator 在 GC 前最后一刻产生的 dirty card 还写在 thread-local buffer 里，没提交到全局队列。必须赶在 GC 扫描前合并进来，否则漏掉引用。
 
-如果不做这一步——最后一批 dirty card 对 GC Worker 来说**不可见**——这些 card 上的跨 Region 引用会被漏掉——**活对象被误判为死对象**——严重错误。
+### 8.3 重置 scan_state
 
-### 5.3 重置 scan_state
+`_scan_state->reset()` 为堆中每个 Region 重算 `_scan_top[i]`（ch11/06 §2.3）：
+- 不在 CSet 中的 old/humongous Region → `_scan_top[i] = top()`（需要扫描它的 card）
+- CSet 内 / young / free Region → `_scan_top[i] = bottom()`（在 evacuation 时自然处理）
 
-`_scan_state->reset()` 为堆中**每一个 Region** 重算 `_scan_top[i]`（ch11/06 §2.3 详细讲了这个数组）。逻辑（g1RemSet.cpp:127-141）：
-
-```cpp
-for each Region r:
-    if (!r->in_collection_set() && r->is_old_or_humongous())
-        _scan_top[hrm_index] = r->top();       // 需要扫描这个 Region 的 card
-    else
-        _scan_top[hrm_index] = r->bottom();    // 不需要——CSet 内的在 evacuation 时自然处理
-```
-
-**为什么需要区分**——RSet 扫描时（第二篇 08-02 展开），Worker 需要知道 "哪些 Region 的哪些 card 可能引用了 CSet"。`_scan_top[i]` 给出了精确的上限：
-- 如果 Region i 不在 CSet 且是 old/humongous——card 0 到 `_scan_top[i]` 需要被检查
-- 如果 Region i 在 CSet 中——它的对象会被整体疏散，跨 Region 引用在 evacuation 时自然覆盖，不需要通过 RSet 额外追踪
-
-### 5.4 如果是 InitialMark GC——额外步骤
-
-如果本次是 InitialMark GC（§3 判断为 true），还有一个额外的操作——清理所有 `ClassLoaderData` 的 claimed 标记，为标记阶段的 class unloading 做准备。Normal Young GC 跳过这步。
+如果本次是 InitialMark GC，还需清理 ClassLoaderData claimed 标记——Normal Young GC 跳过。
 
 ---
 
-## 附录 A: `_young_list_target_length` 怎么算
+## 附录 A: `_young_list_target_length` 算法
 
-G1Policy 通过 `_young_list_target_length` 控制堆里该有多少 Young Region（Eden+Survivor）。这不是一个静态值——它在初始化和每次 GC 后都被重新计算。**初始值和运行时值的计算方式截然不同。**
+G1Policy 通过 `_young_list_target_length` 控制堆里该有多少 Young Region。**初始值和运行时值的计算方式截然不同。**
 
-### A.1 初始值——没有历史数据时的第一次
+### A.1 初始值——无历史数据
 
-VM 启动时 `G1Policy::init()`（g1Policy.cpp:79-96）调用 `update_young_list_max_and_target_length()`。此时 **所有 analytics 序列都是空的**——没有任何 GC 历史数据。
+VM 启动时 `G1Policy::init()`（g1Policy.cpp:92）调用计算。所有 analytics 序列为空——G1Analytics 用硬编码默认值（g1Analytics.cpp:41-66）：
 
-没有数据怎么办？G1Analytics 用**硬编码默认值**（g1Analytics.cpp:41-66）：
+| 预测项 | 默认值 |
+|--------|--------|
+| 拷贝成本 | 0.000009~0.00006 ms/byte |
+| 固定开销 | 5.0 ms |
+| 存活率 | 0.4 / age |
+| RSet 扫描成本 | 0.0015~0.01 ms/card |
 
-| 预测项 | 默认值 | 用于 |
-|--------|--------|------|
-| 拷贝成本 | 0.000009 ~ 0.00006 ms/byte | 预测搬活对象的耗时 |
-| 卡片扫描成本 | 0.0015 ~ 0.01 ms/card | 预测 RSet 扫描耗时 |
-| 常数开销 | 5.0 ms | 每次 GC 的固定底线耗时 |
-| 存活率 | 0.4 / age | 每个年龄层约 40% 对象存活 |
-| RSet 长度 | 0 | 无历史——假设没有 RSet 要扫描 |
-| 分配速率 | 0 | 空序列——前三次 GC 不用分配速率做约束 |
+`G1YoungLengthPredictor::will_fit(young_length)`（g1Policy.cpp:121-158）检查三项：空间足够 + 暂停不超 MaxGCPauseMillis + 拷贝安全余量（safety_factor = 2.2）。二分搜索在 `[G1NewSizePercent%堆, G1MaxNewSizePercent%堆]` 范围内找最大值。
 
-这些默认值代入 `G1YoungLengthPredictor::will_fit(young_length)`（g1Policy.cpp:121-158）。这个预测器对每个候选值检查三项：
+### A.2 运行时——数据驱动
 
-```
-检查 1: 空间够不够？
-  young_length < free_regions - reserve_regions (默认 10%)
+`record_collection_pause_end()`（g1Policy.cpp:710）把真实数据喂进 analytics：分配速率、RS 长度、拷贝时间、pending cards。EWMA 预测越来越准。
 
-检查 2: 暂停会超吗？
-  copy_time_ms = accum_surv_rate × RegionSize × cost_per_byte_ms
-  other_time_ms = young_length × cost_per_region_ms
-  pause_time_ms = base_time_ms + copy_time_ms + other_time_ms
-  if (pause_time_ms > MaxGCPauseMillis)  → 太大，不行
-
-检查 3: 拷贝安全吗？
-  safety_factor = (100 / G1ConfidencePercent) × (100 + TargetPLABWastePct) / 100
-                = (100 / 50) × (100 + 10) / 100 = 2.2
-  expected_bytes_to_copy = safety_factor × bytes_to_copy
-  if (expected_bytes_to_copy > remaining_free_space)  → 危险，不行
-```
-
-`calculate_young_list_target_length()`（g1Policy.cpp:278-378）对 `[min, max]` 区间做**二分搜索**——找能通过三项检查的最大值。
-
-上下界来自 `G1YoungGenSizer`（g1YoungGenSizer.cpp:30-79）：
-- 下界：`max(1, heap_regions × G1NewSizePercent/100)` —— 默认 5%
-- 上界：`max(1, heap_regions × G1MaxNewSizePercent/100)` —— 默认 60%
-- 可以被 `-XX:NewSize` / `-XX:MaxNewSize` 显式覆盖
-
-**第一次 GC 不保证满足暂停目标**——初始值用默认数据估算，真实行为（分配速率、存活率、拷贝成本）可能与默认值差甚远。这是有意为之——用第一轮的真实数据喂给 analytics，后续的预测才会越来越准。
-
-### A.2 运行时——数据驱动的动态调整
-
-每次 GC 结束后 `record_collection_pause_end()`（g1Policy.cpp:556-737）把本轮的真实数据喂进 analytics 的滑动窗口序列：
-
-```
-report_alloc_rate_ms()    —— eden_region_count / app_time_ms
-report_rs_lengths()       —— _max_rs_lengths
-report_cost_per_byte_ms() —— copy_time / bytes_copied
-report_pending_cards()    —— _pending_cards  (仅 young GC 更新)
-report_rs_length_diff()   —— RS 变化差异
-```
-
-序列越长，EWMA（指数加权移动平均）预测越准。第三条 GC 开始用分配速率做下界约束（`num_alloc_rate_ms() > 3`）。
-
-**mutator 阶段的修正**——`G1YoungRemSetSamplingThread` 每 300ms（G1ConcRefinementServiceIntervalMillis）唤醒一次，采样所有 young Region 的 RSet 实际长度。如果当前 RS 长度超过了 GC 结束时的预测值：
-
-```cpp
-// g1Policy.cpp:392-402
-void G1Policy::revise_young_list_target_length_if_necessary(size_t rs_lengths) {
-    if (rs_lengths > _rs_lengths_prediction) {
-        size_t new_prediction = rs_lengths * 1100 / 1000;   // ×1.1 容错
-        update_rs_lengths_prediction(new_prediction);
-        update_young_list_max_and_target_length(new_prediction);  // 重新算 target
-    }
-}
-```
-
-**这可能导致一次提前 GC**——如果重新算的 target 比当前  小，下一次分配就会更快触发 GC。但这是值得的——RS 比预期大意味着下次 GC 扫描会超时，提前 GC 缩小 young gen 比超时好。
+`G1YoungRemSetSamplingThread` 每 300ms 采样 RS 实际大小——超标时用 ×1.1 容错重新算，可能触发提前 GC。
 
 ---
 
-## 附录 B: TLAB 和 Region 分配——完整路径
-
-### B.1 TLAB 的 pointer bump
-
-`_top + size ≤ _end` → `_top += size`。约 10 条 CPU 指令，无锁，每个线程独立。
-
-### B.2 TLAB 空间不够时的容差
-
-`_refill_waste_limit = TLAB大小 / 64`。每次走 CAS 路径（跳过 TLAB 直接在 Region 上分配）时 waste limit 再递增 4（`TLABWasteIncrement`），逐步宽松——长时间不用退休同一块 TLAB，减少 overhead。
-
-### B.3 TLAB 退休的全部步骤
-
-`clear_before_allocation()`（threadLocalAllocBuffer.cpp:43-46）：
-1. `make_parsable(true)` —— 在 `top`→`hard_end` 填 dummy filler object（`CollectedHeap::fill_with_object`）
-2. `incr_allocated_bytes(used_bytes())` —— 记入线程的总分配量
-3. 清零 `start/top/end/allocation_end` 指针
-
-### B.4 Region 的三级挽救——详情
-
-| 级别 | 方法 | 持锁？ | 失败后果 |
-|------|------|--------|---------|
-| 第一级 | `G1Allocator::attempt_allocation()` → `attempt_retained_allocation()` | 无锁 | 返回 NULL，进入第二级 |
-| 第二级 | `attempt_allocation_locked()`（g1AllocRegion.inline.hpp:98-118） | Heap_lock | retry → retire current → `new_mutator_alloc_region()` → NULL 进入第三级或 GC |
-| 第三级 | `attempt_allocation_force()` | Heap_lock（同第二级的上下文） | 绕过 target 用 max 上限；失败 → GC |
-
-### B.5 Region 退休 vs TLAB 退休
-
-| 维度 | TLAB 退休 | Region 退休 |
-|------|----------|-----------|
-| 触发 | `_refill_waste_limit` 判断 | Region 无法分配（`par_allocate` 返回 NULL） |
-| 退休动作 | fill dummy filler + 清零指针 | `fill_up_remaining_space()` 填 dummy + `retire_mutator_alloc_region()` 入 CSet |
-| 保留机制 | 无——TLAB 退休就不存在了 | `MutatorAllocRegion::should_retain()`——如果剩余空间 ≥ MinTLABSize，保留为 retained region |
-| waste 阈值 | `_refill_waste_limit`（TLAB 大小 / 64，动态调整） | 无——Region 退休时不看 waste，看"还能不能装一个完整 TLAB" |
-
----
-
-## 附录 C: 本文涉及的字段速查
+## 附录 B: 字段速查
 
 | 字段 | 所在类 | 类型 | 源码位置 | 用途 |
 |------|--------|------|---------|------|
-| `_refill_waste_limit` | `ThreadLocalAllocBuffer` | `size_t` | threadLocalAllocBuffer.hpp:57 | TLAB 剩余超过此值不退休——直接在 Region 上 CAS 分配 |
-| `_slow_refill_waste` | `ThreadLocalAllocBuffer` | `unsigned` | threadLocalAllocBuffer.hpp:67 | TLAB slow-path refill 的浪费累计计数 |
-| `_retained_alloc_region` | `MutatorAllocRegion` | `HeapRegion* volatile` | g1AllocRegion.hpp:213 | 退休时保留的 Region——下次优先从它分配 |
-| `_wasted_bytes` | `MutatorAllocRegion` | `size_t` | g1AllocRegion.hpp:208 | 当前 mutator 阶段产生的总浪费字节数 |
-| `_young_list_target_length` | `G1Policy` | `uint` | g1Policy.hpp:82 | Young Region (Eden+Survivor) 的目标总数 |
-| `_young_list_max_length` | `G1Policy` | `uint` | g1Policy.hpp:87 | GCLocker 活跃时 Eden 的最大 Region 数 |
-| `_jni_lock_count` | `GCLocker` | `static volatile jint` | gcLocker.hpp:45 | 当前在 JNI critical section 中的线程计数 |
+| `_refill_waste_limit` | `ThreadLocalAllocBuffer` | `size_t` | threadLocalAllocBuffer.hpp:57 | TLAB 剩余超过此值不做退休 |
+| `_retained_alloc_region` | `MutatorAllocRegion` | `HeapRegion* volatile` | g1AllocRegion.hpp:213 | 退休时保留的 Region——下次优先分配 |
+| `_young_list_target_length` | `G1Policy` | `uint` | g1Policy.hpp:82 | Young Region 的目标总数 |
+| `_young_list_max_length` | `G1Policy` | `uint` | g1Policy.hpp:87 | GCLocker 活跃时的 Eden 最大 Region 数 |
+| `_jni_lock_count` | `GCLocker` | `static volatile jint` | gcLocker.hpp:45 | JNI critical section 线程计数 |
 | `_needs_gc` | `GCLocker` | `static volatile bool` | gcLocker.hpp:46 | 堆需要 GC 但被 critical section 拦住的标志 |
-| `_doing_gc` | `GCLocker` | `static volatile bool` | gcLocker.hpp:48 | unlock_critical 正在替大家执行 GC 的标志 |
-| `_collection_set_regions` | `G1CollectionSet` | `uint*` | g1CollectionSet.hpp:55 | CSet 实际存储——C 数组，存 region 索引 |
-| `_collection_set_cur_length` | `G1CollectionSet` | `volatile size_t` | g1CollectionSet.hpp:56 | 当前 CSet 有效条目数，volatile 支持并发读 |
-| `_inc_build_state` | `G1CollectionSet` | `CSetBuildType` | g1CollectionSet.hpp:76 | 枚举 Active/Inactive——控制增量构建开关 |
-| `_inc_recorded_rs_lengths` | `G1CollectionSet` | `size_t` | g1CollectionSet.hpp:88 | 增量构建期间累加的 RSet 总长度 |
-| `_inc_predicted_elapsed_time_ms` | `G1CollectionSet` | `double` | g1CollectionSet.hpp:101 | 增量构建期间累加的预测耗时（毫秒） |
+| `_doing_gc` | `GCLocker` | `static volatile bool` | gcLocker.hpp:48 | 有线程正在替大家做 GC 的标志 |
+| `_collection_set_regions` | `G1CollectionSet` | `uint*` | g1CollectionSet.hpp:55 | CSet 的 C 数组——存 hrm_index |
+| `_collection_set_cur_length` | `G1CollectionSet` | `volatile size_t` | g1CollectionSet.hpp:56 | CSet 有效条目数 |
+| `_inc_build_state` | `G1CollectionSet` | `CSetBuildType` | g1CollectionSet.hpp:76 | Active/Inactive 增量构建开关 |
+| `_inc_recorded_rs_lengths` | `G1CollectionSet` | `size_t` | g1CollectionSet.hpp:88 | 累加 RSet 长度 |
+| `_inc_predicted_elapsed_time_ms` | `G1CollectionSet` | `double` | g1CollectionSet.hpp:101 | 累加预测耗时 |
+| `Heap_lock` | (全局 `Monitor*`) | `Monitor*` | mutexLocker.hpp:55 | 所有 GC 共享的全局互斥体 |
