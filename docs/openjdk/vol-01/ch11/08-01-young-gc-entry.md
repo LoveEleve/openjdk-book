@@ -34,12 +34,48 @@ Java 代码里写 `new Object()`。这条分配调用经历了三层决策，每
 
 ---
 
-**第 2 层：Eden Region——G1 的 Region 级分配（§1.3）**
+**第 2 层：Eden Region——G1 的 Region 级分配（§1.4）**
 
-`allocate_outside_tlab()` → `G1CollectedHeap::mem_allocate()`（g1CollectedHeap.cpp:398）→ `attempt_allocation()`。这一层是 G1 特有的——不再通过 TLAB，直接操作 Eden Region。
+第 1 层 TLAB 失败后，`mem_allocate()` 调用 `allocate_outside_tlab()`，它直接走到 G1 的堆分配入口：
 
-- **快路径**：`attempt_allocation()` 先试 `attempt_retained_allocation()`（上一轮退休保留的 retained region），再试 active region 上的 CAS bump-pointer。无锁。
-- **三级挽救**：快路径全失败 → `attempt_allocation_slow()`。三级挽救依次是：持锁重试当前 Region → 退休它、从 free list 拿新 Eden Region → GCLocker 紧急扩展用 max 做上限。每一级都先试能不能分配，成功了就不往后走。
+```cpp
+// memAllocator.cpp:270-282
+HeapWord* MemAllocator::allocate_outside_tlab(Allocation& allocation) const {
+    allocation._allocated_outside_tlab = true;
+    HeapWord* mem = _heap->mem_allocate(_word_size, &allocation._overhead_limit_exceeded);
+    // _heap 是多态的——在 G1 下就是 G1CollectedHeap
+    ...
+}
+```
+
+```cpp
+// g1CollectedHeap.cpp:398-408
+HeapWord* G1CollectedHeap::mem_allocate(size_t word_size, bool* gc_overhead_limit_was_exceeded) {
+    if (is_humongous(word_size)) {
+        return attempt_allocation_humongous(word_size);   // 巨对象走独立路径
+    }
+    size_t dummy = 0;
+    return attempt_allocation(word_size, word_size, &dummy);  // 普通对象走这里
+}
+```
+
+`attempt_allocation()`（g1CollectedHeap.cpp:730-753）分两步：
+
+```cpp
+// 快路径：无锁
+HeapWord* result = _allocator->attempt_allocation(min, desired, actual);
+// _allocator 是 G1Allocator 实例——它内部：
+//   (1) mutator_alloc_region()->attempt_retained_allocation(...)  ← 先试 retained region
+//   (2) mutator_alloc_region()->attempt_allocation(...)          ← 再试 active region CAS
+// 两步都是无锁 CAS 分配
+
+// 慢路径：快路径全失败
+if (result == NULL) {
+    result = attempt_allocation_slow(desired_word_size);    // ← §1.5 展开
+}
+```
+
+这一层是 G1 特有的——不再通过 TLAB，直接通过 `G1AllocRegion` 的 CAS bump-pointer 操作 Eden Region 上的 `_top` 指针。
 
 ---
 
