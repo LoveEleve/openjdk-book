@@ -237,9 +237,11 @@ inline HeapWord* G1AllocRegion::attempt_allocation_locked(size_t min_word_size,
 | 含义 | Young Region (Eden+Survivor) 的**目标**总数 | Young Region 的**最大**总数（GCLocker 紧急扩展用） |
 | 如何确定 | 由 G1Policy 通过暂停预测模型（二分搜索）计算——附录 A 详解 | = target × (1 + GCLockerEdenExpansionPercent/100)，默认 target × 1.05 |
 | 正常分配用哪个 | `should_allocate_mutator_region()`——用 target 做上限 | — |
-| GCLocker 紧急时用哪个（详见 §2） | — | `can_expand_young_list()`——用 max 做上限 |
+| GCLocker 紧急时用哪个（详见 §1.5） | — | `can_expand_young_list()`——用 max 做上限 |
 
-当 `young_count >= target` 时，`should_allocate_mutator_region()` 返回 false——无法再分配新的 Eden Region。
+当 `young_regions_count() >= target` 时，`should_allocate_mutator_region()` 返回 false——无法再分配新的 Eden Region。
+
+`young_regions_count()` 是 `G1CollectedHeap` 上的方法（g1CollectedHeap.hpp:1253），返回 `_eden.length() + _survivor.length()`
 
 ```cpp
 // g1Policy.cpp:861-865
@@ -267,7 +269,87 @@ bool can_expand_young_list() const {
 
 如果第三级也失败——GC 必须被触发。进入 §1.5。
 
-### 1.5 触发 GC——attempt_allocation_slow 的决策循环
+
+### 1.5 GCLocker——为什么要拦着 GC（§1.4-1.7 的前置）
+
+### 2.1 问题：JNI Critical Section 和 GC 互斥
+
+JNI 提供了 `GetPrimitiveArrayCritical()` 函数——它返回一个 **指向 Java 数组堆内存的原始指针**，让 native 代码直接操作数组内容，不经过 JVM 的任何包装层。
+
+**这条指针指向堆里的对象。GC 是标记-复制——它会搬走活对象。** 如果 `GetPrimitiveArrayCritical` 的持有者还在通过这条原始指针读写数组时，GC 把数组搬到了另一个地址——指针立刻变成野指针，进程 crash。
+
+### 2.2 GCLocker 的解决方案——三个关键状态
+
+GCLocker（gcLocker.hpp:38-154）用三个 `static volatile` 变量实现了一个协议——不需要在 safepoint 里等待 mutator 线程释放 JNI critical section，而是让最后一个退出的线程替大家做 GC：
+
+**`_jni_lock_count`** — `GCLocker`:`static volatile jint`，gcLocker.hpp:45。JVM 全局唯一计数器，初始值为 0。`lock_critical()` 进入 critical section 时 +1（`jni_lock()` → `Atomic::inc(&_jni_lock_count)`），`unlock_critical()` 退出时 -1（`jni_unlock()` → `Atomic::dec(&_jni_lock_count)`）。解决的问题——GC 通过 `check_active_before_gc()` 在 safepoint 中读它：`_jni_lock_count != 0` 意味着有线程正握着原生指针，GC 不能搬对象 → 必须 abort 本次 safepoint GC。
+
+**`_needs_gc`** — `GCLocker`:`static volatile bool`，gcLocker.hpp:46。静态变量，初始 `false`——VM 启动时堆是空的。设置时机——分配失败需要 GC 但 `_jni_lock_count > 0` 时，`set_needs_gc()` 将其置为 `true`。解决的问题——"堆满了但有人不让做 GC"——把这个意愿记下来，等最后一个 critical section 退出时由 `unlock_critical()` 检查。如果它看到 `_needs_gc == true`，就调用 `jni_unlock()` 执行一次 GC（`collect(GCCause::_gc_locker)`），完成后设回 `false`。
+
+**`_doing_gc`** — `GCLocker`:`static volatile bool`，gcLocker.hpp:48。静态变量，初始 `false`。设置时机——`jni_unlock()` 在 `_needs_gc == true` 时设 `_doing_gc = true`，GC 完成后设回 `false`。解决的问题——其他线程在 `lock_critical()` 里检查 `_jni_lock_count == 0 && _doing_gc == true` 时，说明"已经没有 critical section 了，但有人正在替大家做 GC"——在 `JNICritical_lock` 上等待，避免在 GC 完成前进入新的 critical section。
+
+`lock_critical()`——进入 critical section（gcLocker.inline.hpp:31-42）：
+```cpp
+void GCLocker::lock_critical(JavaThread* thread) {
+    if (!thread->in_critical()) {
+        if (needs_gc()) {
+            jni_lock(thread);   // slow path：_needs_gc 为 true → 在 JNICritical_lock 上等
+            return;
+        }
+        increment_debug_jni_lock_count();
+    }
+    thread->enter_critical();   // fast path：直接进入
+}
+```
+
+`unlock_critical()`——退出 critical section（gcLocker.inline.hpp:44-55）：
+```cpp
+void GCLocker::unlock_critical(JavaThread* thread) {
+    if (thread->in_last_critical()) {
+        if (needs_gc()) {
+            jni_unlock(thread);  // slow path：最后一个退出的线程负责执行 GC
+            return;
+        }
+        decrement_debug_jni_lock_count();
+    }
+    thread->exit_critical();
+}
+```
+
+### 2.3 GC 侧的检查——abort, retry, expand
+
+在 safepoint 中，GC 调用 `GCLocker::check_active_before_gc()`（g1CollectedHeap.cpp:2798-2800）：
+
+```cpp
+if (GCLocker::check_active_before_gc()) {
+    return false;  // 有 critical section → 放弃本次 GC
+}
+```
+
+返回 false 后——**本次 GC 整个 abort**。VMThread 解除 safepoint，所有 mutator 恢复运行。刚才分配失败的那位线程会重新触发 GC。一直循环，直到所有 JNI critical section 被释放（`unlock_critical()` → `jni_unlock()` 帮大家做了 GC → `_needs_gc = false` → 下次 GC 正常进入）。
+
+**为什么不在 safepoint 里等**——因为 `ReleasePrimitiveArrayCritical`（触发 `unlock_critical`）是 mutator 线程的 native 代码部分——必须让 mutator 恢复运行才能执行。VMThread 干等 = 死锁。所以策略是 abort + retry。
+
+### 2.4 GCLocker 紧急扩展
+
+在触发 GC 之前（§1.4 的 slow path 里），G1 还有一条 "GCLocker 紧急扩展" 路径：
+
+```cpp
+// g1CollectedHeap.cpp:441-448
+if (GCLocker::is_active_and_needs_gc() && g1_policy()->can_expand_young_list()) {
+    result = _allocator->attempt_allocation_force(word_size);
+    if (result != NULL) return result;  // 扩展成功 → 不用触发 GC
+}
+```
+
+`can_expand_young_list()`（g1Policy.cpp:867-871）用 `_young_list_max_length`（而非 `_young_list_target_length`）做上限——允许临时突破 target 来避免 GCLocker abort 的 safepoint 往返。`GCLockerEdenExpansionPercent` 默认 5%，即 `_young_list_max_length = target * 1.05`，给的就是这个 buffer。
+
+如果紧急扩展也不够，`GCLocker::stall_until_clear()` 在 `JNICritical_lock` 上等待所有 critical section 释放。
+
+---
+
+
+### 1.6 触发 GC——attempt_allocation_slow 的决策循环
 
 前面的三级挽救都失败了，控制权到达 `attempt_allocation_slow()`。这个方法的核心结构是一个 **for 循环**——不是单次尝试，因为 GC 可能被 GCLocker 拒绝、也可能被别的线程抢先，必须能重试。
 
@@ -376,85 +458,7 @@ if (result != NULL) return result;
 
 **关键——触发 GC ≠ 自己需要 GC**。N 个线程同时走到 slow path，一人触发 GC，其余人在 `Heap_lock` 上排队。GC 完成后 Eden 有空闲 Region，排队的人醒来后持锁重试（步骤 1）或出锁后无锁重试（步骤 4）直接分配成功——"GC 不是我触发的，但我受益了"。
 
-## 2. 阶段 1: GCLocker——为什么要拦着 GC
-
-### 2.1 问题：JNI Critical Section 和 GC 互斥
-
-JNI 提供了 `GetPrimitiveArrayCritical()` 函数——它返回一个 **指向 Java 数组堆内存的原始指针**，让 native 代码直接操作数组内容，不经过 JVM 的任何包装层。
-
-**这条指针指向堆里的对象。GC 是标记-复制——它会搬走活对象。** 如果 `GetPrimitiveArrayCritical` 的持有者还在通过这条原始指针读写数组时，GC 把数组搬到了另一个地址——指针立刻变成野指针，进程 crash。
-
-### 2.2 GCLocker 的解决方案——三个关键状态
-
-GCLocker（gcLocker.hpp:38-154）用三个 `static volatile` 变量实现了一个协议——不需要在 safepoint 里等待 mutator 线程释放 JNI critical section，而是让最后一个退出的线程替大家做 GC：
-
-**`_jni_lock_count`** — `GCLocker`:`static volatile jint`，gcLocker.hpp:45。JVM 全局唯一计数器，初始值为 0。`lock_critical()` 进入 critical section 时 +1（`jni_lock()` → `Atomic::inc(&_jni_lock_count)`），`unlock_critical()` 退出时 -1（`jni_unlock()` → `Atomic::dec(&_jni_lock_count)`）。解决的问题——GC 通过 `check_active_before_gc()` 在 safepoint 中读它：`_jni_lock_count != 0` 意味着有线程正握着原生指针，GC 不能搬对象 → 必须 abort 本次 safepoint GC。
-
-**`_needs_gc`** — `GCLocker`:`static volatile bool`，gcLocker.hpp:46。静态变量，初始 `false`——VM 启动时堆是空的。设置时机——分配失败需要 GC 但 `_jni_lock_count > 0` 时，`set_needs_gc()` 将其置为 `true`。解决的问题——"堆满了但有人不让做 GC"——把这个意愿记下来，等最后一个 critical section 退出时由 `unlock_critical()` 检查。如果它看到 `_needs_gc == true`，就调用 `jni_unlock()` 执行一次 GC（`collect(GCCause::_gc_locker)`），完成后设回 `false`。
-
-**`_doing_gc`** — `GCLocker`:`static volatile bool`，gcLocker.hpp:48。静态变量，初始 `false`。设置时机——`jni_unlock()` 在 `_needs_gc == true` 时设 `_doing_gc = true`，GC 完成后设回 `false`。解决的问题——其他线程在 `lock_critical()` 里检查 `_jni_lock_count == 0 && _doing_gc == true` 时，说明"已经没有 critical section 了，但有人正在替大家做 GC"——在 `JNICritical_lock` 上等待，避免在 GC 完成前进入新的 critical section。
-
-`lock_critical()`——进入 critical section（gcLocker.inline.hpp:31-42）：
-```cpp
-void GCLocker::lock_critical(JavaThread* thread) {
-    if (!thread->in_critical()) {
-        if (needs_gc()) {
-            jni_lock(thread);   // slow path：_needs_gc 为 true → 在 JNICritical_lock 上等
-            return;
-        }
-        increment_debug_jni_lock_count();
-    }
-    thread->enter_critical();   // fast path：直接进入
-}
-```
-
-`unlock_critical()`——退出 critical section（gcLocker.inline.hpp:44-55）：
-```cpp
-void GCLocker::unlock_critical(JavaThread* thread) {
-    if (thread->in_last_critical()) {
-        if (needs_gc()) {
-            jni_unlock(thread);  // slow path：最后一个退出的线程负责执行 GC
-            return;
-        }
-        decrement_debug_jni_lock_count();
-    }
-    thread->exit_critical();
-}
-```
-
-### 2.3 GC 侧的检查——abort, retry, expand
-
-在 safepoint 中，GC 调用 `GCLocker::check_active_before_gc()`（g1CollectedHeap.cpp:2798-2800）：
-
-```cpp
-if (GCLocker::check_active_before_gc()) {
-    return false;  // 有 critical section → 放弃本次 GC
-}
-```
-
-返回 false 后——**本次 GC 整个 abort**。VMThread 解除 safepoint，所有 mutator 恢复运行。刚才分配失败的那位线程会重新触发 GC。一直循环，直到所有 JNI critical section 被释放（`unlock_critical()` → `jni_unlock()` 帮大家做了 GC → `_needs_gc = false` → 下次 GC 正常进入）。
-
-**为什么不在 safepoint 里等**——因为 `ReleasePrimitiveArrayCritical`（触发 `unlock_critical`）是 mutator 线程的 native 代码部分——必须让 mutator 恢复运行才能执行。VMThread 干等 = 死锁。所以策略是 abort + retry。
-
-### 2.4 GCLocker 紧急扩展
-
-在触发 GC 之前（§1.4 的 slow path 里），G1 还有一条 "GCLocker 紧急扩展" 路径：
-
-```cpp
-// g1CollectedHeap.cpp:441-448
-if (GCLocker::is_active_and_needs_gc() && g1_policy()->can_expand_young_list()) {
-    result = _allocator->attempt_allocation_force(word_size);
-    if (result != NULL) return result;  // 扩展成功 → 不用触发 GC
-}
-```
-
-`can_expand_young_list()`（g1Policy.cpp:867-871）用 `_young_list_max_length`（而非 `_young_list_target_length`）做上限——允许临时突破 target 来避免 GCLocker abort 的 safepoint 往返。`GCLockerEdenExpansionPercent` 默认 5%，即 `_young_list_max_length = target * 1.05`，给的就是这个 buffer。
-
-如果紧急扩展也不够，`GCLocker::stall_until_clear()` 在 `JNICritical_lock` 上等待所有 critical section 释放。
-
----
-
-## 3. 阶段 2: 这次 Young GC 要不要兼做 InitialMark
+## 2. InitialMark 决策——这次要不要兼做
 
 每次 Young GC 之前，G1Policy 判断一个关键问题——"老年代是不是快满了，需要启动并发标记了？"
 
@@ -514,7 +518,7 @@ threshold = internal_threshold - (marking_time × promotion_rate + max_young_siz
 
 ---
 
-## 4. 阶段 3: CSet 选择——把哪些 Region 放进去
+## 3. CSet 选择——把哪些 Region 放进去
 
 ### 4.1 什么是 CSet
 
@@ -603,7 +607,7 @@ void G1Policy::finalize_collection_set(target_pause_time_ms, &_survivor) {
 
 ---
 
-## 5. 阶段 4: Pre-Evacuation——搬运前的最后准备
+## 4. Pre-Evacuation——搬运前的最后准备
 
 ### 5.1 做什么
 
