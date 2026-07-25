@@ -248,7 +248,7 @@ bool should_allocate_mutator_region() const {
 }
 ```
 
-如果第二级失败（young count 已到 target 上限）→ 进入第三级。
+如果第二级失败（ 已到 target 上限）→ 进入第三级。
 
 ---
 
@@ -728,7 +728,7 @@ void G1Policy::revise_young_list_target_length_if_necessary(size_t rs_lengths) {
 }
 ```
 
-**这可能导致一次提前 GC**——如果重新算的 target 比当前 young count 小，下一次分配就会更快触发 GC。但这是值得的——RS 比预期大意味着下次 GC 扫描会超时，提前 GC 缩小 young gen 比超时好。
+**这可能导致一次提前 GC**——如果重新算的 target 比当前  小，下一次分配就会更快触发 GC。但这是值得的——RS 比预期大意味着下次 GC 扫描会超时，提前 GC 缩小 young gen 比超时好。
 
 ---
 
