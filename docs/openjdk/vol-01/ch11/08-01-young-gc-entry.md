@@ -269,6 +269,30 @@ void nativeProcess(JNIEnv* env, jbyteArray arr) {
 | `_needs_gc` | `static volatile bool` | 堆需要 GC 但被 critical section 拦住的标志 | false |
 | `_doing_gc` | `static volatile bool` | 有线程正在触发 GC（等 VMThread 执行）的标志 | false |
 
+**"进入 critical section" 需要加锁吗？——大部分时候不需要。**
+
+`lock_critical()` 有两条路径，取决于 `_needs_gc` 标志：
+
+```cpp
+// gcLocker.inline.hpp:31-42
+void GCLocker::lock_critical(JavaThread* thread) {
+    if (_needs_gc == false) {
+        // ★ 快路径——99.9% 的情况。_needs_gc 为 false，没有 GC 被拦着。
+        // 只是递增 _jni_lock_count，标记线程进入 critical section。无锁，约几条 CPU 指令。
+        thread->enter_critical();
+    } else {
+        // ★ 慢路径——_needs_gc 为 true。此时有一个 GC 正等着所有 critical section 结束。
+        // 如果这个线程也进入 critical section，GC 要等更久——所以必须先等 GC 做完。
+        // 这块才需要拿 JNICritical_lock 并休眠等待。
+        jni_lock(thread);
+    }
+}
+```
+
+`jni_lock()` 做的事：在 `JNICritical_lock` 上 `wait()`，直到 GC 完成、`_needs_gc` 变成 false、被 `notify_all()` 唤醒——然后再 `enter_critical()`。
+
+**所以**：正常情况下 `GetPrimitiveArrayCritical()` 是 O(1) 的无锁操作——只是递增了一个计数器。只有当 GC 被拦着的时候才走慢路径。
+
 ### 4.3 GC 被拦截的完整流程
 
 线程 A 调 `GetPrimitiveArrayCritical()` → `lock_critical()` → `_jni_lock_count++` → 进入 `_thread_in_native` 状态，握着原始指针写数据。
