@@ -554,7 +554,7 @@ for (uint try_count = 1, gclocker_retry_count = 0; /* we'll return */; try_count
 
 每次 Young GC 进入 `do_collection_pause_at_safepoint()` 之后，在 CSet 选择之前，G1Policy 先判断一个问题：**"老年代是不是快满了，需要启动并发标记了？"**
 
-这个判断不是每次都看 IHOP——IHOP 上一次 **Young GC** 结束时就已经算过了。InitialMark GC 也是 Young GC 的一种——它只是多了 "标记 survivor 为 root" 这一步——所以每次 Young GC 结束（不管是 Normal 还是 InitialMark）都会算 IHOP，算出结果留到下一次 GC 用。当时的 `record_collection_pause_end()` 调用 `maybe_start_marking()` → `need_to_start_conc_mark()`，如果老年代占用量超过了 IHOP 阈值，就设一个标志 `initiate_conc_mark_if_possible = true`。这个标志留到**下一次** Young GC 来兑现——本次 Normal Young GC 检查的就是这个。（g1Policy.cpp:531-551），如果老年代占用量超过了 IHOP 阈值，就设一个标志 `initiate_conc_mark_if_possible = true`。这个标志留到下一次 Young GC 来兑现。
+这个判断不是每次都看 IHOP——IHOP 上一次 **Normal Young GC** 结束时就已经算过了。`record_collection_pause_end()`（g1Policy.cpp:574）中，如果本次是 InitialMark GC（并发标记已经启动了），跳过 IHOP 检查（直接调 `record_concurrent_mark_init_end`）；只有 Normal Young GC 才会调 `maybe_start_marking()` 检查 IHOP。此外，Mixed GC 阶段结束回到 young-only 时（g1Policy.cpp:619）也会重新算一次。算出结果是一个标志位 `initiate_conc_mark_if_possible`，留给下一次 Young GC 兑现。当时的 `record_collection_pause_end()` 调用 `maybe_start_marking()` → `need_to_start_conc_mark()`，如果老年代占用量超过了 IHOP 阈值，就设一个标志 `initiate_conc_mark_if_possible = true`。这个标志留到**下一次** Young GC 来兑现——本次 Normal Young GC 检查的就是这个。（g1Policy.cpp:531-551），如果老年代占用量超过了 IHOP 阈值，就设一个标志 `initiate_conc_mark_if_possible = true`。这个标志留到下一次 Young GC 来兑现。
 
 所以每次 Young GC 进入 `do_collection_pause_at_safepoint()` 时，G1Policy 检查的**不是 IHOP，而是这个已经设好的标志**：
 
@@ -588,7 +588,7 @@ bool need_to_start_conc_mark() {
 
 IHOP 阈值的含义（自适应模式下）：`internal_threshold - (marking_time × promotion_rate + max_young_size)`。**"如果现在启动并发标记，标记完成时老年代还能装下标记期间晋升来的对象吗？"** 装不下就设标志——下一次 Young GC 就会变成 InitialMarkGC。
 
-Normal Young GC 时——上一次 Young GC 结束时没设这个标志（老年代还没到 IHOP 阈值）——`initiate_conc_mark_if_possible()` 为 false——走纯 young 回收路径。并发标记的详细流程在 ch11/13 展开。
+Normal Young GC 时——上一次 Normal Young GC（或 Mixed GC 结束时）没设这个标志（老年代还没到 IHOP 阈值）——`initiate_conc_mark_if_possible()` 为 false——走纯 young 回收路径。并发标记的详细流程在 ch11/13 展开。
 
 ## 7. CSet 选择——确认本次回收哪些 Region
 
