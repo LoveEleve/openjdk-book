@@ -131,13 +131,27 @@ TLAB 不够放下一个对象时，线程不是直接触发 GC——先判断 "�
 | 作用域 | 每个 Java 线程**各自持有**——线程 A 的 TLAB 里有自己的 waste limit，和线程 B 互不影响 |
 | 初始化 | 每次申请到新 TLAB 时重置——`threadLocalAllocBuffer.cpp:190`：`set_refill_waste_limit(initial_refill_waste_limit())` |
 | 初始值 | `TLAB 大小 / TLABRefillWasteFraction`（默认 64）。比如 1MB 的 TLAB，初始 waste limit = 16KB |
-| 动态调整 | 每次跳过 TLAB 直接在 Region 分配时 +4（`TLABWasteIncrement`），逐步放大容忍度——长时间不退休同一块 TLAB，减少 TLAB 重建 overhead |
-| 解决的问题 | 如果每次 TLAB 不够都退休重建——一个线程可能频繁退休大块 TLAB 只因为差几个字节——浪费 CPU。有了 waste limit，差得少就跳过 TLAB 单次分配，差得多才退休 |
+| 动态调整 | 每次"TLAB 不够但 waste limit 说不用退休"时，waste limit 在 `record_slow_allocation()` 中自增 `TLABWasteIncrement`（默认 4） | threadLocalAllocBuffer.inline.hpp:82-97 |
+| 为什么自增 | 如果一个线程频繁"差一点点"导致每次都要绕过 TLAB 走 CAS 分配，不如提高容忍度——下次差得不多时直接退休，换个新 TLAB 省掉 CAS 开销。waste limit 变大意味着 TLAB 更早被退休，减少"频繁走慢速路径" | — |
 
 ```cpp
 // threadLocalAllocBuffer.hpp:57——每个 ThreadLocalAllocBuffer 实例都有自己的 waste limit
 size_t _refill_waste_limit;   // TLAB 剩余超过此值则不退休
 ```
+
+**每次 "不退休、走 CAS" 时，waste limit 怎么变的**：
+
+```cpp
+// threadLocalAllocBuffer.inline.hpp:82-97
+void ThreadLocalAllocBuffer::record_slow_allocation(size_t obj_size) {
+    // 每次"TLAB剩余 > waste limit 所以不退休，而是走 CAS 分配"时调这个方法
+    set_refill_waste_limit(refill_waste_limit() + refill_waste_limit_increment());
+    // refill_waste_limit_increment() 返回 TLABWasteIncrement（默认 4）
+    _slow_allocations++;
+}
+```
+
+**为什么是 +4 而不是 +100**——如果调得太大，TLAB 会过度容忍碎片，大量浪费内存。+4 是一个温和的梯度——连续若干次"差一点"后 waste limit 会涨到足够退休的水平，避免同一线程长期在慢速路径上徘徊。
 
 **决策逻辑**（memAllocator.cpp:314-316）：
 
