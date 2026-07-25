@@ -183,7 +183,7 @@ TLAB 退休了但拿不到新 TLAB → 当前 Eden Region（`MutatorAllocRegion`
 | 类型 | `HeapRegion* volatile`（指针 + volatile——其他线程可能在读） |
 | 源码位置 | g1AllocRegion.hpp:213 |
 | 初始化 | 构造函数置 NULL；Region 退休时如果 `should_retain()` 返回 true，赋值为当前退休的 Region |
-| 作用 | 当一个 Eden Region 退休时，如果它还有剩余空间 ≥ MinTLABSize，不一定马上归还 free list——而是保留为 `_retained_alloc_region`。下次需要分配时优先从这个 retained region 分配——命中率高，避免了持锁开销 |
+| 作用 | 当一个 Eden Region 退休时（`retire_mutator_alloc_region` 把它加入 CSet，**不是**归还 free list），如果它还有剩余空间 ≥ MinTLABSize，`should_retain()` 把它存为 `_retained_alloc_region`。下次需要分配时优先从这里分配——命中率高，避免了持锁开销。一个 Region 只有在 GC 清空后才会进入 `_free_list` |
 
 ```cpp
 // g1AllocRegion.inline.hpp:133-144
