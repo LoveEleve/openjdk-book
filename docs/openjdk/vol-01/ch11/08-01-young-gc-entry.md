@@ -266,15 +266,26 @@ static volatile jint _jni_lock_count;   // 当前在 critical section 中的线�
 任意多个线程可以同时进入 critical section（各自握着不同数组的指针），互不干扰。`lock_critical()` 在正常情况下只做 `_jni_lock_count++`，约几条 CPU 指令，无锁：
 
 ```cpp
-// gcLocker.inline.hpp:31-42
+// gcLocker.inline.hpp:31-42——真实源码
 void GCLocker::lock_critical(JavaThread* thread) {
-    if (_needs_gc == false) {
-        thread->enter_critical();       // ★ 快路径——99.9% 的情况
-    } else {
-        jni_lock(thread);               // 慢路径——GC 正在排队，在 JNICritical_lock 上等
+  if (!thread->in_critical()) {
+    if (needs_gc()) {
+      // 慢路径——GC 正在排队，在 JNICritical_lock 上等
+      // jni_lock 内部会调 enter_critical
+      jni_lock(thread);
+      return;
     }
+    increment_debug_jni_lock_count();   // ★ 快路径——只递增计数
+  }
+  thread->enter_critical();             // 两条路径最终都会执行这行
 }
 ```
+
+**快路径**：`!thread->in_critical()` 且 `!needs_gc()` → `increment_debug_jni_lock_count()` → `thread->enter_critical()`。无锁，约几条指令。
+
+**慢路径**：`!thread->in_critical()` 且 `needs_gc()` → `jni_lock(thread)` → 在 `JNICritical_lock` 上等 GC 完成 → 内部调 `enter_critical()`。`return` 跳过末尾的 `enter_critical()`（已经做过了）。
+
+如果线程**已经在** critical section 里（嵌套调用），直接走末尾的 `enter_critical()` 增加嵌套计数。
 
 ### 4.3 GC 来了——三个步骤
 
