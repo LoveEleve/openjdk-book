@@ -554,7 +554,7 @@ for (uint try_count = 1, gclocker_retry_count = 0; /* we'll return */; try_count
 
 每次 Young GC 进入 `do_collection_pause_at_safepoint()` 之后，在 CSet 选择之前，G1Policy 先判断一个问题：**"老年代是不是快满了，需要启动并发标记了？"**
 
-这个判断不是每次都看 IHOP——IHOP 上一次 **Young GC**（或 InitialMark GC）结束时就已经算过了。当时的 `record_collection_pause_end()` 调用 `maybe_start_marking()` → `need_to_start_conc_mark()`，如果老年代占用量超过了 IHOP 阈值，就设一个标志 `initiate_conc_mark_if_possible = true`。这个标志留到**下一次** Young GC 来兑现——本次 Normal Young GC 检查的就是这个。（g1Policy.cpp:531-551），如果老年代占用量超过了 IHOP 阈值，就设一个标志 `initiate_conc_mark_if_possible = true`。这个标志留到下一次 Young GC 来兑现。
+这个判断不是每次都看 IHOP——IHOP 上一次 **Young GC** 结束时就已经算过了。InitialMark GC 也是 Young GC 的一种——它只是多了 "标记 survivor 为 root" 这一步——所以每次 Young GC 结束（不管是 Normal 还是 InitialMark）都会算 IHOP，算出结果留到下一次 GC 用。当时的 `record_collection_pause_end()` 调用 `maybe_start_marking()` → `need_to_start_conc_mark()`，如果老年代占用量超过了 IHOP 阈值，就设一个标志 `initiate_conc_mark_if_possible = true`。这个标志留到**下一次** Young GC 来兑现——本次 Normal Young GC 检查的就是这个。（g1Policy.cpp:531-551），如果老年代占用量超过了 IHOP 阈值，就设一个标志 `initiate_conc_mark_if_possible = true`。这个标志留到下一次 Young GC 来兑现。
 
 所以每次 Young GC 进入 `do_collection_pause_at_safepoint()` 时，G1Policy 检查的**不是 IHOP，而是这个已经设好的标志**：
 
