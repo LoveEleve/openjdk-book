@@ -70,7 +70,7 @@ do_collection_pause_at_safepoint(target_pause_time_ms)     // target = MaxGCPaus
 
 ---
 
-## 2. TLAB 分配——线程本地的快速通���
+## 2. TLAB 分配——线程本地的快速通
 
 ### 2.1 TLAB 是什么
 
