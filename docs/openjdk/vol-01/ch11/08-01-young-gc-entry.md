@@ -237,7 +237,7 @@ inline HeapWord* G1AllocRegion::attempt_allocation_locked(size_t min_word_size,
 | 含义 | Young Region (Eden+Survivor) 的**目标**总数 | Young Region 的**最大**总数（GCLocker 紧急扩展用） |
 | 如何确定 | 由 G1Policy 通过暂停预测模型（二分搜索）计算——附录 A 详解 | = target × (1 + GCLockerEdenExpansionPercent/100)，默认 target × 1.05 |
 | 正常分配用哪个 | `should_allocate_mutator_region()`——用 target 做上限 | — |
-| GCLocker 紧急用哪个 | — | `can_expand_young_list()`——用 max 做上限 |
+| GCLocker 紧急时用哪个（详见 §2） | — | `can_expand_young_list()`——用 max 做上限 |
 
 当 `young_count >= target` 时，`should_allocate_mutator_region()` 返回 false——无法再分配新的 Eden Region。
 
@@ -254,7 +254,7 @@ bool should_allocate_mutator_region() const {
 
 **第三级：GCLocker 紧急扩展——`_young_list_max_length` 作为缓冲**
 
-GCLocker 活跃 + 需要 GC（`is_active_and_needs_gc()`）时，`attempt_allocation_force()` 用 `_young_list_max_length` 做上限——允许在 target 之上再临时扩展一些 Eden Region：
+GCLocker 是什么——详见 §2。这里只说"它阻塞 GC 时怎么办"：GCLocker 活跃 + 需要 GC（`is_active_and_needs_gc()`）时，`attempt_allocation_force()` 用 `_young_list_max_length` 做上限——允许在 target 之上再临时扩展一些 Eden Region，避免一次多余的 safepoint 往返：
 
 ```cpp
 // g1Policy.cpp:867-871
