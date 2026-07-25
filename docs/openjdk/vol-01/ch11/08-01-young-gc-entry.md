@@ -245,7 +245,9 @@ bool should_allocate_mutator_region() const {
 
 但在"等"之前，G1 还有最后一次尝试——**GCLocker 紧急扩展**。它不是用 `_young_list_target_length` 做上限（那个已经到了），而是用 `_young_list_max_length`——一个比 target 更大的值。
 
-`_young_list_max_length` 比 `_young_list_target_length` 大多少？默认多 5%。G1 用 `GCLockerEdenExpansionPercent`（默认 5）控制这个差额：`update_max_gc_locker_expansion()`（g1Policy.cpp:886-899）计算 `_young_list_max_length = _young_list_target_length + ceil(target * GCLockerEdenExpansionPercent / 100)`——所以 `max = target * 1.05`。这个 5% 的 buffer 就是给 GCLocker 场景的紧急额度：如果有 GCLocker 拦着 GC，可以先临时多分配几个 Eden Region 顶一顶，避免一次多余的 safepoint 往返，等 critical section 自然释放再正常做 GC。
+`_young_list_max_length` 比 `_young_list_target_length` 大多少？默认多 5%。G1 用 `GCLockerEdenExpansionPercent`（默认 5）控制这个差额：`update_max_gc_locker_expansion()`（g1Policy.cpp:886-899）计算 `_young_list_max_length = _young_list_target_length + ceil(target * GCLockerEdenExpansionPercent / 100)`——所以 `max = target * 1.05`。
+
+这个 5% 的 buffer 解决什么问题？如果没有它——分配失败 → GC → safepoint → VMThread 发现 GCLocker → abort → 循环头重试 → 再次分配失败 → 再次 GC → 再次 abort——在 critical section 释放之前，每次循环都是无效的 safepoint 往返。有了这 5% 的紧急额度——分配失败时先不触发 GC，用这多出来的几个 Eden Region 顶一下，延长"能继续分配"的时间窗口，等 JNI critical section 自然释放后再正常做 GC。
 
 ```cpp
 // g1Policy.cpp:867-871
