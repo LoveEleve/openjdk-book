@@ -319,11 +319,14 @@ _needs_gc = true;   // "我需要 GC，但有人在 critical section 里拦着"
 ```cpp
 // gcLocker.cpp:123-137
 void GCLocker::jni_lock(JavaThread* thread) {
-    MutexLocker mu(JNICritical_lock);
-    while (is_active_and_needs_gc() || _doing_gc) {
-        JNICritical_lock->wait();     // 释放锁 + 休眠
-    }
-    thread->enter_critical();
+  assert(!thread->in_critical(), "shouldn't currently be in a critical region");
+  MutexLocker mu(JNICritical_lock);
+  while (is_active_and_needs_gc() || _doing_gc) {
+    JNICritical_lock->wait();           // 释放锁 + 休眠
+  }
+  thread->enter_critical();             // GC 完成后进入 critical section
+  _jni_lock_count++;                    // 递增全局计数
+  increment_debug_jni_lock_count();
 }
 ```
 
@@ -345,18 +348,22 @@ void GCLocker::unlock_critical(JavaThread* thread) {
 `jni_unlock()`（gcLocker.cpp:139-163）：
 
 ```cpp
-_jni_lock_count--;
-thread->exit_critical();
-
-if (needs_gc() && !is_active_internal()) {     // 确认最后一个
-    _doing_gc = true;                           // 设标志——新来的人别进来
+void GCLocker::jni_unlock(JavaThread* thread) {
+  assert(thread->in_last_critical(), "should be exiting critical region");
+  MutexLocker mu(JNICritical_lock);
+  _jni_lock_count--;                           // 递减全局计数
+  decrement_debug_jni_lock_count();
+  thread->exit_critical();                     // 退出 critical section
+  if (needs_gc() && !is_active_internal()) {   // 确认最后一个
+    _doing_gc = true;                          // 设标志——新来的人别进来
     {
-        MutexUnlocker munlock(JNICritical_lock);
-        Universe::heap()->collect(GCCause::_gc_locker);  // ★ 触发 GC
+      MutexUnlocker munlock(JNICritical_lock); // 暂时放锁——collect 内部会到 safepoint
+      Universe::heap()->collect(GCCause::_gc_locker);  // ★ 触发 GC
     }
     _doing_gc = false;
-    _needs_gc = false;                          // 清标志
-    JNICritical_lock->notify_all();             // 叫醒所有等的人
+    _needs_gc = false;                         // 清标志
+    JNICritical_lock->notify_all();           // 叫醒所有等的人
+  }
 }
 ```
 
