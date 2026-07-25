@@ -203,11 +203,29 @@ if (_retained_alloc_region != NULL) {
 
 `Heap_lock` 是一个 JVM 全局的 `Monitor*` 对象（mutexLocker.hpp:55——`extern Monitor* Heap_lock`）。它不是任何类的字段，是一个**全局单例**——所有 HotSpot GC 实现（Serial/Parallel/CMS/G1）共享同一把锁。在 `mutex_init()` 中初始化为 `PaddedMonitor` 实例，类型为 `nonleaf+1`（高优先级内部锁），safepoint check 策略为 `_safepoint_check_sometimes`——意味着持这把锁的线程在 safepoint 时不需要特殊处理。
 
-`attempt_allocation_locked()`（g1AllocRegion.inline.hpp:98-118）做三件事：
+`attempt_allocation_locked()`（g1AllocRegion.inline.hpp:98-118）做三件事——**三步都在 `Heap_lock` 持锁状态下执行**：
 
-1. **持锁后重试当前 Region**——等锁期间别的线程可能做完了 GC，释放了空间
-2. 如果还是失败 → **退休当前 Region**（`retire(true)`——fill dummy + 可能保留为 retained region）
-3. 调用 `new_mutator_alloc_region()` → 检查 `should_allocate_mutator_region()`
+```cpp
+// g1AllocRegion.inline.hpp:98-118
+inline HeapWord* G1AllocRegion::attempt_allocation_locked(size_t min_word_size,
+                                                           size_t desired_word_size,
+                                                           size_t* actual_word_size) {
+    // 步骤 1: 持锁后重试当前 Region——等锁期间别的线程可能做完了 GC，释放了空间
+    HeapWord* result = attempt_allocation(min_word_size, desired_word_size, actual_word_size);
+    if (result != NULL) return result;
+
+    // 步骤 2: 还是失败 → 退休当前 Region
+    retire(true /* fill_up */);  // fill dummy object + 可能保留为 retained
+
+    // 步骤 3: 从 free list 拿新 Eden Region 并尝试分配
+    result = new_alloc_region_and_allocate(desired_word_size, false /* force */);
+    if (result != NULL) return result;
+
+    return NULL;  // 三步全失败
+}
+```
+
+这里的 `attempt_allocation()`（步骤 1）和外面无锁版本的 `attempt_allocation()` 是**同一个方法**——唯一的区别是这次在锁保护下。
 
 这里出现两个关键的 Policy 字段——**`_young_list_target_length`** 和 **`_young_list_max_length`**：
 
