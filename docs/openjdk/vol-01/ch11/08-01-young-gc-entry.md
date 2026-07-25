@@ -319,7 +319,6 @@ _needs_gc = true;   // "我需要 GC，但有人在 critical section 里拦着"
 ```cpp
 // gcLocker.cpp:123-137
 void GCLocker::jni_lock(JavaThread* thread) {
-  assert(!thread->in_critical(), "shouldn't currently be in a critical region");
   MutexLocker mu(JNICritical_lock);
   while (is_active_and_needs_gc() || _doing_gc) {
     JNICritical_lock->wait();           // 释放锁 + 休眠
@@ -349,7 +348,6 @@ void GCLocker::unlock_critical(JavaThread* thread) {
 
 ```cpp
 void GCLocker::jni_unlock(JavaThread* thread) {
-  assert(thread->in_last_critical(), "should be exiting critical region");
   MutexLocker mu(JNICritical_lock);
   _jni_lock_count--;                           // 递减全局计数
   decrement_debug_jni_lock_count();
