@@ -575,7 +575,9 @@ if (initiate_conc_mark_if_possible()     // 上次 GC 结束时设的标志
 
 **谁设的这个标志**——上一次 Normal Young GC 结束时（`record_collection_pause_end()` 调 `maybe_start_marking()`），G1Policy 检查老年代占用量是否超过了 IHOP 阈值（Initiating Heap Occupancy Percent）。超过就设 `initiate_conc_mark_if_possible = true`，留给下一次 Young GC 来兑现。
 
-Normal Young GC 时——上一次 Normal Young GC 没设这个标志（老年代还没到 IHOP 阈值）——走纯 young 回收路径。IHOP 的计算和并发标记的详细流程在 ch11/13 展开。
+**如果这是 JVM 启动后的第一次 Young GC**——没有"上一次 GC"。`initiate_conc_mark_if_possible` 的初始值是 `false`（G1CollectorState 构造函数中所有标志默认 false），所以第一次 Young GC 必然是 Normal——没有历史数据来算 IHOP，不存在 "老年代满了需要并发标记" 的问题。
+
+**后续的 Normal Young GC**——上一次 Normal Young GC 没设这个标志（老年代还没到 IHOP 阈值）——走纯 young 回收路径。IHOP 的计算和并发标记的详细流程在 ch11/13 展开。
 
 
 
