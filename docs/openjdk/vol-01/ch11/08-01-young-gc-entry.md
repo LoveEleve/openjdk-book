@@ -335,7 +335,9 @@ if (GCLocker::check_active_before_gc()) {
 _needs_gc = true;   // "我需要 GC，但有人在 critical section 里拦着"
 ```
 
-然后 VMThread abort GC，解除 safepoint，mutator 恢复运行。**VMThread 不等待**——在 critical section 里的线程在 `_thread_in_native` 状态，不参与 safepoint，VMThread 干等 = 死锁。
+然后 VMThread abort GC，解除 safepoint，mutator 恢复运行。
+
+**为什么 VMThread 不"等"而是 abort**——此时线程 A 在 `_thread_in_native` 状态执行 native 代码——它不参与 safepoint。VMThread 在 safepoint 里等线程 A 调用 `ReleasePrimitiveArrayCritical` 是没有意义的——线程 A 根本不会响应 safepoint 请求（它没在跑 Java 代码，不会走到 safepoint 检查点）。所以 JVM 的设计是：**不等，直接放弃这次 safepoint**，让线程 A 恢复 native 代码执行，等它主动释放。这就是 `return false`——整次 GC 被 abort。
 
 **步骤 2：走 slow path 的 mutator 等**
 
