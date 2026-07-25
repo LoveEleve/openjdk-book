@@ -269,6 +269,12 @@ void nativeProcess(JNIEnv* env, jbyteArray arr) {
 | `_needs_gc` | `static volatile bool` | 堆需要 GC 但被 critical section 拦住的标志 | false |
 | `_doing_gc` | `static volatile bool` | 有线程正在触发 GC（等 VMThread 执行）的标志 | false |
 
+**"JNI critical section" 本身没有锁**——它只是一个计数器 `_jni_lock_count`。任意多个应用线程可以同时进入 critical section（各自握着不同的数组的原始指针），互不干扰。正常情况下（`_needs_gc == false`），`lock_critical()` 只做 `_jni_lock_count++`，不加任何锁。
+
+**只有 GC 被拦着时，后来的人才需要等**。一旦 `_needs_gc == true`，后续想进入 critical section 的线程走慢路径——在 `JNICritical_lock` 上休眠等 GC 完成。已经在 critical section 里的线程不受影响——它们继续执行 native 代码，等它们自己退出。
+
+**所以**：没有 GC 时，`JNICritical_lock` 从不被触碰。`_needs_gc == true` 的那一刻起，`JNICritical_lock` 才开始起作用——协调 "最后一个退出的线程触发 GC" 和 "新来的线程别进来添乱"。
+
 **这两个标志谁设置**：
 
 | 标志 | 谁设 true | 什么时候 | 谁设 false | 什么时候 |
