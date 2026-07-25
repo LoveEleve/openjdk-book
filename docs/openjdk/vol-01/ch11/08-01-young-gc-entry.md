@@ -311,7 +311,9 @@ void GCLocker::unlock_critical(JavaThread* thread) {
 |----|------|---------|
 | 线程 A（JNI critical 持有者） | `_thread_in_native` | 握着原始指针——还没调用 `Release` |
 | VMThread | safepoint 中 | 发现 GCLocker → **abort GC**（返回 false） |
-| 线程 B（走 slow path 的 mutator） | `attempt_allocation_slow` 循环 | `stall_until_clear()` → 在 `JNICritical_lock` 上等 |
+| 线程 B（走 slow path 的 mutator） | `attempt_allocation_slow` 循环 | 判断 `should_try_gc = false`（JNI 临界区还在）→ 放弃自己触发 GC → 调 `stall_until_clear()` **休眠在 `JNICritical_lock` 上**，等待线程 A 释放临界区 |
+
+**"休眠在 JNICritical_lock 上"是什么意思**——`JNICritical_lock` 是 JVM 的一个 `Monitor` 对象（和 `Heap_lock` 同类，只是不同用途）。`stall_until_clear()` 内部调 `JNICritical_lock->wait()`——线程 B 在这个锁上**进入休眠状态**，不消耗 CPU。当线程 A 释放临界区并触发 GC 后，调 `JNICritical_lock->notify_all()`——JVM 唤醒所有睡在这个锁上的线程。线程 B 醒来，发现 `_needs_gc == false`（GC 已经完成了），继续循环，重新尝试分配。
 
 线程 A 释放时调用 `collect(GCCause::_gc_locker)` 触发 GC——实际 GC 仍然由 VMThread 在 safepoint 中执行，线程 A 阻塞等待。GC 完成后 `notify_all()` 叫醒所有人。
 
