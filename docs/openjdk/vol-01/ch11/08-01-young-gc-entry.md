@@ -269,6 +269,15 @@ void nativeProcess(JNIEnv* env, jbyteArray arr) {
 | `_needs_gc` | `static volatile bool` | 堆需要 GC 但被 critical section 拦住的标志 | false |
 | `_doing_gc` | `static volatile bool` | 有线程正在触发 GC（等 VMThread 执行）的标志 | false |
 
+**这两个标志谁设置**——两个地方，分工明确：
+
+| 标志 | 谁设 true | 什么时候 | 谁设 false | 什么时候 |
+|------|----------|---------|----------|---------|
+| `_needs_gc` | VMThread→`check_active_before_gc()` | safepoint 中发现 GCLocker 活跃 + 需要 GC | 最后一个退出 critical section 的线程→`jni_unlock()` | GC 执行完成后 |
+| `_doing_gc` | 最后一个退出 critical section 的线程→`jni_unlock()` | 准备调 `collect()` 执行 GC 之前 | 同上 | `collect()` 返回后 |
+
+`_doing_gc` 额外保护一种并发场景——当最后一个 critical section 正在退出并执行 GC 时，如果有**新的**线程尝试进入 critical section（调 `GetPrimitiveArrayCritical`），`jni_lock()` 检查 `_doing_gc == true` → 不进入，在 `JNICritical_lock` 上等 GC 完成。防止 "刚做完一个 GC，又有新 critical section 拦着" 的乒乓效应。
+
 **"进入 critical section" 需要加锁吗？——大部分时候不需要。**
 
 `lock_critical()` 有两条路径，取决于 `_needs_gc` 标志：
