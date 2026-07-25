@@ -237,9 +237,27 @@ bool can_expand_young_list() const {
 
 ### 4.1 问题：JNI Critical Section 和 GC 互斥
 
-JNI 提供 `GetPrimitiveArrayCritical()`——返回一个**指向 Java 数组堆内存的原始指针**，让 native 代码直接操作，不经过 JVM 包装。
+**"JNI critical section" 是什么**——当 Java 代码把自己手里的数组传给 native 方法时，正常情况下 JNI 会拷贝一份副本给 native 代码操作。但 `GetPrimitiveArrayCritical()` 不拷贝——它直接返回一个**指向 Java 数组堆内存的原始指针**。从调用 `GetPrimitiveArrayCritical` 到调用 `ReleasePrimitiveArrayCritical` 之间的这段时间叫 "JNI critical section"。
 
-**这条指针指向堆里的对象。GC 是标记-复制——会搬走活对象。** 如果持有者还在通过这条指针读写数组时 GC 搬走了数组——野指针，进程 crash。
+```java
+// Java 侧
+byte[] buffer = new byte[1024 * 1024];
+nativeProcess(buffer);  // 调 native 方法
+
+// C/C++ 侧（JNI）
+void nativeProcess(JNIEnv* env, jbyteArray arr) {
+    // ★ 进入 critical section——拿到指向堆内存的原始指针
+    jbyte* raw = (*env)->GetPrimitiveArrayCritical(env, arr, NULL);
+    
+    // 直接操作 Java 堆里的原始字节——不经过任何 JVM 包装
+    for (int i = 0; i < len; i++) raw[i] = ...;
+    
+    // ★ 退出 critical section——释放原始指针
+    (*env)->ReleasePrimitiveArrayCritical(env, arr, raw, 0);
+}
+```
+
+**问题**——这条 raw 指针指向堆里的对象。GC 是标记-复制——它会搬走活对象。如果临界区内的 native 代码正通过这个 raw 指针读写数组时，GC 把数组搬到了另一个地址——**指针立刻变成野指针，进程 crash**。所以 GC 必须在所有 JNI critical section 都结束之后才能进行。
 
 ### 4.2 GCLocker 的三个关键状态
 
