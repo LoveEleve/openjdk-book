@@ -417,7 +417,7 @@ void GCLocker::jni_unlock(JavaThread* thread) {
 
 ## 5. attempt_allocation_slow——触发 GC 的决策循环
 
-回到 §3 的三级挽救——第三级（GCLocker 紧急扩展）也失败了。现在控制权到达 `attempt_allocation_slow()`（g1CollectedHeap.cpp:410-516），也就是 §1 全景图里分配链最底层的那个方法。§4 的 GCLocker 机制在这里被实际调用——`should_try_gc`、`stall_until_clear`、`check_active_before_gc` 全在这一处交汇。
+回到 §3 的三级挽救——第三级（GCLocker 紧急扩展）也失败了。现在控制权到达 `attempt_allocation_slow()`（g1CollectedHeap.cpp:410-516）。**这是应用线程分配内存的最终落脚点——§1 的分配链上，TLAB 快路径、慢路径、Region 三级挽救全走完之后，剩下的唯一一条路就是这里。** 也就是 §1 全景图里分配链最底层的那个方法。§4 的 GCLocker 机制在这里被实际调用——`should_try_gc`、`stall_until_clear`、`check_active_before_gc` 全在这一处交汇。
 
 ### 5.1 为什么是 for 循环
 
