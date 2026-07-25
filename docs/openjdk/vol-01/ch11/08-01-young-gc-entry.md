@@ -415,72 +415,132 @@ void GCLocker::jni_unlock(JavaThread* thread) {
 
 ### 5.1 为什么是 for 循环
 
-前面三级挽救都失败了，控制权到达 `attempt_allocation_slow()`（g1CollectedHeap.cpp:410-516）。这个方法是 **for 循环**，不是单次尝试——因为 GC 可能被 GCLocker 拒绝、也可能被别的线程抢先，必须能重试。
+这个方法的核心结构是一个 `for` 循环，不是单次尝试。原因——GC 可能被 GCLocker 拒绝（§4.3 步骤 1），也可能被别的线程抢先（多个线程同时走到 slow path）——必须能回到循环头重试。
+
+下面逐段拆开——每段先看代码、再看解释、再看它在整体里扮演什么角色。看完四段后 §5.6 汇总全貌。
+
+### 5.2 循环头——持锁阶段
 
 ```cpp
-// g1CollectedHeap.cpp:427
+// g1CollectedHeap.cpp:427-439
 for (uint try_count = 1, gclocker_retry_count = 0; /* we'll return */; try_count += 1) {
     bool should_try_gc;
     uint gc_count_before;
 
-    // (1) 持锁阶段: 持锁重试 + GCLocker 紧急扩展 + 判断能否做 GC
     {
-      MutexLockerEx x(Heap_lock);
-      result = _allocator->attempt_allocation_locked(word_size);
-      if (result != NULL) return result;
+        MutexLockerEx x(Heap_lock);                                // 持锁
+        result = _allocator->attempt_allocation_locked(word_size);
+        if (result != NULL) return result;                         // ①持锁重试成功
 
-      if (GCLocker::is_active_and_needs_gc() && g1_policy()->can_expand_young_list()) {
-          result = _allocator->attempt_allocation_force(word_size);
-          if (result != NULL) return result;
-      }
+        if (GCLocker::is_active_and_needs_gc()
+            && g1_policy()->can_expand_young_list()) {
+            result = _allocator->attempt_allocation_force(word_size);
+            if (result != NULL) return result;                     // ②GCLocker紧急扩展成功
+        }
 
-      should_try_gc = !GCLocker::needs_gc();
-      gc_count_before = total_collections();
-    }
+        should_try_gc = !GCLocker::needs_gc();                    // ③决定: 自己做GC还是等?
+        gc_count_before = total_collections();                     // ④快照GC计数
+    } // 释放 Heap_lock
+```
 
-    // (2) GC 阶段: 三个结果
+**① 持锁重试**：等 `Heap_lock` 期间，别的线程可能刚做完 GC、释放了 Eden Region。拿到锁后立刻再试一次当前 Region——如果成功，这个线程一次 GC 都没做就分配到了。这就是 §5.6 要讲的"GC 不是我触发的，但我受益了"。
+
+**② GCLocker 紧急扩展**：如果 GCLocker 活跃（§4.3），在持锁状态下用 `_young_list_max_length` 做上限，绕过 `_young_list_target_length` 再分配一个新的 Eden Region。如果成功——省了一次 GC。
+
+**③ `should_try_gc`**：决定接下来走哪条岔路。`GCLocker::needs_gc()` 为 false → 可以自己做 GC（走 §5.3）；为 true → 有 JNI critical section 拦着，走 §5.4 的 stall。
+
+**④ `gc_count_before`**：快照当前的 `total_collections()`。后面 `do_collection_pause()` 会对比这个值——如果没变，说明 GC 被 GCLocker 拦了或被别的线程抢先了。
+
+### 5.3 GC 阶段——自己做 GC
+
+```cpp
+    // g1CollectedHeap.cpp:441-448
     if (should_try_gc) {
         result = do_collection_pause(word_size, gc_count_before, &succeeded,
                                      GCCause::_g1_inc_collection_pause);
-        if (result != NULL) return result;    // GC 成功 + 分配成功
-        if (succeeded) return NULL;            // GC 成功 + 分配失败 → 放弃
-        // !succeeded → GC 被抢先 → 循环头重试
-    } else {
-        // (3) GCLocker stall: 等 JNI critical section 释放
-        if (gclocker_retry_count > GCLockerRetryAllocationCount) return NULL;
-        GCLocker::stall_until_clear();
+        if (result != NULL) return result;    // GC 成功回收空间 + 分配成功
+        if (succeeded) return NULL;            // GC 成功但分配失败（堆真的满了）
+        // !succeeded → GC 被抢先 → 不 return，落到 §5.5 无锁重试
+    }
+```
+
+`do_collection_pause()`（g1CollectedHeap.cpp:2501-2521）创建 `VM_G1CollectForAllocation` 提交给 VMThread，**阻塞等待** GC 完成。返回时有三种可能：
+
+| succeeded | result | 含义 | 做什么 |
+|-----------|--------|------|--------|
+| true | 非NULL | GC 成功执行，方法内部分配了对象 | `return result`——搞定 |
+| true | NULL | GC 成功执行，但分配失败（堆满了） | `return NULL`——放弃，调用者收到 NULL |
+| false | NULL | GC 没执行——被 GCLocker 拦了或被别的线程抢先 | 不 return，落到 §5.5 |
+
+### 5.4 GCLocker stall——等 JNI critical section 释放
+
+```cpp
+    // g1CollectedHeap.cpp:448-454
+    } else {  // should_try_gc == false
+        if (gclocker_retry_count > GCLockerRetryAllocationCount) {
+            return NULL;                      // 等太多次了 → 放弃
+        }
+        GCLocker::stall_until_clear();        // 在 JNICritical_lock 上休眠
         gclocker_retry_count += 1;
     }
+```
 
-    // (4) 无锁重试: 别的线程的 GC 可能刚释放了空间
+`should_try_gc == false` 意味着 `GCLocker::needs_gc()` 为 true——有线程正握着 `GetPrimitiveArrayCritical` 的原始指针（§4.3）。与其触发一次注定被 abort 的 safepoint 往返，不如在 `JNICritical_lock` 上**休眠等待**。当那个握着指针的线程退出 critical section 并触发 GC 后（§4.3 步骤 3），`notify_all()` 唤醒这个线程。
+
+**终止条件**：`gclocker_retry_count` 超过 `GCLockerRetryAllocationCount` 时放弃——防止 JNI critical section 永远不释放。
+
+### 5.5 无锁重试——别人的 GC 可能帮了我们
+
+```cpp
+    // g1CollectedHeap.cpp:499-503
+    size_t dummy = 0;
     result = _allocator->attempt_allocation(word_size, word_size, &dummy);
     if (result != NULL) return result;
 }
 ```
 
-### 5.2 各阶段详解
+无论走了 §5.3（自己做 GC）还是 §5.4（在 GCLocker stall 上等），出锁后别的线程可能已经做完了 GC、释放了 Eden Region。这一步不持锁、轻量快速——成功直接返回，失败回到循环头（下次迭代在 §5.2 重新持锁重试）。
 
-**(1) 持锁阶段**——进入 slow path 等于说 "无锁手段全用完了"。在触发 GC 之前，持 `Heap_lock` 后做最后挽救：持锁重试当前 Region（等锁期间别的线程可能刚做完 GC）、GCLocker 紧急扩展（用 max 做上限）、判断能不能做 GC（`should_try_gc = !GCLocker::needs_gc()`）。
+### 5.6 全貌——四个阶段在一次循环中的位置
 
-**`gc_count_before`**——后面 `do_collection_pause()` 用它和当前 `total_collections()` 对比。如果 GC 计数没变——被 GCLocker 拦了或被抢先了——`succeeded=false`，回到循环头重试。
+```cpp
+// g1CollectedHeap.cpp:427-503
+for (uint try_count = 1, gclocker_retry_count = 0; /* we'll return */; try_count += 1) {
+    bool should_try_gc;
+    uint gc_count_before;
 
-**(2) GC 阶段**——`do_collection_pause()`（g1CollectedHeap.cpp:2501-2521）创建 `VM_G1CollectForAllocation` 提交给 VMThread，阻塞等待 GC 完成。三种返回：
+    {                                         // ── §5.2 持锁阶段 ──
+        MutexLockerEx x(Heap_lock);
+        result = _allocator->attempt_allocation_locked(word_size);
+        if (result != NULL) return result;
 
-| succeeded | result | 含义 | 动作 |
-|-----------|--------|------|------|
-| true | 非NULL | GC 成功，分配完成 | return result |
-| true | NULL | GC 成功但分配失败（堆满了） | return NULL（放弃） |
-| false | NULL | GC 没执行（被拦/抢先） | 回到循环头 |
+        if (GCLocker::is_active_and_needs_gc() && ...) {
+            result = _allocator->attempt_allocation_force(word_size);
+            if (result != NULL) return result;
+        }
 
-**(3) GCLocker stall**——`should_try_gc = false` 意味着有 JNI critical section 持有者。VMThread 会在 safepoint 中 abort GC，所以与其来一次注定失败的 safepoint 往返，不如在 `JNICritical_lock` 上等。终止条件 `gclocker_retry_count > GCLockerRetryAllocationCount` 防止永久卡死。
+        should_try_gc = !GCLocker::needs_gc();
+        gc_count_before = total_collections();
+    }
 
-**(4) 无锁重试**——无论走了 (2) 还是 (3)，出锁后别的线程可能刚做完 GC 释放了空间。这一步不持锁、轻量快速——成功直接返回，失败回到循环头。
+    if (should_try_gc) {                      // ── §5.3 GC 阶段 ──
+        result = do_collection_pause(...);
+        if (result != NULL) return result;
+        if (succeeded) return NULL;
+    } else {                                  // ── §5.4 GCLocker stall ──
+        if (gclocker_retry_count > GCLockerRetryAllocationCount) return NULL;
+        GCLocker::stall_until_clear();
+        gclocker_retry_count += 1;
+    }
 
-### 5.3 关键——触发 GC ≠ 自己需要 GC
+    result = _allocator->attempt_allocation(word_size, ..., &dummy);
+    if (result != NULL) return result;        // ── §5.5 无锁重试 ──
+}
+```
 
-N 个线程同时走到 slow path，一人触发 GC，其余人在 `Heap_lock` 上排队。GC 完成后 Eden 有空闲 Region，排队的人醒来后持锁重试（步骤 1）或出锁后无锁重试（步骤 4）直接分配成功——"GC 不是我触发的，但我受益了"。
+**关键——触发 GC ≠ 自己需要 GC**。N 个线程同时走到 slow path，线程 A 在 §5.3 做了 GC，线程 B/C/D 在 `Heap_lock` 上排队等。A 的 GC 完成后 Eden 有空闲 Region，B/C/D 拿到锁后在 §5.2 的持锁重试中直接分配成功——它们一次 GC 都没做但都受益了。
 
----
+
 
 ## 6. InitialMark 决策——这次要不要顺便启动并发标记
 
