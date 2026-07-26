@@ -613,17 +613,24 @@ CSet 是**增量地**构建的——mutator 运行期间一小口一小口往里
 
 ### 7.3 GC 开始时锁定——finalize_collection_set
 
+§7.2 讲了 Region 怎么进入 CSet——但什么时候 "关门"？GC 进入 safepoint 后：
+
 ```cpp
 // g1CollectedHeap.cpp:2944
 g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
 ```
 
-`finalize_young_part()`（g1CollectionSet.cpp:356-398）：
-1. `finalize_incremental_building()`——Active → Inactive，停止接受新 Region
-2. `init_region_lengths(eden_count, survivor_count)`——记下数量
-3. `survivors->convert_to_eden()`（g1SurvivorRegions.cpp:42-50）——SurvTag(3) → EdenTag(2)
-4. 算 time budget——`target_pause_time_ms - base_time_ms`
-5. Young-only 时 `finalize_old_part()` 不执行
+这个方法调用 `finalize_young_part()`（g1CollectionSet.cpp:356-398），做五件事：
+
+1. **`finalize_incremental_building()`**——把 `_inc_build_state` 从 Active 切到 Inactive。此后 mutator 的任何 "retire Eden Region → add_eden_region" 调用会 assert 失败——CSet 已经锁定了。这一步是 GC 和 mutator 之间的边界：之前是增量构建期，现在进入 GC 使用期。
+
+2. **`init_region_lengths(eden_count, survivor_count)`**——记下 "本轮 CSet 里 Eden 多少个、Survivor 多少个"。这些数字会被 G1Policy 上报给日志和 tracing。
+
+3. **`survivors->convert_to_eden()`**（g1SurvivorRegions.cpp:42-50）——上一轮 GC 留下的 Survivor Region，Tag 从 `SurvTag(3)` 改为 `EdenTag(2)`。这些 Region 在本轮 GC 中作为 Eden 被全量回收。
+
+4. **算 time budget**——G1Policy 用历史数据预测本次 GC 的 base 开销（固定开销 + RSet 扫描 + dirty card 处理），从 `target_pause_time_ms`（= MaxGCPauseMillis, 默认 200ms）中减掉，余下的时间分配给实际搬对象的工作。如果预算不够，后续的预测器会调小下一轮的 `_young_list_target_length`。
+
+5. **Young-only 时 `finalize_old_part()` 不执行**——因为 `in_mixed_phase()` 返回 false，old Region 的候选列表为空，跳到下一步。Mixed GC 时才走这里。
 
 ### 7.4 `_young_list_target_length` 如何影响 CSet 大小
 
