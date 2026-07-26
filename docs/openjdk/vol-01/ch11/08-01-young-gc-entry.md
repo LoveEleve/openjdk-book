@@ -640,38 +640,36 @@ CSet 的大小是 GC 之间的 mutator 分配活动决定的——分配了多�
 
 ## 8. Pre-Evacuation——搬运前的最后准备
 
-### 8.1 做什么
+所有准备工作就绪（CSet 已锁定），距离真正搬活对象只剩最后一步——把 mutator 在 GC 前最后一刻产生的 dirty card 数据合并进来，确保 GC Worker 不会漏掉任何引用。
 
 ```cpp
 // g1CollectedHeap.cpp:2972
 pre_evacuate_collection_set();
 ```
 
-内部（g1CollectedHeap.cpp:4039-4058）：
-- 关闭热卡缓存——GC 期间 hot card cache 不能有 stale 数据
-- 调用 `prepare_for_oops_into_collection_set_do()`（g1RemSet.cpp:511-516）
+内部（g1CollectedHeap.cpp:4039-4058）做了两件事：
 
-### 8.2 合并 dirty card logs
+### 8.1 关闭热卡缓存
 
 ```cpp
-void G1RemSet::prepare_for_oops_into_collection_set_do() {
-    DirtyCardQueueSet& dcqs = G1BarrierSet::dirty_card_queue_set();
-    dcqs.concatenate_logs();    // ★ 合并所有线程的半满 dirty card buffer
-    _scan_state->reset();
-}
+_hot_card_cache->set_use_cache(false);
 ```
 
-`concatenate_logs()`——mutator 在 GC 前最后一刻产生的 dirty card 还写在 thread-local buffer 里，没提交到全局队列。必须赶在 GC 扫描前合并进来，否则漏掉引用。
+热卡缓存（`HotCardCache`，ch11/05 讲过）是 concurrent refinement 线程用来缓存 "频繁变脏的 card" 的——避免同一张 card 被反复加入 dirty card queue。但 GC 期间 refinement 线程也停了，热卡缓存里可能还有没处理的 card。关闭它意味着后续所有 card 处理直接走常规路径，避免新旧数据混合。
 
-### 8.3 重置 scan_state
+### 8.2 合并 dirty card + 重置 scan_state
 
-`_scan_state->reset()` 为堆中每个 Region 重算 `_scan_top[i]`（ch11/06 §2.3）：
-- 不在 CSet 中的 old/humongous Region → `_scan_top[i] = top()`（需要扫描它的 card）
-- CSet 内 / young / free Region → `_scan_top[i] = bottom()`（在 evacuation 时自然处理）
+```cpp
+g1_rem_set()->prepare_for_oops_into_collection_set_do();
+```
 
-如果本次是 InitialMark GC，还需清理 ClassLoaderData claimed 标记——Normal Young GC 跳过。
+这个方法（g1RemSet.cpp:511-516）是两件事合一：
 
----
+**`concatenate_logs()`**——每个 mutator 线程有自己的 thread-local `DirtyCardQueue`。写屏障产生的 dirty card 先写进这个本地队列，队列满了才提交到全局队列。GC 触发前最后一刻，大多数线程的本地队列都是**半满**的——这些 card 对全局还是不可见的。`concatenate_logs()` 把所有线程的半满队列拼接到全局 completed buffer list 上，保证 GC Worker 能看到**每一张** dirty card。
+
+**`_scan_state->reset()`**——为堆中每个 Region 重算 `_scan_top[i]` 数组（ch11/06 §2.3）。不在 CSet 中的 old/humongous Region 设 `top()`（需要扫描它的 card），CSet 内 / young / free Region 设 `bottom()`（不需要——CSet 内部引用在 evacuation 时自然处理，young 整块回收不依赖 card table，free 没有对象）。这个数组在 08-02 的 RSet 扫描阶段被大量使用。
+
+
 
 ## 附录 A: `_young_list_target_length` 算法
 
