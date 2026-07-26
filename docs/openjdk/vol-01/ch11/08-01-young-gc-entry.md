@@ -665,7 +665,24 @@ g1_rem_set()->prepare_for_oops_into_collection_set_do();
 
 这个方法（g1RemSet.cpp:511-516）是两件事合一：
 
-**`concatenate_logs()`**——每个 mutator 线程有自己的 thread-local `DirtyCardQueue`。写屏障产生的 dirty card 先写进这个本地队列，队列满了才提交到全局队列。GC 触发前最后一刻，大多数线程的本地队列都是**半满**的——这些 card 对全局还是不可见的。`concatenate_logs()` 把所有线程的半满队列拼接到全局 completed buffer list 上，保证 GC Worker 能看到**每一张** dirty card。
+**`concatenate_logs()`**——把所有 mutator 线程的半满 dirty card 队列拼到全局。
+
+每个 mutator 线程有一个 thread-local 的 `DirtyCardQueue`（实际是一个 `PtrQueue`，大小约 256 条 card）。写屏障（ch11/05）记录一条 dirty card 时，指针 bump 写入这个队列——只在**满了**或者线程到达 safepoint 时才提交到全局 `DirtyCardQueueSet` 的 completed buffer list。
+
+问题：safepoint 之前 mutator 还在跑——它可能刚写了几十条 dirty card，队列还没满。这些 card 对全局是**不可见**的（还在 thread-local 队列里，没有拼接）。如果 GC Worker 现在就开始 RSet 扫描——这些 "还在本地队列里但已经发生的引用变更" 全被漏掉。
+
+`concatenate_logs()` 遍历所有 Java 线程，把每个线程的当前 thread-local buffer（无论满没满）都拼到全局 completed list 上。源码（dirtyCardQueue.cpp）：
+
+```cpp
+void DirtyCardQueueSet::concatenate_logs() {
+    // 遍历所有线程的 _dirty_card_queue，把 buffer 拼进全局 completed list
+    for (JavaThreadIteratorWithHandle jtiwh; JavaThread* t = jtiwh.next(); ) {
+        concatenate_log(t);
+    }
+}
+```
+
+拼完之后，全局 completed buffer list 包含了所有线程的**全部** dirty card——无论满不满。08-02 的 GC Worker 在 `update_rem_set()` 阶段消费这个全局队列，确保没有任何一张 card 被漏掉。
 
 **`_scan_state->reset()`**——为堆中**每一个** Region 重算 `_scan_top[i]`。
 
