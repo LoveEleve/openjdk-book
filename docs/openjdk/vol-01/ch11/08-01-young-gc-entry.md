@@ -580,7 +580,14 @@ if (initiate_conc_mark_if_possible()     // 上次 GC 结束时设的标志（�
 - `initiate_conc_mark_if_possible()`：`G1CollectorState` 上的 `volatile bool` 标志（g1CollectorState.hpp:61,108）。含义："下次 Young GC 也做 InitialMark"。上一次 Normal Young GC 结束时 IHOP 判断设的（`maybe_start_marking()` → `set_initiate_conc_mark_if_possible(true)`），本次消费后清掉
 - `initiate_conc_mark()`：两步——设 `_in_initial_mark_gc = true`（本次升级为 InitialMark），清 `initiate_conc_mark_if_possible = false`（标志已消费）
 
-**谁设的这个标志**——上一次 Normal Young GC 结束时（`record_collection_pause_end()` 调 `maybe_start_marking()`），G1Policy 检查老年代占用量是否超过了 IHOP 阈值（Initiating Heap Occupancy Percent）。超过就设 `initiate_conc_mark_if_possible = true`，留给下一次 Young GC 来兑现。
+**谁设的这个标志**——上一次 Normal Young GC 结束时，G1Policy 检查老年代占用量是否超过了 IHOP 阈值（Initiating Heap Occupancy Percent）。超过就设 `initiate_conc_mark_if_possible = true`，留给下一次 Young GC 来兑现。
+
+```
+时间线：
+  GC(42) Normal 结束 → IHOP: old gen满了 → 设标志=true
+  GC(43) 开始 → 看到标志=true → 升级为 InitialMark → 清标志=false
+  GC(44) 开始 → 看到标志=false → 继续 Normal
+```（`record_collection_pause_end()` 调 `maybe_start_marking()`），G1Policy 检查老年代占用量是否超过了 IHOP 阈值（Initiating Heap Occupancy Percent）。超过就设 `initiate_conc_mark_if_possible = true`，留给下一次 Young GC 来兑现。
 
 **如果这是 JVM 启动后的第一次 Young GC**——没有"上一次 GC"。`initiate_conc_mark_if_possible` 的初始值是 `false`（G1CollectorState 构造函数中所有标志默认 false），所以第一次 Young GC 必然是 Normal——没有历史数据来算 IHOP，不存在 "老年代满了需要并发标记" 的问题。
 
