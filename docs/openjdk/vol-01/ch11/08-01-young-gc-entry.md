@@ -609,15 +609,7 @@ CSet 是**增量地**构建的——mutator 运行期间一小口一小口往里
 - **当前活跃的 Eden**：GC 开始时 `release_mutator_alloc_region()`（g1CollectedHeap.cpp:2926）也退休它 → 同路径入 CSet。
 - **上一轮 Survivor**：上轮 GC 结束时 `transfer_survivors_to_cset()`（g1Policy.cpp:1148-1176）把它们全部加入下一轮 CSet。**第一次 GC 时没有 Survivor**——`_survivor.length() == 0`，`transfer_survivors_to_cset` 遍历空列表不添加任何 Region。
 
-`add_young_region_common()`（g1CollectionSet.cpp:229-278）是底层方法——把 `hrm_index` 写入 `_collection_set_regions` 数组：
-
-| 字段 | 所在类 | 类型 | 源码位置 | 用途 |
-|------|--------|------|---------|------|
-| `_collection_set_regions` | `G1CollectionSet` | `uint*` | g1CollectionSet.hpp:55 | CSet 的 C 数组存储——存 hrm_index 而非 HeapRegion* |
-| `_collection_set_cur_length` | `G1CollectionSet` | `volatile size_t` | g1CollectionSet.hpp:56 | 当前有效条目数——volatile 支持并发读 |
-| `_inc_build_state` | `G1CollectionSet` | `CSetBuildType` (Active/Inactive) | g1CollectionSet.hpp:76 | 增量构建开关 |
-| `_inc_recorded_rs_lengths` | `G1CollectionSet` | `size_t` | g1CollectionSet.hpp:88 | 累加 RSet 长度——用于暂停预测 |
-| `_inc_predicted_elapsed_time_ms` | `G1CollectionSet` | `double` | g1CollectionSet.hpp:101 | 累加预测耗时 |
+`add_young_region_common()`（g1CollectionSet.cpp:229-278）是底层方法——把 `hrm_index` 写入 CSet 内部的 `_collection_set_regions` 数组（`uint*`，不是链表），同时给 G1Policy 的暂停预测器累积 RSet 长度和预测耗时。这些字段的完整身份卡片在附录 B。
 
 ### 7.3 GC 开始时锁定——finalize_collection_set
 
