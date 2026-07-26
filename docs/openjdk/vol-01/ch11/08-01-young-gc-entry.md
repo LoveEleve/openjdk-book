@@ -576,7 +576,7 @@ if (initiate_conc_mark_if_possible()     // 上次 GC 结束时设的标志（�
 ```
 
 - `in_young_only_phase()`：G1CollectorState 上的标志位，表示 "当前只回收 young，没在 Mixed GC 阶段"。Mixed GC 阶段开始时清掉，结束后重新设为 true
-- `!about_to_start_mixed_phase()`（g1Policy.cpp:527-530）——返回 `during_cycle() || in_young_gc_before_mixed()`。如果并发标记还在跑、或者已经是 "Mixed 前的最后一次 Young GC"，返回 true。取反 `!` 的含义：**并发标记已经完成、而且还没开始 Mixed GC 阶段**——此时才允许启动新的一轮 InitialMark。如果 Mixxed GC 的候选 old Region 列表已经有了，不需要再启动一轮新的 InitialMark
+- `!about_to_start_mixed_phase()`——对 Normal Young GC 来说这个条件永远为 true（还没启动过并发标记，不存在 "即将进入 Mixed" 的场景）。当并发标记完成后、要进入 Mixed GC 时才会变 false——那是 ch11/14-15 的内容
 - `initiate_conc_mark_if_possible()`（g1CollectorState.hpp:108）——**就是一个 getter，没有逻辑**：`return _initiate_conc_mark_if_possible;`。名字听上去像动作，实际上只是读一个 `volatile bool`。这个 `bool` 是上一次 GC 结束时设的，存在 `G1CollectorState` 对象里跨一次 GC 传递。本次 GC 开始时读它——true 就升级为 InitialMark，false 继续 Normal（g1CollectorState.hpp:61,108）。含义："下次 Young GC 升级为 InitialMark"。上一次 Normal Young GC 结束时 IHOP 判断设的（`maybe_start_marking()` → `set_initiate_conc_mark_if_possible(true)`），本次消费后清掉
 - `initiate_conc_mark()`：两步——设 `_in_initial_mark_gc = true`（本次升级为 InitialMark），清 `initiate_conc_mark_if_possible = false`（标志已消费）
 
