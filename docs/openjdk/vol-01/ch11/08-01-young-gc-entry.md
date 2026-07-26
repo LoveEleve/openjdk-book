@@ -655,7 +655,9 @@ pre_evacuate_collection_set();
 _hot_card_cache->set_use_cache(false);
 ```
 
-热卡缓存（`HotCardCache`，ch11/05 讲过）是 concurrent refinement 线程用来缓存 "频繁变脏的 card" 的——避免同一张 card 被反复加入 dirty card queue。但 GC 期间 refinement 线程也停了，热卡缓存里可能还有没处理的 card。关闭它意味着后续所有 card 处理直接走常规路径，避免新旧数据混合。
+热卡缓存（`G1HotCardCache`, g1HotCardCache.hpp:56）是 concurrent refinement 线程的**写侧缓存**——正常运行时，refinement 线程处理 dirty card 时，如果发现某张 card 的引用变更模式是 "反复同一个 Region 对另一个 Region 的引用"，会把它缓存进 `_hot_cache[]` 数组（避免重复加入 dirty card queue）。
+
+GC 期间 refinement 线程停了，缓存没有任何新增。`set_use_cache(false)` 只是把 `_use_cache` 设为 false——让 `insert()` 方法直接返回（不缓存新 card），**已有的缓存数据不动**。后续 GC Worker 处理 card 时全部走常规路径，不受缓存干扰。
 
 ### 8.2 合并 dirty card + 重置 scan_state
 
