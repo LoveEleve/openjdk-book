@@ -563,6 +563,8 @@ if (!_cm_thread->should_terminate()) {
 }
 ```
 
+`_cm_thread` 是 `G1ConcurrentMarkThread*`——负责管理并发标记周期的 JVM 线程。`should_terminate()` 检查它是否已被通知 "JVM 要退出了，别再启动新的并发标记了"——如果 JVM 正在 shutdown，这里跳过去，不启动 InitialMark。
+
 `decide_on_conc_mark_initiation()`（g1Policy.cpp:936-985）如果发现标志为 true、当前在 young-only 阶段、还没开始 Mixed，就把本次升级为 InitialMarkGC：
 
 ```cpp
