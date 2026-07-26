@@ -634,7 +634,7 @@ g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
 
 ### 7.4 `_young_list_target_length` 如何影响 CSet 大小
 
-CSet 的大小是 GC 之间的 mutator 分配活动决定的——分配了多少 Eden Region，就有多少 Eden 进入 CSet。G1Policy 通过 `_young_list_target_length` 持续控制 "堆里该有多少 Young Region"。附录 A 详解了这个值的计算——分初始值（无历史数据，用硬编码默认值）和运行时（每次 GC 后把真实数据喂进 analytics 序列）。
+CSet 的大小是 GC 之间的 mutator 分配活动决定的——分配了多少 Eden Region，就有多少 Eden 进入 CSet。G1Policy 通过 `_young_list_target_length` 持续控制 "堆里该有多少 Young Region"（对应的 `_young_list_max_length = target × 1.05`，用于 §3.4 的 GCLocker 紧急扩展）。附录 A 详解了 target 的计算——分初始值（无历史数据）和运行时（每次 GC 后把真实数据喂进 analytics 序列）。
 
 ---
 
