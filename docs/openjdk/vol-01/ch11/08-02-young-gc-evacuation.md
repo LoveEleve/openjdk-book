@@ -2,7 +2,7 @@
 
 > **系列定位**：三篇串讲一次 Normal Young GC。第二篇讲解 GC 最核心的阶段——搬走 CSet 中所有活对象。12 个 Root 子任务的并行分工、RSet 扫描怎么找到跨 Region 引用、工作窃取怎么保证不遗漏任何引用。
 >
-> **前置**：第一篇（08-01）——触发 / GCLocker / CSet 选择 / Pre-Evacuation。本章的 §2 Pre-Evacuation 是 08-01 §5 的承接点。
+> **前置**：第一篇（08-01）——触发 / GCLocker / CSet 选择 / Pre-Evacuation。本章的 §2 Pre-Evacuation 是 08-01 §8 的承接点。
 >
 > **第三篇**：Post-Evacuation → Free CSet → 完整时间线（08-03）。
 
@@ -10,7 +10,7 @@
 
 ## 1. Pre-Evacuation——搬运前的最后准备（承接 08-01）
 
-第一篇 §5 讲到 `pre_evacuate_collection_set()` 做了两件事。现在补充一个更完整的视图——**这一步到底是哪些数据结构需要 GC 前来不及清理完的**。
+08-01 §8 讲到 `pre_evacuate_collection_set()` 做了两件事。现在补充一个更完整的视图——**这一步到底是哪些数据结构需要 GC 前来不及清理完的**。
 
 进入 safepoint 前，世界上有两类数据在变迁：
 
@@ -30,7 +30,7 @@ void G1RemSet::prepare_for_oops_into_collection_set_do() {
 
 `concatenate_logs()` 将每个线程的 `DirtyCardQueue` 的当前 partial buffer 拼接（concatenate）到全局 `DirtyCardQueueSet` 的 completed buffer list 上。这保证了 **GC Workers 有一份完整的 "所有 dirty card" 的视图**——不会漏掉任何一个 card。
 
-`_scan_state->reset()` 为堆中每个 Region 重算 `_scan_top[i]`。代码逻辑已经在 08-01 §5.3 讲过——这里强调的是**这个数组在后续 §3 的 RSet 扫描中会被大量使用**——它决定了每个 old/humongous Region 的哪些 card block 需要被扫描。
+`_scan_state->reset()` 为堆中每个 Region 重算 `_scan_top[i]`。代码逻辑已经在 08-01 §8 讲过——这里强调的是**这个数组在后续 §3 的 RSet 扫描中会被大量使用**——它决定了每个 old/humongous Region 的哪些 card block 需要被扫描。
 
 ---
 
