@@ -667,7 +667,24 @@ g1_rem_set()->prepare_for_oops_into_collection_set_do();
 
 **`concatenate_logs()`**——每个 mutator 线程有自己的 thread-local `DirtyCardQueue`。写屏障产生的 dirty card 先写进这个本地队列，队列满了才提交到全局队列。GC 触发前最后一刻，大多数线程的本地队列都是**半满**的——这些 card 对全局还是不可见的。`concatenate_logs()` 把所有线程的半满队列拼接到全局 completed buffer list 上，保证 GC Worker 能看到**每一张** dirty card。
 
-**`_scan_state->reset()`**——为堆中每个 Region 重算 `_scan_top[i]` 数组（ch11/06 §2.3）。不在 CSet 中的 old/humongous Region 设 `top()`（需要扫描它的 card），CSet 内 / young / free Region 设 `bottom()`（不需要——CSet 内部引用在 evacuation 时自然处理，young 整块回收不依赖 card table，free 没有对象）。这个数组在 08-02 的 RSet 扫描阶段被大量使用。
+**`_scan_state->reset()`**——为堆中**每一个** Region 重算 `_scan_top[i]`。
+
+`_scan_state` 是 `G1RemSet` 持有的 `G1RemSetScanState` 对象（ch11/06 §2.3 详细展开过）。它的核心是一个数组 `_scan_top[]`，长度 = 堆中 Region 总数。`_scan_top[i]` 表示 "Region i 如果不在 CSet 中，它的 card 0 到 `_scan_top[i]` 之间的区间需要被扫描，因为可能包含指向 CSet 的引用"。
+
+每次 GC 前必须重算，因为 CSet 变了——上一轮扫描用的 `_scan_top` 已经过期。重算逻辑（g1RemSet.cpp:127-141）：
+
+```cpp
+for each Region r:
+    if (!r->in_collection_set() && r->is_old_or_humongous())
+        _scan_top[r->hrm_index()] = r->top();      // 需要扫描
+    else
+        _scan_top[r->hrm_index()] = r->bottom();    // 不需要
+```
+
+- **设 `top()` 的**——old 或 humongous Region，且不在 CSet 中。它可能引用了 CSet 里的对象，需要扫描它的 card 来找这些引用
+- **设 `bottom()` 的**——在 CSet 中的（evacuation 会遍历它的所有对象，不需要 card 辅助）、young 的（整块回收）、free 的（没对象）——都不需要扫
+
+这个数组在 08-02 的 RSet 扫描阶段被 GC Worker 大量使用——每个 Worker 通过它知道每个 old Region 该扫描到哪张 card。
 
 
 
