@@ -577,7 +577,7 @@ if (initiate_conc_mark_if_possible()     // 上次 GC 结束时设的标志（�
 
 - `in_young_only_phase()`：G1CollectorState 上的标志位，表示 "当前只回收 young，没在 Mixed GC 阶段"。Mixed GC 阶段开始时清掉，结束后重新设为 true
 - `!about_to_start_mixed_phase()`：确保并发标记的 Cleanup 阶段还没完成——如果 Cleanup 已经跑完了（候选 old Region 列表已经产生了），立即进入 Mixed GC，不需要再启动一轮新的 InitialMark
-- `initiate_conc_mark_if_possible()`：`G1CollectorState` 上的 `volatile bool` 标志（g1CollectorState.hpp:61,108）。含义："下次 Young GC 也做 InitialMark"。上一次 Normal Young GC 结束时 IHOP 判断设的（`maybe_start_marking()` → `set_initiate_conc_mark_if_possible(true)`），本次消费后清掉
+- `initiate_conc_mark_if_possible()`：`G1CollectorState` 上的 `volatile bool` 标志（g1CollectorState.hpp:61,108）。含义："下次 Young GC 升级为 InitialMark"。上一次 Normal Young GC 结束时 IHOP 判断设的（`maybe_start_marking()` → `set_initiate_conc_mark_if_possible(true)`），本次消费后清掉
 - `initiate_conc_mark()`：两步——设 `_in_initial_mark_gc = true`（本次升级为 InitialMark），清 `initiate_conc_mark_if_possible = false`（标志已消费）
 
 **谁设的这个标志**——上一次 Normal Young GC 结束时，G1Policy 检查老年代占用量是否超过了 IHOP 阈值（Initiating Heap Occupancy Percent）。超过就设 `initiate_conc_mark_if_possible = true`，留给下一次 Young GC 来兑现。
