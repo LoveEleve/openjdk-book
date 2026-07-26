@@ -640,7 +640,7 @@ CSet 的大小是 GC 之间的 mutator 分配活动决定的——分配了多�
 
 ## 8. Pre-Evacuation——搬运前的最后准备
 
-所有准备工作就绪（CSet 已锁定），距离真正搬活对象只剩最后一步——把 mutator 在 GC 前最后一刻产生的 dirty card 数据合并进来，确保 GC Worker 不会漏掉任何引用。
+所有准备工作就绪（CSet 已锁定），此时所有 mutator 线程已经在 safepoint 停下了，**VMThread 在执行**。距离真正搬活对象只剩最后一步——把 mutator 在停下来的前一刻产生的 dirty card 数据合并进来（它们还在各线程的本地队列里，没有提交到全局），确保后续的 GC Worker 不会漏掉任何引用。
 
 ```cpp
 // g1CollectedHeap.cpp:2972
