@@ -630,7 +630,7 @@ g1_policy()->finalize_collection_set(target_pause_time_ms, &_survivor);
 
 4. **算 time budget**——G1Policy 用历史数据预测本次 GC 的 base 开销（固定开销 + RSet 扫描 + dirty card 处理），从 `target_pause_time_ms`（= MaxGCPauseMillis, 默认 200ms）中减掉，余下的时间分配给实际搬对象的工作。如果预算不够，后续的预测器会调小下一轮的 `_young_list_target_length`。
 
-5. 最后顺带看一眼——如果是 Mixed GC，`finalize_old_part()` 会继续往里加 old Region。Young-only 时 `in_mixed_phase()` 为 false，直接跳过。
+5. `finalize_young_part()` 返回剩余时间 budget。`finalize_collection_set()` 会用这个余量调 `finalize_old_part()`——添加 old Region。Young-only 时 `in_mixed_phase()` 为 false，`finalize_old_part()` 不做任何事。
 
 ### 7.4 `_young_list_target_length` 如何影响 CSet 大小
 
