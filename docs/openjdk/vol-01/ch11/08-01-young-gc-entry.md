@@ -605,7 +605,7 @@ CSet（Collection Set）= 本次 GC 要回收的 Region 集合。Normal Young GC
 
 CSet 是**增量地**构建的——mutator 运行期间一小口一小口往里加：
 
-- **已填满退休的 Eden**：mutator 把 Eden Region 分三亚后退了它 → `retire_mutator_alloc_region()` → `add_eden_region()`（g1CollectedHeap.cpp:4874）。这个调用发生在 mutator 时间里（safepoint 之间）。
+- **已填满退休的 Eden**：mutator 把 Eden Region 分配满后退了它 → `retire_mutator_alloc_region()` → `add_eden_region()`（g1CollectedHeap.cpp:4874）。这个调用发生在 mutator 时间里（safepoint 之间）。
 - **当前活跃的 Eden**：GC 开始时 `release_mutator_alloc_region()`（g1CollectedHeap.cpp:2926）也退休它 → 同路径入 CSet。
 - **上一轮 Survivor**：上轮 GC 结束时 `transfer_survivors_to_cset()`（g1Policy.cpp:1148-1176）把它们全部加入下一轮 CSet。
 
