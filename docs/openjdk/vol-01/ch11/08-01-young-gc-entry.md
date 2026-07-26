@@ -671,16 +671,28 @@ g1_rem_set()->prepare_for_oops_into_collection_set_do();
 
 问题：safepoint 之前 mutator 还在跑——它可能刚写了几十条 dirty card，队列还没满。这些 card 对全局是**不可见**的（还在 thread-local 队列里，没有拼接）。如果 GC Worker 现在就开始 RSet 扫描——这些 "还在本地队列里但已经发生的引用变更" 全被漏掉。
 
-`concatenate_logs()` 遍历所有 Java 线程，把每个线程的当前 thread-local buffer（无论满没满）都拼到全局 completed list 上。源码（dirtyCardQueue.cpp）：
+`concatenate_logs()` 遍历所有 Java 线程，对每个线程调 `concatenate_log(dcq)`。源码（dirtyCardQueue.cpp:331-350）：
 
 ```cpp
-void DirtyCardQueueSet::concatenate_logs() {
-    // 遍历所有线程的 _dirty_card_queue，把 buffer 拼进全局 completed list
-    for (JavaThreadIteratorWithHandle jtiwh; JavaThread* t = jtiwh.next(); ) {
-        concatenate_log(t);
+// 对单个线程的队列——如果非空，把当前 buffer flush 到全局
+void DirtyCardQueueSet::concatenate_log(DirtyCardQueue& dcq) {
+    if (!dcq.is_empty()) {
+        dcq.flush();    // 把 thread-local buffer 拼到全局 completed list 上
     }
 }
+
+void DirtyCardQueueSet::concatenate_logs() {
+    int save_max = _max_completed_queue;
+    _max_completed_queue = max_jint;  // 取消队列上限——GC 期间必须接受所有 buffer
+    for (JavaThreadIteratorWithHandle jtiwh; JavaThread *t = jtiwh.next(); ) {
+        concatenate_log(G1ThreadLocalData::dirty_card_queue(t));
+    }
+    concatenate_log(_shared_dirty_card_queue);  // 非 Java 线程的共享队列
+    _max_completed_queue = save_max;
+}
 ```
+
+`dcq.flush()` 做的事情：把当前 thread-local 的底层 buffer node 从本地卸下来，挂到全局 `_all_active` 链表末尾。`_max_completed_queue` 临时设为 `max_jint`——正常运行时队列有上限（超过上限 mutator 会背压参与处理），GC 期间必须解除限制，拒绝任何 buffer 都意味着引用丢失。
 
 拼完之后，全局 completed buffer list 包含了所有线程的**全部** dirty card——无论满不满。08-02 的 GC Worker 在 `update_rem_set()` 阶段消费这个全局队列，确保没有任何一张 card 被漏掉。
 
