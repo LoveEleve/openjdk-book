@@ -82,15 +82,15 @@ storage->release(slot);            // 还回去
 OopStorage 对象:
   _name = "VM Weak Oop Handles"
 
-  _active_array ──→ Block*[]          所有 Block 的主索引，GC 遍历入口（第 5.4 节）
-  _allocation_list ──→ 双向链表       非满 Block 的池，allocate 从这里取（第 5.1 节）
-  _deferred_updates ──→ 单向链表      状态变更的 Block，release 推入、持锁消费（第 5.2 节）
+  _active_array --→ Block*[]          所有 Block 的主索引，GC 遍历入口（第 5.4 节）
+  _allocation_list --→ 双向链表       非满 Block 的池，allocate 从这里取（第 5.1 节）
+  _deferred_updates --→ 单向链表      状态变更的 Block，release 推入、持锁消费（第 5.2 节）
 
-  _allocation_mutex ──→ 锁           保护 allocation_list 和 Block 创建
-  _active_mutex ──→ 锁               保护 _active_array 扩容和空 Block 删除
-  _allocation_count ──→ 计数器       当前已分配但未释放的 slot 数量（volatile，原子操作）
-  _protect_active ──→ SingleWriterSynchronizer  _active_array 扩容时保护旧指针数组不被过早删除（第 5.5 节）
-  _concurrent_iteration_active ──→ bool  并发遍历标记，防删空 Block 与并行 GC 冲突
+  _allocation_mutex --→ 锁           保护 allocation_list 和 Block 创建
+  _active_mutex --→ 锁               保护 _active_array 扩容和空 Block 删除
+  _allocation_count --→ 计数器       当前已分配但未释放的 slot 数量（volatile，原子操作）
+  _protect_active --→ SingleWriterSynchronizer  _active_array 扩容时保护旧指针数组不被过早删除（第 5.5 节）
+  _concurrent_iteration_active --→ bool  并发遍历标记，防删空 Block 与并行 GC 冲突
 ```
 
 `_name` 是一个标识字符串。`_allocation_count` 是每次 allocate 时 `Atomic::inc`、release 时 `Atomic::dec` 的全局计数——用原子操作保证并发安全，不需要锁。GC 通过 `_active_array` 找到所有 Block 遍历。
@@ -232,7 +232,7 @@ oop* OopStorage::Block::allocate() {
 
 **走一个例子。** 掩码 `allocated = 0b00101`（slot[0] 和 slot[2] 已占，十进制 5）。
 
-① `allocated = 0b00101`
+(1) `allocated = 0b00101`
 
 (2) `~0b00101 = 0b11010`。CTZ = 1（bit 1 是第一个空闲位）。slot[1] 空闲。
 
@@ -274,7 +274,7 @@ Block 只有 64 个槽。需要更多槽时——创建更多 Block。三个数�
 
 ```
 _allocation_list:
-  Block_A ←──→ Block_B ←──→ Block_C
+  Block_A ←--→ Block_B ←--→ Block_C
  [3/64占]   [15/64占]   [62/64占]
 
 - head() → Block_A：分配时从链表头取
@@ -603,7 +603,7 @@ void OopStorage::Block::release_entries(uintx releasing, Block* volatile* deferr
 
 条件 2——之前满的，现在有空位了。Block 64 个 slot 全满：`old_allocated = 0xFFFFFFFFFFFFFFFF`。释放 slot[3]：`releasing = 0b1000`。CAS 成功。`is_full_bitmask(0xFFFF...FF)` → **TRUE**。释放前 Block 是满的，现在有空位了——这个 Block 又可以分配了。
 
-① `_release_refcount` 从 0 变 1——告诉 `is_deletable()` 别在这个窗口内删 Block。如果没这个保护：bitmask 被清零了（Block 看起来空了），但(8)还没推到 deferred list——`is_deletable()` 发现 Block 全空且不在 deferred list——认为可以删了——但释放还没完成。
+(1) `_release_refcount` 从 0 变 1——告诉 `is_deletable()` 别在这个窗口内删 Block。如果没这个保护：bitmask 被清零了（Block 看起来空了），但(8)还没推到 deferred list——`is_deletable()` 发现 Block 全空且不在 deferred list——认为可以删了——但释放还没完成。
 
 ---
 
@@ -710,7 +710,7 @@ bool is_deletable() const {
     return (OrderAccess::load_acquire(&_allocated_bitmask) == 0)       // (1) 全空
 ```
 
-**条件① `_allocated_bitmask == 0`。** Block 的所有 64 个 slot 都空闲。最便宜的检查，先跑。
+**条件(1) `_allocated_bitmask == 0`。** Block 的所有 64 个 slot 都空闲。最便宜的检查，先跑。
 
 **条件(2) `_release_refcount == 0`。** 如果 `release_entries` 正在执行中（refcount > 0），bitmask 可能暂时为 0 但还没推到 deferred list——此时不能删。refcount 在 release_entries 开头递增、结尾递减——挡住这个窗口。
 

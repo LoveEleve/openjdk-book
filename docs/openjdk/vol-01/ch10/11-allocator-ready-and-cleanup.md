@@ -12,33 +12,33 @@
 
 ```
 Phase 1: 初始化基础设施 (1533-1629)
-  ├─ enable_vtime, Heap_lock, 对齐校验
-  ├─ ReservedSpace, BarrierSet, CardTable, HotCardCache
-  ├─ G1RegionToSpaceMapper × 6（heap, BOT, cardtable, card_counts, prev_bitmap, next_bitmap）
-  └─ _hrm.initialize(), _card_table->initialize(), _hot_card_cache->initialize()
+  +- enable_vtime, Heap_lock, 对齐校验
+  +- ReservedSpace, BarrierSet, CardTable, HotCardCache
+  +- G1RegionToSpaceMapper × 6（heap, BOT, cardtable, card_counts, prev_bitmap, next_bitmap）
+  +- _hrm.initialize(), _card_table->initialize(), _hot_card_cache->initialize()
 
 Phase 2: 并发标记与 RSet (1630-1668)
-  ├─ RemSet 初始化
-  ├─ FreeRegionList 超长阈值
-  ├─ BlockOffsetTable, _in_cset_fast_test, _humongous_reclaim_candidates
-  └─ G1ConcurrentMark + 线程
+  +- RemSet 初始化
+  +- FreeRegionList 超长阈值
+  +- BlockOffsetTable, _in_cset_fast_test, _humongous_reclaim_candidates
+  +- G1ConcurrentMark + 线程
 
 Phase 3: 扩容与策略初始化 (1670-1707)
-  ├─ expand(init_byte_size)  ←── 真正提交物理内存，包括 region 0
-  ├─ g1_policy()->init()
-  ├─ SATB + DirtyCard 队列系统
-  ├─ concurrent_refinement + young_gen_sampling_thread
-  └─ DirtyCardQueueSet 二次初始化
+  +- expand(init_byte_size)  ←-- 真正提交物理内存，包括 region 0
+  +- g1_policy()->init()
+  +- SATB + DirtyCard 队列系统
+  +- concurrent_refinement + young_gen_sampling_thread
+  +- DirtyCardQueueSet 二次初始化
 
 Phase 4: 本文覆盖 —— 分配器就位 + 收尾 (1709-1734)
-  ├─ Dummy Region 创建、标记、填满
-  ├─ G1AllocRegion::setup() —— 静态全局变量
-  ├─ init_mutator_alloc_region() —— 分配器激活
-  ├─ G1MonitoringSupport —— 监控
-  ├─ G1StringDedup —— 去重（默认关）
-  ├─ PreservedMarksSet::init —— 撤离失败保险
-  ├─ CSet::initialize —— Region 索引数组
-  └─ return JNI_OK
+  +- Dummy Region 创建、标记、填满
+  +- G1AllocRegion::setup() —— 静态全局变量
+  +- init_mutator_alloc_region() —— 分配器激活
+  +- G1MonitoringSupport —— 监控
+  +- G1StringDedup —— 去重（默认关）
+  +- PreservedMarksSet::init —— 撤离失败保险
+  +- CSet::initialize —— Region 索引数组
+  +- return JNI_OK
 ```
 
 **关键依赖**：Phase 3 的 `expand()` 必须在 Dummy Region 之前——因为 `get_dummy_region()` 会调用 `new_heap_region(0)`，它通过 `bottom_addr_for_region(0)` 获取 region 0 的 base 地址（`reserved.start() + 0 * GrainWords`），然后构造一个 `HeapRegion` 对象。如果 region 0 尚未 commit，这个地址虽然合法（在 reserved 范围内），但 BOT、card table 等辅助结构的数据尚未就绪。
@@ -210,10 +210,10 @@ _dummy_region = dummy_region;
 
 ```
 G1AllocRegion (静态: _g1h, _dummy_region)
-  ├─ MutatorAllocRegion     — mutator 分配
-  └─ G1GCAllocRegion        — GC 分配
-       ├─ SurvivorGCAllocRegion
-       └─ OldGCAllocRegion
+  +- MutatorAllocRegion     — mutator 分配
+  +- G1GCAllocRegion        — GC 分配
+       +- SurvivorGCAllocRegion
+       +- OldGCAllocRegion
 ```
 
 同一进程中只有一个 G1CollectedHeap、一个 dummy region。所有分配器实例共享它们即可，`_g1h` 和 `_dummy_region` 类的所有实例共用。如果设计成实例字段，每个实例都得保存同样的指针，浪费内存且需要各自初始化。
@@ -472,16 +472,16 @@ void StringDedup::initialize_impl() {
 ```
 阶段 1（GC 暂停中）: 发现候选
   GC 标记/撤离对象时，对每个 String 对象检查：
-    ├─ 是 String 实例？
-    ├─ 年龄 ≥ StringDeduplicationAgeThreshold（默认 3，globals.hpp:2589）？
-    └─ 满足则把 String 加入 StringDedupQueue 候选队列
+    +- 是 String 实例？
+    +- 年龄 ≥ StringDeduplicationAgeThreshold（默认 3，globals.hpp:2589）？
+    +- 满足则把 String 加入 StringDedupQueue 候选队列
   （G1 的判据实现见 g1StringDedup.cpp:44-56）
 
 阶段 2（GC 暂停后并发）: 执行去重
   StringDedupThread 后台线程从队列取候选：
-    ├─ 用 String 的 char[] 内容做 key，查 StringDedupTable
-    ├─ 命中：让该 String 指向已存在的 char[]，释放原数组 → 原数组可被 GC 回收
-    └─ 未命中：把当前 char[] 插入哈希表，供未来共享
+    +- 用 String 的 char[] 内容做 key，查 StringDedupTable
+    +- 命中：让该 String 指向已存在的 char[]，释放原数组 → 原数组可被 GC 回收
+    +- 未命中：把当前 char[] 插入哈希表，供未来共享
 ```
 
 三个组件的职责：
@@ -507,24 +507,24 @@ G1 的撤离（evacuation）设计是"先标记、后搬运"：GC 找到存活�
 ```
 正常撤离（成功）:
   from-space 对象               to-space 对象
-  ┌──────────────────┐         ┌──────────────────┐
-  │ mark word: 原始值 │         │ mark word: 原始值 │  ← 新对象保留原始内容
-  │                  │  复制   │                  │
-  │                  │ ──────→ │                  │
-  │                  │         │                  │
-  └──────────────────┘         └──────────────────┘
-  ┌──────────────────┐
-  │ forwarding ptr   │  ← 原对象的 mark word 被覆写为指向 to-space 的地址
-  │ → to-space       │      GC 遍历时通过它找到新位置
-  └──────────────────┘
+  +------------------+         +------------------+
+  | mark word: 原始值 |         | mark word: 原始值 |  ← 新对象保留原始内容
+  |                  |  复制   |                  |
+  |                  | ------→ |                  |
+  |                  |         |                  |
+  +------------------+         +------------------+
+  +------------------+
+  | forwarding ptr   |  ← 原对象的 mark word 被覆写为指向 to-space 的地址
+  | → to-space       |      GC 遍历时通过它找到新位置
+  +------------------+
 
 撤离失败（空间不足）:
   from-space 对象
-  ┌──────────────────┐
-  │ forwarding ptr   │  ← mark word 一样被覆写
-  │ → 自己（self）    │     但这次没有新对象来保留原始值
-  └──────────────────┘
-  原始 mark word ──→ 丢了
+  +------------------+
+  | forwarding ptr   |  ← mark word 一样被覆写
+  | → 自己（self）    |     但这次没有新对象来保留原始值
+  +------------------+
+  原始 mark word --→ 丢了
 ```
 
 mark word 在 HotSpot 中是一个字（64 位平台上 8 字节），承担多重职责：
@@ -573,12 +573,12 @@ void PreservedMarksSet::init(uint num) {
 
 ```
 PreservedMarksSet
-  └── _stacks: Padded<PreservedMarks>[]   ← 一个数组，长度 = ParallelGCThreads
-        ├── _stacks[0]: PreservedMarks     ← Worker 0 的
-        │     └── _stack: Stack<OopAndMarkOop>  ← 唯一的一个栈
-        ├── _stacks[1]: PreservedMarks     ← Worker 1 的
-        │     └── _stack: Stack<OopAndMarkOop>
-        └── ...
+  +-- _stacks: Padded<PreservedMarks>[]   ← 一个数组，长度 = ParallelGCThreads
+        +-- _stacks[0]: PreservedMarks     ← Worker 0 的
+        |     +-- _stack: Stack<OopAndMarkOop>  ← 唯一的一个栈
+        +-- _stacks[1]: PreservedMarks     ← Worker 1 的
+        |     +-- _stack: Stack<OopAndMarkOop>
+        +-- ...
 ```
 
 `_stacks` 数组名虽然带复数，但每个元素存的是一个 `PreservedMarks` 对象，对象内部只有一个 **Stack**。`_stacks[worker_id]._stack` 才是那个真正的栈容器。
@@ -599,14 +599,14 @@ class OopAndMarkOop {
 Stack 不预先分配一整块连续内存，而是按需分配固定大小的段（segment），段与段之间通过链表指针连接：
 
 ```
-     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-     │  elements[0]  │     │  elements[0]  │     │  elements[0]  │
-     │  elements[1]  │     │  elements[1]  │     │  elements[1]  │
-     │  ...          │     │  ...          │     │  ...          │
-     │  elements[N]  │     │  elements[N]  │     │  elements[N]  │
-     ├──────────────┤     ├──────────────┤     ├──────────────┤
-     │  link ───────┼────→│  link ───────┼────→│  link = NULL  │
-     └──────────────┘     └──────────────┘     └──────────────┘
+     +--------------+     +--------------+     +--------------+
+     |  elements[0]  |     |  elements[0]  |     |  elements[0]  |
+     |  elements[1]  |     |  elements[1]  |     |  elements[1]  |
+     |  ...          |     |  ...          |     |  ...          |
+     |  elements[N]  |     |  elements[N]  |     |  elements[N]  |
+     +--------------+     +--------------+     +--------------+
+     |  link -------+----→|  link -------+----→|  link = NULL  |
+     +--------------+     +--------------+     +--------------+
        ↑ _cur_seg           (middle segment)      (bottom segment)
        当前段（top）
 ```
@@ -625,14 +625,14 @@ Stack 不预先分配一整块连续内存，而是按需分配固定大小的�
 **段（segment）的布局**：一个段是一块连续内存（stack.inline.hpp:103-113）：
 
 ```
-┌──────────────────────┐
-│ elements[0]          │
-│ elements[1]          │
-│ ...                  │
-│ elements[_seg_size-1]│  ← _seg_size 个元素
-├──────────────────────┤
-│ link (E*)            │  ← 指向前一段的指针（链表）
-└──────────────────────┘
++----------------------+
+| elements[0]          |
+| elements[1]          |
+| ...                  |
+| elements[_seg_size-1]|  ← _seg_size 个元素
++----------------------+
+| link (E*)            |  ← 指向前一段的指针（链表）
++----------------------+
 ```
 
 段的大小计算：`segment_bytes() = align_up(_seg_size × sizeof(E), sizeof(E*)) + sizeof(E*)`。对于 `OopAndMarkOop`（16 字节）：

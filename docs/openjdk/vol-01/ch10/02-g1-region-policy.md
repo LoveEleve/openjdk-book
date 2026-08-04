@@ -144,18 +144,18 @@ _max_fine_entries = 1 << log₂(768) = 1024   // 向上取整到 2 的幂
 写屏障通知："Region A 的 card 37 被写，ref 指向 Region B"
 
 Region B 的 RSet:
-  ├─ Sparse 里有 Region A 的条目 → 追加 card 37
-  │    ├─ Region A 条目没溢出 → 完成
-  │    └─ Region A 的 card 列表太长 → 升级
-  │         └─ new PerRegionTable(Region A) → 挂到 Fine 数组里
-  │              ├─ Fine 表数量 ≤ 768 → 完成
-  │              └─ Fine 表数量 > 768 → 降级
-  │                   └─ 挑一个 PerRegionTable 删掉
-  │                       Coarse bit[该Region] = 1
-  │
-  └─ Sparse 里没有 Region A 的条目 → 新增
-       ├─ Sparse 条目 < 12 → 插入
-       └─ Sparse 条目 ≥ 12 → 哈希表扩容（桶数翻倍）
+  +- Sparse 里有 Region A 的条目 → 追加 card 37
+  |    +- Region A 条目没溢出 → 完成
+  |    +- Region A 的 card 列表太长 → 升级
+  |         +- new PerRegionTable(Region A) → 挂到 Fine 数组里
+  |              +- Fine 表数量 ≤ 768 → 完成
+  |              +- Fine 表数量 > 768 → 降级
+  |                   +- 挑一个 PerRegionTable 删掉
+  |                       Coarse bit[该Region] = 1
+  |
+  +- Sparse 里没有 Region A 的条目 → 新增
+       +- Sparse 条目 < 12 → 插入
+       +- Sparse 条目 ≥ 12 → 哈希表扩容（桶数翻倍）
 ```
 
 ### 3.6 内存开销（4MB Region、8GB 堆、2048 个 Region）

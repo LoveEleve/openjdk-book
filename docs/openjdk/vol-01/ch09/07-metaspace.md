@@ -30,8 +30,8 @@ Metaspace 分三层管理（全局层内部还有 VSL → Node → chunk 的嵌�
 ```
 全局层（所有 CLD 共享）:
   VirtualSpaceList  →  VirtualSpaceNode 链表
-    └─ VirtualSpaceNode  →  mmap reserve 的一段连续虚拟地址，lazy commit
-         └─ chunk        →  固定 size class 的块（Specialized/Small/Medium/Humongous）
+    +- VirtualSpaceNode  →  mmap reserve 的一段连续虚拟地址，lazy commit
+         +- chunk        →  固定 size class 的块（Specialized/Small/Medium/Humongous）
   ChunkManager      →  空闲 chunk 的全局回收池（跨 CLD 复用）
 
 Per-CLD 层（每个 CLD 独占）:
@@ -107,8 +107,8 @@ uint8_t* _map_layer_1;  // 指向第二层位图（in-use-map）
 `_map` 只是把两个指针打包在一起，方便用 `_map[layer]` 索引访问。两块位图大小相同（都是 `_map_size` 字节），因为覆盖同一个 Node 的地址范围；区别只在内容——第一层记录 chunk 头部位置，第二层记录占用状态。内存布局：
 
 ```
-_map[0] ──→ [byte0][byte1][byte2]...   ← 第一层位图（chunk-start-map）
-_map[1] ──→ [byte0][byte1][byte2]...   ← 第二层位图（in-use-map）
+_map[0] --→ [byte0][byte1][byte2]...   ← 第一层位图（chunk-start-map）
+_map[1] --→ [byte0][byte1][byte2]...   ← 第二层位图（in-use-map）
 ```
 
 每个 `uint8_t` 字节有 8 个 bit，所以 1 字节可以表示 8 个 slot。查询 bit N 的值（源码 `get_bit_at_position`）：
@@ -122,8 +122,8 @@ return (_map[layer][byteoffset] & mask) > 0;  // 读出该 bit
 所以前面的例子（8 个 slot）实际上只需要 1 字节就能装下整个位图：
 
 ```
-_map[0] ──→ [0b10001000]   ← 第一层：bit 0 和 bit 4 是 1（两个 chunk 头部）
-_map[1] ──→ [0b11110000]   ← 第二层：bit 0-3 是 1（Small A 在用）
+_map[0] --→ [0b10001000]   ← 第一层：bit 0 和 bit 4 是 1（两个 chunk 头部）
+_map[1] --→ [0b11110000]   ← 第二层：bit 0-3 是 1（Small A 在用）
 ```
 
 每个 bit 代表一个 `SpecializedChunk` 大小的区域（最小 chunk size，`metaspaceCommon.hpp:37` `SpecializedChunk = 128 words = 1KB`），所以位图粒度是最细的——任何 chunk 都能被位图精确覆盖。

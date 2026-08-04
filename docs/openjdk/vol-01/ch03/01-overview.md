@@ -18,9 +18,9 @@ r = ifn->CreateJavaVM(pvm, (void**)penv, &args);
 
 ```
 终端进程 (shell, 例如 bash)
-│  执行了 fork + exec，Shell 还活着，等待 Java 进程退出
-│
-└─ Java 进程 (PID=xxx, 即 java 可执行文件)
+|  执行了 fork + exec，Shell 还活着，等待 Java 进程退出
+|
++- Java 进程 (PID=xxx, 即 java 可执行文件)
 ```
 
 <img src="/docs/openjdk/vol-01/ch03/assets/Clipboard_Screenshot_1782478472.png" alt="进程与线程模型" style="max-width:100%">
@@ -31,12 +31,12 @@ Shell 进程要等 Java 进程退出后收集退出码、显示新的命令提�
 
 ```
 Java 进程 (PID=xxx)
-├─ 原始线程 (pid=LWP-1)               ← 永远是个裸 pthread
-│     main() → JLI_Launch() → JVMInit() → ContinueInNewThread()
-│     → CallJavaMainInNewThread() → pthread_create()
-│     状态：阻塞在 pthread_join，等待新线程结束
-│
-└─ 新 pthread (pid=LWP-2)             ← 即将被包装为 JavaThread
++- 原始线程 (pid=LWP-1)               ← 永远是个裸 pthread
+|     main() → JLI_Launch() → JVMInit() → ContinueInNewThread()
+|     → CallJavaMainInNewThread() → pthread_create()
+|     状态：阻塞在 pthread_join，等待新线程结束
+|
++- 新 pthread (pid=LWP-2)             ← 即将被包装为 JavaThread
       ThreadJavaMain() → JavaMain() → InitializeJVM()
       → ifn->CreateJavaVM() → JNI_CreateJavaVM()    ← 现在在这里
 ```

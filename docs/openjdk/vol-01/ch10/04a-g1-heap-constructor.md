@@ -25,22 +25,22 @@ _collected_heap->initialize();                             // → 重头戏（ch
 
 ```
 初始化列表 (~40 行, 1419-1457)
-├── NULL 字段 × 12: _young_gen_sampling_thread, _card_table, _eden_pool,
-│     _survivor_pool, _old_pool, _ref_processor_stw/cm, _bot,
-│     _hot_card_cache, _g1_rem_set, _cr, _g1mm, _archive_allocator
-├── 轻量对象: _memory_manager(×2), _gc_timer_stw, _gc_tracer_stw,
-│     _g1_policy(new G1Policy), _collection_set(空)
-├── PLAB 统计: _survivor_evac_stats, _old_evac_stats
-└── 计数: _summary_bytes_used=0, _old_marking_cycles_started=0 等
++-- NULL 字段 × 12: _young_gen_sampling_thread, _card_table, _eden_pool,
+|     _survivor_pool, _old_pool, _ref_processor_stw/cm, _bot,
+|     _hot_card_cache, _g1_rem_set, _cr, _g1mm, _archive_allocator
++-- 轻量对象: _memory_manager(×2), _gc_timer_stw, _gc_tracer_stw,
+|     _g1_policy(new G1Policy), _collection_set(空)
++-- PLAB 统计: _survivor_evac_stats, _old_evac_stats
++-- 计数: _summary_bytes_used=0, _old_marking_cycles_started=0 等
     _hrm (值成员, 默认构造)                    ← §8 HeapRegionManager 空壳
 
 构造函数体 (~35 行, 1459-1492)
-├── _workers          = new WorkGang(...)   ← §2 STW GC 线程池
-├── _verifier         = new G1HeapVerifier(this)
-├── _allocator        = new G1Allocator(this)    ← §3 对象分配器
-├── _heap_sizing_policy  = ...              ← §4 堆大小策略
-├── _task_queues      = new RefToScanQueueSet(N)  ← §5 per-worker ref 队列
-└── _evacuation_failed_info_array = NEW_C_HEAP_ARRAY(...) ← §6 撤离失败追踪
++-- _workers          = new WorkGang(...)   ← §2 STW GC 线程池
++-- _verifier         = new G1HeapVerifier(this)
++-- _allocator        = new G1Allocator(this)    ← §3 对象分配器
++-- _heap_sizing_policy  = ...              ← §4 堆大小策略
++-- _task_queues      = new RefToScanQueueSet(N)  ← §5 per-worker ref 队列
++-- _evacuation_failed_info_array = NEW_C_HEAP_ARRAY(...) ← §6 撤离失败追踪
 ```
 
 初始化列表大部分是 NULL 指针和简单计数——核心在构造函数体的 6 个对象。下面逐个展开。
@@ -78,7 +78,7 @@ G1CollectionSet::G1CollectionSet(G1CollectedHeap* g1h, G1Policy* policy) :
 { }
 ```
 
-**① `_cset_chooser`**（`CollectionSetChooser`，`collectionSetChooser.hpp:31-66`）——Mixed GC 时**按回收效率排序的 old Region 候选队列**。内部是一个 `GrowableArray<HeapRegion*>`，`front/end` 索引模拟 FIFO 队列。Concurrent Mark 结束后的 cleanup 阶段调用 `rebuild()` 重建——并行遍历所有 Region，筛选出存活率低、RSet 完整的 old Region，按 GC 效率排序。
+**(1) `_cset_chooser`**（`CollectionSetChooser`，`collectionSetChooser.hpp:31-66`）——Mixed GC 时**按回收效率排序的 old Region 候选队列**。内部是一个 `GrowableArray<HeapRegion*>`，`front/end` 索引模拟 FIFO 队列。Concurrent Mark 结束后的 cleanup 阶段调用 `rebuild()` 重建——并行遍历所有 Region，筛选出存活率低、RSet 完整的 old Region，按 GC 效率排序。
 
 **(2) `_collection_set_regions`**——**这就是 CSet 本身**。一个 `uint*` 动态数组，每个元素存的是入选 Region 的 HRM index（如 `_cset_regions = [3, 7, 12, 45, ...]`）。GC 暂停中 GC Worker 遍历这个数组，逐个 evacuate 对应的 Region。`_eden_region_length / _survivor_region_length / _old_region_length` 三个计数器标记数组里哪一段是哪种 Region。初始化列表中为 NULL——等 `G1CollectedHeap::initialize()` 末尾 `_collection_set.initialize(max_regions())` 才在 C Heap 上分配 `uint[max_regions]` 数组。
 
@@ -196,19 +196,19 @@ _allocator = new G1Allocator(this);
 
 ```
 G1Allocator
-├── _mutator_alloc_region    (MutatorAllocRegion)     ← 应用线程 new 对象（TLAB/直分配）
-├── _survivor_gc_alloc_region (SurvivorGCAllocRegion)  ← GC 中拷贝 young 存活对象到 Survivor
-└── _old_gc_alloc_region      (OldGCAllocRegion)       ← GC 中晋升年龄够大的对象到 Old
++-- _mutator_alloc_region    (MutatorAllocRegion)     ← 应用线程 new 对象（TLAB/直分配）
++-- _survivor_gc_alloc_region (SurvivorGCAllocRegion)  ← GC 中拷贝 young 存活对象到 Survivor
++-- _old_gc_alloc_region      (OldGCAllocRegion)       ← GC 中晋升年龄够大的对象到 Old
 ```
 
 三种分配区对应三种**对象流向**：mutator 创建新对象 → Eden（MutatorAllocRegion）；GC 拷贝 young 存活对象 → Survivor 或 Old（GC 两个 Region）。它们底层共用一个基类，继承关系如下：
 
 ```
 G1AllocRegion（基类, hpp:41-82）
-├── MutatorAllocRegion（hpp:204）       ← 直接继承，无 GC 相关字段
-└── G1GCAllocRegion（hpp:249）          ← 继承 + 新增 _stats + _purpose
-    ├── SurvivorGCAllocRegion（hpp:265）
-    └── OldGCAllocRegion（hpp:271）
++-- MutatorAllocRegion（hpp:204）       ← 直接继承，无 GC 相关字段
++-- G1GCAllocRegion（hpp:249）          ← 继承 + 新增 _stats + _purpose
+    +-- SurvivorGCAllocRegion（hpp:265）
+    +-- OldGCAllocRegion（hpp:271）
 ```
 
 `G1GCAllocRegion` 给 GC 两个子类增加了两个字段：`G1EvacStats* _stats`（PLAB 大小自适应用的每 Region 统计）和 `InCSetState _purpose`（Young 或 Old，决定分配时标记什么类型）。MutatorAllocRegion 没有这两个字段——它不需要 PLAB 统计，也不知道 GC 的 Young/Old 分类。
@@ -300,7 +300,7 @@ if (to_fill >= min_fill_size) {
 ```
 退役前:
   Card 0: [对象A...对象B....top=400B..........|Card 1: 512B 开始...
-           ←── 已经填满 ──→ ← 112B 空隙 →      ↑ 新 Card，还没任何对象
+           ←-- 已经填满 --→ ← 112B 空隙 →      ↑ 新 Card，还没任何对象
            
 退役时（没有对齐填充）:
   Card 0 的 [400, 512) 是空的
@@ -380,7 +380,7 @@ HeapRegionManager() :
 
 逐个解释：
 
-**① `_regions`**（`G1HeapRegionTable`, `:39`）——一个 `G1BiasedMappedArray<HeapRegion*>`（偏置数组，ch10/05 §3 同名技巧）。以 Region index 为下标，存 `HeapRegion*` 指针。构造时为空——没有 `new` 任何 Region。
+**(1) `_regions`**（`G1HeapRegionTable`, `:39`）——一个 `G1BiasedMappedArray<HeapRegion*>`（偏置数组，ch10/05 §3 同名技巧）。以 Region index 为下标，存 `HeapRegion*` 指针。构造时为空——没有 `new` 任何 Region。
 
 **(2) 6 个 Mapper 指针**——全部 NULL。等 `G1CollectedHeap::initialize()` 中调 `_hrm.initialize(heap_storage, prev_bitmap, ...)` 时传入并绑定（ch10/05 §5）。每个 Mapper 管理一种元数据的虚拟内存（堆、prev/next 位图、BOT、Card Table、Card Counts）。`expand()` 时 6 Mapper 同步 commit（ch10/08）。
 
@@ -445,12 +445,12 @@ StarTask 存的是一个"指向 oop 的指针"（oop*），不是 oop 本身:
 
 ```
 RefToScanQueue (OverflowTaskQueue):
-  ┌─ _elems[N]         (环形数组, 继承自 GenericTaskQueue)
-  └─ _overflow_stack    (Stack<E,F>, OverflowTaskQueue 自己加的)
+  +- _elems[N]         (环形数组, 继承自 GenericTaskQueue)
+  +- _overflow_stack    (Stack<E,F>, OverflowTaskQueue 自己加的)
      → push() 满了 → overflow_stack->push(t)    内部自消化, 永远返回 true
 
 G1CMTaskQueue (GenericTaskQueue):
-  └─ _elems[N]         (环形数组)
+  +- _elems[N]         (环形数组)
      → push() 满了 → 返回 false → 调用者调 move_entries_to_global_stack()
      → 搬到外部 G1CMMarkStack（chunk 链表, ch10/07 §5）       外部救援
 ```
@@ -463,16 +463,16 @@ G1 中总共有 **2 个 `DirtyCardQueueSet` 实例** + **每个线程本地一�
 
 ```
 DirtyCardQueueSet（管理 completed buffers 链表 + free list）
-├── G1BarrierSet::_dirty_card_queue_set  (static, 全局)    ← mutator 提交到这里
-│     ├── JavaThread #1 → DirtyCardQueue (线程本地 buffer, 挂在此 Set 上)
-│     ├── JavaThread #2 → DirtyCardQueue
-│     ├── ...
-│     └── _shared_dirty_card_queue (非 Java 线程共用)
-│
-└── G1CollectedHeap::_dirty_card_queue_set  (实例)         ← GC Worker 提交到这里
-      ├── GC Worker #1 → DirtyCardQueue (暂停中暂用, 挂在此 Set 上)
-      ├── GC Worker #2 → DirtyCardQueue
-      └── ...
++-- G1BarrierSet::_dirty_card_queue_set  (static, 全局)    ← mutator 提交到这里
+|     +-- JavaThread #1 → DirtyCardQueue (线程本地 buffer, 挂在此 Set 上)
+|     +-- JavaThread #2 → DirtyCardQueue
+|     +-- ...
+|     +-- _shared_dirty_card_queue (非 Java 线程共用)
+|
++-- G1CollectedHeap::_dirty_card_queue_set  (实例)         ← GC Worker 提交到这里
+      +-- GC Worker #1 → DirtyCardQueue (暂停中暂用, 挂在此 Set 上)
+      +-- GC Worker #2 → DirtyCardQueue
+      +-- ...
 ```
 
 **两条写入路径**：
@@ -673,10 +673,10 @@ _preserved_marks_set(true /* in_c_heap */)
 
 ```
 对象头（普通情况）:                 对象头（evacuate 后，原位置）:
-┌──────────┬──────────┐           ┌──────────────┬──────────┐
-│ markOop  │  klass   │           │ forwarding ptr│  klass   │
-│(锁/年龄) │  (类型)  │           │  (新地址)     │          │
-└──────────┴──────────┘           └──────────────┴──────────┘
++----------+----------+           +--------------+----------+
+| markOop  |  klass   |           | forwarding ptr|  klass   |
+|(锁/年龄) |  (类型)  |           |  (新地址)     |          |
++----------+----------+           +--------------+----------+
                                      ↑ 偷用 markOop 位置
 ```
 
@@ -772,9 +772,9 @@ _full_gc_memory_manager("G1 Old Generation", "end of major GC")
 
 ```
 _memory_manager（young/mixed GC）        _full_gc_memory_manager（Full GC）
-├── _eden_pool     ✅ 受影响               ├── _eden_pool     ✅ 受影响
-├── _survivor_pool ✅ 受影响               ├── _survivor_pool ✅ 受影响
-└── _old_pool      ⚠ 不一定受影响           └── _old_pool      ✅ 受影响
++-- _eden_pool     ✅ 受影响               +-- _eden_pool     ✅ 受影响
++-- _survivor_pool ✅ 受影响               +-- _survivor_pool ✅ 受影响
++-- _old_pool      ⚠ 不一定受影响           +-- _old_pool      ✅ 受影响
 ```
 
 Young/Mixed GC 时 old pool 标记为 `not always affected`——因为它可能不变。Full GC 时三个 pool 都受影响。
@@ -802,20 +802,20 @@ Young/Mixed GC 时 old pool 标记为 `not always affected`——因为它可能
 
 ```
 create_heap()
-├── G1Arguments::create_heap()
-│     ├── new G1CollectorPolicy()                         ← ch10/02 + ch10/04
-│     └── new G1CollectedHeap(policy)                     ← ★ 本文
-│           ├── 策略引擎: _g1_policy, _collection_set, _soft_ref_policy
-│           ├── 线程池: _workers(ParallelGCThreads, pgc_thread)
-│           ├── 分配组: _allocator (G1AllocRegion × 3), _hrm (值成员, 默认构造)
-│           ├── 队列组: _task_queues (RefToScanQueue × N), _dirty_card_queue_set
-│           ├── GC 指针: _card_table, _bot, _hot_card_cache, _g1_rem_set, _cr (全 NULL)
-│           ├── Region 管理: _old_set, _humongous_set, 偏置位图 × 2, humongous 阈值
-│           ├── PLAB 统计: _survivor_evac_stats, _old_evac_stats
-│           ├── 撤离支持: _preserved_marks_set, _evacuation_failed_info_array
-│           └── 监控: _gc_timer_stw, _gc_tracer_stw, _memory_manager × 2
-│
-└── 返回 G1CollectedHeap* → Universe::initialize_heap()
++-- G1Arguments::create_heap()
+|     +-- new G1CollectorPolicy()                         ← ch10/02 + ch10/04
+|     +-- new G1CollectedHeap(policy)                     ← ★ 本文
+|           +-- 策略引擎: _g1_policy, _collection_set, _soft_ref_policy
+|           +-- 线程池: _workers(ParallelGCThreads, pgc_thread)
+|           +-- 分配组: _allocator (G1AllocRegion × 3), _hrm (值成员, 默认构造)
+|           +-- 队列组: _task_queues (RefToScanQueue × N), _dirty_card_queue_set
+|           +-- GC 指针: _card_table, _bot, _hot_card_cache, _g1_rem_set, _cr (全 NULL)
+|           +-- Region 管理: _old_set, _humongous_set, 偏置位图 × 2, humongous 阈值
+|           +-- PLAB 统计: _survivor_evac_stats, _old_evac_stats
+|           +-- 撤离支持: _preserved_marks_set, _evacuation_failed_info_array
+|           +-- 监控: _gc_timer_stw, _gc_tracer_stw, _memory_manager × 2
+|
++-- 返回 G1CollectedHeap* → Universe::initialize_heap()
       → _collected_heap->initialize()                     ← ch10/05 起
 ```
 

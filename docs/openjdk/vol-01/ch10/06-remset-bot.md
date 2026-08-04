@@ -45,15 +45,15 @@ _humongous_reclaim_candidates.initialize(start, end, granularity);
 
 ```
 G1RemSet（全局，1 个）
-  ├── 消费 dirty card → 扫描引用 → 调 to_region.rem_set().add_reference(from)
-  │                                      ↓
-  │                              写入目标 Region 的 RSet
-  │
-  └── 协调 GC 期间的并行扫描（_scan_state）
+  +-- 消费 dirty card → 扫描引用 → 调 to_region.rem_set().add_reference(from)
+  |                                      ↓
+  |                              写入目标 Region 的 RSet
+  |
+  +-- 协调 GC 期间的并行扫描（_scan_state）
 
 HeapRegionRemSet（per-Region，2048 个）= RSet
-  └── OtherRegionsTable 三层存储（Sparse/Fine/Coarse）
-      └── 记录"哪些 card 引用了我"
+  +-- OtherRegionsTable 三层存储（Sparse/Fine/Coarse）
+      +-- 记录"哪些 card 引用了我"
 ```
 
 **G1 回收 Region X 时**——扫 Region X 的 RSet（HeapRegionRemSet），找到所有指向它的引用，不用全堆扫描。G1RemSet 是"往 RSet 里写数据"的协调器，不是 RSet 本身。
@@ -65,16 +65,16 @@ HeapRegionRemSet（per-Region，2048 个）= RSet
 ```
 每个 HeapRegion 持有 1 个 RSet:
   _rem_set: HeapRegionRemSet                          ← 每个 Region 一个
-    │
-    ├── _other_regions: OtherRegionsTable              ← 三层存储（Section 3）
-    │     ├── _coarse_map: CHeapBitMap                 ← Coarse（1 bit/from-Region）
-    │     ├── _fine_grain_regions: PerRegionTable*[]   ← Fine（哈希表，256 桶）
-    │     │     └── PerRegionTable._bm: BitMap[8192]   ← 每个 from-Region 的 card 位图
-    │     └── _sparse_table: SparsePRT (RSHashTable)   ← Sparse（哈希表）
-    │           └── SparsePRTEntry[]                   ← 每个 Entry 存 4 个 card_index
-    │
-    ├── _state: RemSetState                            ← 状态机
-    └── _code_roots: G1CodeRootSet                     ← JIT 代码引用
+    |
+    +-- _other_regions: OtherRegionsTable              ← 三层存储（Section 3）
+    |     +-- _coarse_map: CHeapBitMap                 ← Coarse（1 bit/from-Region）
+    |     +-- _fine_grain_regions: PerRegionTable*[]   ← Fine（哈希表，256 桶）
+    |     |     +-- PerRegionTable._bm: BitMap[8192]   ← 每个 from-Region 的 card 位图
+    |     +-- _sparse_table: SparsePRT (RSHashTable)   ← Sparse（哈希表）
+    |           +-- SparsePRTEntry[]                   ← 每个 Entry 存 4 个 card_index
+    |
+    +-- _state: RemSetState                            ← 状态机
+    +-- _code_roots: G1CodeRootSet                     ← JIT 代码引用
 
 全局（1 个实例，不属于任何 Region）:
   G1RemSet（Section 2）                                ← 消费 dirty card，写入各 Region 的 RSet
@@ -305,8 +305,8 @@ GC 结束: 并发清非 survivor 区域的卡表（G1ClearCardTableTask）
 **Fine 哈希表本质上是二维数组**：
 ```
 _fine_grain_regions[256]           ← 第一维：最多 256 个不同的 from-Region（哈希表桶数）
-  └── PerRegionTable
-        └── _bm: CHeapBitMap[8192] ← 第二维：每个 from-Region 最多 8192 张 card（BitMap 正好覆盖）
+  +-- PerRegionTable
+        +-- _bm: CHeapBitMap[8192] ← 第二维：每个 from-Region 最多 8192 张 card（BitMap 正好覆盖）
 ```
 第一维上限 = 256（哈希表桶数），第二维上限 = CardsPerRegion（8192）。BitMap 固定 1KB，刚好覆盖一个 Region 的全部 card，不存在"不够用"——只是不同 from-Region 太多（>256）会 evict 退化到 Coarse。
 
@@ -532,11 +532,11 @@ class HeapRegionRemSet {
 
 ```
 新 old Region 分配
-  → Untracked ────────────→ Updating ──────────→ Complete
+  → Untracked ------------→ Updating ----------→ Complete
        ↑ 不维护 RSet       (rebuild 前)           ↑ RSet 完整
-       │                   add_reference 生效       │ add_reference 继续
-       │                                           │
-       └──────────── GC 回收后重置 ────────────────┘
+       |                   add_reference 生效       | add_reference 继续
+       |                                           |
+       +------------ GC 回收后重置 ----------------+
 
 young / humongous Region：始终 Complete（分配时就设置，不经过 Untracked/Updating）
 ```
@@ -626,7 +626,7 @@ BOT 每个 entry 只有 1 字节（256 个值），但要能表示"回退多远"
 **编码结构**——把 256 个值分成两段：
 
 ```
-entry 值:  0 ────────────────── 63 │ 64 ─────────────────────── 255
+entry 值:  0 ------------------ 63 | 64 ----------------------- 255
 含义:      线性偏移（word）         指数偏移（card）
           回退 0~63 个 word         回退 16^(entry-64) 个 card
           覆盖 0~512B（1 card 内）   覆盖 1 card ~ 16^191 card

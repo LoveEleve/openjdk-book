@@ -11,67 +11,67 @@
 
 ```
 Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain)
-│
-├── [阶段 1] 前置初始化
-│   ├── VM_Version::early_initialize()
-│   ├── is_supported_jni_version(args->version)
-│   ├── ThreadLocalStorage::init()
-│   ├── ostream_init()
-│   ├── Arguments::process_sun_java_launcher_properties(args)
-│   ├── os::init()
-│   └── create_vm_timer.start()          — 计时起点
-│
-├── [阶段 2] 参数解析与系统属性
-│   ├── Arguments::init_system_properties()
-│   ├── JDK_Version_init()
-│   ├── Arguments::init_version_specific_system_properties()
-│   ├── LogConfiguration::initialize()
-│   ├── Arguments::parse(args)            — 核心：解析 -cp, -Xms, -XX:+ 等
-│   ├── os::init_before_ergo()
-│   ├── Arguments::apply_ergo()           — 核心：自动调优堆大小等
-│   └── JVMFlag 范围/约束校验
-│
-├── [阶段 3] os::init_2 与安全点
-│   ├── os::init_2()                      — 核心：信号处理器、线程栈等 OS 资源
-│   ├── SafepointMechanism::initialize()
-│   └── Arguments::adjust_after_os()
-│
-├── [阶段 4] Agent 与全局初始化
-│   ├── ostream_init_log()
-│   ├── convert/init -agentlib/-Xrun agents
-│   └── vm_init_globals()                 — 核心：初始化全局数据结构
-│
-├── [阶段 5] 主线程附着
-│   ├── new JavaThread()                  — 核心：把当前 OS 线程包装为 JavaThread
-│   ├── initialize_thread_current()
-│   ├── record_stack_base_and_size()
-│   ├── set_active_handles()
-│   ├── set_as_starting_thread()
-│   └── create_stack_guard_pages()
-│
-├── [阶段 6] 全局模块与 VMThread
-│   ├── ObjectMonitor::Initialize()
-│   ├── init_globals()                    — 核心：初始化 Universe/Heap/SystemDictionary 等
-│   ├── Threads::add(main_thread)
-│   └── VMThread::create() + wait ready
-│
-├── [阶段 7] Java 类引导
-│   ├── initialize_java_lang_classes()    — 核心：加载 java.lang.Object/String/Class 等
-│   ├── quicken_jni_functions()
-│   └── set_init_completed()
-│
-├── [阶段 8] 编译器与运行时服务
-│   ├── os::initialize_jdk_signal_support()
-│   ├── AttachListener init
-│   ├── ServiceThread::initialize()
-│   └── CompileBroker::compilation_init   — 核心：C1/C2 编译器初始化
-│
-└── [阶段 9] Java 世界诞生
-    ├── call_initPhase2()                 — 核心：加载 java.base 模块
-    ├── call_initPhase3()                 — 核心：安全管理器、系统类加载器
-    ├── WatcherThread start
-    ├── create_vm_timer.end()             — 计时终点
-    └── return JNI_OK
+|
++-- [阶段 1] 前置初始化
+|   +-- VM_Version::early_initialize()
+|   +-- is_supported_jni_version(args->version)
+|   +-- ThreadLocalStorage::init()
+|   +-- ostream_init()
+|   +-- Arguments::process_sun_java_launcher_properties(args)
+|   +-- os::init()
+|   +-- create_vm_timer.start()          — 计时起点
+|
++-- [阶段 2] 参数解析与系统属性
+|   +-- Arguments::init_system_properties()
+|   +-- JDK_Version_init()
+|   +-- Arguments::init_version_specific_system_properties()
+|   +-- LogConfiguration::initialize()
+|   +-- Arguments::parse(args)            — 核心：解析 -cp, -Xms, -XX:+ 等
+|   +-- os::init_before_ergo()
+|   +-- Arguments::apply_ergo()           — 核心：自动调优堆大小等
+|   +-- JVMFlag 范围/约束校验
+|
++-- [阶段 3] os::init_2 与安全点
+|   +-- os::init_2()                      — 核心：信号处理器、线程栈等 OS 资源
+|   +-- SafepointMechanism::initialize()
+|   +-- Arguments::adjust_after_os()
+|
++-- [阶段 4] Agent 与全局初始化
+|   +-- ostream_init_log()
+|   +-- convert/init -agentlib/-Xrun agents
+|   +-- vm_init_globals()                 — 核心：初始化全局数据结构
+|
++-- [阶段 5] 主线程附着
+|   +-- new JavaThread()                  — 核心：把当前 OS 线程包装为 JavaThread
+|   +-- initialize_thread_current()
+|   +-- record_stack_base_and_size()
+|   +-- set_active_handles()
+|   +-- set_as_starting_thread()
+|   +-- create_stack_guard_pages()
+|
++-- [阶段 6] 全局模块与 VMThread
+|   +-- ObjectMonitor::Initialize()
+|   +-- init_globals()                    — 核心：初始化 Universe/Heap/SystemDictionary 等
+|   +-- Threads::add(main_thread)
+|   +-- VMThread::create() + wait ready
+|
++-- [阶段 7] Java 类引导
+|   +-- initialize_java_lang_classes()    — 核心：加载 java.lang.Object/String/Class 等
+|   +-- quicken_jni_functions()
+|   +-- set_init_completed()
+|
++-- [阶段 8] 编译器与运行时服务
+|   +-- os::initialize_jdk_signal_support()
+|   +-- AttachListener init
+|   +-- ServiceThread::initialize()
+|   +-- CompileBroker::compilation_init   — 核心：C1/C2 编译器初始化
+|
++-- [阶段 9] Java 世界诞生
+    +-- call_initPhase2()                 — 核心：加载 java.base 模块
+    +-- call_initPhase3()                 — 核心：安全管理器、系统类加载器
+    +-- WatcherThread start
+    +-- create_vm_timer.end()             — 计时终点
+    +-- return JNI_OK
 ```
 
 9 个阶段不是平级的——阶段 1-3 是"纯 C++ 初始化"（还没进入 Java 世界），阶段 4-6 是"JavaThread 诞生与核心数据结构建立"，阶段 7-9 是"Java 类加载与模块系统初始化"。`init_globals`（阶段 6）和 `initialize_java_lang_classes`（阶段 7）是整个 Volume 1 的核心，会在第 4 章和第 5 章单独展开。

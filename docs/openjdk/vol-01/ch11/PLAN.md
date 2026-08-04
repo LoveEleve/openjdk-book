@@ -34,12 +34,12 @@ ch09-ch10 讲完了堆初始化。ch11 承接 `universe_init` 中的 6 个 `Late
 读者的疑问：类都没加载，缓存什么？
 
   ↓ 回答：
-  ① LatestMethodCache 是什么 → _klass + _method_idnum 两个字段
-  ② init() 怎么工作 → 首次使用时填充 _klass + _method_idnum
-  ③ get_method() 怎么工作 → klass->method_with_idnum(cached_idnum)
-  ④ 为什么用 idnum 不用 Method* → RedefineClasses 安全性
-  ⑤ 6 个缓存各自的作用 → 逐一讲解
-  ⑥ 1 槽够用吗？ → 统计证明 + 面试常问
+  (1) LatestMethodCache 是什么 → _klass + _method_idnum 两个字段
+  (2) init() 怎么工作 → 首次使用时填充 _klass + _method_idnum
+  (3) get_method() 怎么工作 → klass->method_with_idnum(cached_idnum)
+  (4) 为什么用 idnum 不用 Method* → RedefineClasses 安全性
+  (5) 6 个缓存各自的作用 → 逐一讲解
+  (6) 1 槽够用吗？ → 统计证明 + 面试常问
 ```
 
 ---
@@ -111,11 +111,11 @@ ch09-ch10 讲完了堆初始化。ch11 承接 `universe_init` 中的 6 个 `Late
 ## 与前后章节的连接
 
 ```
-ch09-ch10 堆初始化 ──→ ch11 LatestMethodCache
-                       │
-                       ├─ 6 个单槽缓存
-                       ├─ 延迟填充 + idnum 安全
-                       └─ 1 槽命中的统计证据
+ch09-ch10 堆初始化 --→ ch11 LatestMethodCache
+                       |
+                       +- 6 个单槽缓存
+                       +- 延迟填充 + idnum 安全
+                       +- 1 槽命中的统计证据
 
                        ↓
                    interpreter_init（已归档）

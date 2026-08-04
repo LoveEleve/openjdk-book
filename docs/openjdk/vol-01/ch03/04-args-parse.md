@@ -315,28 +315,28 @@ _java_home             = new SystemProperty("java.home",             NULL,  true
 ```
 libjvm.so 绝对路径（本机）
    /usr/lib/jvm/java-11-xxx/lib/server/libjvm.so
-   │
-   ├── strrchr(buf, '/') : 去掉 /libjvm.so
-   │        /usr/lib/jvm/java-11-xxx/lib/server
-   │
-   ├── strrchr(buf, '/') : 去掉 /server
-   │        /usr/lib/jvm/java-11-xxx/lib
-   │        └── set_dll_dir(buf)    -- sun.boot.library.path 填入此路径
-   │
-   ├── strrchr(buf, '/') : 去掉 /lib
-   │        /usr/lib/jvm/java-11-xxx          这就是 JAVA_HOME
-   │        └── set_java_home(buf)            -- java.home 填入此路径
-   │
-   ├── 拼接 java.library.path
-   │       getenv("LD_LIBRARY_PATH") + ":/usr/java/packages/lib:" + DEFAULT_LIBPATH
-   │       本机 LD_LIBRARY_PATH 为空，DEFAULT_LIBPATH(AMD64) = /usr/lib64:/lib64:/lib:/usr/lib
-   │        -- java.library.path = "/usr/java/packages/lib:/usr/lib64:/lib64:/lib:/usr/lib"
-   │       └── set_library_path(result)
-   │
-   └── set_boot_path('/', ':')
+   |
+   +-- strrchr(buf, '/') : 去掉 /libjvm.so
+   |        /usr/lib/jvm/java-11-xxx/lib/server
+   |
+   +-- strrchr(buf, '/') : 去掉 /server
+   |        /usr/lib/jvm/java-11-xxx/lib
+   |        +-- set_dll_dir(buf)    -- sun.boot.library.path 填入此路径
+   |
+   +-- strrchr(buf, '/') : 去掉 /lib
+   |        /usr/lib/jvm/java-11-xxx          这就是 JAVA_HOME
+   |        +-- set_java_home(buf)            -- java.home 填入此路径
+   |
+   +-- 拼接 java.library.path
+   |       getenv("LD_LIBRARY_PATH") + ":/usr/java/packages/lib:" + DEFAULT_LIBPATH
+   |       本机 LD_LIBRARY_PATH 为空，DEFAULT_LIBPATH(AMD64) = /usr/lib64:/lib64:/lib:/usr/lib
+   |        -- java.library.path = "/usr/java/packages/lib:/usr/lib64:/lib64:/lib:/usr/lib"
+   |       +-- set_library_path(result)
+   |
+   +-- set_boot_path('/', ':')
            扫描 JAVA_HOME/lib/modules (jimage 文件)
            本机: /usr/lib/jvm/java-11-xxx/lib/modules 存在
-            └── set_sysclasspath("/usr/lib/jvm/java-11-xxx/lib/modules", true)
+            +-- set_sysclasspath("/usr/lib/jvm/java-11-xxx/lib/modules", true)
 ```
 
 三条 NULL 属性全部兑现：`sun.boot.library.path` 拿到了剥去 `libjvm.so` 的 lib 路径，`java.home` 拿到了剥去 `lib` 的 JAVA_HOME 路径，`java.library.path` 拿到了环境变量拼默认库路径。此外 `set_boot_path` 还顺便检测出本机是模块化镜像（有 `modules` jimage），把 `_system_boot_class_path`（最初 `new PathString(NULL)`）也填上了真实的 `modules` 文件路径。
@@ -414,19 +414,19 @@ HotSpot 的 `address_to_library_name_callback` 回调做的事情：遍历每个
 
 ```
 进程虚拟地址空间
-   │
-   ├─ 0x7f...0000  libc.so.6      [dlpi_addr = 0x7f...0000]
-   │     ├─ PT_LOAD: vaddr=0x00000, memsz=0x1e0000  --  [base, base+1e0000)
-   │     └─ PT_LOAD: vaddr=0x1e0000, memsz=0x08000  --  [base+1e0000, ...)
-   │
-   ├─ 0x7f...0000  libjava.so     [dlpi_addr = ...]
-   │     └─ ...
-   │
-   ├─ 0x7f...0000  libjvm.so      [dlpi_addr = 0x7f...0000]
-   │     ├─ PT_LOAD: vaddr=0x00000, memsz=0x...      os::jvm_path 地址落在这里
-   │     └─ PT_LOAD: vaddr=0x..., memsz=0x...
-   │
-   └─ ...
+   |
+   +- 0x7f...0000  libc.so.6      [dlpi_addr = 0x7f...0000]
+   |     +- PT_LOAD: vaddr=0x00000, memsz=0x1e0000  --  [base, base+1e0000)
+   |     +- PT_LOAD: vaddr=0x1e0000, memsz=0x08000  --  [base+1e0000, ...)
+   |
+   +- 0x7f...0000  libjava.so     [dlpi_addr = ...]
+   |     +- ...
+   |
+   +- 0x7f...0000  libjvm.so      [dlpi_addr = 0x7f...0000]
+   |     +- PT_LOAD: vaddr=0x00000, memsz=0x...      os::jvm_path 地址落在这里
+   |     +- PT_LOAD: vaddr=0x..., memsz=0x...
+   |
+   +- ...
 ```
 
 **策略 2：`dladdr` —— POSIX 标准 API，一行调用搞定**
@@ -798,15 +798,15 @@ void JavaThread::create_stack_guard_pages() {
 
 ```
 set_ergonomics_flags()
-  ├── GCConfig::initialize()       -- UseG1GC / UseSerialGC 等（默认 G1）
-  ├── set_use_compressed_oops()    -- UseCompressedOops（堆 < 32GB 且 64 位平台）
-  ├── set_use_compressed_klass_ptrs() -- UseCompressedClassPointers
-  └── set_conservative_max_heap_alignment()
+  +-- GCConfig::initialize()       -- UseG1GC / UseSerialGC 等（默认 G1）
+  +-- set_use_compressed_oops()    -- UseCompressedOops（堆 < 32GB 且 64 位平台）
+  +-- set_use_compressed_klass_ptrs() -- UseCompressedClassPointers
+  +-- set_conservative_max_heap_alignment()
 
 set_heap_size()
-  ├── phys_mem = os::physical_memory()  -- 本机 ~500GB（/proc/meminfo MemTotal）
-  ├── MaxHeapSize = phys_mem × MaxRAMPercentage(25%) ≈ 16GB（如果未显式指定）
-  └── 如果启用压缩指针：限制 ≤ 32GB
+  +-- phys_mem = os::physical_memory()  -- 本机 ~500GB（/proc/meminfo MemTotal）
+  +-- MaxHeapSize = phys_mem × MaxRAMPercentage(25%) ≈ 16GB（如果未显式指定）
+  +-- 如果启用压缩指针：限制 ≤ 32GB
 
 GCConfig::arguments()->initialize()     -- G1HeapRegionSize 等 GC 特定参数
 Metaspace::ergo_initialize()            -- MetaspaceSize / MaxMetaspaceSize

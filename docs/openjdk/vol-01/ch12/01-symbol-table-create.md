@@ -49,11 +49,11 @@ private:
 
 ```
 Symbol 对象（连续内存，大小 = byte_size(len)）
-├─ _refcount     (2B)
-├─ _length       (2B)
-├─ _identity_hash(2B)
-├─ 对齐填充
-└─ _body: "register" 的 UTF8 字节（长度可变）
++- _refcount     (2B)
++- _length       (2B)
++- _identity_hash(2B)
++- 对齐填充
++- _body: "register" 的 UTF8 字节（长度可变）
 ```
 
 ### 0.1 问题：常量池解析是高频操作
@@ -70,10 +70,10 @@ JVM 加载类时，常量池里每一项（类名、方法名、字段名、签�
 
 ```
 哈希表（20011 个桶）
-├─ 桶 0: Symbol* → Symbol* → NULL
-├─ 桶 1: NULL
-├─ ...
-└─ 桶 N: Symbol* → NULL
++- 桶 0: Symbol* → Symbol* → NULL
++- 桶 1: NULL
++- ...
++- 桶 N: Symbol* → NULL
 
 查找: hash(名字) → 桶 → 链表逐个比较 → 命中返回 Symbol*
 插入: 查不到 → 分配新 Symbol → 挂到桶链表头
@@ -152,7 +152,7 @@ template <MEMFLAGS F> inline BasicHashtable<F>::BasicHashtable(int table_size, i
 
 逐行讲解：
 
-**① `initialize(table_size, entry_size, 0)`**——把两个参数记进 `_table_size` / `_entry_size` 字段，同时清空三个空闲管理字段（`_free_list`、`_first_free_entry`、`_end_block`）——此时还没有任何条目，空闲池为空。
+**(1) `initialize(table_size, entry_size, 0)`**——把两个参数记进 `_table_size` / `_entry_size` 字段，同时清空三个空闲管理字段（`_free_list`、`_first_free_entry`、`_end_block`）——此时还没有任何条目，空闲池为空。
 
 **(2) `NEW_C_HEAP_ARRAY2(...)`**——在 C 堆分配一段连续内存作为桶数组，长度 20011，每个元素是一个 `HashtableBucket`。注释说 "Called on startup, no locking needed"：启动期是单线程，不需要锁。
 
@@ -175,14 +175,14 @@ public:
 
 ```
 桶数组（20011 个 HashtableBucket，每个只装一个指针）
-└─ 桶 5: _entry ──────────────┐
++- 桶 5: _entry --------------+
                               ↓
-                     ┌────────────────────┐    ┌────────────────────┐
-                     │ HashtableEntry #1   │    │ HashtableEntry #2   │
-                     │ _hash = 0x1234      │    │ _hash = 0x5678      │
-                     │ _next ──────────────┼───→│ _next ──────────→ NULL
-                     │ _literal = Symbol* A │    │ _literal = Symbol* B│
-                     └────────────────────┘    └────────────────────┘
+                     +--------------------+    +--------------------+
+                     | HashtableEntry #1   |    | HashtableEntry #2   |
+                     | _hash = 0x1234      |    | _hash = 0x5678      |
+                     | _next --------------+---→| _next ----------→ NULL
+                     | _literal = Symbol* A |    | _literal = Symbol* B|
+                     +--------------------+    +--------------------+
                         ↑ 数据在这                  ↑ 数据在这
 ```
 
@@ -230,12 +230,12 @@ Arena 不是"一大块连续内存"，而是**Chunk 链表**：
 
 ```
 Arena
-├─ _first: 第一块 Chunk（链表头）
-├─ _chunk: 当前正在分配的 Chunk
-└─ 每个 Chunk:
-   ├─ _next: 指向下一块
-   ├─ _len:  本块大小（默认 32K，第一块 1K）
-   └─ 数据区: [_bottom, _top)
++- _first: 第一块 Chunk（链表头）
++- _chunk: 当前正在分配的 Chunk
++- 每个 Chunk:
+   +- _next: 指向下一块
+   +- _len:  本块大小（默认 32K，第一块 1K）
+   +- 数据区: [_bottom, _top)
                 ↑        ↑
               _hwm     _max
               (分配游标) (本块末尾)
@@ -297,11 +297,11 @@ SymbolTable 的表结构来自 `BasicHashtable`：
 
 ```
 BasicHashtable
-├─ _buckets: 桶数组（20011 个链表头）
-├─ _entry_size: 每个条目的大小
-└─ 空闲 entry 管理:
-   ├─ _free_list        ← 被释放条目的回收链表
-   └─ _first_free_entry / _end_block  ← 按块批量分配的 entry 池
++- _buckets: 桶数组（20011 个链表头）
++- _entry_size: 每个条目的大小
++- 空闲 entry 管理:
+   +- _free_list        ← 被释放条目的回收链表
+   +- _first_free_entry / _end_block  ← 按块批量分配的 entry 池
 ```
 
 一个细节：**条目（HashtableEntry）不是一个个 malloc 的，而是按块批量分配**。分配顺序：先复用 `_free_list` 里的回收条目，空了才开新块（块大小按当前条目数自适应，封顶 512 个）。块用完再开新块，entry 从块里切——减少 malloc 次数，也方便 GC 时批量释放。源码注释："HashtableEntrys are allocated in blocks to reduce the space overhead"。
@@ -318,10 +318,10 @@ BasicHashtable
 
 ```
 C 堆                          Arena（360K）
-├─ 桶数组 (20011 个链表头)     ├─ Symbol: "java"（bump）
-├─ 块1: [entry][entry][entry]  ├─ Symbol: "lang"
-├─ 块2: [entry][entry]         ├─ Symbol: "Object"
-└─ ...                        └─ ...
++- 桶数组 (20011 个链表头)     +- Symbol: "java"（bump）
++- 块1: [entry][entry][entry]  +- Symbol: "lang"
++- 块2: [entry][entry]         +- Symbol: "Object"
++- ...                        +- ...
     ↑ 条目的家（24B 步长）         ↑ 数据的家（bump）
 ```
 
@@ -361,9 +361,9 @@ C 堆                          Arena（360K）
 ```
 查找遍历桶链表时顺带检查:
   本桶条目数 ≥ rehash_count（100）→ check_rehash_table()
-    └─ 表失衡（最长的桶太长）→ _needs_rehashing = true
+    +- 表失衡（最长的桶太长）→ _needs_rehashing = true
 下次 safepoint → rehash_table()
-    └─ 换一个新 seed（AltHashing::halfsiphash_32(seed, ...)）→ 全部重算 → 重建
+    +- 换一个新 seed（AltHashing::halfsiphash_32(seed, ...)）→ 全部重算 → 重建
 ```
 
 **两个阶段由谁执行？**
@@ -399,7 +399,7 @@ C 堆                          Arena（360K）
   Hashtable 家族的其他使用者（SystemDictionary 等）
 ```
 
-RMT 复用时只需知道：**结构（①(2)(3)(4)）和锁模型（(5)）与 SymbolTable 完全一致**，差异只有条目类型（弱引用）和桶数。
+RMT 复用时只需知道：**结构（(1)(2)(3)(4)）和锁模型（(5)）与 SymbolTable 完全一致**，差异只有条目类型（弱引用）和桶数。
 
 ---
 
@@ -505,7 +505,7 @@ void Symbol::decrement_refcount() {
 
 GC 时（safepoint），SymbolTable::unlink 扫描整张表:
   buckets_unlink(0, table_size)     → 把 20011 个桶分给多个 GC 线程并行扫描
-      └─ 每个条目: refcount() == 0 ? → 从链表摘除 + 释放内存
+      +- 每个条目: refcount() == 0 ? → 从链表摘除 + 释放内存
                                     : → 保留（还有人在用）
   bulk_free_entries(context)        → 把摘除的条目批量释放
 ```
@@ -519,8 +519,8 @@ GC 时（safepoint），SymbolTable::unlink 扫描整张表:
 ```
 SymbolTable 初始化全景:
   create_table()
-    ├─ new SymbolTable()         → 20011 个空桶（质数，经典链表哈希）
-    └─ initialize_symbols(360K)  → Arena 永久符号分配区
+    +- new SymbolTable()         → 20011 个空桶（质数，经典链表哈希）
+    +- initialize_symbols(360K)  → Arena 永久符号分配区
 
 核心机制:
   查找    : hash → 桶 → 无锁链表遍历，未命中才拿锁插入

@@ -221,13 +221,13 @@ int threadCount = ManagementFactory.getThreadMXBean().getThreadCount();
 
 ```
 你的 Java 代码
-  └─ ThreadMXBean.getThreadCount()                      Java 接口方法
-       └─ ThreadImpl.getThreadCount()                     Java 实现类
-            └─ native getThreadCount()                    JNI native 方法
-                 └─ libmanagement.so 里的 C 函数          JVM 入口
-                      └─ 通过 jmm_interface 函数表查表     函数指针调用
-                           └─ jmm_GetLongAttribute(...)   HotSpot C++ 函数
-                                └─ 读 _live_threads_count 的值  最终数据源
+  +- ThreadMXBean.getThreadCount()                      Java 接口方法
+       +- ThreadImpl.getThreadCount()                     Java 实现类
+            +- native getThreadCount()                    JNI native 方法
+                 +- libmanagement.so 里的 C 函数          JVM 入口
+                      +- 通过 jmm_interface 函数表查表     函数指针调用
+                           +- jmm_GetLongAttribute(...)   HotSpot C++ 函数
+                                +- 读 _live_threads_count 的值  最终数据源
 ```
 
 前 4 层都是 Java/JNI 世界的常规代码——Java 接口、Java 实现类、native 方法、JNI 入口。关键是第 5 步那个"**jmm_interface 函数表**"——这是 Java 世界和 C++ 世界之间的桥梁。
@@ -835,25 +835,25 @@ enum DCmdSource {
 
 ```
 用户执行: jcmd <pid> Thread.print
-    │
-    ▼
+    |
+    v
 jcmd 工具(Java 程序) → VirtualMachine.attach(pid)
-    │  创建 /tmp/.attach_pid<pid> 文件
-    │  发 SIGQUIT 信号给目标 JVM
-    │  轮询等待 /tmp/.java_pid<pid> UNIX socket
-    │  connect(socket) 发送命令字符串
-    ▼
+    |  创建 /tmp/.attach_pid<pid> 文件
+    |  发 SIGQUIT 信号给目标 JVM
+    |  轮询等待 /tmp/.java_pid<pid> UNIX socket
+    |  connect(socket) 发送命令字符串
+    v
 目标 JVM 的 AttachListener 线程收到请求
-    │  AttachListener 线程在死循环里 dequeue() 等待 socket 请求
-    │  收到后在 funcs[] 表里按名字查找
-    │  找到 "jcmd" → 调 jcmd() 函数 (attachListener.cpp:200)
-    ▼
+    |  AttachListener 线程在死循环里 dequeue() 等待 socket 请求
+    |  收到后在 funcs[] 表里按名字查找
+    |  找到 "jcmd" → 调 jcmd() 函数 (attachListener.cpp:200)
+    v
 jcmd() 函数直接调 DCmd::parse_and_execute(DCmd_Source_AttachAPI, ...)
-    │  → DCmdFactory::factory() 遍历链表查找 "Thread.print" → ThreadDumpDCmd
-    ▼
+    |  → DCmdFactory::factory() 遍历链表查找 "Thread.print" → ThreadDumpDCmd
+    v
 ThreadDumpDCmd::execute() → 打印所有线程栈
-    │  （仍在 AttachListener 线程的栈上执行）
-    ▼
+    |  （仍在 AttachListener 线程的栈上执行）
+    v
 输出通过 socket 返回给 jcmd 工具
 ```
 
@@ -1133,20 +1133,20 @@ JMX Agent 是一个 **Java 类**——`jdk.internal.agent.Agent`。它做两件�
 
 ```
    Java 程序 / jconsole / JMX 客户端
-              │  调 Java 接口
-              ▼
+              |  调 Java 接口
+              v
          MBean (Java 接口)              ← 对外的 API 表面
-              │  native 方法
-              ▼
+              |  native 方法
+              v
        libmanagement.so                ← Java native 库(C 写的)
-              │  通过 jmm_interface 函数指针
-              ▼
+              |  通过 jmm_interface 函数指针
+              v
          jmm_interface (C 函数指针表)    ← native 库与 HotSpot 之间的桥
-              │  函数实现
-              ▼
+              |  函数实现
+              v
          HotSpot C++ 内部
-              ├── 普通查询: 直接读 Service 数据(ThreadService/MemoryService...)
-              └── 诊断命令: 调 DCmd::parse_and_execute → DCmd 子类.execute()
+              +-- 普通查询: 直接读 Service 数据(ThreadService/MemoryService...)
+              +-- 诊断命令: 调 DCmd::parse_and_execute → DCmd 子类.execute()
                                      ↑
                               DCmd (C++ 类) ← 诊断命令的执行引擎
 ```

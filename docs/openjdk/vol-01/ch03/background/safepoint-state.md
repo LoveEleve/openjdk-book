@@ -36,11 +36,11 @@ class ThreadSafepointState: public CHeapObj<mtThread> {
 
 ```
 对每个 JavaThread：
-  ├─ 已经被外部 suspend（ext_suspended）→ roll_forward(_at_safepoint)  ← 已停
-  ├─ 在 native 中且栈可遍历（_thread_in_native）→ roll_forward(_at_safepoint)  ← 不在 Java 堆上操作
-  ├─ 已被阻塞（_thread_blocked）→ roll_forward(_at_safepoint)  ← 没法动
-  ├─ 在 VM 中（_thread_in_vm）→ roll_forward(_call_back)        ← 执行完当前操作后主动停
-  └─ 在 Java 中（_thread_in_Java）→ 保持 _running               ← 等它自己遇到 polling 指令
+  +- 已经被外部 suspend（ext_suspended）→ roll_forward(_at_safepoint)  ← 已停
+  +- 在 native 中且栈可遍历（_thread_in_native）→ roll_forward(_at_safepoint)  ← 不在 Java 堆上操作
+  +- 已被阻塞（_thread_blocked）→ roll_forward(_at_safepoint)  ← 没法动
+  +- 在 VM 中（_thread_in_vm）→ roll_forward(_call_back)        ← 执行完当前操作后主动停
+  +- 在 Java 中（_thread_in_Java）→ 保持 _running               ← 等它自己遇到 polling 指令
 ```
 
 `roll_forward(_at_safepoint)` 把线程的 `_type` 设为 `_at_safepoint`，然后调用 `signal_thread_at_safepoint()`——递减全局 `_waiting_to_block` 计数器。VMThread 在循环中等待这个计数器归零。归零时，所有线程要么已经在安全点（`_at_safepoint`），要么已经承诺回调（`_call_back`）。

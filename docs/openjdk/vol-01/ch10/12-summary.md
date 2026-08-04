@@ -10,31 +10,31 @@ ch10 用 12 篇文章拆解了 G1 堆创建的全过程。覆盖的源码范围�
 
 ```
 Universe::initialize_heap()                ← ch10/01（全景）
-└─ create_heap()                           ← ch10/04
-   └─ create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()
-      ├─ new G1CollectorPolicy()           ← ch10/02
-      │   ├─ setup_heap_region_size()      ← Region 大小 1/2/4/8/16/32MB
-      │   └─ setup_remset_size()           ← RSet 表容量
-      └─ new G1CollectedHeap(policy)       ← ch10/04a（75 行构造函数）
++- create_heap()                           ← ch10/04
+   +- create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()
+      +- new G1CollectorPolicy()           ← ch10/02
+      |   +- setup_heap_region_size()      ← Region 大小 1/2/4/8/16/32MB
+      |   +- setup_remset_size()           ← RSet 表容量
+      +- new G1CollectedHeap(policy)       ← ch10/04a（75 行构造函数）
 
-└─ _collectedHeap->initialize()            ← 201 行，G1 专属
-   ├─ Universe::reserve_heap()             ← ch10/03（两次 mmap）
-   ├─ G1CardTable + BarrierSet             ← ch10/05
-   ├─ HotCardCache                         ← ch10/05
-   ├─ 6 个 G1RegionToSpaceMapper           ← ch10/05
-   ├─ HeapRegionManager::initialize()      ← ch10/05
-   ├─ G1RemSet                             ← ch10/06
-   ├─ G1BlockOffsetTable + CSet fast test  ← ch10/06
-   ├─ G1ConcurrentMark (~150 行)           ← ch10/07
-   ├─ expand(init_byte_size)               ← ch10/08
-   ├─ g1_policy()->init()                  ← ch10/09
-   ├─ SATB + 双 DCQ + ConcurrentRefine     ← ch10/10
-   ├─ Dummy Region + 分配器就位            ← ch10/11
-   ├─ G1MonitoringSupport + StringDedup    ← ch10/11
-   ├─ PreservedMarksSet                    ← ch10/11
-   └─ G1CollectionSet::initialize()        ← ch10/11
++- _collectedHeap->initialize()            ← 201 行，G1 专属
+   +- Universe::reserve_heap()             ← ch10/03（两次 mmap）
+   +- G1CardTable + BarrierSet             ← ch10/05
+   +- HotCardCache                         ← ch10/05
+   +- 6 个 G1RegionToSpaceMapper           ← ch10/05
+   +- HeapRegionManager::initialize()      ← ch10/05
+   +- G1RemSet                             ← ch10/06
+   +- G1BlockOffsetTable + CSet fast test  ← ch10/06
+   +- G1ConcurrentMark (~150 行)           ← ch10/07
+   +- expand(init_byte_size)               ← ch10/08
+   +- g1_policy()->init()                  ← ch10/09
+   +- SATB + 双 DCQ + ConcurrentRefine     ← ch10/10
+   +- Dummy Region + 分配器就位            ← ch10/11
+   +- G1MonitoringSupport + StringDedup    ← ch10/11
+   +- PreservedMarksSet                    ← ch10/11
+   +- G1CollectionSet::initialize()        ← ch10/11
 
-└─ TLAB set_max_size / CompressedOops / TLAB startup   ← ch10/01（概览）
++- TLAB set_max_size / CompressedOops / TLAB startup   ← ch10/01（概览）
 ```
 
 ---
@@ -45,18 +45,18 @@ Universe::initialize_heap()                ← ch10/01（全景）
 
 ```
 Phase 1: 虚拟地址空间               Phase 2: 元数据
-┌──────────────────────────────┐   ┌──────────────────────────────┐
-│ mmap 预约最大堆地址空间       │ → │ 6 个 Mapper 管理各类元数据    │
-│ (ch10/03)                    │   │ HeapRegionManager 建 _regions │
-└──────────────────────────────┘   │ (ch10/05)                    │
-                                   └──────────────────────────────┘
++------------------------------+   +------------------------------+
+| mmap 预约最大堆地址空间       | → | 6 个 Mapper 管理各类元数据    |
+| (ch10/03)                    |   | HeapRegionManager 建 _regions |
++------------------------------+   | (ch10/05)                    |
+                                   +------------------------------+
               ↓
 Phase 3: 并发引擎与物理内存         Phase 4: 分配器与收尾
-┌──────────────────────────────┐   ┌──────────────────────────────┐
-│ ConcurrentMark (~150 行)     │   │ Dummy Region 上膛            │
-│ expand() commit 物理页       │ → │ 分配器激活 (ch10/11)         │
-│ 队列系统 (ch10/07-10)        │   │ 监控/去重/CSet 就位          │
-└──────────────────────────────┘   └──────────────────────────────┘
++------------------------------+   +------------------------------+
+| ConcurrentMark (~150 行)     |   | Dummy Region 上膛            |
+| expand() commit 物理页       | → | 分配器激活 (ch10/11)         |
+| 队列系统 (ch10/07-10)        |   | 监控/去重/CSet 就位          |
++------------------------------+   +------------------------------+
 ```
 
 每个阶段的输出是下一阶段的输入：
@@ -136,32 +136,32 @@ Dummy Region 是 `G1AllocRegion` 的 Null Object——用"永远非 NULL 但永�
 **运行时路径**（对象怎么分配）：
 ```
 mutator TLAB 分配
-  └─ TLAB 不够 → G1Allocator::mutator_alloc_region()->attempt_allocation()
-       └─ dummy 失败 → attempt_allocation_locked() → 新 region
+  +- TLAB 不够 → G1Allocator::mutator_alloc_region()->attempt_allocation()
+       +- dummy 失败 → attempt_allocation_locked() → 新 region
 ```
 这正是 ch10/11 埋下的伏笔——dummy region 如何在实际分配中"被绕过"。
 
 **第一次 GC 路径**（堆什么时候开始收集）：
 ```
 Eden 满 → young GC
-  └─ G1CollectionSet::finalize_young_part() 填 _collection_set_regions[]
-  └─ 撤离失败 → _preserved_marks_set[worker_id].push()
+  +- G1CollectionSet::finalize_young_part() 填 _collection_set_regions[]
+  +- 撤离失败 → _preserved_marks_set[worker_id].push()
 ```
 
 ch12 是独立的 Metaspace 诊断章（依赖 ch09/07，非本章），与 G1 堆初始化无直接承接关系。
 
-**回到 initialize_heap() 内部**：ch10 的五阶段中，①(2) 由 ch10/02-04 讲透，(3)(4)(5) 由[补章 12b](12b-compressed-oops-and-tlab.md)讲透（universe.cpp:764-823）：
+**回到 initialize_heap() 内部**：ch10 的五阶段中，(1)(2) 由 ch10/02-04 讲透，(3)(4)(5) 由[补章 12b](12b-compressed-oops-and-tlab.md)讲透（universe.cpp:764-823）：
 
 ```
 Universe::initialize_heap()
-├─ (1) create_heap()                                     ← ch10/04 已讲
-├─ (2) _collectedHeap->initialize() (201 行)              ← ch10/02-11 已讲
-├─ (3) ThreadLocalAllocBuffer::set_max_size()             ← 12b §2 已讲
-│      └─ heap()->max_tlab_size() = humongous 阈值（半 Region）
-├─ (4) CompressedOops 模式决策 (~40 行)                   ← 12b §3 已讲
-│      └─ 4GB/32GB 两个阈值切出 Unscaled/ZeroBased/DisjointBase/HeapBased
-└─ (5) ThreadLocalAllocBuffer::startup_initialization()   ← 12b §4 已讲
-       └─ _target_refills = 50 + GlobalTLABStats + 主线程 TLAB 重初始化
++- (1) create_heap()                                     ← ch10/04 已讲
++- (2) _collectedHeap->initialize() (201 行)              ← ch10/02-11 已讲
++- (3) ThreadLocalAllocBuffer::set_max_size()             ← 12b §2 已讲
+|      +- heap()->max_tlab_size() = humongous 阈值（半 Region）
++- (4) CompressedOops 模式决策 (~40 行)                   ← 12b §3 已讲
+|      +- 4GB/32GB 两个阈值切出 Unscaled/ZeroBased/DisjointBase/HeapBased
++- (5) ThreadLocalAllocBuffer::startup_initialization()   ← 12b §4 已讲
+       +- _target_refills = 50 + GlobalTLABStats + 主线程 TLAB 重初始化
 ```
 
 (3)-(5) 是 ch10 的遗留缺口——原计划在 ch10/06 展开（压缩指针与 TLAB），但 ch10/06 实际写成了 RemSet+BOT。已由[补章 12b](12b-compressed-oops-and-tlab.md)补完（三步合计约 90 行源码，一篇搞定）。
@@ -170,15 +170,15 @@ Universe::initialize_heap()
 
 ```
 universe_init()
-├─ (3) SystemDictionary::initialize_oop_storage()          ← ch09-02
-├─ (4) Metaspace::global_initialize()                      ← ch09-07
-├─ (5) MetaspaceCounters::initialize_performance_counters()← ch09-06
-├─ (6) JVMFlagConstraintList::check_constraints()          ← ch09-05
-├─ (7) ClassLoaderData::init_null_class_loader_data()      ← ch09-03
-├─ (8) 6× new LatestMethodCache()                          ← ch11
-├─ (9) MetaspaceShared::initialize_shared_spaces()（CDS）  ← 不讲解（已归档）
-├─ (10) SymbolTable / StringTable::create_table()           ← 已归档
-└─ ⑪ ResolvedMethodTable::create_table()                 ← 已归档
++- (3) SystemDictionary::initialize_oop_storage()          ← ch09-02
++- (4) Metaspace::global_initialize()                      ← ch09-07
++- (5) MetaspaceCounters::initialize_performance_counters()← ch09-06
++- (6) JVMFlagConstraintList::check_constraints()          ← ch09-05
++- (7) ClassLoaderData::init_null_class_loader_data()      ← ch09-03
++- (8) 6× new LatestMethodCache()                          ← ch11
++- (9) MetaspaceShared::initialize_shared_spaces()（CDS）  ← 不讲解（已归档）
++- (10) SymbolTable / StringTable::create_table()           ← 已归档
++- ⑪ ResolvedMethodTable::create_table()                 ← 已归档
 ```
 
 ---

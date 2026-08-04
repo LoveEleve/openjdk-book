@@ -47,16 +47,16 @@ dirty_card_queue_set().initialize(DirtyCardQ_CBL_mon,                   // [5] D
 
 ```
 [2] initialize_concurrent_refinement()
-       │  创建 G1ConcurrentRefine，算出 yellow_zone / red_zone
-       │
-       ▼
+       |  创建 G1ConcurrentRefine，算出 yellow_zone / red_zone
+       |
+       v
 [4] G1BarrierSet::dirty_card_queue_set().initialize(yellow_zone, red_zone)
-       │  全局 primary DCQ set——mutator 和 refinement 线程交互的中心
-       │
-       ▼
+       |  全局 primary DCQ set——mutator 和 refinement 线程交互的中心
+       |
+       v
 [5] G1CollectedHeap::dirty_card_queue_set().initialize()
-       │  GC 端 secondary DCQ set——共享 primary 的 buffer free list
-       │
+       |  GC 端 secondary DCQ set——共享 primary 的 buffer free list
+       |
 [1] SATBMarkQueueSet::initialize()      ← 独立，和 DCQ 无关
 [3] YoungGen Sampling Thread            ← 独立，和队列无关
 ```
@@ -85,13 +85,13 @@ G1 有两道写屏障，各自服务于不同的 GC 机制。这是理解本章�
 
 ```
 mutator 执行 ref.field = new_value;  // 覆盖了一个引用
-       │
-       ├── [写前屏障] SATB barrier
-       │      把 old_value 记到 SATB buffer 队列
-       │      → 保证并发标记的"快照"完整性
-       │      → 由 §4 的 SATBMarkQueueSet 接收
-       │
-       └── [写后屏障] post-write barrier
+       |
+       +-- [写前屏障] SATB barrier
+       |      把 old_value 记到 SATB buffer 队列
+       |      → 保证并发标记的"快照"完整性
+       |      → 由 §4 的 SATBMarkQueueSet 接收
+       |
+       +-- [写后屏障] post-write barrier
               把 card table 的对应字节标为 dirty
               → 标记"这片内存可能有跨 Region 引用"
               → 由 §3 的 DirtyCardQueueSet 接收，§2 的 refinement 线程处理
@@ -282,10 +282,10 @@ void PtrQueue::enqueue(void* ptr) {
 buffer 满了 (_index == 0)
   → make_node_from_buffer(buf, index)
   → process_or_enqueue_complete_buffer(node)
-    ├─ _n_completed_buffers >= max_completed_queue(red_zone)?
-    │    → mut_process_buffer(node)  ← mutator 自救，自己处理脏卡
-    │    → return true → 重用 buffer
-    └─ else:
+    +- _n_completed_buffers >= max_completed_queue(red_zone)?
+    |    → mut_process_buffer(node)  ← mutator 自救，自己处理脏卡
+    |    → return true → 重用 buffer
+    +- else:
          → enqueue_complete_buffer(node)  ← 入队 completed list
            → n_completed_buffers++
            → if n >= process_completed_threshold → notify refinement
@@ -382,7 +382,7 @@ G1ConcurrentRefine 用三个数值把 **primary DCQ Set 的已完成 buffer 数�
 ```
 缓冲区数量（completed buffer 的 _n_completed_buffers）
 
-  0 ───────────────── green_zone ────────── yellow_zone ──────────── red_zone ───
+  0 ----------------- green_zone ---------- yellow_zone ------------ red_zone ---
       绿色区域                      黄色区域                      红色区域
 
   绿色：什么都不做             黄色：逐步激活线程           红色：所有线程 + mutator 自救
@@ -930,26 +930,26 @@ G1BarrierSet::dirty_card_queue_set().initialize(
 先从全景看三层是什么关系：
 
 ```
-┌─ G1BarrierSet::_dirty_card_queue_set (primary DCQ Set) ──────────────────────┐
-│                                                                               │
-│   ┌─ completed buffer list (FIFO, _cbl_mon 保护) ───────────────┐            │
-│   │  head → [Node A] → [Node B] → [Node C] → tail               │            │
-│   │          ↑ 满了的 buffer，等待 refinement 处理               │            │
-│   └──────────────────────────────────────────────────────────────┘            │
-│                                                                               │
-│   ┌─ buffer free list (LIFO, _fl_lock 保护) ─────────────────────┐           │
-│   │  _buf_free_list → [Node X] → [Node Y] → NULL                 │           │
-│   │                   处理完的 buffer，留给后续 allocate 复用    │           │
-│   └──────────────────────────────────────────────────────────────┘            │
-│                         ↑ deallocate_buffer                  ↑ allocate_buffer│
-│                         │                                    │               │
-│   ┌──────────────────────│────────────────────────────────────│───────────┐   │
-│   │  线程 A DirtyCardQueue │      线程 B DirtyCardQueue       │            │   │
-│   │  _buf → [▨][▨]...[ ]  │    _buf → [▨][▨]...[▨]           │            │   │
-│   │  _index = 1024         │    _index = 0 → handle_zero_index│            │   │
-│   │  _qset → 这个 DCQ Set  │    _qset → 这个 DCQ Set          │            │   │
-│   └────────────────────────┴─────────────────────────────────┴────────────┘   │
-└───────────────────────────────────────────────────────────────────────────────┘
++- G1BarrierSet::_dirty_card_queue_set (primary DCQ Set) ----------------------+
+|                                                                               |
+|   +- completed buffer list (FIFO, _cbl_mon 保护) ---------------+            |
+|   |  head → [Node A] → [Node B] → [Node C] → tail               |            |
+|   |          ↑ 满了的 buffer，等待 refinement 处理               |            |
+|   +--------------------------------------------------------------+            |
+|                                                                               |
+|   +- buffer free list (LIFO, _fl_lock 保护) ---------------------+           |
+|   |  _buf_free_list → [Node X] → [Node Y] → NULL                 |           |
+|   |                   处理完的 buffer，留给后续 allocate 复用    |           |
+|   +--------------------------------------------------------------+            |
+|                         ↑ deallocate_buffer                  ↑ allocate_buffer|
+|                         |                                    |               |
+|   +----------------------|------------------------------------|-----------+   |
+|   |  线程 A DirtyCardQueue |      线程 B DirtyCardQueue       |            |   |
+|   |  _buf → [▨][▨]...[ ]  |    _buf → [▨][▨]...[▨]           |            |   |
+|   |  _index = 1024         |    _index = 0 → handle_zero_index|            |   |
+|   |  _qset → 这个 DCQ Set  |    _qset → 这个 DCQ Set          |            |   |
+|   +------------------------+---------------------------------+------------+   |
++-------------------------------------------------------------------------------+
 ```
 
 - 每个 Java 线程有自己的 `DirtyCardQueue`，`_qset` 指向同一个 primary DCQ Set
@@ -966,14 +966,14 @@ G1BarrierSet::dirty_card_queue_set().initialize(
 
 ```
 低地址                                         高地址
-┌──────────────────────┬──────────────────────────────────────┐
-│ BufferNode 头部       │  _buffer 数组                        │
-│ ┌────────┬─────────┐ │  ┌───────┬───────┬───┬───────────┐  │
-│ │_index  │ _next   │ │  │ [0]   │ [1]   │…  │ [255]     │  │
-│ │(8B)    │ (8B)    │ │  │ void* │ void* │   │ void*     │  │
-│ └────────┴─────────┘ │  └───────┴───────┴───┴───────────┘  │
-│       16 字节         │            256 × 8B = 2KB           │
-└──────────────────────┴──────────────────────────────────────┘
++----------------------+--------------------------------------+
+| BufferNode 头部       |  _buffer 数组                        |
+| +--------+---------+ |  +-------+-------+---+-----------+  |
+| |_index  | _next   | |  | [0]   | [1]   |…  | [255]     |  |
+| |(8B)    | (8B)    | |  | void* | void* |   | void*     |  |
+| +--------+---------+ |  +-------+-------+---+-----------+  |
+|       16 字节         |            256 × 8B = 2KB           |
++----------------------+--------------------------------------+
 ```
 
 算一下：头部 + 256 × 8 = 2064 字节。`make_node_from_buffer(buf)` 返回 `(char*)buf - offsetof(BufferNode, _buffer)`——拿到 buffer 地址就能反推 Node 地址，反过来 `make_buffer_from_node(node)` 做 `(char*)node + offsetof(...)` 拿到 buffer 地址。**同一个内存块，两个视角**——PtrQueue 看到的是 `void**` 数组，链表看到的是 `BufferNode*`。
@@ -1344,33 +1344,33 @@ if (thr->is_Java_thread()) {
 
 ```
                             Mutator 线程
-                               │
+                               |
                     post-write barrier
-                               │
+                               |
                     per-thread DirtyCardQueue
                     (_qset = &G1BarrierSet::dirty_card_queue_set())
-                               │
+                               |
                   buffer 满了 → enqueue_complete_buffer()
-                               │
-                               ▼
-            ┌──────────────────────────────────────┐
-            │  G1BarrierSet::dirty_card_queue_set  │ ← primary DCQ
-            │  (全局静态 primary)                   │
-            │                                      │
-            │  _n_completed_buffers                 │
-            │  process_completed_threshold = yellow │
-            │  max_completed_queue = red            │
-            │  fl_owner = this (自己管 free list)   │
-            └──────┬───────────┬───────────────────┘
-                   │           │
-          yellow → │           │ red →
-        notify()  │           │ mutator 自己 mut_process_buffer()
-                   ▼           ▼
-    ┌──────────────────────┐
-    │ Refinement 线程 0..N │
-    │ do_refinement_step() │
-    │ → RSet 更新           │
-    └──────────────────────┘
+                               |
+                               v
+            +--------------------------------------+
+            |  G1BarrierSet::dirty_card_queue_set  | ← primary DCQ
+            |  (全局静态 primary)                   |
+            |                                      |
+            |  _n_completed_buffers                 |
+            |  process_completed_threshold = yellow |
+            |  max_completed_queue = red            |
+            |  fl_owner = this (自己管 free list)   |
+            +------+-----------+-------------------+
+                   |           |
+          yellow → |           | red →
+        notify()  |           | mutator 自己 mut_process_buffer()
+                   v           v
+    +----------------------+
+    | Refinement 线程 0..N |
+    | do_refinement_step() |
+    | → RSet 更新           |
+    +----------------------+
 
               ═══════ GC 暂停 ═══════
 
@@ -1383,24 +1383,24 @@ if (thr->is_Java_thread()) {
 
     RedirtyLoggedCardTableEntryClosure
         → 写脏卡到 GC 端 DCQ
-        │
-        ▼
-    ┌──────────────────────────────────────┐
-    │  G1CollectedHeap::_dirty_card_queue  │ ← secondary DCQ
-    │  (GC 端临时容器)                      │
-    │                                      │
-    │  process_completed_threshold = -1     │
-    │  max_completed_queue = -1            │
-    │  fl_owner = &primary                │
-    └──────┬───────────────────────────────┘
-           │
-           │ merge_bufferlists(&secondary)
-           │
-           ▼
-    ┌──────────────────────────────────────┐
-    │  回到 primary DCQ                    │
-    │  → refinement 线程继续处理新 card    │
-    └──────────────────────────────────────┘
+        |
+        v
+    +--------------------------------------+
+    |  G1CollectedHeap::_dirty_card_queue  | ← secondary DCQ
+    |  (GC 端临时容器)                      |
+    |                                      |
+    |  process_completed_threshold = -1     |
+    |  max_completed_queue = -1            |
+    |  fl_owner = &primary                |
+    +------+-------------------------------+
+           |
+           | merge_bufferlists(&secondary)
+           |
+           v
+    +--------------------------------------+
+    |  回到 primary DCQ                    |
+    |  → refinement 线程继续处理新 card    |
+    +--------------------------------------+
 ```
 
 ### 3.7 两个 DCQ Set 的完整状态表

@@ -239,16 +239,16 @@ void CodeSection::initialize_outer(CodeBuffer* outer, int index) {
 
 ```
 C 栈（普通内存）                              CodeCache（可执行内存，mmap）
-────────────────────────────────             ───────────────────────────────
+--------------------------------             -------------------------------
 buffer（CodeBuffer 栈对象）                   BufferBlob payload（30000B）
-  _total_start ──────────────────────────→   start+128
+  _total_start --------------------------→   start+128
   _total_size = 30000
   _consts（CodeSection 栈对象）               _consts._start = NULL（未分配）
     _start = NULL, _end = NULL, _limit = NULL
   _insts（CodeSection 栈对象）                payload 内存
-    _start ──────────────────────────────→   start+128
-    _end  ──────────────────────────────→   start+128（还没写）
-    _limit ─────────────────────────────→   start+128+30000
+    _start ------------------------------→   start+128
+    _end  ------------------------------→   start+128（还没写）
+    _limit -----------------------------→   start+128+30000
   _stubs（CodeSection 栈对象）                _stubs._start = NULL（未分配）
     _start = NULL, _end = NULL, _limit = NULL
 ```

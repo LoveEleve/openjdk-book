@@ -316,17 +316,17 @@ _relocation_end   = p + 104 + 0   = 0x7fdc00000068  （退化成一个点）
 
 ```
 p = 0x7fdc00000000
-  │
-  ├─ [0x00000, 0x00080)  128 字节  ← C++ header
-  │     BufferBlob 的全部字段在这 128 字节里
-  │     relocation_begin = relocation_end = p + 0x68 = 0x7fdc00000068
-  │
-  ├─ [0x00080, 0x075B8)  30000 字节 ← code / content 区域
-  │     这是待填充 x86 机器码的地方
-  │     code_begin    = content_begin = 0x7fdc00000080
-  │     code_end      = content_end   = 0x7fdc000075B8
-  │     data_end      = 0x7fdc000075B8
-  │
+  |
+  +- [0x00000, 0x00080)  128 字节  ← C++ header
+  |     BufferBlob 的全部字段在这 128 字节里
+  |     relocation_begin = relocation_end = p + 0x68 = 0x7fdc00000068
+  |
+  +- [0x00080, 0x075B8)  30000 字节 ← code / content 区域
+  |     这是待填充 x86 机器码的地方
+  |     code_begin    = content_begin = 0x7fdc00000080
+  |     code_end      = content_end   = 0x7fdc000075B8
+  |     data_end      = 0x7fdc000075B8
+  |
   p + 30128 = 0x7fdc000075B8  ← 终点
 ```
 
@@ -336,16 +336,16 @@ p = 0x7fdc00000000
 nmethod（JIT 编译的 Java 方法）的完整布局：
 
 start
-  │
-  ├─ [0, header_size)                    ← 区域 1: header（C++ 对象字段）
-  │
-  ├─ [header_size, header_size + relocation_size)  ← 区域 2: relocation（重定位表）
-  │     记录：代码里第 N 个字节处有 oop 引用，GC 移动对象后要更新
-  │
-  ├─ [content_offset, data_offset)       ← 区域 3: content / code（x86 机器码）
-  │
-  ├─ [data_offset, size)                 ← 区域 4: data（oop 引用表、metadata 引用表）
-  │     存编译代码中引用的 Java 对象和类的元数据指针
+  |
+  +- [0, header_size)                    ← 区域 1: header（C++ 对象字段）
+  |
+  +- [header_size, header_size + relocation_size)  ← 区域 2: relocation（重定位表）
+  |     记录：代码里第 N 个字节处有 oop 引用，GC 移动对象后要更新
+  |
+  +- [content_offset, data_offset)       ← 区域 3: content / code（x86 机器码）
+  |
+  +- [data_offset, size)                 ← 区域 4: data（oop 引用表、metadata 引用表）
+  |     存编译代码中引用的 Java 对象和类的元数据指针
 ```
 
 | 区域 | 谁用 | nmethod | BufferBlob |

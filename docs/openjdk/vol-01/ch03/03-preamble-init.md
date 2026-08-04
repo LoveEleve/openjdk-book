@@ -260,10 +260,10 @@ ostream_init();
 
 ```
 outputStream（基类）
-  ├── stringStream   → 写到内存缓冲区（日志拼接）
-  ├── fileStream     → 写到文件（GC 日志、编译日志）
-  ├── defaultStream  → 写到 stdout/stderr（默认输出）
-  └── bufferedStream → 带缓冲的包装
+  +-- stringStream   → 写到内存缓冲区（日志拼接）
+  +-- fileStream     → 写到文件（GC 日志、编译日志）
+  +-- defaultStream  → 写到 stdout/stderr（默认输出）
+  +-- bufferedStream → 带缓冲的包装
   ... 共 12 个子类
 ```
 

@@ -113,7 +113,7 @@ oop（ordinary object pointer）是 JVM 内部表示"指向 Java 对象的引用
 
 ```
 0x800000000 = 0000 0000 0000 0000 0000 0000 0000 1000 0000 0000 0000 0000 0000 0000 0000 0000
-              ↑←────── 高 29 位（第 35~63 位）恒 0 ──────→↑↑←──── 低 35 位，装得下堆里所有地址 ────→
+              ↑←------ 高 29 位（第 35~63 位）恒 0 ------→↑↑←---- 低 35 位，装得下堆里所有地址 ----→
 ```
 
 如果堆是 32GB，最大的地址就是 `2^35 - 1`——二进制下高 29 位全 0。
@@ -128,16 +128,16 @@ HotSpot 默认 `ObjectAlignmentInBytes = 8`：任何对象在堆里的起始地�
 0x600000000 + 104 = 0x600000068
 二进制末 3 位：         ...0110 1000
                         ↑↑↑
-                        └─┴─┴─ 末 3 位 = 000（因为 104 是 8 的倍数）
+                        +-+-+- 末 3 位 = 000（因为 104 是 8 的倍数）
 ```
 
 **两个约束叠加：**
 
 ```
 64 位地址
-├─ 高 29 位（35~63）：恒 0 —— 堆 ≤ 32GB，地址装不进这 29 位
-├─ 中间 32 位（3~34）：真正携带信息
-└─ 低 3 位（0~2）：恒 0 —— 对象 8 字节对齐
++- 高 29 位（35~63）：恒 0 —— 堆 ≤ 32GB，地址装不进这 29 位
++- 中间 32 位（3~34）：真正携带信息
++- 低 3 位（0~2）：恒 0 —— 对象 8 字节对齐
 ```
 
 中间这 32 位就是全部信息量。**压缩指针 = 只存这 32 位**。还原时把 3 位对齐补回去：
@@ -225,20 +225,20 @@ LogMinObjAlignmentInBytes = exact_log2(ObjectAlignmentInBytes) = 3
 
 ```
 Level 0: 用户指定 HeapBaseMinAddress          ← 仅当用户显式设置 -XX:HeapBaseMinAddress
-         └─ 强制精确落在该地址，不对则 release
+         +- 强制精确落在该地址，不对则 release
 
 Level 1: Unscaled 模式（< 4GB）                ← 堆能装进 4GB 时才尝试
-         └─ try_reserve_range：从 4GB 顶部向下试 HeapSearchSteps(3) 个点
+         +- try_reserve_range：从 4GB 顶部向下试 HeapSearchSteps(3) 个点
 
 Level 2: ZeroBased 模式（< 32GB）              ← 预留压缩类空间后尝试
-         └─ zerobased_max = 32GB - CompressedClassSpaceSize
-         └─ 从顶部向下试 3 个点
+         +- zerobased_max = 32GB - CompressedClassSpaceSize
+         +- 从顶部向下试 3 个点
 
 Level 3: DisjointBase 模式                     ← 从预置地址表挨个试
-         └─ 2×32G, 3×32G, 4×32G, 8×32G, 10×32G, 1×64K×32G, ...（virtualspace.cpp:452-466）
+         +- 2×32G, 3×32G, 4×32G, 8×32G, 10×32G, 1×64K×32G, ...（virtualspace.cpp:452-466）
 
 Level 4: 任意地址（HeapBased）                 ← 最后的绝望尝试
-         └─ initialize(NULL)，无任何地址偏好
+         +- initialize(NULL)，无任何地址偏好
 ```
 
 关键机制（`try_reserve_heap`，virtualspace.cpp:334-414）：
@@ -391,7 +391,7 @@ void ThreadLocalAllocBuffer::startup_initialization() {
 }
 ```
 
-### 4.2 ① _target_refills——控制 TLAB GC 浪费的比例
+### 4.2 (1) _target_refills——控制 TLAB GC 浪费的比例
 
 #### 前置概念一：refill 是什么
 
@@ -514,7 +514,7 @@ _global_stats = new GlobalTLABStats();
 GC 前，accumulate_statistics_before_gc()：
   遍历所有 JavaThread：
     accumulate_statistics()
-      └─ 若 _number_of_refills > 0（该周期内发生过 TLAB refill）：
+      +- 若 _number_of_refills > 0（该周期内发生过 TLAB refill）：
            global_stats()->update_allocating_threads()    // _allocating_threads += 1
   汇总后 publish()：
     _allocating_threads_avg.sample(_allocating_threads)   // 以该值为样本更新平滑平均

@@ -28,18 +28,18 @@ _collection_set(NULL),     // 等 init() 绑定
 
 ```cpp
 void G1Policy::init(G1CollectedHeap* g1h, G1CollectionSet* collection_set) {
-    _g1h = g1h;                                              // ① 绑定堆指针
+    _g1h = g1h;                                              // (1) 绑定堆指针
     _collection_set = collection_set;                         //   绑定 CSet 指针
 
     if (!adaptive_young_list_length()) {
         _young_list_fixed_length = _young_gen_sizer.min_desired_young_length();
     }
-    _young_gen_sizer.adjust_max_new_size(_g1h->max_regions()); // ② 调节新生代上限
+    _young_gen_sizer.adjust_max_new_size(_g1h->max_regions()); // (2) 调节新生代上限
 
-    _free_regions_at_end_of_collection = _g1h->num_free_regions(); // ③ 记录空闲数
+    _free_regions_at_end_of_collection = _g1h->num_free_regions(); // (3) 记录空闲数
 
-    update_young_list_max_and_target_length();                  // ④ 算 young list 目标
-    _collection_set->start_incremental_building();              // ⑤ 启动 CSet 构建
+    update_young_list_max_and_target_length();                  // (4) 算 young list 目标
+    _collection_set->start_incremental_building();              // (5) 启动 CSet 构建
 }
 ```
 
@@ -118,17 +118,17 @@ update_young_list_max_and_target_length();
 **怎么算**（`g1Policy.cpp:197-276`）——两层调用：
 
 ```
-① _analytics->predict_rs_lengths()         预测本次 GC 的 RSet 扫描长度
+(1) _analytics->predict_rs_lengths()         预测本次 GC 的 RSet 扫描长度
    ↓                                         （初始化时没有历史数据，返回预设估算值）
-② update_young_list_max_and_target_length(rs_lengths)
-   ├── young_list_target_lengths(rs_lengths) 计算 target 范围
-   │     ├── base_min_length = survivor_regions_count() = 0（初始化时无 GC）
-   │     ├── desired_min_length = 确保至少一个 Eden Region
-   │     ├── desired_max_length = 基于剩余空间的硬上限
-   │     ├── calculate_young_list_target_length(rs_lengths, ...)
-   │     │     用 RSet 成本预测 + GC 停顿目标算出理想值
-   │     └── clamp 到 [desired_min, desired_max]
-   └── update_max_gc_locker_expansion()       调 _young_list_max_length（GC locker 容忍上限）
+(2) update_young_list_max_and_target_length(rs_lengths)
+   +-- young_list_target_lengths(rs_lengths) 计算 target 范围
+   |     +-- base_min_length = survivor_regions_count() = 0（初始化时无 GC）
+   |     +-- desired_min_length = 确保至少一个 Eden Region
+   |     +-- desired_max_length = 基于剩余空间的硬上限
+   |     +-- calculate_young_list_target_length(rs_lengths, ...)
+   |     |     用 RSet 成本预测 + GC 停顿目标算出理想值
+   |     +-- clamp 到 [desired_min, desired_max]
+   +-- update_max_gc_locker_expansion()       调 _young_list_max_length（GC locker 容忍上限）
 ```
 
 初始化时没有 GC 历史数据——Analytics 返回的是保守预设值，第一次 target 计算结果为 **102 个 Region**（8GB 堆，debug 实测值）。正是 §2.2 中 `_min_desired_young_length` 的下限（5% × 2048 = 102）——初始保守策略直接取下限值。
@@ -169,15 +169,15 @@ void G1CollectionSet::start_incremental_building() {
 
 ```
 g1_policy()->init(this, &_collection_set)
-├── _g1h = this                     ← 绑定堆指针（之前 NULL）
-├── _collection_set = &_collection_set ← 绑定 CSet 指针（之前 NULL）
-├── _young_gen_sizer.adjust_max_new_size(max_regions)
-├── _free_regions_at_end_of_collection = num_free_regions()
-├── update_young_list_max_and_target_length()
-│     └── calculate_young_list_target_length(BaseTime, FreeRegions, TargetPause)
-│           → young_list_target_length ≈ (200ms - 2ms) / 0.5ms = 397
-│           → young_list_max_length = target_length × 1.2
-└── _collection_set->start_incremental_building()
++-- _g1h = this                     ← 绑定堆指针（之前 NULL）
++-- _collection_set = &_collection_set ← 绑定 CSet 指针（之前 NULL）
++-- _young_gen_sizer.adjust_max_new_size(max_regions)
++-- _free_regions_at_end_of_collection = num_free_regions()
++-- update_young_list_max_and_target_length()
+|     +-- calculate_young_list_target_length(BaseTime, FreeRegions, TargetPause)
+|           → young_list_target_length ≈ (200ms - 2ms) / 0.5ms = 397
+|           → young_list_max_length = target_length × 1.2
++-- _collection_set->start_incremental_building()
       → clear() + 设 Active + 启动计时
 ```
 

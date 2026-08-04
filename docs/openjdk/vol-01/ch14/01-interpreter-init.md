@@ -14,25 +14,25 @@
 
 ```
 interpreter_init()                   ← init_globals 第 11 步
-  ├─ Interpreter::initialize()
-  │    └─ TemplateInterpreter::initialize()   ← 本章全部内容
-  │         ├─ §1 五步初始化流程
-  │         ├─ §2 generate_all()——生成全部桩代码
-  │         │    ├─ 方法入口
-  │         │    ├─ 返回桩
-  │         │    ├─ 异常桩
-  │         │    └─ 安全点与去优化
-  │         ├─ §3 TemplateTable::initialize()——注册 202 条字节码模板
-  │         └─ §4 DispatchTable 三表切换
-  ├─ Forte::register_stub          ← Profiling 工具注册解释器代码区为"桩"
-  └─ JvmtiExport::post_dynamic_code_generated ← JVMTI 代理收到通知（动态代码生成）
+  +- Interpreter::initialize()
+  |    +- TemplateInterpreter::initialize()   ← 本章全部内容
+  |         +- §1 五步初始化流程
+  |         +- §2 generate_all()——生成全部桩代码
+  |         |    +- 方法入口
+  |         |    +- 返回桩
+  |         |    +- 异常桩
+  |         |    +- 安全点与去优化
+  |         +- §3 TemplateTable::initialize()——注册 202 条字节码模板
+  |         +- §4 DispatchTable 三表切换
+  +- Forte::register_stub          ← Profiling 工具注册解释器代码区为"桩"
+  +- JvmtiExport::post_dynamic_code_generated ← JVMTI 代理收到通知（动态代码生成）
 ```
 
 ### 0.1 generate_all() 按生成类型分为 9 组
 
 | 组 | 生成的桩 | 用途 |
 |----|---------|------|
-| ① 慢速签名处理 | `_slow_signature_handler` | 方法参数列表的通用适配器 |
+| (1) 慢速签名处理 | `_slow_signature_handler` | 方法参数列表的通用适配器 |
 | (2) 返回入口 | `_return_entry[1..5]` × 10 种 TosState | 方法返回到调用者 |
 | (3) invoke 返回入口 | 3 种 invoke × 10 种 TosState | invokedynamic / invokevirtual / invokeinterface 的返回 |
 | (4) native 结果处理器 | `_native_abi_to_tosca[10]` | JNI 返回值的类型转换 |
@@ -73,7 +73,7 @@ void TemplateInterpreter::initialize() {
 
 | 步 | 做什么 | 产出 |
 |---|--------|------|
-| ① | `AbstractInterpreter::initialize()` | 基类初始化——字节码计数器重置 + `InvocationCounter::reinitialize`（ch13 §2.4 已讲） |
+| (1) | `AbstractInterpreter::initialize()` | 基类初始化——字节码计数器重置 + `InvocationCounter::reinitialize`（ch13 §2.4 已讲） |
 | (2) | `TemplateTable::initialize()` | 注册 202 个字节码模板——为每个字节码绑定生成器函数和操作数栈转型规则（§3） |
 | (3) | `new StubQueue(...)` | 创建 CodeBuffer，分配 `InterpreterCodeSize` 字节的代码空间——所有 Codelet 的汇编代码存于此 |
 | (4) | `TemplateInterpreterGenerator g(_code)` | 构造触发 `generate_all()`——遍历模板 + 生成全部桩代码（§2） |

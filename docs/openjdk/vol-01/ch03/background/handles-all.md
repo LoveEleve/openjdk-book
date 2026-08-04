@@ -91,12 +91,12 @@ void unsafe() {
 
 // 安全——Handle 保护
 void safe() {
-  HandleMark hm;                              // ①画线
+  HandleMark hm;                              // (1)画线
   Handle obj(THREAD, java_lang_String::create(...));
-  // ② new String → oop 在堆上，槽位在 HandleArea，_handle 指向槽位
+  // (2) new String → oop 在堆上，槽位在 HandleArea，_handle 指向槽位
   // >>> GC 发生 → HandleArea::oops_do() 更新槽位 → *_handle 是新地址
-  obj()->set_xxx(...);                        // ③ 安全
-  // ④ HandleMark 析构 → Arena 回滚 → _handle 指向的内存回收
+  obj()->set_xxx(...);                        // (3) 安全
+  // (4) HandleMark 析构 → Arena 回滚 → _handle 指向的内存回收
 }
 ```
 
@@ -173,7 +173,7 @@ HotSpot 需要找一个地方把"当前 native 帧正在用的 oop"**登记**起
   1. thread->free_handle_block() != NULL  → 拿线程本地缓存（无锁）
   2. 持全局锁，_block_free_list != NULL  → 从全局池拿
   3. 全局池也是 NULL                    → new JNIHandleBlock()
-       └─ CHeapObj<mtInternal>::operator new → malloc
+       +- CHeapObj<mtInternal>::operator new → malloc
   ```
 
   **第一次分配时**，`_free_handle_block`（线程的"空闲块缓存"）是 NULL（构造函数刚设的），全局池也是 NULL（静态零初始化）。所以第 1、2 步都跳过，直接走第 3 步：`new JNIHandleBlock()`，底层调用 `malloc`。分配后的块**不进 `_free_handle_block`（空闲缓存）**——它直接挂到 `_active_handles` 上（`main_thread->set_active_handles(allocate_block())`），进入"正在使用"状态。注意 Thread 有**两个**私有槽：`_active_handles`（正在用的块链表）和 `_free_handle_block`（1 个空闲块缓存），别搞混。此后当这个块被 `release_block()` **释放**时，才根据 `thread` 参数决定：`thread != NULL` → 进 `_free_handle_block`（抽屉备用）；`thread == NULL` → 进全局池。

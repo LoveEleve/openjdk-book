@@ -115,56 +115,56 @@ jint init_globals() {
 
 ```
 init_globals()
-│
-├─ HandleMark hm                                 RAII，标记 Handle 区边界
-│
-├─ [Block A] 前置轻量（universe_init 的依赖项）
-│  ├─ management_init()                    JMX 管理初始化
-│  ├─ bytecodes_init()                     字节码表（trivial）
-│  ├─ classLoader_init1()                  类加载器（trivial）
-│  ├─ compilationPolicy_init()       ★    编译策略
-│  ├─ codeCache_init()              ★★   代码缓存
-│  ├─ VM_Version_init()                   CPU 特性检测
-│  ├─ os_init_globals()                    OS 全局（依赖 VM_Version_init）
-│  └─ stubRoutines_init1()                存根例程 phase1（trivial）
-│
-├─ [Block B] universe_init  ★★★  阶段 6 中枢
-│  └─ 返回值检查 #1：status != JNI_OK → return status
-│     ├─ Universe::initialize_heap()            堆创建 + compressed oops + TLAB
-│     ├─ Metaspace::global_initialize()         元空间
-│     ├─ 6× new LatestMethodCache()              finalizer/register 等方法缓存
-│     └─ SymbolTable / StringTable / ResolvedMethodTable ::create_table()
-│
-├─ [Block C] 解释器与运行时
-│  ├─ gc_barrier_stubs_init()              GC 屏障存根（依赖 universe_init）
-│  ├─ interpreter_init()             ★    解释器（before any methods loaded）
-│  ├─ invocationCounter_init()            调用计数器（trivial）
-│  ├─ accessFlags_init()                  访问标志（trivial，仅 assert）
-│  ├─ templateTable_init()                模板表（trivial）
-│  ├─ InterfaceSupport_init()             接口支持
-│  ├─ VMRegImpl::set_regName()            寄存器名（平台相关）
-│  ├─ SharedRuntime::generate_stubs() ★   共享运行时存根
-│  ├─ universe2_init()                    原始类加载
-│  ├─ javaClasses_init()             ★   Java 类（after vtable，before referenceProcessor）
-│  ├─ referenceProcessor_init()           引用处理器（trivial）
-│  ├─ jni_handles_init()                  JNI 句柄（trivial）
-│  └─ vmStructs_init()                    VM 结构（debug only，INCLUDE_VM_STRUCTS）
-│
-├─ [Block D] 编译器
-│  ├─ vtableStubs_init()                  vtable 存根（trivial）
-│  ├─ InlineCacheBuffer_init()            IC 缓冲（trivial）
-│  ├─ compilerOracle_init()          ★    编译指令
-│  ├─ dependencyContext_init()            依赖上下文（trivial）
-│  └─ compileBroker_init()          ★    编译代理
-│     └─ 返回值检查 #2：!compileBroker_init() → return JNI_EINVAL
-│
-└─ [Block E] 后置
-   ├─ universe_post_init()        ★★    预分配异常实例（after compiler_init）
-   │  └─ 返回值检查 #3：!universe_post_init() → return JNI_ERR
-   ├─ stubRoutines_init2()               存根 phase2（trivial）
-   ├─ MethodHandles::generate_adapters() 方法句柄适配器
-   ├─ NMT_stack_walkable = true          本地内存跟踪（INCLUDE_NMT）
-   └─ JVMFlag::printFlags()              标志最终打印
+|
++- HandleMark hm                                 RAII，标记 Handle 区边界
+|
++- [Block A] 前置轻量（universe_init 的依赖项）
+|  +- management_init()                    JMX 管理初始化
+|  +- bytecodes_init()                     字节码表（trivial）
+|  +- classLoader_init1()                  类加载器（trivial）
+|  +- compilationPolicy_init()       ★    编译策略
+|  +- codeCache_init()              ★★   代码缓存
+|  +- VM_Version_init()                   CPU 特性检测
+|  +- os_init_globals()                    OS 全局（依赖 VM_Version_init）
+|  +- stubRoutines_init1()                存根例程 phase1（trivial）
+|
++- [Block B] universe_init  ★★★  阶段 6 中枢
+|  +- 返回值检查 #1：status != JNI_OK → return status
+|     +- Universe::initialize_heap()            堆创建 + compressed oops + TLAB
+|     +- Metaspace::global_initialize()         元空间
+|     +- 6× new LatestMethodCache()              finalizer/register 等方法缓存
+|     +- SymbolTable / StringTable / ResolvedMethodTable ::create_table()
+|
++- [Block C] 解释器与运行时
+|  +- gc_barrier_stubs_init()              GC 屏障存根（依赖 universe_init）
+|  +- interpreter_init()             ★    解释器（before any methods loaded）
+|  +- invocationCounter_init()            调用计数器（trivial）
+|  +- accessFlags_init()                  访问标志（trivial，仅 assert）
+|  +- templateTable_init()                模板表（trivial）
+|  +- InterfaceSupport_init()             接口支持
+|  +- VMRegImpl::set_regName()            寄存器名（平台相关）
+|  +- SharedRuntime::generate_stubs() ★   共享运行时存根
+|  +- universe2_init()                    原始类加载
+|  +- javaClasses_init()             ★   Java 类（after vtable，before referenceProcessor）
+|  +- referenceProcessor_init()           引用处理器（trivial）
+|  +- jni_handles_init()                  JNI 句柄（trivial）
+|  +- vmStructs_init()                    VM 结构（debug only，INCLUDE_VM_STRUCTS）
+|
++- [Block D] 编译器
+|  +- vtableStubs_init()                  vtable 存根（trivial）
+|  +- InlineCacheBuffer_init()            IC 缓冲（trivial）
+|  +- compilerOracle_init()          ★    编译指令
+|  +- dependencyContext_init()            依赖上下文（trivial）
+|  +- compileBroker_init()          ★    编译代理
+|     +- 返回值检查 #2：!compileBroker_init() → return JNI_EINVAL
+|
++- [Block E] 后置
+   +- universe_post_init()        ★★    预分配异常实例（after compiler_init）
+   |  +- 返回值检查 #3：!universe_post_init() → return JNI_ERR
+   +- stubRoutines_init2()               存根 phase2（trivial）
+   +- MethodHandles::generate_adapters() 方法句柄适配器
+   +- NMT_stack_walkable = true          本地内存跟踪（INCLUDE_NMT）
+   +- JVMFlag::printFlags()              标志最终打印
 ```
 
 30 个子函数中，**12 个是 trivial 单行委托**（如 `bytecodes_init`、`accessFlags_init` 仅 `assert`）。但 trivial 不等于没原理——`os_init_globals` 是空 hook 但要讲清楚为什么空、真实初始化在哪；`accessFlags_init` 仅 sizeof 断言但要讲 JVM_ACC_* 位域和 RedefineClasses 用的内部位。本卷按子系统分章展开，trivial 函数合并到 ch04 一篇，`classLoader_init1` 的空壳委托在 ch04/4.4 完整覆盖（不再单独成章），其余按原理独立成章。
@@ -178,26 +178,26 @@ init_globals()
 ```
 依赖链（从 init.cpp 注释提取）：
 
-VM_Version_init ──→ os_init_globals                  // os depends on VM_Version, before universe
-                         │
-codeCache_init ─────┐    │
-stubRoutines_init1 ─┼───→ universe_init               // universe depends on codeCache + stubRoutines
-                    │      │
-                    │      ↓
-                    │   gc_barrier_stubs_init          // depends on universe, before interpreter
-                    │      │
-                    │      ↓
-                    │   interpreter_init               // before any methods loaded
-                    │   invocationCounter_init          // before any methods loaded
-                    │
-                    ├──→ universe2_init                // depends on codeCache + stubRoutines
-                    │
-                    │      javaClasses_init             // after vtable, before referenceProcessor
-                    │           │
-                    │           ↓
-                    │   referenceProcessor_init
-                    │
-                    └──→ ... ──→ compileBroker_init ──→ universe_post_init
+VM_Version_init --→ os_init_globals                  // os depends on VM_Version, before universe
+                         |
+codeCache_init -----+    |
+stubRoutines_init1 -+---→ universe_init               // universe depends on codeCache + stubRoutines
+                    |      |
+                    |      ↓
+                    |   gc_barrier_stubs_init          // depends on universe, before interpreter
+                    |      |
+                    |      ↓
+                    |   interpreter_init               // before any methods loaded
+                    |   invocationCounter_init          // before any methods loaded
+                    |
+                    +--→ universe2_init                // depends on codeCache + stubRoutines
+                    |
+                    |      javaClasses_init             // after vtable, before referenceProcessor
+                    |           |
+                    |           ↓
+                    |   referenceProcessor_init
+                    |
+                    +--→ ... --→ compileBroker_init --→ universe_post_init
                                                        // post_init must be after compiler_init
 ```
 
@@ -219,25 +219,25 @@ stubRoutines_init1 ─┼───→ universe_init               // universe de
 
 ```
 universe_init()
-├─ guarantee HeapWord/oop 大小约束              编译期布局自检
-├─ JavaClasses::compute_hard_coded_offsets()    计算 Java 类硬编码偏移
-├─ Universe::initialize_heap()         ★★★      堆创建
-│   ├─ create_heap()                              GCConfig 选 GC 类型，new CollectedHeap
-│   ├─ _collectedHeap->initialize()               堆内存预留 + 初始化
-│   ├─ compressed oops 设置                        堆基址 + 编码模式（Unscaled/ZeroBased/DisjointBase/HeapBased）
-│   └─ ThreadLocalAllocBuffer::startup_initialization()  TLAB
-├─ SystemDictionary::initialize_oop_storage()   oop 存储
-├─ Metaspace::global_initialize()      ★★       元空间
-├─ MetaspaceCounters / CompressedClassSpaceCounters ::initialize_performance_counters()
-├─ AOTLoader::universe_init()                    INCLUDE_AOT
-├─ JVMFlagConstraintList::check_constraints(AfterMemoryInit)  返回 JNI_EINVAL
-├─ ClassLoaderData::init_null_class_loader_data() null ClassLoader 的 ClassLoaderData
-├─ 6× new LatestMethodCache()                    finalizer_register / loader_addClass /
-│                                                pd_implies / throw_illegal_access /
-│                                                throw_no_such_method / do_stack_walk
-├─ [CDS 分支] MetaspaceShared::initialize_shared_spaces()  UseSharedSpaces
-│            或 SymbolTable::create_table() + StringTable::create_table()
-└─ ResolvedMethodTable::create_table()
++- guarantee HeapWord/oop 大小约束              编译期布局自检
++- JavaClasses::compute_hard_coded_offsets()    计算 Java 类硬编码偏移
++- Universe::initialize_heap()         ★★★      堆创建
+|   +- create_heap()                              GCConfig 选 GC 类型，new CollectedHeap
+|   +- _collectedHeap->initialize()               堆内存预留 + 初始化
+|   +- compressed oops 设置                        堆基址 + 编码模式（Unscaled/ZeroBased/DisjointBase/HeapBased）
+|   +- ThreadLocalAllocBuffer::startup_initialization()  TLAB
++- SystemDictionary::initialize_oop_storage()   oop 存储
++- Metaspace::global_initialize()      ★★       元空间
++- MetaspaceCounters / CompressedClassSpaceCounters ::initialize_performance_counters()
++- AOTLoader::universe_init()                    INCLUDE_AOT
++- JVMFlagConstraintList::check_constraints(AfterMemoryInit)  返回 JNI_EINVAL
++- ClassLoaderData::init_null_class_loader_data() null ClassLoader 的 ClassLoaderData
++- 6× new LatestMethodCache()                    finalizer_register / loader_addClass /
+|                                                pd_implies / throw_illegal_access /
+|                                                throw_no_such_method / do_stack_walk
++- [CDS 分支] MetaspaceShared::initialize_shared_spaces()  UseSharedSpaces
+|            或 SymbolTable::create_table() + StringTable::create_table()
++- ResolvedMethodTable::create_table()
 ```
 
 `universe_init` 之所以是中枢，因为它建立了后续所有 Java 代码运行的物质基础——堆（对象分配）、Metaspace（Klass/metadata）、符号表（SymbolTable/StringTable，Java 字符串和符号的 intern）、方法缓存（`LatestMethodCache`，JVM 反射调用 Java 方法的 fast path）。它之后的 `interpreter_init`、`universe2_init`、`javaClasses_init` 都依赖这些已就绪。

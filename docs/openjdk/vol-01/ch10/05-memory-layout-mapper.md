@@ -173,7 +173,7 @@ jbyte* byte_for(const void* p) const {
 
 ```
 堆偏移:    0B            512B           1024B
-           ├─ card 0 ─┤ ├─ card 1 ─┤  ├─ card 2 ─┤
+           +- card 0 -+ +- card 1 -+  +- card 2 -+
            0~512          512~1024       1024~1536
                               ↑
                          对象 A (512B)
@@ -302,13 +302,13 @@ class G1BarrierSet: public CardTableBarrierSet {
 
 ```
 全局 QueueSet（static，全局唯一）
-  ├── 管理 completed buffer 链表（已满的 buffer 队列）
-  ├── 管理 free list（空闲 buffer 复用）
-  └── 设置阈值（buffer 满了什么时候提交）
+  +-- 管理 completed buffer 链表（已满的 buffer 队列）
+  +-- 管理 free list（空闲 buffer 复用）
+  +-- 设置阈值（buffer 满了什么时候提交）
 
 每个 Java 线程（G1ThreadLocalData）
-  ├── _satb_mark_queue（本地 SATB 队列，无锁写入）
-  └── _dirty_card_queue（本地脏卡队列，无锁写入）
+  +-- _satb_mark_queue（本地 SATB 队列，无锁写入）
+  +-- _dirty_card_queue（本地脏卡队列，无锁写入）
 ```
 
 **写屏障的完整流程**：
@@ -503,16 +503,16 @@ G1 的每个 Region 不只是"一段堆内存"——它还关联了 5 种元数�
 
 ```
 G1CollectedHeap（collectedHeap.hpp:117）
-  ├── _reserved（MemRegion）——记住 8GB 地址范围（base + end）
-  │   initialize_reserved_region(heap_rs.base(), heap_rs.end())  ← line 1572 设置
-  │   对外暴露 reserved_region() / is_in_reserved() / capacity()
-  │
-  └── _hrm（HeapRegionManager）——Region 生命周期管理
-        ├── _heap_mapper（G1RegionToSpaceMapper*）——Region 级 commit/uncommit
-        │     └── _storage（G1PageBasedVirtualSpace）——per-page commit/uncommit
-        │           └── os::commit_memory / os::uncommit_memory——mmap 系统调用
-        ├── _regions（G1HeapRegionTable）——Region 数组（地址→HeapRegion*）
-        └── _free_list（FreeRegionList）——空闲 Region 链表
+  +-- _reserved（MemRegion）——记住 8GB 地址范围（base + end）
+  |   initialize_reserved_region(heap_rs.base(), heap_rs.end())  ← line 1572 设置
+  |   对外暴露 reserved_region() / is_in_reserved() / capacity()
+  |
+  +-- _hrm（HeapRegionManager）——Region 生命周期管理
+        +-- _heap_mapper（G1RegionToSpaceMapper*）——Region 级 commit/uncommit
+        |     +-- _storage（G1PageBasedVirtualSpace）——per-page commit/uncommit
+        |           +-- os::commit_memory / os::uncommit_memory——mmap 系统调用
+        +-- _regions（G1HeapRegionTable）——Region 数组（地址→HeapRegion*）
+        +-- _free_list（FreeRegionList）——空闲 Region 链表
 ```
 
 | 层 | 对象 | 管什么 | 不管什么 |
@@ -546,11 +546,11 @@ mutator 写引用 → cardtable 标 dirty → refine 线程消费
 以 cardtable 为例——Card Table 数据按 512B 切分（每 512B 堆空间对应 1 字节 card），但 **commit 按 Region 粒度**（一次 commit 一个 Region 对应的所有 card 字节）：
 
 ```
-heap:           [─────── Region 0 (4MB) ───────][─────── Region 1 (4MB) ───────]
+heap:           [------- Region 0 (4MB) -------][------- Region 1 (4MB) -------]
                   对象1    对象2    对象3...       对象4    对象5...
 
 cardtable:      [c][c][c][c][c][c][c][c]...     [c][c][c][c][c][c][c][c]...
-                └── 8192 个 card（4MB/512B）──┘  └── 8192 个 card ──┘
+                +-- 8192 个 card（4MB/512B）--+  +-- 8192 个 card --+
                 ↑                                 ↑
                 commit Region 0 时               commit Region 1 时
                 这 8192 字节一起 commit          这 8192 字节一起 commit

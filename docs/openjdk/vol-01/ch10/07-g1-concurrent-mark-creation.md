@@ -32,32 +32,32 @@ _cm_thread = _cm->cm_thread();
 
 ```
 G1ConcurrentMark 构造函数（344-495）
-│
-├── 位图（351-354, 400-401）──────────────────────── §2
-│   ├── _mark_bitmap_1 / _mark_bitmap_2      两个物理位图实例
-│   └── _prev_mark_bitmap / _next_mark_bitmap 两个指针，初始指向不同位图
-│
-├── CM 线程（404-407）─────────────────────────────── §3
-│   └── _cm_thread = new G1ConcurrentMarkThread(this)  标记驱动线程
-│
-├── 并行工作任务（364, 477-491）────────────────────── §4
-│   ├── _tasks[ParallelGCThreads]            每个 STW worker 一个 CMTask
-│   ├── _task_queues                         G1CMTaskQueueSet——无锁队列集
-│   └── _terminator                          ParallelTaskTerminator——终止协议
-│
-├── 全局标记栈（360, 439-475）─────────────────────── §5
-│   ├── _global_mark_stack                   任务间溢出卸载的共享栈
-│   └── MarkStackSize 自动调优
-│
-├── 根 Region（358, 414）─────────────────────────── §6
-│   └── _root_regions                        并发标记起始点——survivor Region
-│
-└── 其余（364-396, 416-437, 493）──────────────────── §7
-    ├── ConcGCThreads 计算（416-437）        并发 GC 线程数（≠ ParallelGCThreads）
-    ├── WorkGang（436-437）                  并发 worker 线程池
-    ├── SATB buffer size（411-412）
-    ├── 统计计时字段
-    └── reset_at_marking_complete()（493）   初始化状态到"标记完成"状态
+|
++-- 位图（351-354, 400-401）------------------------ §2
+|   +-- _mark_bitmap_1 / _mark_bitmap_2      两个物理位图实例
+|   +-- _prev_mark_bitmap / _next_mark_bitmap 两个指针，初始指向不同位图
+|
++-- CM 线程（404-407）------------------------------- §3
+|   +-- _cm_thread = new G1ConcurrentMarkThread(this)  标记驱动线程
+|
++-- 并行工作任务（364, 477-491）---------------------- §4
+|   +-- _tasks[ParallelGCThreads]            每个 STW worker 一个 CMTask
+|   +-- _task_queues                         G1CMTaskQueueSet——无锁队列集
+|   +-- _terminator                          ParallelTaskTerminator——终止协议
+|
++-- 全局标记栈（360, 439-475）----------------------- §5
+|   +-- _global_mark_stack                   任务间溢出卸载的共享栈
+|   +-- MarkStackSize 自动调优
+|
++-- 根 Region（358, 414）--------------------------- §6
+|   +-- _root_regions                        并发标记起始点——survivor Region
+|
++-- 其余（364-396, 416-437, 493）-------------------- §7
+    +-- ConcGCThreads 计算（416-437）        并发 GC 线程数（≠ ParallelGCThreads）
+    +-- WorkGang（436-437）                  并发 worker 线程池
+    +-- SATB buffer size（411-412）
+    +-- 统计计时字段
+    +-- reset_at_marking_complete()（493）   初始化状态到"标记完成"状态
 ```
 
 每一组都在构造函数里做了实质性的分配和初始化。下面逐个展开。
@@ -309,34 +309,34 @@ CMThread 醒来 → 7 步标记周期（下面详述）
 CMThread 醒来后按 7 步跑完一个完整的标记周期。先看总览，再逐个拆解。
 
 ```
-┌─ Idle (睡觉) ─────────────────────────────────────────────────────────┐
-│                                                                        │
-│  ← Init Mark Young GC STW 暂停: 设 TAMS + 撤离并标记 + 开 SATB + notify ──┘
-│     (详见 §3.3; 暂停结束后 CMThread 恢复运行，收到 notify 醒来)
-│
-│  状态: Started → InProgress
-│
-│  (1) CLEAR_CLAIMED_MARKS         清 CLD claimed 标记（几微秒）
-│  (2) SCAN_ROOT_REGIONS           并发扫描 survivor Region（详见 §6）
-│  (3) CONCURRENT_MARK             标记主体（见下方展开）
-│  (4) REBUILD_REMEMBERED_SETS     并发重建 RSet
-│  (5) delay_to_keep_mmu()         等一会儿（让 mutator 跑够）
-│  (6) CLEANUP (STW)               swap 位图 + 决定 mixed GC
-│  (7) CLEANUP_FOR_NEXT_MARK       并发清除 next 位图
-│
-│  状态: InProgress → Idle  （CMThread 睡觉，但 Mixed GC 可能还在跑）
-│
-└→ 回到 Idle，继续睡觉
++- Idle (睡觉) ---------------------------------------------------------+
+|                                                                        |
+|  ← Init Mark Young GC STW 暂停: 设 TAMS + 撤离并标记 + 开 SATB + notify --+
+|     (详见 §3.3; 暂停结束后 CMThread 恢复运行，收到 notify 醒来)
+|
+|  状态: Started → InProgress
+|
+|  (1) CLEAR_CLAIMED_MARKS         清 CLD claimed 标记（几微秒）
+|  (2) SCAN_ROOT_REGIONS           并发扫描 survivor Region（详见 §6）
+|  (3) CONCURRENT_MARK             标记主体（见下方展开）
+|  (4) REBUILD_REMEMBERED_SETS     并发重建 RSet
+|  (5) delay_to_keep_mmu()         等一会儿（让 mutator 跑够）
+|  (6) CLEANUP (STW)               swap 位图 + 决定 mixed GC
+|  (7) CLEANUP_FOR_NEXT_MARK       并发清除 next 位图
+|
+|  状态: InProgress → Idle  （CMThread 睡觉，但 Mixed GC 可能还在跑）
+|
++→ 回到 Idle，继续睡觉
 ```
 
 **关键区分**：
 - **(3) 是"并发标记"**（CMTask 追踪引用图，写 `_next` 位图）。**(7) 是"并发清除"**（CMThread 擦 next 位图）。(3) 在 (6) 之前完成，Mixed GC **不和 (3) 并发**，但**和 (7) 并发**。
-- **① (2) (4) (7)** 是并发的（CMThread 派活给 worker，自己等，应用继续跑）。
+- **(1) (2) (4) (7)** 是并发的（CMThread 派活给 worker，自己等，应用继续跑）。
 - **(3) 中的 REMARK 和 (6) CLEANUP** 是 STW 暂停（CMThread 请求 VMThread 让全 JVM 停下）。
 
 ---
 
-#### ① CLEAR_CLAIMED_MARKS——初始化
+#### (1) CLEAR_CLAIMED_MARKS——初始化
 
 调 `ClassLoaderDataGraph::clear_claimed_marks()`，清类加载数据的 claimed 标记。几微秒的事。
 
@@ -470,7 +470,7 @@ SATB（Snapshot At The Beginning）是 G1 的核心并发标记算法。它和�
 
 ```
 mutator 执行: obj.field = new_value;
-  └→ SATB 写屏障: enqueue(old_value)  // 快照了被覆盖的旧引用
+  +→ SATB 写屏障: enqueue(old_value)  // 快照了被覆盖的旧引用
 ```
 
 为什么要记录旧值？Init Mark Young GC 结束时，`_next` 位图里存的是"那个时刻对象图的快照"——"obj.field 指向 old_value"在这个快照里是存活的。即使 mutator 后来把它改掉了，标记也必须覆盖 old_value 及它所能到达的所有对象。如果不记录，这些引用就"漏标"了（被并发标记线程认为已死，但实际上是存活）。
@@ -575,17 +575,17 @@ for (uint i = 0; i < _max_num_tasks; ++i) {
 
 ```
 G1ConcurrentMark
-├── _task_queues  (G1CMTaskQueueSet)     ← 管理全部队列，供偷活用
-│   └── queues[0..N-1]                    ← N = ParallelGCThreads 个队列
-│
-├── _tasks[]      (G1CMTask* 数组)       ← 标记逻辑载体，每个绑一个队列
-│   └── _tasks[i] → CMTask#i  ─→ _task_queue → queues[i]
-│                                  ↑ 同一份队列，两处引用
-│
-├── _concurrent_workers (WorkGang)       ← 线程池，管实际 OS 线程
-│   └── GangWorker[0..M-1]               ← M = ConcGCThreads (≤ N)
-│
-└── _terminator   (ParallelTaskTerminator) ← 全部 worker 完成的判定
++-- _task_queues  (G1CMTaskQueueSet)     ← 管理全部队列，供偷活用
+|   +-- queues[0..N-1]                    ← N = ParallelGCThreads 个队列
+|
++-- _tasks[]      (G1CMTask* 数组)       ← 标记逻辑载体，每个绑一个队列
+|   +-- _tasks[i] → CMTask#i  -→ _task_queue → queues[i]
+|                                  ↑ 同一份队列，两处引用
+|
++-- _concurrent_workers (WorkGang)       ← 线程池，管实际 OS 线程
+|   +-- GangWorker[0..M-1]               ← M = ConcGCThreads (≤ N)
+|
++-- _terminator   (ParallelTaskTerminator) ← 全部 worker 完成的判定
 ```
 
 - `_task_queues`：N 个队列的集合，每个队列无锁——自己操作自己的不竞争
@@ -626,13 +626,13 @@ do {
 (3) drain_global_stack()       排空全局 Mark Stack（其他 worker 卸载的，§5）
 ↓
 主循环:
-  ├── 持有 Region？→ bitmap_closure 遍历该 Region，找已标记的对象
-  │                    → 对每个已标对象调 oop_closure 扫其引用字段
-  │                    → 引用的新对象标记到 _next，push 到本地队列
-  ├── drain_local_queue() / drain_global_stack()
-  ├── 没有 Region 了？→ _cm->claim_region(worker_id) 认领下一个 Region
-  ├── 所有 Region 扫完了？→ try_stealing() 偷别人的队列（§4.4）
-  └── 也没有可偷的 → offer_termination() 请求终止（§4.5）
+  +-- 持有 Region？→ bitmap_closure 遍历该 Region，找已标记的对象
+  |                    → 对每个已标对象调 oop_closure 扫其引用字段
+  |                    → 引用的新对象标记到 _next，push 到本地队列
+  +-- drain_local_queue() / drain_global_stack()
+  +-- 没有 Region 了？→ _cm->claim_region(worker_id) 认领下一个 Region
+  +-- 所有 Region 扫完了？→ try_stealing() 偷别人的队列（§4.4）
+  +-- 也没有可偷的 → offer_termination() 请求终止（§4.5）
 ```
 
 **关键**：GC Root 的标记在 Init Mark Young GC（§3.3）和 scan_root_regions（§3.5 (2)）中已经完成。到这一步时，`_next` 位图里已经有最初一批被标的对象了。
@@ -682,10 +682,10 @@ typedef GenericTaskQueue<G1TaskQueueEntry, mtGC> G1CMTaskQueue;
 
 ```
            _age (volatile Age)    _bottom (volatile uint)
-         ┌──────────────────┐     ┌──┐
-         │ _top (uint)      │     │  │ ← 本地端，owner push/pop_local
-         │ _tag (uint,版本号)│     └──┘
-         └──────────────────┘        ↗ push: if dirty<max_elems → _elems[bot]=t, _bottom++
+         +------------------+     +--+
+         | _top (uint)      |     |  | ← 本地端，owner push/pop_local
+         | _tag (uint,版本号)|     +--+
+         +------------------+        ↗ push: if dirty<max_elems → _elems[bot]=t, _bottom++
   _elems [0][1][2]...[N-1]          ↙  pop_local: _bottom--, 读 _elems[bottom]
          ↑
     pop_global: CAS _age, top++, 读 _elems[old_top]
@@ -755,7 +755,7 @@ Stealer（偷活者）用 `pop_global()` 从顶部取——**FIFO**，偷的是�
 ```
 Worker A (空闲)                          Worker B (忙碌)
   本地队列: [空]                          本地队列: [obj1, obj2, obj3, obj4, ...]
-  全局栈取不到  ───────────────────────────→
+  全局栈取不到  ---------------------------→
               → steal_best_of_2()          pop_global() → 从 B 的队列顶部偷一个
               ← 偷到 obj1 ←
               标记 obj1 → 发现新引用 → push 到自己的队列 → 继续干活
@@ -835,13 +835,13 @@ class G1CMMarkStack {
 
 ```
 TaskQueueEntryChunk[0]     TaskQueueEntryChunk[1]
-┌─────────────────┐     ┌─────────────────┐
-│ data[0]          │     │ data[0]          │
-│ data[1]          │     │ data[1]          │
-│ ...              │     │ ...              │
-│ data[1022]       │     │ data[1022]       │
-│ next → chunk[1]  │     │ next → chunk[2]  │
-└─────────────────┘     └─────────────────┘
++-----------------+     +-----------------+
+| data[0]          |     | data[0]          |
+| data[1]          |     | data[1]          |
+| ...              |     | ...              |
+| data[1022]       |     | data[1022]       |
+| next → chunk[1]  |     | next → chunk[2]  |
++-----------------+     +-----------------+
 ```
 
 两个链表：
@@ -856,9 +856,9 @@ TaskQueueEntryChunk[0]     TaskQueueEntryChunk[1]
 
 ```
 1. 从 _free_list 取一个空闲 chunk
-   ├── 有 → 直接拿来用
-   └── 无 → allocate_new_chunk() 从 _base 内存按 _hwm 分配新 chunk
-         └── 仍分配不到 → 返回 false（触发 overflow）
+   +-- 有 → 直接拿来用
+   +-- 无 → allocate_new_chunk() 从 _base 内存按 _hwm 分配新 chunk
+         +-- 仍分配不到 → 返回 false（触发 overflow）
 
 2. Copy::conjoint_memory_atomic → 把 arr 的 1023 个 entry 拷贝到 chunk
 
@@ -869,8 +869,8 @@ TaskQueueEntryChunk[0]     TaskQueueEntryChunk[1]
 
 ```
 1. 从 _chunk_list 移除头部 chunk
-   ├── 有 → 取出数据
-   └── 无 → 返回 false
+   +-- 有 → 取出数据
+   +-- 无 → 返回 false
 
 2. Copy::conjoint_memory_atomic → 把 chunk 的 1023 个 entry 拷贝到 arr
 
@@ -1065,13 +1065,13 @@ _concurrent_workers->initialize_workers();  // 创建 OS 线程
 
 ```
 WorkGang
-├── _dispatcher: GangTaskDispatcher       ← 协调者：发/收信号
-│     ├── _start_semaphore (Semaphore)    ← worker 等在这里
-│     ├── _end_semaphore   (Semaphore)    ← 协调者等在这里（阻塞到全完成）
-│     └── _task, _not_finished, _started  ← 共享状态
-│
-└── _workers[]: GangWorker[_total_workers]   ← 线程数组（继承自 AbstractWorkGang）
-      └── 每个 GangWorker 执行 loop():
++-- _dispatcher: GangTaskDispatcher       ← 协调者：发/收信号
+|     +-- _start_semaphore (Semaphore)    ← worker 等在这里
+|     +-- _end_semaphore   (Semaphore)    ← 协调者等在这里（阻塞到全完成）
+|     +-- _task, _not_finished, _started  ← 共享状态
+|
++-- _workers[]: GangWorker[_total_workers]   ← 线程数组（继承自 AbstractWorkGang）
+      +-- 每个 GangWorker 执行 loop():
             while (true) {
                 wait_for_task()           ← block on _start_semaphore
                 task->work(worker_id)     ← 执行实际任务

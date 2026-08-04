@@ -914,11 +914,11 @@ AQS 的结点有一个 `waitStatus` 状态机（`CANCELLED/SIGNAL/CONDITION/PROP
 
 ```
 Monitor
-  ├─ SplitWord   _LockWord      ← 锁状态(最低位) + 等待队列指针(高位)
-  ├─ Thread*     _owner         ← 当前持有者 (NULL=空闲)
-  ├─ ParkEvent*  _EntryList     ← 等待获取锁的 ParkEvent 链表
-  ├─ ParkEvent*  _OnDeck        ← 下一个继承人 (最多一个)
-  └─ ParkEvent*  _WaitSet       ← 条件变量的等待集合（仅 Monitor 使用，Mutex 禁用）
+  +- SplitWord   _LockWord      ← 锁状态(最低位) + 等待队列指针(高位)
+  +- Thread*     _owner         ← 当前持有者 (NULL=空闲)
+  +- ParkEvent*  _EntryList     ← 等待获取锁的 ParkEvent 链表
+  +- ParkEvent*  _OnDeck        ← 下一个继承人 (最多一个)
+  +- ParkEvent*  _WaitSet       ← 条件变量的等待集合（仅 Monitor 使用，Mutex 禁用）
 ```
 
 > **不是两套锁机制——Mutex 就是 Monitor 的子类。** JVM 里只有一套锁体系。`Monitor` 是基类（有 `lock/unlock` + `wait/notify`），`Mutex` 继承了它但把 `wait/notify` 禁用了：

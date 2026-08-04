@@ -6,8 +6,8 @@ Stage 3 结束时，JVM 的 OS 层基础设施已经全部就绪——信号处�
 
 ```
 Java 进程 (PID=xxx)
-├─ 原始线程 (LWP-1)            : 阻塞在 pthread_join
-└─ 新 pthread (LWP-2)         : 正在执行 Threads::create_vm（就是我们）
++- 原始线程 (LWP-1)            : 阻塞在 pthread_join
++- 新 pthread (LWP-2)         : 正在执行 Threads::create_vm（就是我们）
 ```
 
 LWP-2 是由 `CallJavaMainInNewThread()` 中的 `pthread_create` 创建的。它是调用 `JavaMain()` → `InitializeJVM()` → `JNI_CreateJavaVM()` → `Threads::create_vm()` 的线程，也将是 Java 程序员眼中的"main 线程"——最终它会执行 `main(String[] args)`。LWP-1 永远不会变成 `JavaThread`，它唯一的使命是 `pthread_join` 等 LWP-2 结束。
@@ -124,13 +124,13 @@ HotSpot 用 Thread-SMR（Safe Memory Reclamation）解决这个问题。核心�
 
 ```
 vm_init_globals()
-├── check_ThreadShadow()        — 验证 _pending_exception 偏移正确
-├── basic_types_init()          — 验证基本类型大小 + 设置 heapOopSize
-├── eventlog_init()             — 创建四类 EventLog 环形缓冲区
-├── mutex_init()                — 分配 ~80 个全局 Mutex/Monitor，确定加锁全序
-├── chunkpool_init()            — 初始化 Arena 块池
-├── perfMemory_init()           — 创建 PerfData 共享内存（jstat 可见）
-└── SuspendibleThreadSet_init() — 初始化可挂起线程集合
++-- check_ThreadShadow()        — 验证 _pending_exception 偏移正确
++-- basic_types_init()          — 验证基本类型大小 + 设置 heapOopSize
++-- eventlog_init()             — 创建四类 EventLog 环形缓冲区
++-- mutex_init()                — 分配 ~80 个全局 Mutex/Monitor，确定加锁全序
++-- chunkpool_init()            — 初始化 Arena 块池
++-- perfMemory_init()           — 创建 PerfData 共享内存（jstat 可见）
++-- SuspendibleThreadSet_init() — 初始化可挂起线程集合
 ```
 
 ### check_ThreadShadow — 偏移验证
@@ -741,37 +741,37 @@ class Arena : public CHeapObj<mtNone> {
 
 ```
 new (mtThread) ResourceArea()
-  │
-  │ 1. placement new: 在 C-Heap 上分配 ResourceArea 对象本身（约 48 字节）
-  │    (mtThread) → NMT 把这 48 字节标记为 mtThread 类型
-  │
-  ├─ 2. ResourceArea::ResourceArea(flags) → Arena::Arena(flags)
-  │
-  ├─ 3. Arena 构造函数内:
-  │      _first = _chunk = new (..., Chunk::init_size) Chunk(Chunk::init_size)
-  │                                          │                └── Chunk(_len=984)
-  │                                          └── 参数 length=984, 走 Chunk::operator new
-  │
-  ├─ 4. Chunk::operator new(size=16, length=984):
-  │      switch(984) → case Chunk::init_size → ChunkPool::small_pool()
-  │                                              └── allocate(1000)
-  │
-  ├─ 5. ChunkPool::small_pool()->allocate(1000):
-  │      get_first() → NULL (首次分配，池空)
-  │      → os::malloc(1000, mtChunk)
-  │      → 返回 1000 字节的原始内存
-  │
-  ├─ 6. Chunk 构造函数在这块内存上执行:
-  │      _len = 984, _next = NULL
-  │   
-  │
-  ├─ 7. Arena 设置三个指针:
-  │      _first = _chunk = 这个 Chunk 的地址
-  │      _hwm  = _chunk->bottom()   → 指向数据区起点
-  │      _max  = _chunk->top()      → 指向数据区终点
-  │      撞针就位，分配就绪
-  │
-  └─ 8. 结果:
+  |
+  | 1. placement new: 在 C-Heap 上分配 ResourceArea 对象本身（约 48 字节）
+  |    (mtThread) → NMT 把这 48 字节标记为 mtThread 类型
+  |
+  +- 2. ResourceArea::ResourceArea(flags) → Arena::Arena(flags)
+  |
+  +- 3. Arena 构造函数内:
+  |      _first = _chunk = new (..., Chunk::init_size) Chunk(Chunk::init_size)
+  |                                          |                +-- Chunk(_len=984)
+  |                                          +-- 参数 length=984, 走 Chunk::operator new
+  |
+  +- 4. Chunk::operator new(size=16, length=984):
+  |      switch(984) → case Chunk::init_size → ChunkPool::small_pool()
+  |                                              +-- allocate(1000)
+  |
+  +- 5. ChunkPool::small_pool()->allocate(1000):
+  |      get_first() → NULL (首次分配，池空)
+  |      → os::malloc(1000, mtChunk)
+  |      → 返回 1000 字节的原始内存
+  |
+  +- 6. Chunk 构造函数在这块内存上执行:
+  |      _len = 984, _next = NULL
+  |   
+  |
+  +- 7. Arena 设置三个指针:
+  |      _first = _chunk = 这个 Chunk 的地址
+  |      _hwm  = _chunk->bottom()   → 指向数据区起点
+  |      _max  = _chunk->top()      → 指向数据区终点
+  |      撞针就位，分配就绪
+  |
+  +- 8. 结果:
        一个 Arena 对象 (48 字节) 在 C-Heap 上
        一个 Chunk (1000 字节) 在 C-Heap 上，通过 ChunkPool
        撞针 _hwm 指向 Chunk 数据区起点——下一步可以直接 Amalloc()
@@ -855,32 +855,32 @@ HandleArea 的首个 Chunk 更小——`HandleArea(HandleArea* prev) : Arena(mtT
 ```
 一个 Arena 的生命周期:
 
- ┌─ Arena 构造
- │    _first = _chunk = new Chunk(init_size)  ← small_pool, 984 字节
- │    _hwm = _chunk->bottom()
- │    _max = _chunk->top()
- │
- │  Amalloc(64) × N
- │    _hwm → _hwm+64 → _hwm+128 → ...
- │    直到 _hwm + 64 > _max
- │
- ├─ grow(64)
- │    新 Chunk from large_pool (32728 字节)
- │    链表: _first → Chunk1(984) → Chunk2(32728) ← _chunk
- │    _hwm 重置到新块起点
- │
- │  Amalloc(64) × M
- │    在新块上继续推进
- │
- ├─ grow(64) again
- │    链表: _first → Chunk1 → Chunk2 → Chunk3 ← _chunk
- │
+ +- Arena 构造
+ |    _first = _chunk = new Chunk(init_size)  ← small_pool, 984 字节
+ |    _hwm = _chunk->bottom()
+ |    _max = _chunk->top()
+ |
+ |  Amalloc(64) × N
+ |    _hwm → _hwm+64 → _hwm+128 → ...
+ |    直到 _hwm + 64 > _max
+ |
+ +- grow(64)
+ |    新 Chunk from large_pool (32728 字节)
+ |    链表: _first → Chunk1(984) → Chunk2(32728) ← _chunk
+ |    _hwm 重置到新块起点
+ |
+ |  Amalloc(64) × M
+ |    在新块上继续推进
+ |
+ +- grow(64) again
+ |    链表: _first → Chunk1 → Chunk2 → Chunk3 ← _chunk
+ |
 
 ![Arena 生命周期](assets/arena-lifecycle.png)
 
 同一个 Arena 的链表中混着不同大小的 Chunk：首个 984 字节，grow 创建的 Chunk 用 `MAX2(x, Chunk::size)` 至少 32728 字节——所以正常场景下后续全是 32728 字节。
 
- ── Arena 析构
+ -- Arena 析构
       遍历链表，delete 每个 Chunk
       → ChunkPool 回收: _num_chunks++ (最多保留 5 个)
       → 池中空闲块可被新 Arena 复用
@@ -1481,8 +1481,8 @@ _MuxEvent    = ParkEvent::Allocate(this);
 ```cpp
 _hashStateX = os::random();          // 线程本地随机数种子（第一阶段）
 _hashStateY = 842502087;             // Marsaglia XorShift 算法的固定常量
-_hashStateZ = 0x8767;                // └─ 来自经典论文《Xorshift RNGs》
-_hashStateW = 273326509;             // └─ 四元组确保足够的周期和随机性
+_hashStateZ = 0x8767;                // +- 来自经典论文《Xorshift RNGs》
+_hashStateW = 273326509;             // +- 四元组确保足够的周期和随机性
 ```
 
 HotSpot 用 Marsaglia 的 XorShift 算法生成线程本地的伪随机数——每个线程有自己的 `_hashStateX/Y/Z/W` 四元组，不需要全局锁。
@@ -1858,11 +1858,11 @@ main_thread->set_active_handles(JNIHandleBlock::allocate_block());
 
 ```
 JNIHandleBlock
-├── oop  _handles[32];           // 固定 32 个槽位的 oop 数组
-├── JNIHandleBlock* _next;       // 下一个块（链表，32 个不够时可扩展）
-├── int  _top;                   // 当前已用槽位数（0-32）
-├── int  _free_list;             // 空闲槽位链表（复用已释放的 slot）
-└── int  _allocate_before_rebuild; // 在该块被回收前还允许分配多少次
++-- oop  _handles[32];           // 固定 32 个槽位的 oop 数组
++-- JNIHandleBlock* _next;       // 下一个块（链表，32 个不够时可扩展）
++-- int  _top;                   // 当前已用槽位数（0-32）
++-- int  _free_list;             // 空闲槽位链表（复用已释放的 slot）
++-- int  _allocate_before_rebuild; // 在该块被回收前还允许分配多少次
 ```
 
 GC 通过遍历每个线程的 `_active_handles` 链表来标记这些局部引用为 GC 根——确保 native 方法返回前，其创建的 JNI 局部引用不会被 GC 回收。`JNIHandleBlock` 的 32 槽位设计、链表扩展机制、`_free_list` 回收、GC 写更新细节见前置概念：三套 Handle 体系第 3 节。

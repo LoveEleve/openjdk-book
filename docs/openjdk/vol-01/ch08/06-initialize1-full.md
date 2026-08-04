@@ -11,15 +11,15 @@
 
 ```
 init_globals()
-  │
-  ├── ... codecache_init() → CodeCache::initialize()  // 建立三个堆
-  │
-  ├── stubRoutines_init1()          // ← 本文的主角。生成 call_stub 等核心桩
-  │     └── StubRoutines::initialize1()
-  │
-  ├── ... interpreter_init()        // 解释器启动——call_stub 已可用
-  │
-  └── ... call_initPhase1() → JavaCalls::call_static() → needs call_stub（此时必须可用）
+  |
+  +-- ... codecache_init() → CodeCache::initialize()  // 建立三个堆
+  |
+  +-- stubRoutines_init1()          // ← 本文的主角。生成 call_stub 等核心桩
+  |     +-- StubRoutines::initialize1()
+  |
+  +-- ... interpreter_init()        // 解释器启动——call_stub 已可用
+  |
+  +-- ... call_initPhase1() → JavaCalls::call_static() → needs call_stub（此时必须可用）
 ```
 
 **为什么 call_stub 必须在这时候可用？**
@@ -444,30 +444,30 @@ static address _fence_entry;
 
 ```
 初始化前：StubRoutines 表中所有 address 字段 = NULL
-  │
-  ├─ 01-stub-what-is.md
-  │   解释了为什么需要 stub、address 是什么、三种帧类型
-  │
-  ├─ 02-stubroutines-table.md
-  │   解释 StubRoutines 这张表本身：字段分类、读写模式、AllStatic 模式
-  │
-  ├─ 03-bufferblob-create.md
-  │   解释 BufferBlob::create 怎么从 CodeCache 的 NonNMethod 堆分配可执行内存
-  │   CodeBlobLayout 怎么把裸内存切成 header + payload
-  │
-  ├─ 04-code-writing-chain.md
-  │   解释怎么往 payload 里写 x86 机器码：
-  │     CodeSection（三指针追踪写入位置）
-  │     → Assembler（不用手翻 Intel 手册）
-  │     → CodeBuffer（三段管理）
-  │     → StubCodeGenerator + __ 宏（一行写作）
-  │
-  ├─ 05-stubgenerator.md
-  │   解释 StubGenerator 怎么一次性生成 17+ 个桩
-  │   每个桩的 StubCodeMark 怎么记录边界
-  │   generate_initial() 怎么把所有入口地址填回 StubRoutines 表
-  │
-  └─ 06-initialize1-full.md（本文）
+  |
+  +- 01-stub-what-is.md
+  |   解释了为什么需要 stub、address 是什么、三种帧类型
+  |
+  +- 02-stubroutines-table.md
+  |   解释 StubRoutines 这张表本身：字段分类、读写模式、AllStatic 模式
+  |
+  +- 03-bufferblob-create.md
+  |   解释 BufferBlob::create 怎么从 CodeCache 的 NonNMethod 堆分配可执行内存
+  |   CodeBlobLayout 怎么把裸内存切成 header + payload
+  |
+  +- 04-code-writing-chain.md
+  |   解释怎么往 payload 里写 x86 机器码：
+  |     CodeSection（三指针追踪写入位置）
+  |     → Assembler（不用手翻 Intel 手册）
+  |     → CodeBuffer（三段管理）
+  |     → StubCodeGenerator + __ 宏（一行写作）
+  |
+  +- 05-stubgenerator.md
+  |   解释 StubGenerator 怎么一次性生成 17+ 个桩
+  |   每个桩的 StubCodeMark 怎么记录边界
+  |   generate_initial() 怎么把所有入口地址填回 StubRoutines 表
+  |
+  +- 06-initialize1-full.md（本文）
       全局预览：逐行拆解 13 行代码
       完整案例：执行前后全局状态变化
 ```

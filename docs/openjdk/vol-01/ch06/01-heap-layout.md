@@ -1674,10 +1674,10 @@ BufferBlob* BufferBlob::create(const char* name, int buffer_size) {
 ```
 NonNMethod 堆中分配到的地址 (start)
   |
-  ├── [BufferBlob C++ 对象]  ← header，sizeof(BufferBlob) 字节
+  +-- [BufferBlob C++ 对象]  ← header，sizeof(BufferBlob) 字节
   |       _content_offset = align_code_offset(header_size)
   |
-  ├── [payload]              ← content_begin() 从这里开始
+  +-- [payload]              ← content_begin() 从这里开始
   |       大小 = align_up(ICache::stub_size, oopSize)
   |       可以往里写机器码
 ```

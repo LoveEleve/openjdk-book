@@ -16,14 +16,14 @@ ch04 总览已经讲过：`init_globals()` 的 30 个子函数按依赖链分为
 
 ```
 universe_init()
-├─ JavaClasses::compute_hard_coded_offsets()
-├─ Universe::initialize_heap()          // ← 本文的主角
-├─ SystemDictionary::initialize_oop_storage()
-├─ Metaspace::global_initialize()
-├─ ClassLoaderData::init_null_class_loader_data()
-├─ 6× new LatestMethodCache()
-├─ SymbolTable/StringTable::create_table()
-└─ ResolvedMethodTable::create_table()
++- JavaClasses::compute_hard_coded_offsets()
++- Universe::initialize_heap()          // ← 本文的主角
++- SystemDictionary::initialize_oop_storage()
++- Metaspace::global_initialize()
++- ClassLoaderData::init_null_class_loader_data()
++- 6× new LatestMethodCache()
++- SymbolTable/StringTable::create_table()
++- ResolvedMethodTable::create_table()
 ```
 
 `universe_init()` 是阶段 6 的中枢，因为它建立了后续所有 Java 代码运行的物质基础——堆（对象分配）、Metaspace（Klass/metadata）、符号表（字符串和符号的 intern）、方法缓存（反射调用 Java 方法的 fast path）。
@@ -116,42 +116,42 @@ universe_init()
 
 ```
 Universe::initialize_heap()   ← universe_init() 调用
-│
-├─ [阶段 1] create_heap()                          ← 本文下面第 3 节展开
-│   └─ GCConfig::arguments()->create_heap()
-│       └─ G1Arguments::create_heap()
-│           └─ create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()
-│               ├─ new G1CollectorPolicy()          → ch10/02 详讲
-│               │   ├─ setup_heap_region_size()     → ch10/02 详讲
-│               │   └─ setup_remset_size()          → ch10/02 详讲
-│               └─ new G1CollectedHeap(policy)     → ch10/03 详讲
-│
-├─ [阶段 2] _collectedHeap->initialize()            ← G1CollectedHeap::initialize()
-│   │ 201 行，是整个 initialize_heap 中最重的一步   → ch10/03-05 详讲
-│   │
-│   ├─ Universe::reserve_heap()                     → ch10/03 详讲
-│   │   └─ ReservedHeapSpace → mmap                 → ch10/03 详讲
-│   │
-│   ├─ 6 个 G1RegionToSpaceMapper                   → ch10/04 详讲
-│   │   └─ HeapRegionManager::initialize()
-│   │
-│   ├─ G1ConcurrentMark(~150行)                     → ch10/05 详讲
-│   │   └─ SATB / DirtyCard 队列初始化
-│   │
-│   ├─ ConcurrentRefinement 线程                     → ch10/05 详讲
-│   ├─ expand(init_byte_size) —— 真正 commit 物理页  → ch10/05 详讲
-│   └─ g1_policy()->init()                          → ch10/05 详讲
-│
-├─ [阶段 3] ThreadLocalAllocBuffer::set_max_size()   ← G1 视角：humongous threshold
-│
-├─ [阶段 4] Compressed Oops 编码设置                  → ch10/06 详讲
-│   ├─ narrow_oop_shift / narrow_oop_base 设置
-│   └─ narrow_ptrs_base 同步
-│
-└─ [阶段 5] ThreadLocalAllocBuffer::startup_initialization()
-    ├─ _target_refills 计算                          → ch10/06 详讲
-    ├─ GlobalTLABStats 创建                           → ch10/06 详讲
-    └─ 主线程 TLAB 重新初始化                         → ch10/06 详讲
+|
++- [阶段 1] create_heap()                          ← 本文下面第 3 节展开
+|   +- GCConfig::arguments()->create_heap()
+|       +- G1Arguments::create_heap()
+|           +- create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()
+|               +- new G1CollectorPolicy()          → ch10/02 详讲
+|               |   +- setup_heap_region_size()     → ch10/02 详讲
+|               |   +- setup_remset_size()          → ch10/02 详讲
+|               +- new G1CollectedHeap(policy)     → ch10/03 详讲
+|
++- [阶段 2] _collectedHeap->initialize()            ← G1CollectedHeap::initialize()
+|   | 201 行，是整个 initialize_heap 中最重的一步   → ch10/03-05 详讲
+|   |
+|   +- Universe::reserve_heap()                     → ch10/03 详讲
+|   |   +- ReservedHeapSpace → mmap                 → ch10/03 详讲
+|   |
+|   +- 6 个 G1RegionToSpaceMapper                   → ch10/04 详讲
+|   |   +- HeapRegionManager::initialize()
+|   |
+|   +- G1ConcurrentMark(~150行)                     → ch10/05 详讲
+|   |   +- SATB / DirtyCard 队列初始化
+|   |
+|   +- ConcurrentRefinement 线程                     → ch10/05 详讲
+|   +- expand(init_byte_size) —— 真正 commit 物理页  → ch10/05 详讲
+|   +- g1_policy()->init()                          → ch10/05 详讲
+|
++- [阶段 3] ThreadLocalAllocBuffer::set_max_size()   ← G1 视角：humongous threshold
+|
++- [阶段 4] Compressed Oops 编码设置                  → ch10/06 详讲
+|   +- narrow_oop_shift / narrow_oop_base 设置
+|   +- narrow_ptrs_base 同步
+|
++- [阶段 5] ThreadLocalAllocBuffer::startup_initialization()
+    +- _target_refills 计算                          → ch10/06 详讲
+    +- GlobalTLABStats 创建                           → ch10/06 详讲
+    +- 主线程 TLAB 重新初始化                         → ch10/06 详讲
 ```
 
 ### 2.3 各个阶段的定位
@@ -183,19 +183,19 @@ CollectedHeap* Universe::create_heap() {
 
 ```
 Universe::create_heap()
-  └─ GCConfig::arguments()
-       │
-       └─→ 返回选中的 GCArguments*（这里 = G1Arguments*）
-            └─ G1Arguments::create_heap()
-                 └─ create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()
-                      ├─ new G1CollectorPolicy()
-                      │    ├─ HeapRegion::setup_heap_region_size()
-                      │    │    └─ 决定 Region 大小 (1/2/4/8/16/32 MB)
-                      │    └─ HeapRegionRemSet::setup_remset_size()
-                      │         └─ 决定 RSet 表容量
-                      │
-                      └─ new G1CollectedHeap(policy)
-                           └─ 92 行构造函数
+  +- GCConfig::arguments()
+       |
+       +-→ 返回选中的 GCArguments*（这里 = G1Arguments*）
+            +- G1Arguments::create_heap()
+                 +- create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()
+                      +- new G1CollectorPolicy()
+                      |    +- HeapRegion::setup_heap_region_size()
+                      |    |    +- 决定 Region 大小 (1/2/4/8/16/32 MB)
+                      |    +- HeapRegionRemSet::setup_remset_size()
+                      |         +- 决定 RSet 表容量
+                      |
+                      +- new G1CollectedHeap(policy)
+                           +- 92 行构造函数
 ```
 
 `GCConfig::arguments()` 返回的就是**被选中的那个 GC 的 Arguments 对象**——G1Arguments 在这里是 `FOR_EACH_SUPPORTED_GC` 循环中找到 `UseG1GC == true` 的那个。这个选择过程（`select_gc` + `SupportedGCs[]` 表）在 ch10/02 详讲。
@@ -228,42 +228,42 @@ Universe::create_heap()
 ### 4.1 22 个步骤的高层分组
 
 ```
-G1CollectedHeap::initialize()  201行 ──→ 22个步骤 ──→ 分入 ch10/03、04、05
-│
-├─ [ch10/03 详讲] 基本初始化 (步骤1-4)
-│   ├─ 1. os::enable_vtime() + Heap_lock 获取
-│   ├─ 2. 获取 init/max byte size + heap_alignment
-│   ├─ 3. 校验对齐(G1)
-│   └─ 4. Universe::reserve_heap(max_byte_size, alignment)
-│       → ReservedHeapSpace 创建 → OS 层面 mmap 预留虚拟地址空间
-│
-├─ [ch10/04 详讲] 内存映射体系 (步骤5-10)
-│   ├─ 5. G1CardTable + G1BarrierSet 创建
-│   ├─ 6. G1HotCardCache 创建
-│   ├─ 7. 6 个 G1RegionToSpaceMapper 创建
-│   │    (heap / BOT / cardtable / card_counts / prev_bitmap / next_bitmap)
-│   ├─ 8. HeapRegionManager::initialize()
-│   │    → _regions 数组 + _available_map 位图
-│   ├─ 9. CardTable 二次初始化 (绑定 cardtable_storage)
-│   └─ 10. Region 数量校验
-│
-├─ [ch10/05 详讲] 并发引擎 + 物理内存 (步骤11-18)
-│   ├─ 11. G1RemSet 创建并初始化
-│   ├─ 12. G1BlockOffsetTable 创建
-│   ├─ 13. CSet 快速判断 + Humongous 回收候选 初始化
-│   ├─ 14. G1ConcurrentMark 构造(~150行) ← 最重单步
-│   │    └─ 双缓冲位图 + G1ConcurrentMarkThread + WorkGang("G1 Conc")
-│   │       + MarkStackSize + per-worker G1CMTask/G1CMTaskQueue
-│   ├─ 15. expand(init_byte_size) —— commit 物理页
-│   ├─ 16. g1_policy()->init() —— 策略初始化
-│   ├─ 17. SATB 队列初始化
-│   └─ 18. ConcurrentRefinement 初始化
-│
-└─ [ch10/05 详讲] 收尾 (步骤19-22)
-    ├─ 19. Young RemSet Sampling 线程
-    ├─ 20. DirtyCard 双队列初始化
-    ├─ 21. Dummy Region + 分配器初始化
-    └─ 22. G1MonitoringSupport + StringDedup + preserved marks
+G1CollectedHeap::initialize()  201行 --→ 22个步骤 --→ 分入 ch10/03、04、05
+|
++- [ch10/03 详讲] 基本初始化 (步骤1-4)
+|   +- 1. os::enable_vtime() + Heap_lock 获取
+|   +- 2. 获取 init/max byte size + heap_alignment
+|   +- 3. 校验对齐(G1)
+|   +- 4. Universe::reserve_heap(max_byte_size, alignment)
+|       → ReservedHeapSpace 创建 → OS 层面 mmap 预留虚拟地址空间
+|
++- [ch10/04 详讲] 内存映射体系 (步骤5-10)
+|   +- 5. G1CardTable + G1BarrierSet 创建
+|   +- 6. G1HotCardCache 创建
+|   +- 7. 6 个 G1RegionToSpaceMapper 创建
+|   |    (heap / BOT / cardtable / card_counts / prev_bitmap / next_bitmap)
+|   +- 8. HeapRegionManager::initialize()
+|   |    → _regions 数组 + _available_map 位图
+|   +- 9. CardTable 二次初始化 (绑定 cardtable_storage)
+|   +- 10. Region 数量校验
+|
++- [ch10/05 详讲] 并发引擎 + 物理内存 (步骤11-18)
+|   +- 11. G1RemSet 创建并初始化
+|   +- 12. G1BlockOffsetTable 创建
+|   +- 13. CSet 快速判断 + Humongous 回收候选 初始化
+|   +- 14. G1ConcurrentMark 构造(~150行) ← 最重单步
+|   |    +- 双缓冲位图 + G1ConcurrentMarkThread + WorkGang("G1 Conc")
+|   |       + MarkStackSize + per-worker G1CMTask/G1CMTaskQueue
+|   +- 15. expand(init_byte_size) —— commit 物理页
+|   +- 16. g1_policy()->init() —— 策略初始化
+|   +- 17. SATB 队列初始化
+|   +- 18. ConcurrentRefinement 初始化
+|
++- [ch10/05 详讲] 收尾 (步骤19-22)
+    +- 19. Young RemSet Sampling 线程
+    +- 20. DirtyCard 双队列初始化
+    +- 21. Dummy Region + 分配器初始化
+    +- 22. G1MonitoringSupport + StringDedup + preserved marks
 ```
 
 ### 4.2 三个"为什么"
@@ -326,26 +326,26 @@ ThreadLocalAllocBuffer::startup_initialization();
 
 ```
 阶段 1 (create_heap)
-  │  Region 大小确定了、G1CollectedHeap 对象存在了
-  │
-  ├──→ 阶段 2 (initialize)
-  │      │  用 Region 大小(GrainBytes)创建 6 个 Mapper
-  │      │  ↓
-  │      ├──→ HeapRegionManager 初始化（需要 Mapper 的 reserved regions）
-  │      │      │  ↓
-  │      │      ├──→ G1ConcurrentMark 创建（需要 max_regions() 来分配 per-region 结构）
-  │      │      │    ↓
-  │      │      ├──→ expand(init_byte_size)（需要 _workers 已创建）
-  │      │      │    ↓
-  │      │      └──→ g1_policy()->init()（需要 expand 后的 free region 数量）
-  │      │
-  │      └──→ 阶段 2 结束：堆内存已预留、GC 线程已创建、并发标记就绪
-  │            │
-  ├─────────────┴──→ 阶段 3 (set_max_size) ← 需要 heap 已初始化以调用 max_tlab_size()
-  │                       │
-  │                       ├──→ 阶段 4 (CompressedOops) ← 需要 heap 地址范围以判断模式
-  │                       │
-  │                       └──→ 阶段 5 (TLAB startup) ← 需要 heap 已初始化
+  |  Region 大小确定了、G1CollectedHeap 对象存在了
+  |
+  +--→ 阶段 2 (initialize)
+  |      |  用 Region 大小(GrainBytes)创建 6 个 Mapper
+  |      |  ↓
+  |      +--→ HeapRegionManager 初始化（需要 Mapper 的 reserved regions）
+  |      |      |  ↓
+  |      |      +--→ G1ConcurrentMark 创建（需要 max_regions() 来分配 per-region 结构）
+  |      |      |    ↓
+  |      |      +--→ expand(init_byte_size)（需要 _workers 已创建）
+  |      |      |    ↓
+  |      |      +--→ g1_policy()->init()（需要 expand 后的 free region 数量）
+  |      |
+  |      +--→ 阶段 2 结束：堆内存已预留、GC 线程已创建、并发标记就绪
+  |            |
+  +-------------+--→ 阶段 3 (set_max_size) ← 需要 heap 已初始化以调用 max_tlab_size()
+  |                       |
+  |                       +--→ 阶段 4 (CompressedOops) ← 需要 heap 地址范围以判断模式
+  |                       |
+  |                       +--→ 阶段 5 (TLAB startup) ← 需要 heap 已初始化
 ```
 
 关键时序约束：
@@ -370,24 +370,24 @@ ThreadLocalAllocBuffer::startup_initialization();
 
 ```
 01 本文（全景）
-│
-├─→ 02 G1 Region 与策略
-│    └─ setup_heap_region_size(47行) + setup_remset_size(13行) + initialize_all
-│
-├─→ 03 G1 骨干构建
-│    └─ G1CollectedHeap 构造函数(92行) + Universe::reserve_heap
-│
-├─→ 04 G1 内存映射体系
-│    └─ 6 个 Mapper + HeapRegionManager + CardTable + BarrierSet
-│
-├─→ 05 G1 并发标记初始化
-│    └─ G1ConcurrentMark(~150行) + SATB/DirtyCard + ConcurrentRefinement + expand
-│
-├─→ 06 压缩指针与 TLAB
-│    └─ CompressedOops(G1 视角) + TLAB startup(G1 特殊行为)
-│
-└─→ 07 完整串联
-     └─ initialize_heap(62行) + G1::initialize(201行) 逐行拆解
+|
++-→ 02 G1 Region 与策略
+|    +- setup_heap_region_size(47行) + setup_remset_size(13行) + initialize_all
+|
++-→ 03 G1 骨干构建
+|    +- G1CollectedHeap 构造函数(92行) + Universe::reserve_heap
+|
++-→ 04 G1 内存映射体系
+|    +- 6 个 Mapper + HeapRegionManager + CardTable + BarrierSet
+|
++-→ 05 G1 并发标记初始化
+|    +- G1ConcurrentMark(~150行) + SATB/DirtyCard + ConcurrentRefinement + expand
+|
++-→ 06 压缩指针与 TLAB
+|    +- CompressedOops(G1 视角) + TLAB startup(G1 特殊行为)
+|
++-→ 07 完整串联
+     +- initialize_heap(62行) + G1::initialize(201行) 逐行拆解
 ```
 
 **下一篇 ch10/02 从 `G1CollectorPolicy` 的构造函数开始**——Region 大小怎么算、RSet 表容量怎么定、`initialize_all` 三阶段各自校验什么。

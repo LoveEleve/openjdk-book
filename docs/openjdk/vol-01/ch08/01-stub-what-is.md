@@ -37,16 +37,16 @@ void JavaCalls::call_helper(JavaValue* result, const methodHandle& method, ...) 
 
 ```
 Threads::create_vm()                          // thread.cpp:3702
-  ├── init_globals()                          // thread.cpp:3846
-  │     └── stubRoutines_init1()              // init.cpp:110  ← 这里创建 call_stub
-  │            └── 创建 call_stub 机器码，入口存入 _call_stub_entry
-  │
-  └── initialize_java_lang_classes()          // thread.cpp:3914
-        └── call_initPhase1()                 // thread.cpp:3674
-              └── JavaCalls::call_static()    // 调用 System.initPhase1()
-                    └── JavaCalls::call_helper()
-                          └── StubRoutines::call_stub()(args...)
-                                └── 跳进 call_stub 的 x86 机器码
+  +-- init_globals()                          // thread.cpp:3846
+  |     +-- stubRoutines_init1()              // init.cpp:110  ← 这里创建 call_stub
+  |            +-- 创建 call_stub 机器码，入口存入 _call_stub_entry
+  |
+  +-- initialize_java_lang_classes()          // thread.cpp:3914
+        +-- call_initPhase1()                 // thread.cpp:3674
+              +-- JavaCalls::call_static()    // 调用 System.initPhase1()
+                    +-- JavaCalls::call_helper()
+                          +-- StubRoutines::call_stub()(args...)
+                                +-- 跳进 call_stub 的 x86 机器码
 ```
 
 注意顺序：**`stubRoutines_init1()` 在 `call_initPhase1()` 之前执行**——System 类被初始化之前，call_stub 必须已经生成。如果此时 `_call_stub_entry` 还是 NULL，`call_helper` 会 `call` 到一个 NULL 地址，CPU 崩溃。整个 JVM 启动流程里，call_stub 的初始化必须排在所有 Java 方法调用之前——这就是为什么 `stubRoutines_init1()` 在 `init_globals()` 里排在如此靠前的位置（第 110 行，排在 CodeCache 初始化之后、universe 和解释器初始化之前）。
@@ -343,7 +343,7 @@ sub  rsp, 96      ; (3) 往下分配 96 字节，作为本函数的局部变量�
 低地址
 ```
 
-**① push rbp 之后：**
+**(1) push rbp 之后：**
 
 ```
 高地址
@@ -372,13 +372,13 @@ sub  rsp, 96      ; (3) 往下分配 96 字节，作为本函数的局部变量�
   [调用者的帧]
   [返回地址  ]
   [saved rbp]  ← rbp（帧基址——不变了）
-        ┐
-        │ ← 这 96 字节是 call_stub 的"草稿纸"：
-        │   [rbp-8]  存一个值
-        │   [rbp-16] 存另一个值
-        │   ...
-        │   [rbp-96] 存浮点控制寄存器
-        ┘
+        +
+        | ← 这 96 字节是 call_stub 的"草稿纸"：
+        |   [rbp-8]  存一个值
+        |   [rbp-16] 存另一个值
+        |   ...
+        |   [rbp-96] 存浮点控制寄存器
+        +
         ↑ rsp（栈顶——之后 push/sub 会往下继续长）
 低地址
 ```
@@ -441,11 +441,11 @@ sub  rsp, 96      ; (3) 往下分配 96 字节——rsp -= 96
   [rbp+0]  saved old rbp          ← (1) push rbp 保存的 call_helper 的 rbp
         ↑
         现在 rbp 指向这里 —— entry_frame 的基址
-  [rbp-8]                         ┐
-  [rbp-16]                        │
-  ...                             │ (3) sub rsp, 96 分配的
-  [rbp-88]                        │ 96 字节工作区
-  [rbp-96] ← rsp                  ┘
+  [rbp-8]                         +
+  [rbp-16]                        |
+  ...                             | (3) sub rsp, 96 分配的
+  [rbp-88]                        | 96 字节工作区
+  [rbp-96] ← rsp                  +
 低地址
 ```
 
@@ -552,7 +552,7 @@ rsp = 指向栈顶 Java 参数的下方
 (4) 设 rbx=Method*, r13=sender_sp, r15=JavaThread* → call rcx
 ```
 
-entry_frame 只是第①(2)步的"草稿纸"——call_stub 的本地工作区。第(3)步的 Java 参数是在 entry_frame **下方** push 到栈上的，第(4)步的跳转是最后一步。
+entry_frame 只是第(1)(2)步的"草稿纸"——call_stub 的本地工作区。第(3)步的 Java 参数是在 entry_frame **下方** push 到栈上的，第(4)步的跳转是最后一步。
 
 ### 4.4 Java 帧 —— 编译代码在 entry_frame 上方继续增长
 
@@ -576,18 +576,18 @@ entry_frame 只是第①(2)步的"草稿纸"——call_stub 的本地工作区�
   [param_size  ]             [param_size  ]           [param_size  ]           [param_size  ]
   [返回地址    ]  ← call push [返回地址    ]           [返回地址    ]           [返回地址    ]
 rbp→                rsp     [saved rbp   ]           [saved rbp   ]           [saved rbp   ]
-                          rbp→              ┐        [parameters  ]           [parameters  ]
-                            [parameters  ]  │        [entry_point ]           [entry_point ]
-                            [entry_point ]  │        [method      ]           [method      ]
-                            [method      ]  │entry   [result_type ]           [result_type ]
-                            [result_type ]  │frame   [result      ]           [result      ]
-                            [result      ]  │96B     [call_wrapper]           [call_wrapper]
-                            [call_wrapper]  │        [rbx_save    ]           [rbx_save    ]
-                            [rbx_save    ]  │        [r12_save    ]           [r12_save    ]
-                            [r12_save    ]  │        [r13_save    ]           [r13_save    ]
-                            [r14_save    ]  │        [r14_save    ]           [r14_save    ]
-                            [r15_save    ]  │        [r15_save    ]           [r15_save    ]
-                            [mxcsr_save  ]  ┘        [mxcsr_save  ]           [mxcsr_save  ]
+                          rbp→              +        [parameters  ]           [parameters  ]
+                            [parameters  ]  |        [entry_point ]           [entry_point ]
+                            [entry_point ]  |        [method      ]           [method      ]
+                            [method      ]  |entry   [result_type ]           [result_type ]
+                            [result_type ]  |frame   [result      ]           [result      ]
+                            [result      ]  |96B     [call_wrapper]           [call_wrapper]
+                            [call_wrapper]  |        [rbx_save    ]           [rbx_save    ]
+                            [rbx_save    ]  |        [r12_save    ]           [r12_save    ]
+                            [r12_save    ]  |        [r13_save    ]           [r13_save    ]
+                            [r14_save    ]  |        [r14_save    ]           [r14_save    ]
+                            [r15_save    ]  |        [r15_save    ]           [r15_save    ]
+                            [mxcsr_save  ]  +        [mxcsr_save  ]           [mxcsr_save  ]
                           rsp→                     rsp→                       [Java 参数   ]
                                                                               [返回地址    ]
                                                                            rbp→[saved rbp   ]
@@ -599,7 +599,7 @@ rbp→                rsp     [saved rbp   ]           [saved rbp   ]           
 ```
 
 四张图的变化：
-- **①→(2)**：栈往下长了 96+8=104 字节（saved rbp + entry_frame）
+- **(1)→(2)**：栈往下长了 96+8=104 字节（saved rbp + entry_frame）
 - **(2)→(3)**：栈没有变——entry_frame 槽位被填入了具体值，但 rsp 位置不变
 - **(3)→(4)**：栈往下长了 `Java参数大小 + 返回地址 + Java帧大小`——编译代码在 entry_frame 下方建立了自己的帧
 

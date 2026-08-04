@@ -58,10 +58,10 @@ commit 不传 `MAP_POPULATE`，所以物理帧在首次访问时由缺页中断�
 
 ```
 Universe::reserve_heap(8G, 4M)                ← G1 调用的入口
-  └─ ReservedHeapSpace(8G, 4M, ...)           ← 构造时执行 reserve
-       └─ ReservedSpace::initialize(8G, 4M)   ← 处理对齐、大页分支
-            └─ os::reserve_memory(8G, ...)    ← OS 抽象层
-                 └─ anon_mmap(NULL, 8G, ...)  ← 实际系统调用
+  +- ReservedHeapSpace(8G, 4M, ...)           ← 构造时执行 reserve
+       +- ReservedSpace::initialize(8G, 4M)   ← 处理对齐、大页分支
+            +- os::reserve_memory(8G, ...)    ← OS 抽象层
+                 +- anon_mmap(NULL, 8G, ...)  ← 实际系统调用
 ```
 
 其中 `ReservedHeapSpace` 是 `ReservedSpace` 的子类——构造时创建的是同一个 `ReservedSpace` 对象，子类只是在构造函数里额外调了 `initialize_compressed_heap`（因为 `UseCompressedOops` 在 8GB 堆下默认开启），reserve 的同时让堆底落在压缩编码可用的地址范围（ch10/16 详讲）。最底层的 `anon_mmap` 只有一个。

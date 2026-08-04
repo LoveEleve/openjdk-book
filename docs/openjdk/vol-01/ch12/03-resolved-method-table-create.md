@@ -37,8 +37,8 @@ RMT 的职责：同一个 Method* 会被反复解析（不同的 invokedynamic �
 
 ```
 ResolvedMethodName（Java 对象，堆里）
-├─ vmtarget: 指向 Method*（方法元数据）
-└─ vmholder: 指向类的镜像（保持元数据存活）
++- vmtarget: 指向 Method*（方法元数据）
++- vmholder: 指向类的镜像（保持元数据存活）
 ```
 
 它把"Method*"和"Java 对象"绑在一起——MethodHandle 体系（MemberName、LambdaForm）需要从 C++ 侧的 Method* 找到对应的 Java 对象，或反向查找。
@@ -96,17 +96,17 @@ ResolvedMethodTable()
 
 ```
 桶数组（1007 个 HashtableBucket，每个只装一个指针）
-└─ 桶 5: _entry ────────────┐
++- 桶 5: _entry ------------+
                             ↓
-                   ┌──────────────────────────┐   ┌──────────────────────────┐
-                   │ ResolvedMethodEntry #1    │   │ ResolvedMethodEntry #2    │
-                   │ _hash = 0x1234            │   │ _hash = 0x5678            │
-                   │ _next ────────────────────┼──→│ _next ──────────→ NULL    │
-                   │ _literal:                 │   │ _literal:                 │
-                   │   ClassLdrWeakHandle      │   │   ClassLdrWeakHandle      │
-                   │   (_obj = 槽位0xA000)     │   │   (_obj = 槽位0xB000)     │
-                   └──────────────────────────┘   └──────────────────────────┘
-                         │ _obj
+                   +--------------------------+   +--------------------------+
+                   | ResolvedMethodEntry #1    |   | ResolvedMethodEntry #2    |
+                   | _hash = 0x1234            |   | _hash = 0x5678            |
+                   | _next --------------------+--→| _next ----------→ NULL    |
+                   | _literal:                 |   | _literal:                 |
+                   |   ClassLdrWeakHandle      |   |   ClassLdrWeakHandle      |
+                   |   (_obj = 槽位0xA000)     |   |   (_obj = 槽位0xB000)     |
+                   +--------------------------+   +--------------------------+
+                         | _obj
                          ↓
              vm OopStorage 槽位 0xA000: [oop → ResolvedMethodName]
                          ↓
@@ -276,9 +276,9 @@ RMT            1007 硬编码   → 规模天然小，够用即可（不值得�
 ```
 ResolvedMethodTable 初始化全景:
   create_table()
-    └─ new ResolvedMethodTable()
-         ├─ 1007 桶经典哈希（Hashtable 家族，同 SymbolTable）
-         └─ ClassLoaderWeakHandle 弱引用（phantom 级，vm OopStorage）
+    +- new ResolvedMethodTable()
+         +- 1007 桶经典哈希（Hashtable 家族，同 SymbolTable）
+         +- ClassLoaderWeakHandle 弱引用（phantom 级，vm OopStorage）
 
 核心机制:
   查找  : 无锁遍历 + vmtarget 比对
@@ -291,4 +291,4 @@ ResolvedMethodTable 初始化全景:
   却因服务对象不同走上三条技术路线。
 ```
 
-三张 Table 的初始化到此讲完——它们是 `universe_init` 第⑩⑪步的全部内容，也是 JVM 启动主线上"数据结构就绪"的最后一环。
+三张 Table 的初始化到此讲完——它们是 `universe_init` 第(10)⑪步的全部内容，也是 JVM 启动主线上"数据结构就绪"的最后一环。

@@ -68,7 +68,7 @@ uint HeapRegionManager::expand_at(uint start, uint num_regions, WorkGang* pretou
 
 `make_regions_available()`（`heapRegionManager.cpp:121-147`）是 expand 的**核心**——把一段连续 Region Index 从"不可用"变成"可分配"。分三步：
 
-**① commit 物理内存**——6 个 Mapper 各自 commit 自己那片虚拟地址空间中对应该 Region 范围的物理页（§4.1）。
+**(1) commit 物理内存**——6 个 Mapper 各自 commit 自己那片虚拟地址空间中对应该 Region 范围的物理页（§4.1）。
 
 **(2) 创建 HeapRegion 对象**——`_regions` 偏置数组（`G1HeapRegionTable`）中对应 index 的位置还是 NULL——按需 `new_heap_region(i)` 创建 `HeapRegion` 对象填入。`if (NULL)` 检查是安全的：`expand()` 可能在运行时被多次调用（动态扩堆），之前的 Region 已经创建过了。
 
@@ -129,13 +129,13 @@ _prev_bitmap_mapper:      Region 0 → 页 0~3 (16MB/2048 = 8KB/region, 8KB/4KB 
 
 ```
 G1RegionToSpaceMapper（比如 prev_bitmap Mapper，自己空间 16MB）
-├── _commit_map (CHeapBitMap, hpp:54)   ← 下标按堆 Region Index
-│     _commit_map[5] = 1 表示 "堆 Region 5 在这 16MB 空间中对应的部分已 commit"（2 页）
-│     _commit_map[0] = 0 表示 "堆 Region 0 对应的部分还没 commit"
-│     ★ 追踪的是这 16MB，不是堆的 8GB
-│
-└── _storage (G1PageBasedVirtualSpace)
-    └── _committed (CHeapBitMap, vs.hpp:62)  ← 下标按自己空间的页号
++-- _commit_map (CHeapBitMap, hpp:54)   ← 下标按堆 Region Index
+|     _commit_map[5] = 1 表示 "堆 Region 5 在这 16MB 空间中对应的部分已 commit"（2 页）
+|     _commit_map[0] = 0 表示 "堆 Region 0 对应的部分还没 commit"
+|     ★ 追踪的是这 16MB，不是堆的 8GB
+|
++-- _storage (G1PageBasedVirtualSpace)
+    +-- _committed (CHeapBitMap, vs.hpp:62)  ← 下标按自己空间的页号
           _committed[10] = 1 表示 "这 16MB 空间里的页 10 已 commit"
 ```
 
@@ -206,7 +206,7 @@ for (uint i = start; i < start + num_regions; i++) {
 }
 ```
 
-**① `bottom_addr_for_region(i)` + `MemRegion`**——用简单算术算出 Region i 在堆上的物理区间（和 §4.2 创建 Region 对象时用的同一个公式，但这里 Region 对象已存在，只是算地址）。`MemRegion(bottom, bottom+4MB)` 就是这个 Region 覆盖的堆范围。
+**(1) `bottom_addr_for_region(i)` + `MemRegion`**——用简单算术算出 Region i 在堆上的物理区间（和 §4.2 创建 Region 对象时用的同一个公式，但这里 Region 对象已存在，只是算地址）。`MemRegion(bottom, bottom+4MB)` 就是这个 Region 覆盖的堆范围。
 
 **(2) `hr->initialize(mr)`**——把一个 Region 设成初始状态（`heapRegion.cpp:249-256`）。
 
@@ -282,7 +282,7 @@ HeapWord* G1BlockOffsetTablePart::initialize_threshold_raw() {
 
 第一个 Card 不需要 BOT 回退（0 = 从 Region 开头找），threshold 从第二个 Card 开始。运行时 bump-pointer 分配后 → `_bot_part.alloc_block(res, size)` → 跨过 threshold 就写 entry 并推进，没跨过就跳过。
 
-**③ `insert_into_free_list(hr)`**——按地址有序插入 `_free_list`（`FreeRegionList`，一个双向链表）。从此刻起，`G1Allocator::attempt_allocation_locked()` 可以从 `_free_list` 取 Region 分配给 Mutator。
+**(3) `insert_into_free_list(hr)`**——按地址有序插入 `_free_list`（`FreeRegionList`，一个双向链表）。从此刻起，`G1Allocator::attempt_allocation_locked()` 可以从 `_free_list` 取 Region 分配给 Mutator。
 
 ---
 
@@ -294,9 +294,9 @@ G1CollectedHeap::expand(init_byte_size, _workers)
   → _hrm.expand_by(2048, _workers)
     → expand_at(0, 2048)
       → make_regions_available(0, 2048, _workers)
-        ├── (1) commit_regions: 6 个 Mapper 同步 commit 物理内存
-        ├── (2) new_heap_region(i): 创建 2048 个 HeapRegion 对象
-        └── (3) hr->initialize() + insert_into_free_list(): 入空闲列表
+        +-- (1) commit_regions: 6 个 Mapper 同步 commit 物理内存
+        +-- (2) new_heap_region(i): 创建 2048 个 HeapRegion 对象
+        +-- (3) hr->initialize() + insert_into_free_list(): 入空闲列表
   → g1_policy()->record_new_heap_size() — 通知策略层
 ```
 

@@ -274,8 +274,8 @@ void ThreadsSMRSupport::remove_thread(JavaThread *thread) {
 // ═══ line 779 — free_list：头插入 + scan + 遍历释放 ═══
 void ThreadsSMRSupport::free_list(ThreadsList* threads) {
   assert_locked_or_safepoint(Threads_lock);
-  threads->set_next_list(_to_delete_list);              // ─┐
-  _to_delete_list = threads;                            // ─┘ 头插入 _to_delete_list
+  threads->set_next_list(_to_delete_list);              // -+
+  _to_delete_list = threads;                            // -+ 头插入 _to_delete_list
 
   int hash_table_size = MIN2((int)get_java_thread_list()->length(), 32) * 2;
   // ... 位扩展求 2 的幂 ...
@@ -415,7 +415,7 @@ CAS 是一次不可被 CPU 调度打断的硬件指令：
 cmpxchg(new_val, &location, expected_val)
 ```
 
-它原子地做三件事：① 读出 location 的当前值；(2) 如果当前值 == expected_val，写入 new_val（成功）；(3) 如果当前值 != expected_val，不写入（失败）。返回值是旧值——等于 expected_val 表示成功。
+它原子地做三件事：(1) 读出 location 的当前值；(2) 如果当前值 == expected_val，写入 new_val（成功）；(3) 如果当前值 != expected_val，不写入（失败）。返回值是旧值——等于 expected_val 表示成功。
 
 CAS 是多核并发安全的基石：**"只有在预期值仍未变时，才写入新值"这一判断和写入是不可分割的整**体。
 
@@ -531,7 +531,7 @@ ThreadsList::ThreadsList(int entries) :
 
 **逐行解释**：
 
-① `_length(entries)` — 初始化成员列表，`_length` 记录包含多少线程。注意 `entries` 是线程数，但数组大小是 `entries + 1`。
+(1) `_length(entries)` — 初始化成员列表，`_length` 记录包含多少线程。注意 `entries` 是线程数，但数组大小是 `entries + 1`。
 
 (2) `_next_list(NULL)` — 这个指针不用于 `_thread_list` 链表。它是 `_to_delete_list` 链表专用的 next 指针——当旧快照被挂入回收队列时，通过 `_next_list` 串联。
 
@@ -618,7 +618,7 @@ void ThreadsSMRSupport::add_thread(JavaThread *thread) {
   ThreadsList *new_list = ThreadsList::add_thread(get_java_thread_list(), thread);
 ```
 
-**第 ① 步——建新快照。** 先执行 `get_java_thread_list()`（`threadSMR.inline.hpp:81-83`）：
+**第 (1) 步——建新快照。** 先执行 `get_java_thread_list()`（`threadSMR.inline.hpp:81-83`）：
 
 ```cpp
 inline ThreadsList* ThreadsSMRSupport::get_java_thread_list() {
@@ -755,7 +755,7 @@ void Threads::remove(JavaThread* p, bool is_daemon) {
     ThreadsSMRSupport::remove_thread(p);
 ```
 
-**第 ① 段——更新 CoW 快照。** `remove_thread(p)` 的源码（清单 0e:line 266-270）结构和 `add_thread` 完全对称：
+**第 (1) 段——更新 CoW 快照。** `remove_thread(p)` 的源码（清单 0e:line 266-270）结构和 `add_thread` 完全对称：
 
 ```cpp
 void ThreadsSMRSupport::remove_thread(JavaThread *thread) {
@@ -948,8 +948,8 @@ void SafeThreadsListPtr::acquire_stable_list() {
 
 ```
 执行后的链:
-  _thread->_threads_list_ptr ──→ 对象 A
-                                    │ _previous = nullptr
+  _thread->_threads_list_ptr --→ 对象 A
+                                    | _previous = nullptr
 ```
 
 **第二次创建——外层 A 还在作用域内，内层对象 B 执行同样的两行：**
@@ -964,11 +964,11 @@ void SafeThreadsListPtr::acquire_stable_list() {
 
 ```
 执行后的链:
-  _thread->_threads_list_ptr ──→ 对象 B
-                                    │ _previous = &A
-                                    ▼
+  _thread->_threads_list_ptr --→ 对象 B
+                                    | _previous = &A
+                                    v
                                   对象 A
-                                    │ _previous = nullptr
+                                    | _previous = nullptr
 ```
 
 释放时反向操作（`release_stable_list()` 第一行）：`_thread->_threads_list_ptr = _previous`——B 析构后链栈顶恢复为 `&A`，嵌套越深链越长。
@@ -1004,7 +1004,7 @@ void SafeThreadsListPtr::acquire_stable_list_fast_path() {
     threads = ThreadsSMRSupport::get_java_thread_list();
 ```
 
-**第 ① 步：拿快照。** `get_java_thread_list()` 用 `load_acquire` 读全局 `_java_thread_list`。此时值假设是 v3（`{ [T1, T2, NULL] }`）。
+**第 (1) 步：拿快照。** `get_java_thread_list()` 用 `load_acquire` 读全局 `_java_thread_list`。此时值假设是 v3（`{ [T1, T2, NULL] }`）。
 
 ```
 threads = v3  ← 栈上的局部变量
@@ -1052,7 +1052,7 @@ inline void Thread::set_threads_hazard_ptr(ThreadsList* new_list) {
     }
 ```
 
-**第 (3) 步：验证①——重读全局指针。** 再次 `load_acquire` 读 `_java_thread_list`，和第一步读到的 `threads`（v3）比较。
+**第 (3) 步：验证(1)——重读全局指针。** 再次 `load_acquire` 读 `_java_thread_list`，和第一步读到的 `threads`（v3）比较。
 
 - **相等**：在"拿快照→贴标签"这两步之间，全局指针没被替换 → v3 还是当前最新快照 → 验证通过 → 继续
 - **不等**：中间有写者做了 `xchg`（比如 T2 退出建了 v4）→ v3 已过时 → `continue` → 回到 `while(true)` 顶部重新拿快照
@@ -1087,12 +1087,12 @@ CAS成功:  _threads_hazard_ptr: tagged_v3 → v3 (已验证) → break
 CAS失败:  _threads_hazard_ptr 已是 NULL (被抢) → 重试
 ```
 
-**如果全局指针在验证①和验证(2)之间被替换了（比如 v3 → v4），有问题吗？** 没有。CAS 的成功与否绑定的不是全局指针是否变化——而是标签是否被抢：
+**如果全局指针在验证(1)和验证(2)之间被替换了（比如 v3 → v4），有问题吗？** 没有。CAS 的成功与否绑定的不是全局指针是否变化——而是标签是否被抢：
 
 - 全局指针变了，但标签没被抢 → CAS 成功，hazard ptr = v3 → v3 受保护。T2 的 smr_delete 扫描时发现 v3 包含 T2 → T2 wait。v3 虽然已脱离全局指针，但 hazard ptr 保证它不被 free_list 删除 ← 安全
 - 全局指针变了，标签也被抢了 → CAS 失败 → 重试，拿到 v4（不含 T2）← 安全
 
-两种结果都安全。验证①检查的是"贴标签时快照是否已过时"，验证(2)检查的是"标签是否被并发抢走"——两个验证叠加覆盖了所有竞态窗口。
+两种结果都安全。验证(1)检查的是"贴标签时快照是否已过时"，验证(2)检查的是"标签是否被并发抢走"——两个验证叠加覆盖了所有竞态窗口。
 
 ```cpp
   }
@@ -1196,7 +1196,7 @@ A: 第二次检查 → _delete_notify 已经是 0！→ 不 notify → 释放锁
 bool ThreadsSMRSupport::is_a_protected_JavaThread(JavaThread *thread) {
   assert_locked_or_safepoint(Threads_lock);
 
-  // ── 第一部分：计算哈希表大小 ──
+  // -- 第一部分：计算哈希表大小 --
   int hash_table_size = MIN2((int)get_java_thread_list()->length(), 32) << 1;
   hash_table_size--;
   hash_table_size |= hash_table_size >> 1;   // ... 位扩展求 2 的幂 ...
@@ -1204,12 +1204,12 @@ bool ThreadsSMRSupport::is_a_protected_JavaThread(JavaThread *thread) {
 
   ThreadScanHashtable *scan_table = new ThreadScanHashtable(hash_table_size);
 
-  // ── 第二部分：第一段扫描——扫所有线程的 hazard ptr ──
+  // -- 第二部分：第一段扫描——扫所有线程的 hazard ptr --
   ScanHazardPtrGatherProtectedThreadsClosure scan_cl(scan_table);
   threads_do(&scan_cl);
   OrderAccess::acquire();
 
-  // ── 第三部分：第二段扫描——扫 _to_delete_list 中的引用计数 ──
+  // -- 第三部分：第二段扫描——扫 _to_delete_list 中的引用计数 --
   ThreadsList* current = _to_delete_list;
   while (current != NULL) {
     if (current->_nested_handle_cnt != 0) {
@@ -1219,7 +1219,7 @@ bool ThreadsSMRSupport::is_a_protected_JavaThread(JavaThread *thread) {
     current = current->next_list();
   }
 
-  // ── 第四部分：查哈希表，返回结果 ──
+  // -- 第四部分：查哈希表，返回结果 --
   bool thread_is_protected = scan_table->has_entry((void*)thread);
   delete scan_table;
   return thread_is_protected;
@@ -1294,7 +1294,7 @@ virtual void do_thread(Thread *thread) {
 
 (5) `is_hazard_ptr_tagged(current_list)` 检查最低 bit。untagged → `break` 跳到(8)正常收集。tagged → 继续(6)。
 
-(6) `cmpxchg(NULL, tagged_v3)` — CAS 抢走。**CAS 成功后为什么不收集？** 因为这个标签是 tagged（未验证）——扫描器无法确定它指向的快照是否还有效。读者可能验证①发现 v3 过期然后放弃了，也可能验证通过正准备去 tag。扫描器选择**不信任**：抢走标签，不把此快照的线程加入保护集合。
+(6) `cmpxchg(NULL, tagged_v3)` — CAS 抢走。**CAS 成功后为什么不收集？** 因为这个标签是 tagged（未验证）——扫描器无法确定它指向的快照是否还有效。读者可能验证(1)发现 v3 过期然后放弃了，也可能验证通过正准备去 tag。扫描器选择**不信任**：抢走标签，不把此快照的线程加入保护集合。
 
 **不收集会不会导致写者错误地认为"没人保护 T2"？** 会——写者可能因此 delete 了 T2。但此时全局指针已经被 xchg 换成了不含 T2 的 v4。读者 CAS 失败后重试，拿到的也是 v4——v4 里没有 T2，不需要保护 T2。tag/untag 不保证写者不做错事——它保证读者最终遍历的快照不包含已 delete 的线程。**`return` 只跳过当前这一个线程**——调用方 `threads_do()` 继续遍历下一个 JavaThread。
 
@@ -1318,7 +1318,7 @@ if (_thread->cmpxchg_threads_hazard_ptr(threads, unverified_threads)
   OrderAccess::acquire();
 ```
 
-acquire 屏障——保证①-(9)的 hazard ptr 读取**排在**第三部分的引用计数读取之前。
+acquire 屏障——保证(1)-(9)的 hazard ptr 读取**排在**第三部分的引用计数读取之前。
 
 ---
 
@@ -1386,7 +1386,7 @@ acquire 屏障——保证①-(9)的 hazard ptr 读取**排在**第三部分的�
 
 ```
 时刻  VMThread（读者，无锁）               T2（正退出，持 Threads_lock）
-────  ───────────────────────────────  ───────────────────────────────
+----  -------------------------------  -------------------------------
 t1    threads = get_java_thread_list() → v3 ← 拿到 v3 快照指针
                                                  此时 v3._threads = [T2, T1, NULL]
 
@@ -1414,7 +1414,7 @@ tag/untag 把 VMThread 的"贴标签"从一步 `store` 变成可验证+可重试
 
 ```
 时刻  VMThread（有 tag/untag）              T2
-────  ──────────────────────────────────  ─────────────────────────────
+----  ----------------------------------  -----------------------------
 t1    threads = get_java_thread_list() → v3
 
 t2                                          T2: remove + CoW + xchg → v4
@@ -1440,7 +1440,7 @@ t8    重试: get_java_thread_list() → v4
 **三步改变**：
 
 1. **t3 贴预报标签**——VMThread 在 t3 就贴了 tagged_v3，比无 tag/untag 的 t9 提前了 6 个时刻。T2 的扫描器在 t6 不再读到 NULL（读到 tagged_v3），就不会误判"无人保护"然后 delete
-2. **t7 验证① 发现过期**——VMThread 重读全局指针发现 v4 ≠ v3，放弃 v3 重试
+2. **t7 验证(1) 发现过期**——VMThread 重读全局指针发现 v4 ≠ v3，放弃 v3 重试
 3. **t8 重试拿到 v4**——v4 不含 T2，遍历安全
 
 **核心机制**：预报标签（bit0=1）在 t3 就保护了 v3 容器不被 `free_list` 删除。虽然 T2 的扫描器"不信" tagged 标签（抢走了），但 VMThread 的 CAS 失败触发重试，重试时拿到不含 T2 的 v4。
@@ -1505,7 +1505,7 @@ void JavaThread::java_suspend() {
 
 ```
 所属对象                          字段                 当前值
-────────────────────────────────────────────────────────────────
+----------------------------------------------------------------
 当前线程（调用 JVM_SuspendThread 的那个 JavaThread）:
   Thread                         _threads_hazard_ptr  v3        ← 外层 tlh 通过 fast path 设置的
   Thread                         _threads_list_ptr    null     ← 非嵌套时只有一个 SafeThreadsListPtr
@@ -1540,7 +1540,7 @@ void SafeThreadsListPtr::acquire_stable_list_nested_path() {
 
 执行前：`_threads_hazard_ptr = v3`（字段被外层占），`v3._nested_handle_cnt = 0`，`SafeThreadsListPtr(外层)._has_ref_count = false`
 
-行①：`current_list = v3`（取外层 `_list` 的值，没有任何新操作）
+行(1)：`current_list = v3`（取外层 `_list` 的值，没有任何新操作）
 
 行(2)：`v3.inc_nested_handle_cnt()` → `v3._nested_handle_cnt = 1`。引用计数 +1——用的是 CAS 循环（`Atomic::cmpxchg`），保证多核并发安全。
 
@@ -1846,7 +1846,7 @@ void ThreadsSMRSupport::free_list(ThreadsList* threads) {
 ```
 
 两个条件同时满足才释放：
-- 条件① `!has_entry(current)`——没有任何线程的 hazard ptr 指向此快照
+- 条件(1) `!has_entry(current)`——没有任何线程的 hazard ptr 指向此快照
 - 条件(2) `_nested_handle_cnt == 0`——没有嵌套引用计数保护
 
 ```cpp

@@ -140,12 +140,12 @@ void LatestMethodCache::init(Klass* k, Method* m) {
 
 ```
 init_globals()（init.cpp:101）
-├─ universe_init()              ← 创建堆、6 个缓存空壳（ch10 主线）
-├─ interpreter_init() / 编译器相关
-├─ universe2_init()             ← 加载原始类（注释："loads primordial classes"）
-├─ compileBroker_init()
-├─ universe_post_init()         ← 填充缓存：initialize_known_methods()
-└─ stubRoutines_init2()
++- universe_init()              ← 创建堆、6 个缓存空壳（ch10 主线）
++- interpreter_init() / 编译器相关
++- universe2_init()             ← 加载原始类（注释："loads primordial classes"）
++- compileBroker_init()
++- universe_post_init()         ← 填充缓存：initialize_known_methods()
++- stubRoutines_init2()
 ```
 
 源码注释要求它必须晚于编译器初始化：
@@ -203,7 +203,7 @@ Method* LatestMethodCache::get_method() {
 }
 ```
 
-① `_klass == NULL` 检查——O(1)。
+(1) `_klass == NULL` 检查——O(1)。
 
 (2) `method_with_idnum(idnum)` 内部实现（`instanceKlass.cpp:3964-3980`）：
 

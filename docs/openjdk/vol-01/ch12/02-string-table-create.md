@@ -16,7 +16,7 @@
 
 两个容易误解的点：
 
-**① "内容相同"指字符序列，不是内部字节**。JDK 9+ 的 String 内部是 `byte[]`（LATIN1 或 UTF16 编码），intern 比较的是**解码后的 Unicode 字符序列**——`LATIN1 "abc"`（`61 62 63`）和 `UTF16 "abc"`（`00 61 00 62 00 63`）字节完全不同，但字符序列相同 → intern 共享。
+**(1) "内容相同"指字符序列，不是内部字节**。JDK 9+ 的 String 内部是 `byte[]`（LATIN1 或 UTF16 编码），intern 比较的是**解码后的 Unicode 字符序列**——`LATIN1 "abc"`（`61 62 63`）和 `UTF16 "abc"`（`00 61 00 62 00 63`）字节完全不同，但字符序列相同 → intern 共享。
 
 **(2) `new` 和 `intern()` 是两回事**：
 
@@ -105,7 +105,7 @@ StringTable::StringTable() : _local_table(NULL), _current_size(0), _has_work(0),
    → 并发哈希表：初始 2^16 桶、容量上限 2^24、rehash 阈值 100（§3 展开）
 ```
 
-> **注**：① 的 OopStorage 是什么、为什么需要它（GC 搬对象后，谁来更新你存下的对象地址）——完整设计推演见 [ch09/02 OopStorage](../ch09/02-oopstorage.md)。本文 §2 只展开 StringTable 用到的弱引用语义。
+> **注**：(1) 的 OopStorage 是什么、为什么需要它（GC 搬对象后，谁来更新你存下的对象地址）——完整设计推演见 [ch09/02 OopStorage](../ch09/02-oopstorage.md)。本文 §2 只展开 StringTable 用到的弱引用语义。
 
 ### 1.2 容量：2 的幂，不是质数
 
@@ -201,23 +201,23 @@ CHT 对象本身还持有 `_resize_lock`（扩容与批量删除共用的一把�
 
 ```
 StringTableHash 对象
-├─ _table: InternalTable* ──→ _buckets: Bucket[65536]
-│    （_log2_size=16, _size=65536, _hash_mask=65535）
-│                                └─ 桶 #5: _first ──────────┐
-│                                                            ↓
-│                                                   ┌─────────────────────┐   ┌─────────────────────┐
-│                                                   │ Node #1              │   │ Node #2              │
-│                                                   │ _next ───────────────┼──→│ _next ──────────→ NULL│
-│                                                   │ _value: WeakHandle   │   │ _value: WeakHandle   │
-│                                                   │   (_obj = 0xA000)    │   │   (_obj = 0xB000)    │
-│                                                   └─────────────────────┘   └─────────────────────┘
-│                                                         │ _obj
-│                                                         ↓
-│                                              OopStorage 槽位 0xA000: [ 0x1000 ]
-│                                                         ↓
-│                                              Java 堆: String "abc" @ 0x1000   ← 数据本体在这
-├─ _resize_lock                       ← 扩容/批量删除共用的锁（§3.4/§3.5）
-└─ _log2_size_limit=24, _grow_hint=100  ← 构造后两个参数的落点（§3.6）
++- _table: InternalTable* --→ _buckets: Bucket[65536]
+|    （_log2_size=16, _size=65536, _hash_mask=65535）
+|                                +- 桶 #5: _first ----------+
+|                                                            ↓
+|                                                   +---------------------+   +---------------------+
+|                                                   | Node #1              |   | Node #2              |
+|                                                   | _next ---------------+--→| _next ----------→ NULL|
+|                                                   | _value: WeakHandle   |   | _value: WeakHandle   |
+|                                                   |   (_obj = 0xA000)    |   |   (_obj = 0xB000)    |
+|                                                   +---------------------+   +---------------------+
+|                                                         | _obj
+|                                                         ↓
+|                                              OopStorage 槽位 0xA000: [ 0x1000 ]
+|                                                         ↓
+|                                              Java 堆: String "abc" @ 0x1000   ← 数据本体在这
++- _resize_lock                       ← 扩容/批量删除共用的锁（§3.4/§3.5）
++- _log2_size_limit=24, _grow_hint=100  ← 构造后两个参数的落点（§3.6）
 ```
 
 | 层次 | 结构 | 存什么 |
@@ -252,11 +252,11 @@ StringTableHash 对象
 
 ```
 OopStorage
-├─ _allocation_list: 有可用空间的块链表    ← 分配用
-├─ _active_array:    所有活跃块的数组       ← GC 遍历用
-└─ 每个 Block:
-   ├─ 一批 oop 指针槽位（按位图标记已用/空闲）
-   └─ 状态：空闲/部分使用/已满
++- _allocation_list: 有可用空间的块链表    ← 分配用
++- _active_array:    所有活跃块的数组       ← GC 遍历用
++- 每个 Block:
+   +- 一批 oop 指针槽位（按位图标记已用/空闲）
+   +- 状态：空闲/部分使用/已满
 ```
 
 为什么两个结构？分配需要"找到有空位的块"（链表方便），GC 需要"遍历所有块"（数组方便）——一物两用。
@@ -288,7 +288,7 @@ allocate():
 两个入口:
   delete_empty_blocks_safepoint()    ← GC 暂停内（STW）直接清
   delete_empty_blocks_concurrent()   ← 暂停外并发清（CMS 等场景）
-     └─ 找出 0 个活条目的块 → 从两个结构中摘除 → 释放整块内存
+     +- 找出 0 个活条目的块 → 从两个结构中摘除 → 释放整块内存
 ```
 
 块是回收的**最小单位**：整块清空才释放，部分存活的块保留。
@@ -333,7 +333,7 @@ internal_get(hash):
 ```
 get_insert_lazy(hash, value):
   桶头 CAS 插入新节点（失败则重试）
-  ── 链表里的"死条目"（弱引用已死的）不立即删除，只标记
+  -- 链表里的"死条目"（弱引用已死的）不立即删除，只标记
 
 查找时发现死条目 → 记一个 have_dead 标志 → 继续找
 真正的删除由 ServiceThread 用 BulkDeleteTask 并发批量做（§4.4）← "懒"
@@ -412,7 +412,7 @@ new StringTableHash(log2size=16, 容量上限 24, rehash 阈值 100)
 
 切换只改 StringTable **内部**的桶分布，两点有源码为证。
 
-① 切换只作用于本地表查找路径：`lookup()` 中 `if (_alt_hash)` 只包裹 `do_lookup` 前的重算——共享表查找在此判断之前，但 CDS 默认不开启、共享表为空直接跳过，主流流程不受影响。
+(1) 切换只作用于本地表查找路径：`lookup()` 中 `if (_alt_hash)` 只包裹 `do_lookup` 前的重算——共享表查找在此判断之前，但 CDS 默认不开启、共享表为空直接跳过，主流流程不受影响。
 
 **(2) Java 层 `String.hashCode()` 的返回值不受影响**（java/lang/String.java）：
 
@@ -503,7 +503,7 @@ oop StringTable::intern(Handle string_or_null_h, jchar* name, int len, TRAPS) {
 
 逐行：
 
-- **① 算 hash**：Java 规范固定公式（与 §3.7 一致）
+- **(1) 算 hash**：Java 规范固定公式（与 §3.7 一致）
 - **(2) alt 判断**：若 rehash 过，换为 `halfsiphash_32`（随机 seed）。日常路径该标志为 false，跳过
 - **(3) 本地表纯查找**：调 `do_lookup` 无锁遍历 CHT——`intern()` 本身**也做查找**（只查不插），命中已有 String 直接返回，不等于"看都不看就看 do_intern 插入"
 - **(4) 调 `do_intern`**：只有步骤(3)未命中才走到这里——去建 String、get_insert_lazy 查+插（§4.4）
@@ -750,11 +750,11 @@ StringTable 在 GC 时用的是 **weak_oops_do**——所以它的条目**不会
 GC 内:
   possibly_parallel_unlink(ParState, is_alive)     ← G1 等：ParState 并行遍历块
   unlink_or_oops_do(is_alive)                      ← 串行版（无 ParState）
-    └─ _weak_handles->weak_oops_do(...)  → 死槽位清 NULL + 计数
+    +- _weak_handles->weak_oops_do(...)  → 死槽位清 NULL + 计数
 
 GC 后并发（ServiceThread，serviceThread.cpp）:
   do_concurrent_work → clean_dead_entries
-    └─ BulkDeleteTask 扫表删死条目 → free_node 时 release 槽位
+    +- BulkDeleteTask 扫表删死条目 → free_node 时 release 槽位
 ```
 
 弱引用的完整闭环：interned String 没人引用 → GC 标记为死、槽位清 NULL → ServiceThread 从哈希表批量删除 → 槽位归还 → 块清空后整块释放。
@@ -766,10 +766,10 @@ GC 后并发（ServiceThread，serviceThread.cpp）:
 ```
 StringTable 初始化全景:
   create_table()
-    └─ new StringTable()
-         ├─ OopStorage      → 弱引用槽位存储（双锁 + 块管理）
-         ├─ 2^16 桶          → 掩码寻址（对比 SymbolTable 的质数取模）
-         └─ ConcurrentHashTable → 无锁读 + 渐进扩容
+    +- new StringTable()
+         +- OopStorage      → 弱引用槽位存储（双锁 + 块管理）
+         +- 2^16 桶          → 掩码寻址（对比 SymbolTable 的质数取模）
+         +- ConcurrentHashTable → 无锁读 + 渐进扩容
 
 rehash   : 单桶遍历 > 100 → safepoint 换 alt hash 同大小重建
            （JVM 内最多一次；负载因子 > 2 时改走扩容）
