@@ -119,11 +119,12 @@ body {
 .markdown-section > img { max-width: var(--text-width) !important; }
 .markdown-section a > img { cursor: zoom-in; }
 
-/* ---------- 引用块：无左边框，缩进 + 灰 ---------- */
+/* ---------- 引用块：细左线 + 暗沉 ---------- */
 .markdown-section blockquote {
-  margin: 1.4em 0 1.4em 2em;
-  padding: 0;
+  margin: 1.4em 0;
+  padding: 0.1em 0 0.1em 1.2em;
   border: none;
+  border-left: 2px solid var(--rule);
   color: var(--ink-soft);
   font-size: 0.95rem;
 }
