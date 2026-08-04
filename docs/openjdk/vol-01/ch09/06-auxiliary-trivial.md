@@ -2,7 +2,7 @@
 
 > **本文定位**：`universe_init` 中三个轻量初始化函数——`MetaspaceCounters::initialize_performance_counters()`、`CompressedClassSpaceCounters::initialize_performance_counters()`、`AOTLoader::universe_init()`。代码量很小（每个不到 20 行），但支撑 `jstat`/`jconsole`/JMX 的 Metaspace 监控，以及 JDK 9/10 的 AOT 预编译加载。
 >
-> **前置知识**：PerfData 机制见 [ch04/02-management.md](../../ch04/02-management.md)——本文不重复讲解 mmap 共享内存、`create_counter` 工厂方法等。本文只讲计数器在 Metaspace 上的具体使用。
+> **前置知识**：PerfData 机制见 [ch04/02-management.md](../ch04/02-management.md)——本文不重复讲解 mmap 共享内存、`create_counter` 工厂方法等。本文只讲计数器在 Metaspace 上的具体使用。
 >
 > 本文按 **PerfData 基础设施 -> MetaspaceCounters -> CompressedClassSpaceCounters -> AOTLoader -> 共同模式** 五层结构组织。
 

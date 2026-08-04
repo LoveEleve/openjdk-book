@@ -182,7 +182,7 @@ ManagementFactory.getThreadMXBean().resetPeakThreadCount();     // 重置峰值
 
 ch03/05 的 `perfMemory_init` 创建了一个文件 `/tmp/hsperfdata_<user>/<pid>`（在 `tmpdir` 下，名字是 JVM 进程 PID），用 `mmap` 映射到 JVM 进程的虚拟地址空间。这个文件就是 PerfData 共享内存——JVM 往里写数据，外部工具 mmap 同一个文件读出来。
 
-![alt text](image.png)
+![alt text](image.png)<!-- 404: target not found, 请作者补正文 -->
 
 **关键点**：通道 A 是**被动的**——JVM 往共享内存写完就完事，外部工具随时来读，**不需要 JVM 进程配合**。这就是 `jstat` 高频采样不卡 JVM 的原因。
 

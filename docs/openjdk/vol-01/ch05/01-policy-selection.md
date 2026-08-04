@@ -1,6 +1,6 @@
 # 6.1 编译策略选择 + CICompilerCount ergonomics
 
-上一章 [4.5](#/openjdk/vol-01/ch04/05-trivial-merged) 讲完了 `invocationCounter_init()`——初始化了每个 `JavaThread` 的调用计数器和回边计数器，设置了 `CompileThreshold`（x86 C2 = 10000）等阈值。计数器溢出时会触发编译请求，但用 C1 还是 C2、用多少个编译线程、如何调度——这些取决于编译策略。
+上一章 [4.5](#/openjdk/vol-01/ch04/05-trivial-merged.md) 讲完了 `invocationCounter_init()`——初始化了每个 `JavaThread` 的调用计数器和回边计数器，设置了 `CompileThreshold`（x86 C2 = 10000）等阈值。计数器溢出时会触发编译请求，但用 C1 还是 C2、用多少个编译线程、如何调度——这些取决于编译策略。
 
 `init_globals()` 第 106 行的 `compilationPolicy_init()` 就是选择这个策略并设置 CICompilerCount：
 
@@ -333,4 +333,4 @@ C2 线程占比约 2/3——C2 编译一个方法需要几秒到几十秒，C1 �
 
 `compilationPolicy_init()` 到此结束。`_in_vm_startup = true`（启动期间抑制编译），`_policy` 指向 `TieredThresholdPolicy` 对象，`_c1_count = 6`、`_c2_count = 12`，编译策略就绪。
 
-策略选好了、编译线程数定了。下一节 [6.2](#/openjdk/vol-01/ch05/02-thresholds) 展开 Tiered 模式的 5 级阈值体系——方法从解释器到 C2 的逐级升级条件、编译器队列反馈如何动态调整阈值、code cache 满时的指数级抑制。
+策略选好了、编译线程数定了。下一节 [6.2](#/openjdk/vol-01/ch05/02-thresholds)<!-- 404: target not found, 请作者补正文 --> 展开 Tiered 模式的 5 级阈值体系——方法从解释器到 C2 的逐级升级条件、编译器队列反馈如何动态调整阈值、code cache 满时的指数级抑制。

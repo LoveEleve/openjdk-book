@@ -351,4 +351,4 @@ Safepoint 发生:
 
 202 种字节码的 Codelet 组成了"取指-跳转"循环的全部内容。这是 JVM 在启动后执行任何 Java 代码之前的最后一步——从此 `init_globals` 不再生成新的代码，控制权移交给 Java 程序的执行。
 
-> **下一篇**：[ch17 SharedRuntime::generate_stubs](runtime_stubs.md)——运行时桩生成：方法调用解析、安全点处理、去优化桩。
+> **下一篇**：[ch17 SharedRuntime::generate_stubs](runtime_stubs.md)<!-- 404: target not found, 请作者补正文 -->——运行时桩生成：方法调用解析、安全点处理、去优化桩。

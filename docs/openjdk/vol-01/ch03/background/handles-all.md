@@ -36,7 +36,7 @@ class HandleArea : public Arena {
 };
 ```
 
-HandleArea 就是一个 Arena 分配器（Chunk 初始 `tiny_size`）。Arena 的"撞针分配"和 Chunk/ChunkPool 的完整机制已在 [3.6 节 chunkpool_init](#/openjdk/vol-01/ch03/06-main-thread-create?id=chunkpool_init) 中详细讲解——本节不重复撞针和 Chunk 链表，只聚焦 HandleArea 在 GC oop 扫描中特有的角色。
+HandleArea 就是一个 Arena 分配器（Chunk 初始 `tiny_size`）。Arena 的"撞针分配"和 Chunk/ChunkPool 的完整机制已在 [3.6 节 chunkpool_init](#/openjdk/vol-01/ch03/06-main-thread-create.md?id=chunkpool_init) 中详细讲解——本节不重复撞针和 Chunk 链表，只聚焦 HandleArea 在 GC oop 扫描中特有的角色。
 
 每次 `allocate_handle(obj)` 从 Arena 分配一块 `sizeof(oop)` 的内存，把 oop 写进去，返回这块内存的地址——就是"槽位"。
 

@@ -672,7 +672,7 @@ define_pd_global(uintx, CodeCacheMinimumUseSpace,  400*K);
 | 3 | C1 + 完整 profiling | 收集类型分布、分支概率——C2 优化依据 |
 | 4 | C2 全优化 | 做深度内联、寄存器分配、指令调度，编译慢但运行最快 |
 
-[6.1](#/openjdk/vol-01/ch05/01-policy-selection) 讲了 Tiered 编译的策略选择和 `CICompilerCount` 的计算。本节你只需要知道：Tier 2/3 的方法代码（带 profiling）放在 Profiled 堆，Tier 1/4 的方法代码（无 profiling）放在 NonProfiled 堆，Tier 0 不产生代码。
+[6.1](#/openjdk/vol-01/ch05/01-policy-selection.md) 讲了 Tiered 编译的策略选择和 `CICompilerCount` 的计算。本节你只需要知道：Tier 2/3 的方法代码（带 profiling）放在 Profiled 堆，Tier 1/4 的方法代码（无 profiling）放在 NonProfiled 堆，Tier 0 不产生代码。
 
 **profiling**：C1 编译器在编译方法时，在生成的机器码里插入额外的"计数指令"——每调用若干次就回写一次调用次数和类型信息到 MethodData。这些数据是 C2 做优化决策的依据（该方法哪些分支走得最多、虚方法调用实际是哪个子类）。带 profiling 的代码执行效率比不带 profiling 的代码低——所以要单独放一个 Profiled 堆，等 C2 编译出"去 profiling"的高效版本后替换掉。
 

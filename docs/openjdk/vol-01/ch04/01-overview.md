@@ -1,6 +1,6 @@
 # 4.1 init_globals() 总览
 
-Stage 4 结束时（参见 [3.6](#/openjdk/vol-01/ch03/06-main-thread-create)），JVM 拥有了第一个 `JavaThread` 对象——TLS 绑定完成、栈边界记录完成、守卫区保护到位、PerfData 计数器就绪。`ObjectMonitor::Initialize()` 也注册了 `synchronized` 的 7 个性能计数器。但 JVM 本质上还是个空壳——没有 Java 堆、没有解释器、没有编译器、没有 SystemDictionary，连 `java.lang.Object` 的 Klass 镜像都还不存在。
+Stage 4 结束时（参见 [3.6](#/openjdk/vol-01/ch03/06-main-thread-create.md)），JVM 拥有了第一个 `JavaThread` 对象——TLS 绑定完成、栈边界记录完成、守卫区保护到位、PerfData 计数器就绪。`ObjectMonitor::Initialize()` 也注册了 `synchronized` 的 7 个性能计数器。但 JVM 本质上还是个空壳——没有 Java 堆、没有解释器、没有编译器、没有 SystemDictionary，连 `java.lang.Object` 的 Klass 镜像都还不存在。
 
 `create_vm` 阶段 6 的第二项就是填满这个空壳的入口：
 

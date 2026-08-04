@@ -855,7 +855,7 @@ class ParkEvent : public os::PlatformEvent {
 };
 ```
 
-每个线程在创建时预先分配 4 个 ParkEvent——`_ParkEvent`（synchronized 等待）、`_SleepEvent`（Thread.sleep）、`_MutexEvent`（内部 Mutex 等待）、`_MuxEvent`（低层 mux 同步）。在 Mutex 锁竞争的语境下，使用的是 `_MutexEvent`——锁竞争时这个 ParkEvent 被插入 Monitor 的等待队列中。256 字节对齐是后面的 `SplitWord` 能够工作的关键前提。4 个 ParkEvent 的完整分配细节见 [3.6 Stage 4 主线程创建](../06-main-thread-create) 的第 3.5 节。
+每个线程在创建时预先分配 4 个 ParkEvent——`_ParkEvent`（synchronized 等待）、`_SleepEvent`（Thread.sleep）、`_MutexEvent`（内部 Mutex 等待）、`_MuxEvent`（低层 mux 同步）。在 Mutex 锁竞争的语境下，使用的是 `_MutexEvent`——锁竞争时这个 ParkEvent 被插入 Monitor 的等待队列中。256 字节对齐是后面的 `SplitWord` 能够工作的关键前提。4 个 ParkEvent 的完整分配细节见 [3.6 Stage 4 主线程创建](06-main-thread-create.md) 的第 3.5 节。
 
 ---
 

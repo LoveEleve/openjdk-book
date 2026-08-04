@@ -105,7 +105,7 @@ StringTable::StringTable() : _local_table(NULL), _current_size(0), _has_work(0),
    → 并发哈希表：初始 2^16 桶、容量上限 2^24、rehash 阈值 100（§3 展开）
 ```
 
-> **注**：① 的 OopStorage 是什么、为什么需要它（GC 搬对象后，谁来更新你存下的对象地址）——完整设计推演见 [ch08/02 OopStorage](../ch08/02-oopstorage.md)。本文 §2 只展开 StringTable 用到的弱引用语义。
+> **注**：① 的 OopStorage 是什么、为什么需要它（GC 搬对象后，谁来更新你存下的对象地址）——完整设计推演见 [ch09/02 OopStorage](../ch09/02-oopstorage.md)。本文 §2 只展开 StringTable 用到的弱引用语义。
 
 ### 1.2 容量：2 的幂，不是质数
 

@@ -202,4 +202,4 @@ static DispatchTable _safept_table;   // 安全点模式——每字节码跳转
 
 三张 dispatch 表控制了执行流在安全点和正常模式之间的切换。
 
-> **下一篇**：[ch17 SharedRuntime::generate_stubs](runtime_stubs.md)——运行时桩生成：方法调用解析、安全点处理、去优化桩。
+> **下一篇**：[ch17 SharedRuntime::generate_stubs](runtime_stubs.md)<!-- 404: target not found, 请作者补正文 -->——运行时桩生成：方法调用解析、安全点处理、去优化桩。
