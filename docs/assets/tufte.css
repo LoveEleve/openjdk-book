@@ -50,7 +50,7 @@ body {
   color: var(--ink);
   font-family: var(--body-font);
   font-size: 1rem;
-  line-height: 1.9;
+  line-height: 1.7;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   counter-reset: sidenote-counter;
@@ -85,10 +85,14 @@ body {
   line-height: 1.3;
   scroll-margin-top: 2rem;
 }
-.markdown-section h1 { font-size: 2rem; font-weight: bold; margin: 0 0 2.2rem; letter-spacing: 0.01em; }
-.markdown-section h2 { font-size: 1.5rem; font-weight: bold; margin: 3.2rem 0 1rem; }
-.markdown-section h3 { font-size: 1.2rem; font-weight: bold; margin: 2.4rem 0 0.8rem; }
-.markdown-section h4 { font-size: 1rem; font-weight: bold; margin: 2rem 0 0.6rem; }
+.markdown-section h1 { font-size: 2.5rem; font-weight: bold; margin: 0 0 2.6rem; letter-spacing: 0.02em; line-height: 1.2; }
+.markdown-section h2 { font-size: 1.7rem; font-weight: bold; margin: 4.5rem 0 1.2rem; }
+.markdown-section h3 { font-size: 1.25rem; font-weight: bold; margin: 3rem 0 0.9rem; }
+.markdown-section h4 { font-size: 1.05rem; font-weight: bold; margin: 2.2rem 0 0.7rem; }
+
+/* newthought：节首小型大写字母（对西文生效，中文无影响）
+   用法：<span class="newthought">NOTE</span> 开头... */
+.newthought { font-variant: small-caps; letter-spacing: 0.06em; }
 
 /* ---------- 段落与行内 ---------- */
 .markdown-section p { margin: 0 0 1.2em; }
@@ -147,6 +151,15 @@ body {
   overflow-x: auto;
   font-size: 0.8rem;
   line-height: 1.6;
+}
+/* 宽屏（≥1500px，此时 TOC 挪到左边距）：代码块/表格跨进右边距区，正文仍 700px */
+@media (min-width: 1500px) {
+  .markdown-section pre {
+    max-width: none;
+    width: min(1100px, 100%);
+    clear: right; /* 给右侧浮动的边注让位 */
+  }
+  .markdown-section table { max-width: min(1100px, 100%); }
 }
 .markdown-section pre code {
   font-size: inherit;
@@ -228,7 +241,7 @@ label.sidenote-number::after {
    功能 UI（极简形态）
    ============================================================ */
 
-/* ---------- TOC：桌面固定在右边距区 ---------- */
+/* ---------- TOC：1200-1499 在右边距；≥1500 挪到左边距（右缘让给全宽代码块） ---------- */
 .toc-aside { display: none; }
 @media (min-width: 1200px) {
   .toc-aside[data-has-items="1"] {
@@ -236,7 +249,7 @@ label.sidenote-number::after {
     position: fixed;
     top: 5rem;
     left: calc(max((100vw - var(--page-max)) / 2, 0px) + var(--page-pad) + var(--text-width) + 3.5rem);
-    width: 17rem;
+    width: 15rem;
     max-height: calc(100vh - 8rem);
     overflow-y: auto;
     font-size: 0.8rem;
@@ -246,11 +259,20 @@ label.sidenote-number::after {
     z-index: 20;
   }
 }
-.toc-head { display: flex; gap: 1em; margin-bottom: 0.6em; }
+@media (min-width: 1500px) {
+  .toc-aside[data-has-items="1"] {
+    /* 正文栏左缘 = 页面盒左缘 + 8.5vw 左留白，TOC 贴正文栏左边 */
+    left: auto;
+    right: calc(100vw - max((100vw - var(--page-max)) / 2, 0px) - 8.5vw + 2rem);
+    width: 10rem;
+  }
+}
+.toc-head { display: flex; flex-wrap: wrap; gap: 0.2em 1em; margin-bottom: 0.6em; }
 .toc-back, .toc-top, .toc-close, .toc-collapse {
   background: none; border: none; padding: 0; cursor: pointer;
   font-family: var(--body-font); font-size: 0.78rem; color: var(--ink-faint);
   text-decoration: underline; text-underline-offset: 0.15em;
+  white-space: nowrap;
 }
 .toc-collapse { margin-left: auto; }
 .toc-collapse:hover, .toc-back:hover, .toc-top:hover { color: var(--ink); }
@@ -274,6 +296,12 @@ label.sidenote-number::after {
   text-underline-offset: 0.15em;
 }
 #toc-open-btn:hover { color: var(--ink); }
+@media (min-width: 1500px) {
+  #toc-open-btn {
+    left: auto;
+    right: calc(100vw - max((100vw - var(--page-max)) / 2, 0px) - 8.5vw + 2rem);
+  }
+}
 @media (min-width: 1200px) {
   .toc-aside.is-collapsed { display: none !important; }
   body.toc-collapsed #toc-open-btn { display: block; }
