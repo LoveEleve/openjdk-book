@@ -128,7 +128,6 @@ do {
 ```
 
 `NoSafepointVerifier` 确保 CAS 插入和 CLD 挂到链表之间不发生 GC——因为 `_handles` 里的 oop 需要被 GC root 扫描。
-```
 
 `exchanged == next` 表示插入成功。不相等则把 `next` 更新为当前链表头，循环重试——这称为 CAS 循环（spin loop）。
 

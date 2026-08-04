@@ -176,6 +176,7 @@ Universe::_finalizer_register_cache = new LatestMethodCache();
 // ... 6 个 \
 "单槽方法缓存" —— 每次调用固定用途的 Java 方法（如 Object.finalize），先查这个 1 槽缓存而非 SystemDictionary。命中率极高所以 1 槽够用。
 
+```
 ```cpp
 if (UseSharedSpaces) {
   MetaspaceShared::initialize_shared_spaces();  // 复用上次 CDS 归档的类

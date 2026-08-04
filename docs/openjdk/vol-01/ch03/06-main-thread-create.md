@@ -316,6 +316,7 @@ class EventLogBase<FormatBuffer<256>> : public EventLog {
 
 `timestamp` 和 `thread` 要等到 `logv()` 第一次写入时才被赋真实值。
 
+```cpp
   int compute_log_index() {
     int index = _index;
     if (_count < _length) _count++;

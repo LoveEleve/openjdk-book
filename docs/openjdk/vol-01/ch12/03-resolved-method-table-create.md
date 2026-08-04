@@ -134,7 +134,6 @@ _literal // ClassLoaderWeakHandle = WeakHandle<vm_class_loader_data>
 ```
 
 其中 `hash` 存的是 `compute_hash` 得出的四分量 composite hash（§2.1），`next` 串桶内链表，`literal` 是弱引用句柄
-```
 
 与 SymbolTable 的 `HashtableEntry<Symbol*, mtSymbol>` 唯一区别：**literal 从强指针换成了弱引用**。
 

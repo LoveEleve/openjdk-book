@@ -550,7 +550,6 @@ PaX 是 Linux 内核的安全补丁（主要用于 Hardened Gentoo），提供�
 
 ### POSIX 子层初始化
 
-```
 os::Posix::init();
 Linux 的 OS 层分成两级：`os::Linux`（Linux 特有）和 `os::Posix`（所有 POSIX 系统共享）。`os::Posix::init()` 做三件事。
 

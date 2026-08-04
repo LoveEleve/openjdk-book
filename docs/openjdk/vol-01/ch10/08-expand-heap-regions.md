@@ -240,7 +240,9 @@ void reset_bot() {
 
 **`initialize_threshold_raw()`**——`_next_offset_threshold` 推进到第二个 Card 起点。第一个 Card 不需要 BOT 回退（0 = 从 Region 起始找），threshold 从第二行开始。运行时 bump-pointer 分配后 → `_bot_part.alloc_block(res, size)` → 跨过 threshold 就写 entry 并推进，没跨过就跳过。
 
-**其他字段**——`_bottom`/`_end` 是 Region 在堆上的固定边界，`_top` 是分配指针（初始 = bottom），`_type` 初始为 Free，通过 `hr_clear()` → `set_free()` + `set_top(bottom())` 设置。```cpp
+**其他字段**——`_bottom`/`_end` 是 Region 在堆上的固定边界，`_top` 是分配指针（初始 = bottom），`_type` 初始为 Free，通过 `hr_clear()` → `set_free()` + `set_top(bottom())` 设置。
+
+```cpp
 class G1BlockOffsetTablePart {
     G1BlockOffsetTable* _bot;           // 指向全局 BOT 数组
     G1ContiguousSpace*  _space;         // 指向自己的 Region
