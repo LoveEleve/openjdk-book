@@ -1,18 +1,23 @@
 <div class="home-mug">
 <span class="home-rain">0 1 1 0 1 0 1 1<br>1 0 0 1 0 1 0 0<br>1 1 0 0 1 0 1 1<br>0 0 1 1 0 1 0 0<br>1 0 1 0 1 1 0 1</span>
-<svg viewBox="0 0 80 100" width="70" height="88">
-  <defs><style>.s{fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:2.2;}</style></defs>
-  <!-- Tux - Linux 企鹅 -->
-  <ellipse class="s" cx="40" cy="65" rx="28" ry="30" stroke-width="2"/>
-  <ellipse class="s" cx="40" cy="60" rx="16" ry="19" opacity=".7" stroke-width="1.2"/>
-  <!-- 嘴 -->
-  <path class="s" d="M30 38L40 42L50 38" stroke-width="1.8"/>
-  <!-- 眼睛 -->
-  <circle cx="33" cy="32" r="2.5" fill="currentColor"/>
-  <circle cx="47" cy="32" r="2.5" fill="currentColor"/>
+<svg viewBox="0 0 90 110" width="68" height="84">
+  <defs><style>.s{fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;}</style></defs>
   <!-- 脚 -->
-  <ellipse class="s" cx="26" cy="92" rx="10" ry="5" stroke-width="2"/>
-  <ellipse class="s" cx="54" cy="92" rx="10" ry="5" stroke-width="2"/>
+  <ellipse class="s" cx="24" cy="100" rx="12" ry="6" fill="currentColor" fill-opacity=".15" stroke-width="2"/>
+  <ellipse class="s" cx="66" cy="100" rx="12" ry="6" fill="currentColor" fill-opacity=".15" stroke-width="2"/>
+  <!-- 身体 -->
+  <ellipse class="s" cx="45" cy="62" rx="32" ry="34" stroke-width="2.2"/>
+  <!-- 肚皮 -->
+  <ellipse cx="45" cy="62" rx="20" ry="22" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".5"/>
+  <!-- 嘴 -->
+  <path class="s" d="M38 32L45 37L52 32" stroke-width="2"/>
+  <path class="s" d="M42 37L45 42L48 37" stroke-width="1.2" opacity=".7"/>
+  <!-- 眼睛 -->
+  <circle cx="37" cy="27" r="3" fill="currentColor"/>
+  <circle cx="53" cy="27" r="3" fill="currentColor"/>
+  <!-- 翅膀 -->
+  <path class="s" d="M14 55C8 50 8 40 15 35" stroke-width="1.8"/>
+  <path class="s" d="M76 55C82 50 82 40 75 35" stroke-width="1.8"/>
 </svg>
 </div>
 
