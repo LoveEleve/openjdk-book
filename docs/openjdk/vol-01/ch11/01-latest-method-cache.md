@@ -178,9 +178,9 @@ void initialize_known_method(LatestMethodCache* method_cache,
   TempNewSymbol name = SymbolTable::new_symbol(method, CHECK);   // 方法名 → 内部 Symbol
   Method* m = NULL;
   // The klass must be linked before looking up the method.
-  if (!ik->link_class_or_fail(THREAD) ||                          // ① 类必须已链接
-      ((m = ik->find_method(name, signature)) == NULL) ||         // ② 按名字+签名找方法
-      is_static != m->is_static()) {                              // ③ 静态性必须匹配
+  if (!ik->link_class_or_fail(THREAD) ||                          // (1) 类必须已链接
+      ((m = ik->find_method(name, signature)) == NULL) ||         // (2) 按名字+签名找方法
+      is_static != m->is_static()) {                              // (3) 静态性必须匹配
     vm_exit_during_initialization(...);                           // 任一失败 = JVM 无法启动
   }
   method_cache->init(ik, m);
@@ -195,9 +195,9 @@ void initialize_known_method(LatestMethodCache* method_cache,
 
 ```cpp
 Method* LatestMethodCache::get_method() {
-  if (klass() == NULL) return NULL;           // ① 还没被 init——返回 NULL
+  if (klass() == NULL) return NULL;           // (1) 还没被 init——返回 NULL
   InstanceKlass* ik = InstanceKlass::cast(klass());
-  Method* m = ik->method_with_idnum(method_idnum());  // ② + ③
+  Method* m = ik->method_with_idnum(method_idnum());  // (2) + (3)
   assert(m != NULL, "sanity check");
   return m;
 }
@@ -343,9 +343,9 @@ init 时机: universe_post_init(), Unsafe 类链接后
 ```
 缓存方法: jdk.internal.misc.Unsafe.throwNoSuchMethodError()
 init 时机: universe_post_init(), Unsafe 类链接后
-调用场景: ① MethodHandle 引用的方法被 redefine 删除后，ResolvedMethodTable
+调用场景: (1) MethodHandle 引用的方法被 redefine 删除后，ResolvedMethodTable
           用此方法替换（resolvedMethodTable.cpp:137）
-          ② redefine 后失效的 jmethodID 指向此方法（jvmtiRedefineClasses.cpp:3530）
+          (2) redefine 后失效的 jmethodID 指向此方法（jvmtiRedefineClasses.cpp:3530）
 频率:     redefine 删除方法 / jmethodID 失效时
 ```
 

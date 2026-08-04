@@ -80,14 +80,14 @@ dummy_region->set_top(dummy_region->end());
 inline HeapWord* G1ContiguousSpace::allocate_impl(size_t min_word_size,
                                                    size_t desired_word_size,
                                                    size_t* actual_size) {
-  HeapWord* obj = top();                            // ① top == end
-  size_t available = pointer_delta(end(), obj);     // ② available == 0
-  size_t want_to_allocate = MIN2(available, desired_word_size);  // ③ == 0
-  if (want_to_allocate >= min_word_size) {           // ④ 0 >= 1 → false
+  HeapWord* obj = top();                            // (1) top == end
+  size_t available = pointer_delta(end(), obj);     // (2) available == 0
+  size_t want_to_allocate = MIN2(available, desired_word_size);  // (3) == 0
+  if (want_to_allocate >= min_word_size) {           // (4) 0 >= 1 → false
     ...
     return obj;
   } else {
-    return NULL;                                     // ⑤ 永远到达这里
+    return NULL;                                     // (5) 永远到达这里
   }
 }
 ```
@@ -355,8 +355,8 @@ _survivor_used = survivor_list_length × GrainBytes
 Committed 的含义是"JVM 已向 OS 申请、物理上已提交的内存容量"。这部分的计算是整个函数最绕的地方，核心思路是**总量锁定、依次分配**：
 
 ```
-_overall_committed = _g1h->capacity();      // ① 总量：当前已提交的总物理内存
-committed = _overall_committed;              // ② 本地变量开始"切蛋糕"
+_overall_committed = _g1h->capacity();      // (1) 总量：当前已提交的总物理内存
+committed = _overall_committed;              // (2) 本地变量开始"切蛋糕"
 ```
 
 首先扣除 survivor 和 old 的 committed：
@@ -364,15 +364,15 @@ committed = _overall_committed;              // ② 本地变量开始"切蛋糕
 ```
 _survivor_committed = _survivor_used;        // survivor: 用多少算多少
 _old_committed      = align_up(_old_used);   // old: 向上对齐到 region 边界
-committed          -= survivor + old;         // ③ 剩下的 committed 预算
+committed          -= survivor + old;         // (3) 剩下的 committed 预算
 ```
 
 然后分配 eden 的 committed：
 
 ```
-_eden_committed = eden_list_max_length × GrainBytes;   // ④ 按最大可能 young 区来预算
-_eden_committed = MIN(_eden_committed, committed);     // ⑤ 但不能超过剩余预算
-committed      -= _eden_committed;                     // ⑥ 扣掉 eden 已用的部分
+_eden_committed = eden_list_max_length × GrainBytes;   // (4) 按最大可能 young 区来预算
+_eden_committed = MIN(_eden_committed, committed);     // (5) 但不能超过剩余预算
+committed      -= _eden_committed;                     // (6) 扣掉 eden 已用的部分
 ```
 
 (4) 使用的是 `max_length` 而不是 `length`。这意味着即使当前只有 2 个 eden Region，只要策略允许扩张到 10 个，eden_committed 就按 10 个 Region 来算。目的：避免 GC Locker 激活导致 young 区临时扩张时，jstat 的 committed 值突然跳变。
@@ -382,7 +382,7 @@ committed      -= _eden_committed;                     // ⑥ 扣掉 eden 已用
 最后，**所有剩余的 committed 预算全给 old**：
 
 ```
-_old_committed += committed;                 // ⑦ 剩下的全归 old
+_old_committed += committed;                 // (7) 剩下的全归 old
 ```
 
 (6) 之后 `committed` 还剩多少？`overall - survivor_committed - old_committed(原始) - eden_committed`。把这部分加回 `_old_committed`，最终得到：

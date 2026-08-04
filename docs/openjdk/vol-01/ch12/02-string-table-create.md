@@ -32,12 +32,12 @@ x.intern() == y.intern() → true（intern 后共享同一个对象）
 
 ```
 先 x.intern():
-  ① 取 x 的内容 "a" → 查表 → 未命中
-  ② 把 x 放入表 → x 成为共享对象 → 返回 x（0x1000）
+  (1) 取 x 的内容 "a" → 查表 → 未命中
+  (2) 把 x 放入表 → x 成为共享对象 → 返回 x（0x1000）
 
 再 y.intern():
-  ① 取 y 的内容 "a" → 查表 → 命中（表里是 x）
-  ② 返回 x（0x1000）——不是 y！y 无人引用，之后被 GC 回收
+  (1) 取 y 的内容 "a" → 查表 → 命中（表里是 x）
+  (2) 返回 x（0x1000）——不是 y！y 无人引用，之后被 GC 回收
 
 结果: x.intern() == y.intern() → 都是 0x1000 → true
 （顺序反过来则 y 成为代表，x 被丢弃）
@@ -78,12 +78,12 @@ static void create_table() {
 ```cpp
 StringTable::StringTable() : _local_table(NULL), _current_size(0), _has_work(0),
   _needs_rehashing(false), _weak_handles(NULL), _items(0), _uncleaned_items(0) {
-  _weak_handles = new OopStorage("StringTable weak",          // ① 弱引用存储
+  _weak_handles = new OopStorage("StringTable weak",          // (1) 弱引用存储
                                  StringTableWeakAlloc_lock,
                                  StringTableWeakActive_lock);
-  size_t start_size_log_2 = ceil_pow_2(StringTableSize);      // ② 容量计算
+  size_t start_size_log_2 = ceil_pow_2(StringTableSize);      // (2) 容量计算
   _current_size = ((size_t)1) << start_size_log_2;            //    2^16 = 65536
-  _local_table = new StringTableHash(start_size_log_2,        // ③ 并发哈希表
+  _local_table = new StringTableHash(start_size_log_2,        // (3) 并发哈希表
                                      END_SIZE, REHASH_LEN);
 }
 ```
@@ -95,13 +95,13 @@ StringTable::StringTable() : _local_table(NULL), _current_size(0), _has_work(0),
 **函数体三件事**：
 
 ```
-① new OopStorage("StringTable weak", 两把锁)
+(1) new OopStorage("StringTable weak", 两把锁)
    → 弱引用的物理存储（§2 展开）
 
-② 容量计算: ceil_pow_2(65536) = 16 → _current_size = 2^16 = 65536
+(2) 容量计算: ceil_pow_2(65536) = 16 → _current_size = 2^16 = 65536
    → 桶数（§1.2 讲为什么是 2 的幂）
 
-③ new StringTableHash(16, 24, 100)
+(3) new StringTableHash(16, 24, 100)
    → 并发哈希表：初始 2^16 桶、容量上限 2^24、rehash 阈值 100（§3 展开）
 ```
 
@@ -347,12 +347,12 @@ get_insert_lazy(hash, value):
 
 ```
 grow():
-  ① 拿 resize 锁 → 创建新表（容量 ×2，log2+1）
-  ② 逐桶处理旧表:
+  (1) 拿 resize 锁 → 创建新表（容量 ×2，log2+1）
+  (2) 逐桶处理旧表:
      把该桶链表按新掩码拆成两半 → 挂到新表的第 i 桶和第 i+旧表大小 桶
      （源码称 even/odd siblings：hash 新高位为 0 留原位，为 1 迁到后半区）
      旧桶设 redirect → 等待在途读者退出（write_synchronize）
-  ③ 全部迁移完 → 原子切换 _table 指向新表 → 删旧表
+  (3) 全部迁移完 → 原子切换 _table 指向新表 → 删旧表
 ```
 
 读者无感知：正在读的桶没被迁移就用旧链；遇到 redirect 就转新表。新表创建后旧表不会消失，直到所有桶迁移完——**两表共存期，读者永远能找到一个一致的桶**。
@@ -487,16 +487,16 @@ oop StringTable::intern(oop string, TRAPS) {
 ```cpp
 // stringTable.cpp（私有实现——省略 CDS 共享表查找，默认不开启）
 oop StringTable::intern(Handle string_or_null_h, jchar* name, int len, TRAPS) {
-  unsigned int hash = java_lang_String::hash_code(name, len);  // ① 算 hash
-  if (StringTable::_alt_hash) {                                // ② rehash 过 → 换 siphash
+  unsigned int hash = java_lang_String::hash_code(name, len);  // (1) 算 hash
+  if (StringTable::_alt_hash) {                                // (2) rehash 过 → 换 siphash
     hash = hash_string(name, len, true);
   }
-  oop found_string = StringTable::the_table()->do_lookup(     // ③ 本地表纯查找
+  oop found_string = StringTable::the_table()->do_lookup(     // (3) 本地表纯查找
     name, len, hash);
   if (found_string != NULL) {                                  //    命中 → 直接返回
     return found_string;
   }
-  return StringTable::the_table()->do_intern(                 // ④ 未命中 → 插入
+  return StringTable::the_table()->do_intern(                 // (4) 未命中 → 插入
     string_or_null_h, name, len, hash, THREAD);
 }
 ```
@@ -537,7 +537,7 @@ oop StringTable::do_lookup(jchar* name, int len, uintx hash) {
 `do_lookup` 传给 CHT 的两个对象的真实定义（源码紧接着）：
 
 ```cpp
-// ① 查找回调——CHT 每遇到一个 Node 就调 equals 一次
+// (1) 查找回调——CHT 每遇到一个 Node 就调 equals 一次
 class StringTableLookupJchar : StackObj {
   Thread* _thread;
   uintx  _hash;
@@ -557,7 +557,7 @@ class StringTableLookupJchar : StackObj {
   }
 };
 
-// ② 命中回调——equals 返回 true 后 CHT 调它一次
+// (2) 命中回调——equals 返回 true 后 CHT 调它一次
 class StringTableGet : StackObj {
   Thread* _thread;
   Handle  _return;                    // 收到的匹配 String 用 Handle 存入
@@ -636,7 +636,7 @@ oop StringTable::do_intern(Handle string_or_null_h, jchar* name,
 `do_intern` 的查找与插入由两个回调对象驱动——与 §4.3 的 `do_lookup` 对称，但第二个对象多了一个"建新条目"的重载：
 
 ```cpp
-// ① 查找回调——用已有 String 对象比对（与 do_lookup 的 jchar 版对应）
+// (1) 查找回调——用已有 String 对象比对（与 do_lookup 的 jchar 版对应）
 class StringTableLookupOop : StackObj {
   Thread* _thread;
   uintx  _hash;
@@ -654,7 +654,7 @@ class StringTableLookupOop : StackObj {
   }
 };
 
-// ② 插入回调——一个对象两种重载，覆盖命中与未命中
+// (2) 插入回调——一个对象两种重载，覆盖命中与未命中
 class StringTableCreateEntry : StackObj {
   Thread* _thread;
   Handle  _return;       // 命中：已有匹配 → resolve 记这里

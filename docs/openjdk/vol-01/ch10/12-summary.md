@@ -154,13 +154,13 @@ ch12 是独立的 Metaspace 诊断章（依赖 ch09/07，非本章），与 G1 �
 
 ```
 Universe::initialize_heap()
-├─ ① create_heap()                                     ← ch10/04 已讲
-├─ ② _collectedHeap->initialize() (201 行)              ← ch10/02-11 已讲
-├─ ③ ThreadLocalAllocBuffer::set_max_size()             ← 12b §2 已讲
+├─ (1) create_heap()                                     ← ch10/04 已讲
+├─ (2) _collectedHeap->initialize() (201 行)              ← ch10/02-11 已讲
+├─ (3) ThreadLocalAllocBuffer::set_max_size()             ← 12b §2 已讲
 │      └─ heap()->max_tlab_size() = humongous 阈值（半 Region）
-├─ ④ CompressedOops 模式决策 (~40 行)                   ← 12b §3 已讲
+├─ (4) CompressedOops 模式决策 (~40 行)                   ← 12b §3 已讲
 │      └─ 4GB/32GB 两个阈值切出 Unscaled/ZeroBased/DisjointBase/HeapBased
-└─ ⑤ ThreadLocalAllocBuffer::startup_initialization()   ← 12b §4 已讲
+└─ (5) ThreadLocalAllocBuffer::startup_initialization()   ← 12b §4 已讲
        └─ _target_refills = 50 + GlobalTLABStats + 主线程 TLAB 重初始化
 ```
 
@@ -170,14 +170,14 @@ Universe::initialize_heap()
 
 ```
 universe_init()
-├─ ③ SystemDictionary::initialize_oop_storage()          ← ch09-02
-├─ ④ Metaspace::global_initialize()                      ← ch09-07
-├─ ⑤ MetaspaceCounters::initialize_performance_counters()← ch09-06
-├─ ⑥ JVMFlagConstraintList::check_constraints()          ← ch09-05
-├─ ⑦ ClassLoaderData::init_null_class_loader_data()      ← ch09-03
-├─ ⑧ 6× new LatestMethodCache()                          ← ch11
-├─ ⑨ MetaspaceShared::initialize_shared_spaces()（CDS）  ← 不讲解（已归档）
-├─ ⑩ SymbolTable / StringTable::create_table()           ← 已归档
+├─ (3) SystemDictionary::initialize_oop_storage()          ← ch09-02
+├─ (4) Metaspace::global_initialize()                      ← ch09-07
+├─ (5) MetaspaceCounters::initialize_performance_counters()← ch09-06
+├─ (6) JVMFlagConstraintList::check_constraints()          ← ch09-05
+├─ (7) ClassLoaderData::init_null_class_loader_data()      ← ch09-03
+├─ (8) 6× new LatestMethodCache()                          ← ch11
+├─ (9) MetaspaceShared::initialize_shared_spaces()（CDS）  ← 不讲解（已归档）
+├─ (10) SymbolTable / StringTable::create_table()           ← 已归档
 └─ ⑪ ResolvedMethodTable::create_table()                 ← 已归档
 ```
 

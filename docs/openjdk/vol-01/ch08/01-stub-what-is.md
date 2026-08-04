@@ -328,9 +328,9 @@ x86 CPU 用两个寄存器来管理栈：
 **进入时（建帧）—— 三条指令：**
 
 ```asm
-push rbp          ; ① 把调用者的 rbp 暂存到栈上
-mov  rbp, rsp     ; ② 把 rsp 当前值记作"本函数的帧基址"
-sub  rsp, 96      ; ③ 往下分配 96 字节，作为本函数的局部变量区
+push rbp          ; (1) 把调用者的 rbp 暂存到栈上
+mov  rbp, rsp     ; (2) 把 rsp 当前值记作"本函数的帧基址"
+sub  rsp, 96      ; (3) 往下分配 96 字节，作为本函数的局部变量区
 ```
 
 **指令执行前：**
@@ -421,12 +421,12 @@ call_stub 第一条指令执行之前:
 然后 call_stub 的前三条指令执行——"画"出 entry_frame：
 
 ```asm
-push rbp          ; ① 保存 call_helper 的 rbp 到栈上
+push rbp          ; (1) 保存 call_helper 的 rbp 到栈上
                   ;    rsp -= 8，现在栈上多了一个 "[rbp+0] saved old rbp"
 
-mov  rbp, rsp     ; ② rbp 切换到新帧——从现在起 rbp 指向 entry_frame 的基址
+mov  rbp, rsp     ; (2) rbp 切换到新帧——从现在起 rbp 指向 entry_frame 的基址
 
-sub  rsp, 96      ; ③ 往下分配 96 字节——rsp -= 96
+sub  rsp, 96      ; (3) 往下分配 96 字节——rsp -= 96
                   ;    这 96 字节就是 entry_frame 的工作区
 ```
 
@@ -438,12 +438,12 @@ sub  rsp, 96      ; ③ 往下分配 96 字节——rsp -= 96
   [rbp+24] Thread*                ← 第 8 参数（栈传）
   [rbp+16] size_of_parameters     ← 第 7 参数（栈传）
   [rbp+8]  返回地址               ← call 指令 push 的
-  [rbp+0]  saved old rbp          ← ① push rbp 保存的 call_helper 的 rbp
+  [rbp+0]  saved old rbp          ← (1) push rbp 保存的 call_helper 的 rbp
         ↑
         现在 rbp 指向这里 —— entry_frame 的基址
   [rbp-8]                         ┐
   [rbp-16]                        │
-  ...                             │ ③ sub rsp, 96 分配的
+  ...                             │ (3) sub rsp, 96 分配的
   [rbp-88]                        │ 96 字节工作区
   [rbp-96] ← rsp                  ┘
 低地址
@@ -452,13 +452,13 @@ sub  rsp, 96      ; ③ 往下分配 96 字节——rsp -= 96
 这 96 字节的每个 8 字节槽位有明确分工：
 
 ```
-[rbp-8]  parameters          ← ① 从 r9 搬过来的 intptr_t* 参数数组指针
+[rbp-8]  parameters          ← (1) 从 r9 搬过来的 intptr_t* 参数数组指针
 [rbp-16] entry_point         ← 从 r8 搬过来的编译代码入口地址
 [rbp-24] method              ← 从 rcx 搬过来的 Method*
 [rbp-32] result_type         ← 从 rdx 搬过来的 BasicType
 [rbp-40] result              ← 从 rsi 搬过来的 result 地址
 [rbp-48] call_wrapper        ← 从 rdi 搬过来的 JavaCallWrapper*
-[rbp-56] rbx_save            ← ② 保存 call_helper 的 rbx 值
+[rbp-56] rbx_save            ← (2) 保存 call_helper 的 rbx 值
 [rbp-64] r12_save            ← 保存 call_helper 的 r12 值
 [rbp-72] r13_save            ← 保存 call_helper 的 r13 值
 [rbp-80] r14_save            ← 保存 call_helper 的 r14 值
@@ -546,10 +546,10 @@ rsp = 指向栈顶 Java 参数的下方
 **call_stub 做的四件事总结**：
 
 ```
-① 把 C ABI 的 6 个寄存器参数搬到 entry_frame 栈槽位（释放寄存器）
-② 保存 callee-saved 寄存器到 entry_frame 槽位（rbx/r12/r13/r14/r15 旧值）
-③ push Java 参数到栈上（从 parameters 数组读出来，逐个 push）
-④ 设 rbx=Method*, r13=sender_sp, r15=JavaThread* → call rcx
+(1) 把 C ABI 的 6 个寄存器参数搬到 entry_frame 栈槽位（释放寄存器）
+(2) 保存 callee-saved 寄存器到 entry_frame 槽位（rbx/r12/r13/r14/r15 旧值）
+(3) push Java 参数到栈上（从 parameters 数组读出来，逐个 push）
+(4) 设 rbx=Method*, r13=sender_sp, r15=JavaThread* → call rcx
 ```
 
 entry_frame 只是第①(2)步的"草稿纸"——call_stub 的本地工作区。第(3)步的 Java 参数是在 entry_frame **下方** push 到栈上的，第(4)步的跳转是最后一步。
@@ -565,7 +565,7 @@ entry_frame 只是第①(2)步的"草稿纸"——call_stub 的本地工作区�
 把同一个线程栈在四个关键时刻的样子放一起看：
 
 ```
-     ① call_stub(...)         ② push rbp            ③ 设好 Java 寄存器     ④ call rcx 之后
+     (1) call_stub(...)         (2) push rbp            (3) 设好 Java 寄存器     (4) call rcx 之后
        被调用前                 mov rbp, rsp             call rcx 之前           Java 方法执行中
                               sub rsp, 96
 

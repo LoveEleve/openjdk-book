@@ -12,22 +12,22 @@
 
 ```cpp
 jint Universe::initialize_heap() {
-  _collectedHeap = create_heap();                          // ① 已讲（ch10/04）
-  jint status = _collectedHeap->initialize();              // ② 已讲（ch10/02-11）
+  _collectedHeap = create_heap();                          // (1) 已讲（ch10/04）
+  jint status = _collectedHeap->initialize();              // (2) 已讲（ch10/02-11）
   if (status != JNI_OK) {
     return status;
   }
   log_info(gc)("Using %s", _collectedHeap->name());
 
-  ThreadLocalAllocBuffer::set_max_size(Universe::heap()->max_tlab_size());   // ③ 本文
+  ThreadLocalAllocBuffer::set_max_size(Universe::heap()->max_tlab_size());   // (3) 本文
 
 #ifdef _LP64
-  if (UseCompressedOops) {                                  // ④ 本文
+  if (UseCompressedOops) {                                  // (4) 本文
     ... 压缩指针模式决策 (~40 行)
   }
 #endif
 
-  if (UseTLAB) {                                            // ⑤ 本文
+  if (UseTLAB) {                                            // (5) 本文
     ThreadLocalAllocBuffer::startup_initialization();
   }
   return JNI_OK;
@@ -372,13 +372,13 @@ void ThreadLocalAllocBuffer::startup_initialization() {
 
   // Assuming each thread's active tlab is, on average,
   // 1/2 full at a GC
-  _target_refills = 100 / (2 * TLABWasteTargetPercent);   // ① 算 refill 目标
+  _target_refills = 100 / (2 * TLABWasteTargetPercent);   // (1) 算 refill 目标
   _target_refills = MAX2(_target_refills, 2U);            // 下限 2，防止 VM 启动期 GC
 
-  _global_stats = new GlobalTLABStats();                  // ② 建全局统计
+  _global_stats = new GlobalTLABStats();                  // (2) 建全局统计
 
 #ifdef COMPILER2
-  if (is_server_compilation_mode_vm()) {                  // ③ C2 预留 prefetch 空间
+  if (is_server_compilation_mode_vm()) {                  // (3) C2 预留 prefetch 空间
     int lines = MAX2(AllocatePrefetchLines, AllocateInstancePrefetchLines) + 2;
     _reserve_for_allocation_prefetch = (AllocatePrefetchDistance + AllocatePrefetchStepSize * lines) /
                                        (int)HeapWordSize;
@@ -386,7 +386,7 @@ void ThreadLocalAllocBuffer::startup_initialization() {
 #endif
 
   guarantee(Thread::current()->is_Java_thread(), "tlab initialization thread not Java thread");
-  Thread::current()->tlab().initialize();                 // ④ 重初始化主线程 TLAB
+  Thread::current()->tlab().initialize();                 // (4) 重初始化主线程 TLAB
   ...
 }
 ```
@@ -567,10 +567,10 @@ prefetch 的目标地址 = top + AllocatePrefetchDistance + ...
 **问题三：公式在算什么？**
 
 ```cpp
-// ① 预取几行：对象分配和数组分配各有一个行数参数，取大的 + 2 保险
+// (1) 预取几行：对象分配和数组分配各有一个行数参数，取大的 + 2 保险
 int lines = MAX2(AllocatePrefetchLines, AllocateInstancePrefetchLines) + 2;
 
-// ② 预取范围 = 起始距离 + 每行步长 × 行数
+// (2) 预取范围 = 起始距离 + 每行步长 × 行数
 //    即从 top+distance 开始，连续预取 lines 行
 _reserve_for_allocation_prefetch = (AllocatePrefetchDistance + AllocatePrefetchStepSize * lines) / (int)HeapWordSize;
 //                                                               ↑ 除以 8，把字节换算成 word
@@ -666,11 +666,11 @@ clamp         = [min_size=2KB+reserve, max_size=2MB] → 40MB 被压到 2MB
 (3)(4)(5) 补齐后，`Universe::initialize_heap()` 的完整讲解闭环：
 
 ```
-① create_heap()                       ch10/04
-② _collectedHeap->initialize()        ch10/02-11
-③ TLAB set_max_size                  本文 §2 —— 上限 = humongous 阈值
-④ CompressedOops 模式决策            本文 §3 —— 4GB/32GB 阈值
-⑤ TLAB startup_initialization       本文 §4 —— refills + 统计 + 主线程重初始化
+(1) create_heap()                       ch10/04
+(2) _collectedHeap->initialize()        ch10/02-11
+(3) TLAB set_max_size                  本文 §2 —— 上限 = humongous 阈值
+(4) CompressedOops 模式决策            本文 §3 —— 4GB/32GB 阈值
+(5) TLAB startup_initialization       本文 §4 —— refills + 统计 + 主线程重初始化
 ```
 
 此后的流程回到 `universe_init()`（ch09/01 全景）：SystemDictionary::initialize_oop_storage → Metaspace::global_initialize → ... → SymbolTable/StringTable::create_table。

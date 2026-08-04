@@ -218,14 +218,14 @@ OopStorage::Block::Block(const OopStorage* owner, void* memory) :
 
 ```cpp
 oop* OopStorage::Block::allocate() {
-    uintx allocated = _allocated_bitmask;                    // ① 读掩码
+    uintx allocated = _allocated_bitmask;                    // (1) 读掩码
     while (true) {
-        unsigned index = count_trailing_zeros(~allocated);   // ② CTZ 找空闲位
-        uintx new_value = allocated | bitmask_for_index(index); // ③ 目标 bit 置 1
-        uintx fetched = Atomic::cmpxchg(new_value,           // ④ CAS 提交
+        unsigned index = count_trailing_zeros(~allocated);   // (2) CTZ 找空闲位
+        uintx new_value = allocated | bitmask_for_index(index); // (3) 目标 bit 置 1
+        uintx fetched = Atomic::cmpxchg(new_value,           // (4) CAS 提交
                                         &_allocated_bitmask, allocated);
-        if (fetched == allocated) return &_data[index];      // ⑤ 成功
-        allocated = fetched;                                  // ⑥ 重试
+        if (fetched == allocated) return &_data[index];      // (5) 成功
+        allocated = fetched;                                  // (6) 重试
     }
 }
 ```
@@ -460,10 +460,10 @@ _active_array:
 
 ```cpp
 void replace_active_array(ActiveArray* new_array) {
-    new_array->increment_refcount();                          // ① 新数组 ref+1
-    OrderAccess::release_store(&_active_array, new_array);    // ② 原子切指针
-    _protect_active.synchronize();    // ③ 等旧 refcount 归零（通过 SingleWriterSynchronizer）
-    // ④ 旧数组销毁
+    new_array->increment_refcount();                          // (1) 新数组 ref+1
+    OrderAccess::release_store(&_active_array, new_array);    // (2) 原子切指针
+    _protect_active.synchronize();    // (3) 等旧 refcount 归零（通过 SingleWriterSynchronizer）
+    // (4) 旧数组销毁
 }
 ```
 
@@ -579,21 +579,21 @@ void OopStorage::release(const oop* ptr) {
 
 ```cpp
 void OopStorage::Block::release_entries(uintx releasing, Block* volatile* deferred_list) {
-    Atomic::inc(&_release_refcount);                         // ① 防止在此期间删除
+    Atomic::inc(&_release_refcount);                         // (1) 防止在此期间删除
 
     uintx old_allocated = _allocated_bitmask;
     while (true) {
-        uintx new_value = old_allocated ^ releasing;         // ② XOR 清 bit
+        uintx new_value = old_allocated ^ releasing;         // (2) XOR 清 bit
         uintx fetched = Atomic::cmpxchg(new_value, &_allocated_bitmask, old_allocated);
         if (fetched == old_allocated) break;
         old_allocated = fetched;
     }
 
-    if ((releasing == old_allocated) || is_full_bitmask(old_allocated)) { // ③ 状态变更?
-        // ④ CAS push 到 deferred_updates（详细见 5.2 节）
+    if ((releasing == old_allocated) || is_full_bitmask(old_allocated)) { // (3) 状态变更?
+        // (4) CAS push 到 deferred_updates（详细见 5.2 节）
     }
 
-    Atomic::dec(&_release_refcount);                         // ⑤ 保护结束
+    Atomic::dec(&_release_refcount);                         // (5) 保护结束
 }
 ```
 
@@ -707,7 +707,7 @@ for (size_t i = 0; i < limit; ++i) {
 
 ```cpp
 bool is_deletable() const {
-    return (OrderAccess::load_acquire(&_allocated_bitmask) == 0)       // ① 全空
+    return (OrderAccess::load_acquire(&_allocated_bitmask) == 0)       // (1) 全空
 ```
 
 **条件① `_allocated_bitmask == 0`。** Block 的所有 64 个 slot 都空闲。最便宜的检查，先跑。
@@ -715,13 +715,13 @@ bool is_deletable() const {
 **条件(2) `_release_refcount == 0`。** 如果 `release_entries` 正在执行中（refcount > 0），bitmask 可能暂时为 0 但还没推到 deferred list——此时不能删。refcount 在 release_entries 开头递增、结尾递减——挡住这个窗口。
 
 ```cpp
-        && (OrderAccess::load_acquire(&_release_refcount) == 0)        // ② 没人在释放
+        && (OrderAccess::load_acquire(&_release_refcount) == 0)        // (2) 没人在释放
 ```
 
 **条件(3) `_deferred_updates_next == NULL`。** 如果 Block 还在 deferred 链表上，说明还没被 `reduce_deferred_updates` 消费——bitmask 的值虽然为 0，但 Block 不一定已经在 allocation_list 尾部。需要等消费完后 `_deferred_updates_next` 才被清空。
 
 ```cpp
-        && (OrderAccess::load_acquire(&_deferred_updates_next) == NULL); // ③ 已出延迟队列
+        && (OrderAccess::load_acquire(&_deferred_updates_next) == NULL); // (3) 已出延迟队列
 }
 ```
 

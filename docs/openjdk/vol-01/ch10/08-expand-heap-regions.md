@@ -76,16 +76,16 @@ uint HeapRegionManager::expand_at(uint start, uint num_regions, WorkGang* pretou
 
 ```cpp
 void HeapRegionManager::make_regions_available(uint start, uint num_regions, WorkGang* pretouch) {
-    commit_regions(start, num_regions, pretouch);       // ①
+    commit_regions(start, num_regions, pretouch);       // (1)
 
-    for (uint i = start; i < start + num_regions; i++) {    // ②
+    for (uint i = start; i < start + num_regions; i++) {    // (2)
         if (_regions.get_by_index(i) == NULL) {
             _regions.set_by_index(i, new_heap_region(i));
         }
     }
     _available_map.par_set_range(start, start + num_regions);
 
-    for (uint i = start; i < start + num_regions; i++) {     // ③
+    for (uint i = start; i < start + num_regions; i++) {     // (3)
         HeapRegion* hr = at(i);
         hr->initialize(mr);
         insert_into_free_list(hr);
@@ -177,10 +177,10 @@ HeapRegion* HeapRegionManager::new_heap_region(uint hrm_index) {
 
 ```cpp
 HeapRegion::HeapRegion(uint hrm_index, G1BlockOffsetTable* bot, MemRegion mr) :
-    _hrm_index(hrm_index),                    // ① 存 Region Index
-    _rem_set(new HeapRegionRemSet(bot, this)), // ② 创建本 Region 的 RSet（三层 Sparse/Fine/Coarse）
+    _hrm_index(hrm_index),                    // (1) 存 Region Index
+    _rem_set(new HeapRegionRemSet(bot, this)), // (2) 创建本 Region 的 RSet（三层 Sparse/Fine/Coarse）
 {                                              //    RSet 记录 "谁引用了我"（ch10/06 §3）
-    initialize(mr);                            // ③ 初始化空间
+    initialize(mr);                            // (3) 初始化空间
 }
 ```
 
@@ -199,10 +199,10 @@ for (uint i = start; i < start + num_regions; i++) {
     HeapWord* bottom = G1CollectedHeap::heap()->bottom_addr_for_region(i);
     // = reserved.start() + i × GrainWords   (g1CollectedHeap.inline.hpp:74)
 
-    MemRegion mr(bottom, bottom + HeapRegion::GrainWords); // ① 构造这个 Region 的堆地址范围
+    MemRegion mr(bottom, bottom + HeapRegion::GrainWords); // (1) 构造这个 Region 的堆地址范围
 
-    hr->initialize(mr);                      // ② 设 _bottom/_end = mr, 初始化 _bot_part (BOT), 标 _type = Free
-    insert_into_free_list(hr);               // ③ ★ 入队！从此可被 G1Allocator 取走
+    hr->initialize(mr);                      // (2) 设 _bottom/_end = mr, 初始化 _bot_part (BOT), 标 _type = Free
+    insert_into_free_list(hr);               // (3) ★ 入队！从此可被 G1Allocator 取走
 }
 ```
 
@@ -294,7 +294,7 @@ G1CollectedHeap::expand(init_byte_size, _workers)
   → _hrm.expand_by(2048, _workers)
     → expand_at(0, 2048)
       → make_regions_available(0, 2048, _workers)
-        ├── ① commit_regions: 6 个 Mapper 同步 commit 物理内存
+        ├── (1) commit_regions: 6 个 Mapper 同步 commit 物理内存
         ├── (2) new_heap_region(i): 创建 2048 个 HeapRegion 对象
         └── (3) hr->initialize() + insert_into_free_list(): 入空闲列表
   → g1_policy()->record_new_heap_size() — 通知策略层

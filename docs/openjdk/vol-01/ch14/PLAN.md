@@ -14,7 +14,7 @@ init_globals()（runtime/init.cpp:101）:
   11: interpreter_init()           ← 本章 §1——TemplateInterpreter::initialize()
   12: invocationCounter_init()     ← ch13
   13: accessFlags_init()           ← ch13
-  14: templateTable_init()         ← 本章 §2——已在步骤②中调用，此为冗余
+  14: templateTable_init()         ← 本章 §2——已在步骤(2)中调用，此为冗余
 ```
 
 `interpreter_init` 的核心是 `TemplateInterpreterGenerator::generate_all()`——**一个函数生成了解释器的全部汇编代码**。按生成的代码类型分类：
@@ -41,19 +41,19 @@ init_globals()（runtime/init.cpp:101）:
 void TemplateInterpreter::initialize() {
   if (_code != NULL) return;
 
-  AbstractInterpreter::initialize();                          // ① 基类初始化
+  AbstractInterpreter::initialize();                          // (1) 基类初始化
 
-  TemplateTable::initialize();                                // ② 注册 202 条字节码模板
+  TemplateTable::initialize();                                // (2) 注册 202 条字节码模板
 
   { ResourceMark rm;
-    _code = new StubQueue(new InterpreterCodeletInterface,   // ③ 创建 CodeBuffer
+    _code = new StubQueue(new InterpreterCodeletInterface,   // (3) 创建 CodeBuffer
                           InterpreterCodeSize, NULL, "Interpreter");
 
-    TemplateInterpreterGenerator g(_code);                    // ④ 生成全部汇编代码
+    TemplateInterpreterGenerator g(_code);                    // (4) 生成全部汇编代码
     _code->deallocate_unused_tail();                          //    回收未用尾部空间
   }
 
-  _active_table = _normal_table;                              // ⑤ 激活 dispatch 表
+  _active_table = _normal_table;                              // (5) 激活 dispatch 表
 }
 ```
 

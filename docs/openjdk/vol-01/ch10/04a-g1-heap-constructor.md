@@ -68,11 +68,11 @@ _collection_set(this, _g1_policy)
 
 ```cpp
 G1CollectionSet::G1CollectionSet(G1CollectedHeap* g1h, G1Policy* policy) :
-    _cset_chooser(new CollectionSetChooser()),  // ① 创建旧区候选队列
-    _collection_set_regions(NULL),              // ② 初始 NULL——等 initialize() 分配
+    _cset_chooser(new CollectionSetChooser()),  // (1) 创建旧区候选队列
+    _collection_set_regions(NULL),              // (2) 初始 NULL——等 initialize() 分配
     _collection_set_cur_length(0),
     _collection_set_max_length(0),
-    _inc_build_state(Inactive),                 // ③ 构建状态：未激活
+    _inc_build_state(Inactive),                 // (3) 构建状态：未激活
     _eden_region_length(0), _survivor_region_length(0), _old_region_length(0),
     ...
 { }
@@ -221,8 +221,8 @@ G1AllocRegion（基类, hpp:41-82）
 
 ```cpp
 HeapWord* attempt_allocation(size_t word_size) {
-    HeapRegion* alloc_region = _alloc_region;          // ① 读当前 Region
-    HeapWord* result = par_allocate(alloc_region, word_size); // ② CAS: 原 top+size ≤ end → top+=size
+    HeapRegion* alloc_region = _alloc_region;          // (1) 读当前 Region
+    HeapWord* result = par_allocate(alloc_region, word_size); // (2) CAS: 原 top+size ≤ end → top+=size
     return result;  // NULL = 当前 Region 满了
 }
 ```
@@ -367,14 +367,14 @@ HeapRegionManager _hrm;  // 不是 HeapRegionManager*！
 
 ```cpp
 HeapRegionManager() :
-    _regions(),                              // ①
-    _heap_mapper(NULL),                      // ②
+    _regions(),                              // (1)
+    _heap_mapper(NULL),                      // (2)
     _prev_bitmap_mapper(NULL), _next_bitmap_mapper(NULL),
     _bot_mapper(NULL), _cardtable_mapper(NULL), _card_counts_mapper(NULL),
-    _num_committed(0),                       // ③
-    _allocated_heapregions_length(0),        // ④
-    _available_map(mtGC),                    // ⑤
-    _free_list("Free list", new MasterFreeRegionListMtSafeChecker())  // ⑥
+    _num_committed(0),                       // (3)
+    _allocated_heapregions_length(0),        // (4)
+    _available_map(mtGC),                    // (5)
+    _free_list("Free list", new MasterFreeRegionListMtSafeChecker())  // (6)
 { }
 ```
 

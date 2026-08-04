@@ -195,13 +195,13 @@ void SafeThreadsListPtr::acquire_stable_list() {
 void SafeThreadsListPtr::acquire_stable_list_fast_path() {
   ThreadsList* threads;
   while (true) {
-    threads = ThreadsSMRSupport::get_java_thread_list();              // ① 读全局指针
-    ThreadsList* unverified_threads = Thread::tag_hazard_ptr(threads); // ②a 打 tag
-    _thread->set_threads_hazard_ptr(unverified_threads);              // ②b 贴标签（堆上发布）
-    if (ThreadsSMRSupport::get_java_thread_list() != threads)         // ③ 验证①：重读
+    threads = ThreadsSMRSupport::get_java_thread_list();              // (1) 读全局指针
+    ThreadsList* unverified_threads = Thread::tag_hazard_ptr(threads); // (2)a 打 tag
+    _thread->set_threads_hazard_ptr(unverified_threads);              // (2)b 贴标签（堆上发布）
+    if (ThreadsSMRSupport::get_java_thread_list() != threads)         // (3) 验证(1)：重读
       continue;
     if (_thread->cmpxchg_threads_hazard_ptr(threads, unverified_threads)
-        == unverified_threads)                                        // ④ 验证②：CAS
+        == unverified_threads)                                        // (4) 验证(2)：CAS
       break;
   }
   _list = threads;
@@ -209,11 +209,11 @@ void SafeThreadsListPtr::acquire_stable_list_fast_path() {
 
 // ═══ line 437 — 嵌套路径：外层降级为引用计数 ═══
 void SafeThreadsListPtr::acquire_stable_list_nested_path() {
-  ThreadsList* current_list = _previous->_list;       // ① 取外层快照
-  current_list->inc_nested_handle_cnt();               // ② 引用计数 +1
-  _previous->_has_ref_count = true;                    // ③ 外层切到引用计数模式
-  _thread->_threads_hazard_ptr = NULL;                 // ④ 清空标签，腾给内层
-  acquire_stable_list_fast_path();                     // ⑤ 内层走 fast path
+  ThreadsList* current_list = _previous->_list;       // (1) 取外层快照
+  current_list->inc_nested_handle_cnt();               // (2) 引用计数 +1
+  _previous->_has_ref_count = true;                    // (3) 外层切到引用计数模式
+  _thread->_threads_hazard_ptr = NULL;                 // (4) 清空标签，腾给内层
+  acquire_stable_list_fast_path();                     // (5) 内层走 fast path
 }
 
 // ═══ line 471 — 释放（分 hazard ptr / 引用计数两条路径） ═══
@@ -520,12 +520,12 @@ class ThreadsList : public CHeapObj<mtThread> {
 
 ```cpp
 ThreadsList::ThreadsList(int entries) :
-  _length(entries),                                      // ① 数量
-  _next_list(NULL),                                      // ② 链表指针初始 NULL
-  _threads(NEW_C_HEAP_ARRAY(JavaThread*, entries + 1, mtThread)),  // ③ 分配数组
-  _nested_handle_cnt(0)                                  // ④ 引用计数初始 0
+  _length(entries),                                      // (1) 数量
+  _next_list(NULL),                                      // (2) 链表指针初始 NULL
+  _threads(NEW_C_HEAP_ARRAY(JavaThread*, entries + 1, mtThread)),  // (3) 分配数组
+  _nested_handle_cnt(0)                                  // (4) 引用计数初始 0
 {
-  *(JavaThread**)(_threads + entries) = NULL;            // ⑤ 末尾哨兵
+  *(JavaThread**)(_threads + entries) = NULL;            // (5) 末尾哨兵
 }
 ```
 
@@ -759,10 +759,10 @@ void Threads::remove(JavaThread* p, bool is_daemon) {
 
 ```cpp
 void ThreadsSMRSupport::remove_thread(JavaThread *thread) {
-  ThreadsList *new_list = ThreadsList::remove_thread(             // ① 建不含 thread 的新快照
+  ThreadsList *new_list = ThreadsList::remove_thread(             // (1) 建不含 thread 的新快照
       ThreadsSMRSupport::get_java_thread_list(), thread);
-  ThreadsList *old_list = ThreadsSMRSupport::xchg_java_thread_list(new_list);  // ② 原子替换
-  ThreadsSMRSupport::free_list(old_list);                         // ③ 回收旧快照
+  ThreadsList *old_list = ThreadsSMRSupport::xchg_java_thread_list(new_list);  // (2) 原子替换
+  ThreadsSMRSupport::free_list(old_list);                         // (3) 回收旧快照
 }
 ```
 
@@ -771,11 +771,11 @@ void ThreadsSMRSupport::remove_thread(JavaThread *thread) {
 > 下面是一个新示例——假设当前快照是 v3（包含 p 和 T1），编号独立于上面的 add_thread 示例。
 
 ```
-① new_list = remove_thread(get_java_thread_list(), p)
+(1) new_list = remove_thread(get_java_thread_list(), p)
    → 当前快照 v3 { [p, T1, NULL] } → remove_thread 跳过 p → v4 { [T1, NULL] }
-② old_list = xchg_java_thread_list(v4)
+(2) old_list = xchg_java_thread_list(v4)
    → Atomic::xchg → _java_thread_list = v4, old_list = v3
-③ free_list(v3)
+(3) free_list(v3)
    → v3 头插入 _to_delete_list → 扫描 hazard ptr → 有人引用则排队, 无人则 delete
 ```
 
@@ -930,8 +930,8 @@ void SafeThreadsListPtr::acquire_stable_list() {
 **为什么要维护一个链？** 上面说的嵌套冲突发生在 `_threads_hazard_ptr` 这个字段上——它同一时刻只能存一个快照指针。但 `_threads_list_ptr` 是另外一个字段：它不存快照，而是串联该线程创建过的多个 `SafeThreadsListPtr` 栈对象，**记住创建顺序**——释放时后进先出。
 
 ```cpp
-  _previous = _thread->_threads_list_ptr;    // ① 把旧的栈顶记住
-  _thread->_threads_list_ptr = this;         // ② 自己成为新的栈顶
+  _previous = _thread->_threads_list_ptr;    // (1) 把旧的栈顶记住
+  _thread->_threads_list_ptr = this;         // (2) 自己成为新的栈顶
 ```
 
 用具体对象跟踪——假设外层先创建了 `SafeThreadsListPtr` 对象 A（栈上的 ThreadsListHandle 内部成员），内层后创建了对象 B：
@@ -942,8 +942,8 @@ void SafeThreadsListPtr::acquire_stable_list() {
 执行前: _thread->_threads_list_ptr == nullptr          // 链是空的
         _thread->_threads_hazard_ptr == nullptr         // 槽位空闲
 
-行 ①:   A._previous = nullptr                          // A 没有前驱
-行 ②:   _thread->_threads_list_ptr = &A                // 链栈顶 → A
+行 (1):   A._previous = nullptr                          // A 没有前驱
+行 (2):   _thread->_threads_list_ptr = &A                // 链栈顶 → A
 ```
 
 ```
@@ -958,8 +958,8 @@ void SafeThreadsListPtr::acquire_stable_list() {
 执行前: _thread->_threads_list_ptr = &A                 // 链栈顶是 A
         _thread->_threads_hazard_ptr = v3               // 槽位被 A 占用！
 
-行 ①:   B._previous = &A                               // B 的前驱是 A
-行 ②:   _thread->_threads_list_ptr = &B                // 链栈顶更新为 B
+行 (1):   B._previous = &A                               // B 的前驱是 A
+行 (2):   _thread->_threads_list_ptr = &B                // 链栈顶更新为 B
 ```
 
 ```
@@ -1268,21 +1268,21 @@ HotSpot 中 Closure 是一个对象，装着一个 `do_thread(Thread*)` 方法�
 ```cpp
 virtual void do_thread(Thread *thread) {
   assert_locked_or_safepoint(Threads_lock);
-  if (thread == NULL) return;                    // ① 防御检查
+  if (thread == NULL) return;                    // (1) 防御检查
 
   ThreadsList *current_list = NULL;
-  while (true) {                                 // ② 循环——标签可能被并发修改
-    current_list = thread->get_threads_hazard_ptr(); // ③ load_acquire 读标签
-    if (current_list == NULL) return;             // ④ NULL → 此线程无保护，跳过
+  while (true) {                                 // (2) 循环——标签可能被并发修改
+    current_list = thread->get_threads_hazard_ptr(); // (3) load_acquire 读标签
+    if (current_list == NULL) return;             // (4) NULL → 此线程无保护，跳过
 
-    if (!Thread::is_hazard_ptr_tagged(current_list)) break;  // ⑤ untagged → 正常收集
-    // ⑥ tagged → 抢走：
+    if (!Thread::is_hazard_ptr_tagged(current_list)) break;  // (5) untagged → 正常收集
+    // (6) tagged → 抢走：
     if (thread->cmpxchg_threads_hazard_ptr(NULL, current_list) == current_list) return;
-    // ⑦ CAS 失败 → 读者恰好完成去 tag → 重读 → 回到②
+    // (7) CAS 失败 → 读者恰好完成去 tag → 重读 → 回到(2)
   }
-  // ⑧ 到这里 current_list 是已验证的快照指针
+  // (8) 到这里 current_list 是已验证的快照指针
   AddThreadHazardPointerThreadClosure add_cl(_table);
-  current_list->threads_do(&add_cl);              // ⑨ 收集快照上的全部线程入哈希表
+  current_list->threads_do(&add_cl);              // (9) 收集快照上的全部线程入哈希表
 }
 ```
 
@@ -1428,7 +1428,7 @@ t6                                          → tagged_v3 (bit0=1)
                                             → tagged → CAS 抢走(NULL)
                                             → T2 不保护 → delete T2
 
-t7    验证①: get_java_thread_list() → v4 ≠ v3
+t7    验证(1): get_java_thread_list() → v4 ≠ v3
       → 过时！→ continue（重试）
 
 t8    重试: get_java_thread_list() → v4
@@ -1452,12 +1452,12 @@ t8    重试: get_java_thread_list() → v4
 `acquire_stable_list_fast_path()` 中有两个验证：
 
 ```
-VMThread: ①读v3 → ②贴tagged_v3 → ③重读(验证①) → ④CAS(验证②)
+VMThread: (1)读v3 → (2)贴tagged_v3 → (3)重读(验证(1)) → (4)CAS(验证(2))
 
 T2 的 xchg 有三种时序位置：
-  在③之前 → 验证① 重读发现 v4 ≠ v3 → retry
-  在③和④之间 → 验证① 通过(还是v3)，但CAS时标签被抢 → 验证② retry
-  在④之后 → 标签已是untagged，T2扫描时看到已验证 → T2 wait
+  在(3)之前 → 验证(1) 重读发现 v4 ≠ v3 → retry
+  在(3)和(4)之间 → 验证(1) 通过(还是v3)，但CAS时标签被抢 → 验证(2) retry
+  在(4)之后 → 标签已是untagged，T2扫描时看到已验证 → T2 wait
 ```
 
 三种时序，两个验证全覆盖。不存在漏掉的窗口。写者端扫描的完整源码（while(true) + CAS 抢标签）见第 4 节"写者端——扫描 hazard ptr"。
@@ -1528,11 +1528,11 @@ void JavaThread::java_suspend() {
 
 ```cpp
 void SafeThreadsListPtr::acquire_stable_list_nested_path() {
-  ThreadsList* current_list = _previous->_list;   // ① 取外层保护的快照 v3
-  current_list->inc_nested_handle_cnt();           // ② v3 引用计数 +1
-  _previous->_has_ref_count = true;                // ③ 外层切到引用计数模式
-  _thread->_threads_hazard_ptr = NULL;             // ④ 清空字段！腾给内层
-  acquire_stable_list_fast_path();                 // ⑤ 内层走 fast path 贴新标签
+  ThreadsList* current_list = _previous->_list;   // (1) 取外层保护的快照 v3
+  current_list->inc_nested_handle_cnt();           // (2) v3 引用计数 +1
+  _previous->_has_ref_count = true;                // (3) 外层切到引用计数模式
+  _thread->_threads_hazard_ptr = NULL;             // (4) 清空字段！腾给内层
+  acquire_stable_list_fast_path();                 // (5) 内层走 fast path 贴新标签
 }
 ```
 
@@ -1804,10 +1804,10 @@ void ThreadsSMRSupport::free_list(ThreadsList* threads) {
 **第 (4) 步——扫描并填充哈希表。** `threads_do(&scan_cl)` 遍历所有 JavaThread，对每个线程调用 `ScanHazardPtrGatherThreadsListClosure.do_thread()`。这个 Closure 的逻辑非常简单：
 
 ```
-① get_threads_hazard_ptr()  → 读标签值
-② if NULL → 跳过此线程
-③ untag_hazard_ptr()  → 去掉 tag bit
-④ 把去 tag 后的 ThreadsList* 指针加入哈希表
+(1) get_threads_hazard_ptr()  → 读标签值
+(2) if NULL → 跳过此线程
+(3) untag_hazard_ptr()  → 去掉 tag bit
+(4) 把去 tag 后的 ThreadsList* 指针加入哈希表
 ```
 
 **为什么即使标签是 tagged 也收集？** 这个哈希表决定的是"哪些 ThreadsList 容器不能被 delete"。如果一个 tagged 标签指向 v3——即使读者还没验证完——贸然 delete v3 的风险远大于多保留 v3 一会儿。保守策略：宁可多留一轮 free_list，不要删一个可能正在被保护（只是还没验证完）的快照。

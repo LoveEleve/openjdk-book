@@ -53,19 +53,19 @@ interpreter_init()                   ← init_globals 第 11 步
 void TemplateInterpreter::initialize() {
   if (_code != NULL) return;
 
-  AbstractInterpreter::initialize();                          // ① 基类初始化
+  AbstractInterpreter::initialize();                          // (1) 基类初始化
 
-  TemplateTable::initialize();                                // ② 注册 202 条字节码模板
+  TemplateTable::initialize();                                // (2) 注册 202 条字节码模板
 
   { ResourceMark rm;
-    _code = new StubQueue(new InterpreterCodeletInterface,   // ③ 创建 CodeBuffer
+    _code = new StubQueue(new InterpreterCodeletInterface,   // (3) 创建 CodeBuffer
                           InterpreterCodeSize, NULL, "Interpreter");
 
-    TemplateInterpreterGenerator g(_code);                    // ④ 生成全部汇编代码
+    TemplateInterpreterGenerator g(_code);                    // (4) 生成全部汇编代码
     _code->deallocate_unused_tail();                          //    回收未用尾部空间
   }
 
-  _active_table = _normal_table;                              // ⑤ 激活 dispatch 表
+  _active_table = _normal_table;                              // (5) 激活 dispatch 表
 }
 ```
 

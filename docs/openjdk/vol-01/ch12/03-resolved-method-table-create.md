@@ -53,8 +53,8 @@ ResolvedMethodName（Java 对象，堆里）
 
 ```
 find_resolved_method(method):
-  ① ResolvedMethodTable::find_method(method)   → 命中？返回
-  ② 未命中 → 创建 ResolvedMethodName 对象（存 vmtarget/vmholder）
+  (1) ResolvedMethodTable::find_method(method)   → 命中？返回
+  (2) 未命中 → 创建 ResolvedMethodName 对象（存 vmtarget/vmholder）
            → add_method 插入表
 ```
 
@@ -168,7 +168,7 @@ lookup(Method* method):
 ```
 add_method(method, rmethod_name):
   拿 ResolvedMethodTable_lock
-  ① redefine 检查: method->is_old()？
+  (1) redefine 检查: method->is_old()？
       是 → 用 method_with_idnum 换新方法（呼应 ch10）
           换不到（被删除）→ 用 Unsafe.throwNoSuchMethodError 顶替
   (2) basic_add:

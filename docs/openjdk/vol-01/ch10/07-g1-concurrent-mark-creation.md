@@ -292,7 +292,7 @@ Init-Mark Young GC STW 暂停
     ↓
 CMThread 醒来 → 7 步标记周期（下面详述）
     ↓
-⑥ CLEANUP STW
+(6) CLEANUP STW
   → swap 位图 + record_concurrent_mark_cleanup_end()
   → next_gc_should_be_mixed() → 设 in_young_gc_before_mixed = true
     ↓
@@ -316,13 +316,13 @@ CMThread 醒来后按 7 步跑完一个完整的标记周期。先看总览，�
 │
 │  状态: Started → InProgress
 │
-│  ① CLEAR_CLAIMED_MARKS         清 CLD claimed 标记（几微秒）
-│  ② SCAN_ROOT_REGIONS           并发扫描 survivor Region（详见 §6）
-│  ③ CONCURRENT_MARK             标记主体（见下方展开）
-│  ④ REBUILD_REMEMBERED_SETS     并发重建 RSet
-│  ⑤ delay_to_keep_mmu()         等一会儿（让 mutator 跑够）
-│  ⑥ CLEANUP (STW)               swap 位图 + 决定 mixed GC
-│  ⑦ CLEANUP_FOR_NEXT_MARK       并发清除 next 位图
+│  (1) CLEAR_CLAIMED_MARKS         清 CLD claimed 标记（几微秒）
+│  (2) SCAN_ROOT_REGIONS           并发扫描 survivor Region（详见 §6）
+│  (3) CONCURRENT_MARK             标记主体（见下方展开）
+│  (4) REBUILD_REMEMBERED_SETS     并发重建 RSet
+│  (5) delay_to_keep_mmu()         等一会儿（让 mutator 跑够）
+│  (6) CLEANUP (STW)               swap 位图 + 决定 mixed GC
+│  (7) CLEANUP_FOR_NEXT_MARK       并发清除 next 位图
 │
 │  状态: InProgress → Idle  （CMThread 睡觉，但 Mixed GC 可能还在跑）
 │
@@ -498,18 +498,18 @@ Init Mark Young GC（§3.3）:
   对象 A 的字段 f 指向对象 B
   evacuate A（A 在 young Region 中）→ A 搬走，标记 B 到 _next
 
-并发标记期间，mutator 修改（在 ③ mark_from_roots 之后、Remark 之前）:
+并发标记期间，mutator 修改（在 (3) mark_from_roots 之后、Remark 之前）:
   A.f = C;  // 把指向 B 的引用改成指向 C
   SATB 写屏障: enqueue(&B)  // 记录被覆盖的旧引用 B
 
 并发标记线程可能已经扫过了 A，不会再看到 B
   → 如果没有 SATB 记录 B，B 就被"漏标"了
 
-Remark 暂停（③ 末尾）:
+Remark 暂停（(3) 末尾）:
   排空 SATB 队列 → 找到 B → 标记到 _next → 追踪 B 的引用
   → B 仍然被正确标记为存活
 
-⑥ CLEANUP swap:
+(6) CLEANUP swap:
   _prev = _next（是完整的存活标记）
   _next = _prev_old（被清除，下一轮用）
 ```
@@ -550,11 +550,11 @@ _worker_id_offset(DirtyCardQueueSet::num_par_ids() + G1ConcRefinementThreads),
 _max_num_tasks(ParallelGCThreads),         // CMTask 槽位数 = STW GC 线程数
 
 // 构造函数体:
-_task_queues = new G1CMTaskQueueSet(_max_num_tasks);     // ① 全局队列集
-_terminator = ParallelTaskTerminator(_max_num_tasks, _task_queues);  // ② 终止协议
+_task_queues = new G1CMTaskQueueSet(_max_num_tasks);     // (1) 全局队列集
+_terminator = ParallelTaskTerminator(_max_num_tasks, _task_queues);  // (2) 终止协议
 
 // ConcGCThreads 计算 + WorkGang 创建（§7.1）:
-_concurrent_workers = new WorkGang("G1 Conc", ConcGCThreads, ...);  // ③ 线程池
+_concurrent_workers = new WorkGang("G1 Conc", ConcGCThreads, ...);  // (3) 线程池
 
 // MarkStackSize 计算 + _global_mark_stack 初始化（§5）
 
@@ -564,9 +564,9 @@ _accum_task_vtime = NEW_C_HEAP_ARRAY(double, _max_num_tasks, mtGC);
 for (uint i = 0; i < _max_num_tasks; ++i) {
     G1CMTaskQueue* task_queue = new G1CMTaskQueue();
     task_queue->initialize();
-    _task_queues->register_queue(i, task_queue);           // ④ 登记队列
+    _task_queues->register_queue(i, task_queue);           // (4) 登记队列
 
-    _tasks[i] = new G1CMTask(i, this, task_queue, ...);    // ⑤ 创建 CMTask
+    _tasks[i] = new G1CMTask(i, this, task_queue, ...);    // (5) 创建 CMTask
     _accum_task_vtime[i] = 0.0;
 }
 ```
@@ -621,9 +621,9 @@ do {
 `do_marking_step()` 的流程（`:2592-2790+`）：
 
 ```
-① drain_satb_buffers()       排空 SATB 缓冲（mutator 攒的被覆盖旧引用）
-② drain_local_queue()        排空本地队列（上一步残留的灰色对象）
-③ drain_global_stack()       排空全局 Mark Stack（其他 worker 卸载的，§5）
+(1) drain_satb_buffers()       排空 SATB 缓冲（mutator 攒的被覆盖旧引用）
+(2) drain_local_queue()        排空本地队列（上一步残留的灰色对象）
+(3) drain_global_stack()       排空全局 Mark Stack（其他 worker 卸载的，§5）
 ↓
 主循环:
   ├── 持有 Region？→ bitmap_closure 遍历该 Region，找已标记的对象
@@ -659,9 +659,9 @@ Worker:   pop obj5 → 扫引用 → 发现 obj9 → push obj9 → pop obj8 → 
 
 ```
 for (i = 0; i < ParallelGCThreads; i++) {
-    G1CMTaskQueue* queue = new G1CMTaskQueue();      // ① new 出来
-    _task_queues->register_queue(i, queue);           // ② 挂到全局集里
-    _tasks[i] = new G1CMTask(i, this, queue, ...);    // ③ CMTask 存为 _task_queue 字段
+    G1CMTaskQueue* queue = new G1CMTaskQueue();      // (1) new 出来
+    _task_queues->register_queue(i, queue);           // (2) 挂到全局集里
+    _tasks[i] = new G1CMTask(i, this, queue, ...);    // (3) CMTask 存为 _task_queue 字段
 }
 // → 同一份队列，CMTask._task_queue 和 _task_queues.queues[i] 都指过去
 ```
@@ -1099,8 +1099,8 @@ WorkGang
 
 ```cpp
 void AbstractWorkGang::initialize_workers() {
-    _workers = NEW_C_HEAP_ARRAY(GangWorker*, total_workers());  // ① 分配
-    add_workers(true);   // ② true = initializing
+    _workers = NEW_C_HEAP_ARRAY(GangWorker*, total_workers());  // (1) 分配
+    add_workers(true);   // (2) true = initializing
 }
 ```
 
@@ -1122,9 +1122,9 @@ void AbstractWorkGang::add_workers(uint active_workers, bool initializing) {
 
 ```cpp
 for (uint worker_id = 0; worker_id < ConcGCThreads; worker_id++) {
-    new_worker = holder->install_worker(worker_id);      // ③ new GangWorker
-    os::create_thread(new_worker, worker_type);           // ④ pthread_create
-    os::start_thread(new_worker);                         // ⑤ 启动 → run() → loop()
+    new_worker = holder->install_worker(worker_id);      // (3) new GangWorker
+    os::create_thread(new_worker, worker_type);           // (4) pthread_create
+    os::start_thread(new_worker);                         // (5) 启动 → run() → loop()
 }
 // 创建失败: initializing=true → vm_exit_out_of_memory（死路）; false → 打日志继续
 ```

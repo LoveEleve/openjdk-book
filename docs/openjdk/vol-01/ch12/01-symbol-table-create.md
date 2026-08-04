@@ -97,8 +97,8 @@ SymbolTable 排在最前，因为类加载马上就会用到它（StringTable �
 
 ```cpp
 static void create_table() {
-  _the_table = new SymbolTable();            // ① 哈希表本体
-  initialize_symbols(symbol_alloc_arena_size);  // ② 360K Arena
+  _the_table = new SymbolTable();            // (1) 哈希表本体
+  initialize_symbols(symbol_alloc_arena_size);  // (2) 360K Arena
 }
 ```
 
@@ -111,8 +111,8 @@ static void create_table() {
 ```cpp
 SymbolTable()
   : RehashableHashtable<Symbol*, mtSymbol>(   // 基类：装 Symbol* 的哈希表
-        SymbolTableSize,                      // 参数① 桶数 = 20011
-        sizeof (HashtableEntry<Symbol*, mtSymbol>))  // 参数② 每个条目的字节大小
+        SymbolTableSize,                      // 参数(1) 桶数 = 20011
+        sizeof (HashtableEntry<Symbol*, mtSymbol>))  // 参数(2) 每个条目的字节大小
 {}
 ```
 
@@ -142,10 +142,10 @@ HotSpot BasicHashtable（SymbolTable 的基类）:
 ```cpp
 template <MEMFLAGS F> inline BasicHashtable<F>::BasicHashtable(int table_size, int entry_size) {
   // Called on startup, no locking needed
-  initialize(table_size, entry_size, 0);      // ① 记录 table_size、entry_size，清空空闲链表等
-  _buckets = NEW_C_HEAP_ARRAY2(HashtableBucket<F>, table_size, F, CURRENT_PC);  // ② C 堆分配桶数组
+  initialize(table_size, entry_size, 0);      // (1) 记录 table_size、entry_size，清空空闲链表等
+  _buckets = NEW_C_HEAP_ARRAY2(HashtableBucket<F>, table_size, F, CURRENT_PC);  // (2) C 堆分配桶数组
   for (int index = 0; index < _table_size; index++) {
-    _buckets[index].clear();                  // ③ 逐个桶清零（桶 = 链表头指针，初始为空）
+    _buckets[index].clear();                  // (3) 逐个桶清零（桶 = 链表头指针，初始为空）
   }
 }
 ```
@@ -387,12 +387,12 @@ C 堆                          Arena（360K）
 
 ```
 已覆盖（SymbolTable 用到的部分）:
-  ① 桶数组 + 链表结构（§1.1）
-  ② 条目结构（hash / next / literal，§1.1）
-  ③ 条目块分配 + free_list 循环（§2.1）
-  ④ 取模寻址（hash % table_size，§1.1）
-  ⑤ 乐观锁模型（§3.1）
-  ⑥ rehash 触发机制（§2.2）
+  (1) 桶数组 + 链表结构（§1.1）
+  (2) 条目结构（hash / next / literal，§1.1）
+  (3) 条目块分配 + free_list 循环（§2.1）
+  (4) 取模寻址（hash % table_size，§1.1）
+  (5) 乐观锁模型（§3.1）
+  (6) rehash 触发机制（§2.2）
 
 未覆盖（本篇不展开，按需再讲）:
   rehash 重建的内部实现、表的遍历与复制、
@@ -433,9 +433,9 @@ SymbolTable 的并发模型不是"全程持锁"，而是**乐观锁模式**：
 
 ```
 lookup(name, len):
-  ① hash_symbol(name, len)         → 算 hash（seed + siphash）
-  ② bucket(hash % 20011)           → 取桶链表头
-  ③ 链表逐个 Symbol 比较（无锁）    → 命中 → refcount++（原子）→ 返回
+  (1) hash_symbol(name, len)         → 算 hash（seed + siphash）
+  (2) bucket(hash % 20011)           → 取桶链表头
+  (3) 链表逐个 Symbol 比较（无锁）    → 命中 → refcount++（原子）→ 返回
                                   → 未命中 → 拿锁 basic_add 插入（§3.1）
 ```
 
