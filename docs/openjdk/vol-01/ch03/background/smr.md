@@ -415,7 +415,7 @@ CAS 是一次不可被 CPU 调度打断的硬件指令：
 cmpxchg(new_val, &location, expected_val)
 ```
 
-它原子地做三件事：① 读出 location 的当前值；② 如果当前值 == expected_val，写入 new_val（成功）；③ 如果当前值 != expected_val，不写入（失败）。返回值是旧值——等于 expected_val 表示成功。
+它原子地做三件事：① 读出 location 的当前值；(2) 如果当前值 == expected_val，写入 new_val（成功）；(3) 如果当前值 != expected_val，不写入（失败）。返回值是旧值——等于 expected_val 表示成功。
 
 CAS 是多核并发安全的基石：**"只有在预期值仍未变时，才写入新值"这一判断和写入是不可分割的整**体。
 
@@ -533,13 +533,13 @@ ThreadsList::ThreadsList(int entries) :
 
 ① `_length(entries)` — 初始化成员列表，`_length` 记录包含多少线程。注意 `entries` 是线程数，但数组大小是 `entries + 1`。
 
-② `_next_list(NULL)` — 这个指针不用于 `_thread_list` 链表。它是 `_to_delete_list` 链表专用的 next 指针——当旧快照被挂入回收队列时，通过 `_next_list` 串联。
+(2) `_next_list(NULL)` — 这个指针不用于 `_thread_list` 链表。它是 `_to_delete_list` 链表专用的 next 指针——当旧快照被挂入回收队列时，通过 `_next_list` 串联。
 
-③ `_threads(NEW_C_HEAP_ARRAY(JavaThread*, entries + 1, mtThread))` — 在 C 堆上分配 `entries + 1` 个 `JavaThread*` 指针槽位。例如 `entries=2` → 分配 3 个槽位（24 字节）。`mtThread` 是 NMT（Native Memory Tracking）内存标签，用于 JVM 内存统计。
+(3) `_threads(NEW_C_HEAP_ARRAY(JavaThread*, entries + 1, mtThread))` — 在 C 堆上分配 `entries + 1` 个 `JavaThread*` 指针槽位。例如 `entries=2` → 分配 3 个槽位（24 字节）。`mtThread` 是 NMT（Native Memory Tracking）内存标签，用于 JVM 内存统计。
 
-④ `_nested_handle_cnt(0)` — 嵌套引用计数从 0 开始。第 7 节会解释这个字段何时递增。
+(4) `_nested_handle_cnt(0)` — 嵌套引用计数从 0 开始。第 7 节会解释这个字段何时递增。
 
-⑤ `*(JavaThread**)(_threads + entries) = NULL` — 数组最后一个槽位（索引 = `entries`）写入 NULL。这个 NULL 是遍历哨兵——遍历代码遇 NULL 即止，不需要每次检查 `i < _length`。
+(5) `*(JavaThread**)(_threads + entries) = NULL` — 数组最后一个槽位（索引 = `entries`）写入 NULL。这个 NULL 是遍历哨兵——遍历代码遇 NULL 即止，不需要每次检查 `i < _length`。
 
 完成后的数组布局（`entries = 2` 为例）：
 ```
@@ -641,7 +641,7 @@ inline ThreadsList* ThreadsSMRSupport::get_java_thread_list() {
   ThreadsList *old_list = xchg_java_thread_list(new_list);
 ```
 
-**第 ② 步——原子替换全局指针。** `xchg_java_thread_list()`（`threadSMR.cpp:159-161`）：
+**第 (2) 步——原子替换全局指针。** `xchg_java_thread_list()`（`threadSMR.cpp:159-161`）：
 
 ```cpp
 inline ThreadsList* ThreadsSMRSupport::xchg_java_thread_list(ThreadsList* new_list) {
@@ -684,7 +684,7 @@ xchg:   _java_thread_list = v1, 返回 v0 → old_list = v0
 }
 ```
 
-**第 ③ 步——回收旧快照。** `free_list(old_list)` 先把 v0 头插入 `_to_delete_list`（`threads->set_next_list(_to_delete_list); _to_delete_list = threads;`），然后扫描所有线程的 `_threads_hazard_ptr`。此时所有线程的 `_threads_hazard_ptr == NULL`（没有 ThreadsListHandle 被创建），所以 v0 不在哈希表中 → `delete v0` → `_to_delete_list` 恢复为 NULL。
+**第 (3) 步——回收旧快照。** `free_list(old_list)` 先把 v0 头插入 `_to_delete_list`（`threads->set_next_list(_to_delete_list); _to_delete_list = threads;`），然后扫描所有线程的 `_threads_hazard_ptr`。此时所有线程的 `_threads_hazard_ptr == NULL`（没有 ThreadsListHandle 被创建），所以 v0 不在哈希表中 → `delete v0` → `_to_delete_list` 恢复为 NULL。
 
 #### 第 3 层：`ThreadsList::add_thread()`——纯 Copy
 
@@ -1015,7 +1015,7 @@ _threads_hazard_ptr 仍然是 NULL（还没贴标签）
     ThreadsList* unverified_threads = Thread::tag_hazard_ptr(threads);
 ```
 
-**第 ② 步前半：打 tag。** `tag_hazard_ptr(threads)`（`thread.hpp:165-167`）：
+**第 (2) 步前半：打 tag。** `tag_hazard_ptr(threads)`（`thread.hpp:165-167`）：
 
 ```cpp
 static ThreadsList* tag_hazard_ptr(ThreadsList* list) {
@@ -1029,7 +1029,7 @@ static ThreadsList* tag_hazard_ptr(ThreadsList* list) {
     _thread->set_threads_hazard_ptr(unverified_threads);
 ```
 
-**第 ② 步后半：贴标签（堆上发布！）。** `set_threads_hazard_ptr()`（`thread.inline.hpp:93-95`）：
+**第 (2) 步后半：贴标签（堆上发布！）。** `set_threads_hazard_ptr()`（`thread.inline.hpp:93-95`）：
 
 ```cpp
 inline void Thread::set_threads_hazard_ptr(ThreadsList* new_list) {
@@ -1052,7 +1052,7 @@ inline void Thread::set_threads_hazard_ptr(ThreadsList* new_list) {
     }
 ```
 
-**第 ③ 步：验证①——重读全局指针。** 再次 `load_acquire` 读 `_java_thread_list`，和第一步读到的 `threads`（v3）比较。
+**第 (3) 步：验证①——重读全局指针。** 再次 `load_acquire` 读 `_java_thread_list`，和第一步读到的 `threads`（v3）比较。
 
 - **相等**：在"拿快照→贴标签"这两步之间，全局指针没被替换 → v3 还是当前最新快照 → 验证通过 → 继续
 - **不等**：中间有写者做了 `xchg`（比如 T2 退出建了 v4）→ v3 已过时 → `continue` → 回到 `while(true)` 顶部重新拿快照
@@ -1068,7 +1068,7 @@ inline void Thread::set_threads_hazard_ptr(ThreadsList* new_list) {
     }
 ```
 
-**第 ④ 步：验证②——CAS 去 tag。** `cmpxchg_threads_hazard_ptr()`（`thread.inline.hpp:85-87`）：
+**第 (4) 步：验证(2)——CAS 去 tag。** `cmpxchg_threads_hazard_ptr()`（`thread.inline.hpp:85-87`）：
 
 ```cpp
 inline ThreadsList* Thread::cmpxchg_threads_hazard_ptr(
@@ -1087,12 +1087,12 @@ CAS成功:  _threads_hazard_ptr: tagged_v3 → v3 (已验证) → break
 CAS失败:  _threads_hazard_ptr 已是 NULL (被抢) → 重试
 ```
 
-**如果全局指针在验证①和验证②之间被替换了（比如 v3 → v4），有问题吗？** 没有。CAS 的成功与否绑定的不是全局指针是否变化——而是标签是否被抢：
+**如果全局指针在验证①和验证(2)之间被替换了（比如 v3 → v4），有问题吗？** 没有。CAS 的成功与否绑定的不是全局指针是否变化——而是标签是否被抢：
 
 - 全局指针变了，但标签没被抢 → CAS 成功，hazard ptr = v3 → v3 受保护。T2 的 smr_delete 扫描时发现 v3 包含 T2 → T2 wait。v3 虽然已脱离全局指针，但 hazard ptr 保证它不被 free_list 删除 ← 安全
 - 全局指针变了，标签也被抢了 → CAS 失败 → 重试，拿到 v4（不含 T2）← 安全
 
-两种结果都安全。验证①检查的是"贴标签时快照是否已过时"，验证②检查的是"标签是否被并发抢走"——两个验证叠加覆盖了所有竞态窗口。
+两种结果都安全。验证①检查的是"贴标签时快照是否已过时"，验证(2)检查的是"标签是否被并发抢走"——两个验证叠加覆盖了所有竞态窗口。
 
 ```cpp
   }
@@ -1288,17 +1288,17 @@ virtual void do_thread(Thread *thread) {
 
 **逐行解释**：
 
-③ `get_threads_hazard_ptr()` → `load_acquire` 读。当前线程的标签可能是 NULL（无保护）、tagged_v3（未验证）、v3（已验证）。
+(3) `get_threads_hazard_ptr()` → `load_acquire` 读。当前线程的标签可能是 NULL（无保护）、tagged_v3（未验证）、v3（已验证）。
 
-④ 读到 NULL → `return`。此线程没有保护任何快照，跳过。
+(4) 读到 NULL → `return`。此线程没有保护任何快照，跳过。
 
-⑤ `is_hazard_ptr_tagged(current_list)` 检查最低 bit。untagged → `break` 跳到⑧正常收集。tagged → 继续⑥。
+(5) `is_hazard_ptr_tagged(current_list)` 检查最低 bit。untagged → `break` 跳到(8)正常收集。tagged → 继续(6)。
 
-⑥ `cmpxchg(NULL, tagged_v3)` — CAS 抢走。**CAS 成功后为什么不收集？** 因为这个标签是 tagged（未验证）——扫描器无法确定它指向的快照是否还有效。读者可能验证①发现 v3 过期然后放弃了，也可能验证通过正准备去 tag。扫描器选择**不信任**：抢走标签，不把此快照的线程加入保护集合。
+(6) `cmpxchg(NULL, tagged_v3)` — CAS 抢走。**CAS 成功后为什么不收集？** 因为这个标签是 tagged（未验证）——扫描器无法确定它指向的快照是否还有效。读者可能验证①发现 v3 过期然后放弃了，也可能验证通过正准备去 tag。扫描器选择**不信任**：抢走标签，不把此快照的线程加入保护集合。
 
 **不收集会不会导致写者错误地认为"没人保护 T2"？** 会——写者可能因此 delete 了 T2。但此时全局指针已经被 xchg 换成了不含 T2 的 v4。读者 CAS 失败后重试，拿到的也是 v4——v4 里没有 T2，不需要保护 T2。tag/untag 不保证写者不做错事——它保证读者最终遍历的快照不包含已 delete 的线程。**`return` 只跳过当前这一个线程**——调用方 `threads_do()` 继续遍历下一个 JavaThread。
 
-**标签被抢走后，读者会怎样？** 回到 `acquire_stable_list_fast_path()` 的验证②（回顾第 4 节）：
+**标签被抢走后，读者会怎样？** 回到 `acquire_stable_list_fast_path()` 的验证(2)（回顾第 4 节）：
 
 ```cpp
 // 读者端：试图从 tagged_v3 升级到 v3
@@ -1310,7 +1310,7 @@ if (_thread->cmpxchg_threads_hazard_ptr(threads, unverified_threads)
 
 读者不是读到 NULL 就认命——CAS 失败触发**重试**，重试时拿到新的全局快照 v4（不含 T2），安全遍历。扫描器抢走标签 → `_threads_hazard_ptr = NULL` → 读者 CAS 失败 → 重试 → v4。读者自身不需要感知"被抢"这个事实——它只知道 CAS 没通过，重新来一次。
 
-⑧⑨ 只有 untagged 标签到达这里。`current_list->threads_do(&add_cl)` 遍历 `v3._threads = [T1, T2]`，把 T1、T2 都加入哈希表。
+(8)(9) 只有 untagged 标签到达这里。`current_list->threads_do(&add_cl)` 遍历 `v3._threads = [T1, T2]`，把 T1、T2 都加入哈希表。
 
 **第一段扫描完**，哈希表包含了所有被任何线程的 hazard ptr 保护的 JavaThread。
 
@@ -1318,7 +1318,7 @@ if (_thread->cmpxchg_threads_hazard_ptr(threads, unverified_threads)
   OrderAccess::acquire();
 ```
 
-acquire 屏障——保证①-⑨的 hazard ptr 读取**排在**第三部分的引用计数读取之前。
+acquire 屏障——保证①-(9)的 hazard ptr 读取**排在**第三部分的引用计数读取之前。
 
 ---
 
@@ -1542,13 +1542,13 @@ void SafeThreadsListPtr::acquire_stable_list_nested_path() {
 
 行①：`current_list = v3`（取外层 `_list` 的值，没有任何新操作）
 
-行②：`v3.inc_nested_handle_cnt()` → `v3._nested_handle_cnt = 1`。引用计数 +1——用的是 CAS 循环（`Atomic::cmpxchg`），保证多核并发安全。
+行(2)：`v3.inc_nested_handle_cnt()` → `v3._nested_handle_cnt = 1`。引用计数 +1——用的是 CAS 循环（`Atomic::cmpxchg`），保证多核并发安全。
 
-行③：`SafeThreadsListPtr(外层)._has_ref_count = true`。外层标记为引用计数模式——析构时不再清 hazard ptr，改为 dec 引用计数。
+行(3)：`SafeThreadsListPtr(外层)._has_ref_count = true`。外层标记为引用计数模式——析构时不再清 hazard ptr，改为 dec 引用计数。
 
-行④：`_threads_hazard_ptr = NULL`。线程标签清空，字段腾出。
+行(4)：`_threads_hazard_ptr = NULL`。线程标签清空，字段腾出。
 
-行⑤：`acquire_stable_list_fast_path()` → 内层走正常流程贴新标签。
+行(5)：`acquire_stable_list_fast_path()` → 内层走正常流程贴新标签。
 
 执行后：`_threads_hazard_ptr = v5`（内层占用），外层靠 `v3._nested_handle_cnt = 1` 保护。
 
@@ -1776,7 +1776,7 @@ void ThreadsSMRSupport::free_list(ThreadsList* threads) {
   hash_table_size++;
 ```
 
-**第 ② 步——位扩展求 2 的幂。** 这段位操作把任意整数向上取整到最近的 2 的幂。例如基数 6：
+**第 (2) 步——位扩展求 2 的幂。** 这段位操作把任意整数向上取整到最近的 2 的幂。例如基数 6：
 
 ```
 6 - 1 = 5          → 二进制 0101
@@ -1794,14 +1794,14 @@ void ThreadsSMRSupport::free_list(ThreadsList* threads) {
   ThreadScanHashtable *scan_table = new ThreadScanHashtable(hash_table_size);
 ```
 
-**第 ③ 步——分配哈希表。** `ThreadScanHashtable`（`threadSMR.cpp:169-205`）内部用 `ResourceHashtable` 存储指针。哈希函数是黄金比例乘法：`ptr * 2^32 * Phi`（2654435761），将任意指针值均匀映射到 0~size-1 范围内，避免碰撞聚集。
+**第 (3) 步——分配哈希表。** `ThreadScanHashtable`（`threadSMR.cpp:169-205`）内部用 `ResourceHashtable` 存储指针。哈希函数是黄金比例乘法：`ptr * 2^32 * Phi`（2654435761），将任意指针值均匀映射到 0~size-1 范围内，避免碰撞聚集。
 
 ```cpp
   ScanHazardPtrGatherThreadsListClosure scan_cl(scan_table);
   threads_do(&scan_cl);
 ```
 
-**第 ④ 步——扫描并填充哈希表。** `threads_do(&scan_cl)` 遍历所有 JavaThread，对每个线程调用 `ScanHazardPtrGatherThreadsListClosure.do_thread()`。这个 Closure 的逻辑非常简单：
+**第 (4) 步——扫描并填充哈希表。** `threads_do(&scan_cl)` 遍历所有 JavaThread，对每个线程调用 `ScanHazardPtrGatherThreadsListClosure.do_thread()`。这个 Closure 的逻辑非常简单：
 
 ```
 ① get_threads_hazard_ptr()  → 读标签值
@@ -1847,7 +1847,7 @@ void ThreadsSMRSupport::free_list(ThreadsList* threads) {
 
 两个条件同时满足才释放：
 - 条件① `!has_entry(current)`——没有任何线程的 hazard ptr 指向此快照
-- 条件② `_nested_handle_cnt == 0`——没有嵌套引用计数保护
+- 条件(2) `_nested_handle_cnt == 0`——没有嵌套引用计数保护
 
 ```cpp
       if (prev != NULL) { prev->set_next_list(next); }
@@ -2015,7 +2015,7 @@ _nested_threads_hazard_ptr_cnt = 0; // (4)
 _rcu_counter = 0;                  // (5)
 ```
 
-**(1) `_oops_do_parity`**：GC 并行标记的去重锁——保证每个线程在一次 GC 中只被一个工作线程扫描一次。全局 parity 在 1 和 2 之间翻转，线程自己的 parity 通过 CAS 与全局值比对。**完整机制见[前置概念：_oops_do_parity](oops-do-parity.md)**。
+**(1) `_oops_do_parity`**：GC 并行标记的去重锁——保证每个线程在一次 GC 中只被一个工作线程扫描一次。全局 parity 在 1 和 2 之间翻转，线程自己的 parity 通过 CAS 与全局值比对。<strong>完整机制见[前置概念：_oops_do_parity](oops-do-parity.md)</strong>。
 
 **(2) `_threads_hazard_ptr`**：Hazard Pointer 本体。第 4-5 节已完整拆解——读者贴标签、写者扫描、tag/untag 两阶段发布。
 
@@ -2023,4 +2023,4 @@ _rcu_counter = 0;                  // (5)
 
 **(4) `_nested_threads_hazard_ptr_cnt`**：纯粹的统计计数器——记录当前线程经历过多少层嵌套。仅在 `-XX:+EnableThreadSMRStatistics` 时递增/递减，不影响任何逻辑判断（真正阻止旧快照被删的是 `_nested_handle_cnt`，不是这个字段）。统计用途：记录 `_nested_thread_list_max`（JVM 运行期间的最大嵌套深度）。
 
-**(5) `_rcu_counter`**：每个线程上的计数器，属于**另一套**安全回收机制——GlobalCounter（RCU 风格）。和本文的 Hazard Pointer 完全独立：HP 等特定快照的读者（粒细），GlobalCounter 等全体老代读者（粒粗）。**完整机制见[前置概念：GlobalCounter](global-counter.md)**。
+**(5) `_rcu_counter`**：每个线程上的计数器，属于**另一套**安全回收机制——GlobalCounter（RCU 风格）。和本文的 Hazard Pointer 完全独立：HP 等特定快照的读者（粒细），GlobalCounter 等全体老代读者（粒粗）。<strong>完整机制见[前置概念：GlobalCounter](global-counter.md)</strong>。

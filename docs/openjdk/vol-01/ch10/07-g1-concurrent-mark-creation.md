@@ -330,9 +330,9 @@ CMThread 醒来后按 7 步跑完一个完整的标记周期。先看总览，�
 ```
 
 **关键区分**：
-- **③ 是"并发标记"**（CMTask 追踪引用图，写 `_next` 位图）。**⑦ 是"并发清除"**（CMThread 擦 next 位图）。③ 在 ⑥ 之前完成，Mixed GC **不和 ③ 并发**，但**和 ⑦ 并发**。
-- **① ② ④ ⑦** 是并发的（CMThread 派活给 worker，自己等，应用继续跑）。
-- **③ 中的 REMARK 和 ⑥ CLEANUP** 是 STW 暂停（CMThread 请求 VMThread 让全 JVM 停下）。
+- **(3) 是"并发标记"**（CMTask 追踪引用图，写 `_next` 位图）。**(7) 是"并发清除"**（CMThread 擦 next 位图）。(3) 在 (6) 之前完成，Mixed GC **不和 (3) 并发**，但**和 (7) 并发**。
+- **① (2) (4) (7)** 是并发的（CMThread 派活给 worker，自己等，应用继续跑）。
+- **(3) 中的 REMARK 和 (6) CLEANUP** 是 STW 暂停（CMThread 请求 VMThread 让全 JVM 停下）。
 
 ---
 
@@ -340,13 +340,13 @@ CMThread 醒来后按 7 步跑完一个完整的标记周期。先看总览，�
 
 调 `ClassLoaderDataGraph::clear_claimed_marks()`，清类加载数据的 claimed 标记。几微秒的事。
 
-#### ② SCAN_ROOT_REGIONS——扫描 survivor Region
+#### (2) SCAN_ROOT_REGIONS——扫描 survivor Region
 
 Init Mark Young GC 暂停中，young Region 被撤离到 survivor Region。这些 survivor Region 里的对象在 `_next` 位图中还是"未标记"状态——但它们是存活的。如果不趁早扫一遍，后续 evacuation 暂停可能误把它们当死的回收。
 
 CMThread 启动多个并发 worker，用 `claim_next()` 原子认领 survivor Region，逐个扫描里面所有对象，标记到 `_next`。详见 §6。
 
-#### ③ CONCURRENT_MARK——标记主体
+#### (3) CONCURRENT_MARK——标记主体
 
 这是整个周期中最耗时的一步，内部是一个子循环（可能因栈溢出而重来多次）：
 
@@ -356,19 +356,19 @@ CMThread 启动多个并发 worker，用 `claim_next()` 原子认领 survivor Re
 
 **delay_to_keep_mmu()**——等一会儿，让 mutator 跑够。G1 要保证 mutator 在 GC 周期内仍然有足够的 CPU 时间（MMU = Mutator Utilization）。不能一直疯狂标记把应用卡住。
 
-**REMARK（STW 暂停）**——并发标记跑完后，`_next` 位图里已经有大部分存活对象的标记了，但还差一批：并发标记期间 mutator 覆盖引用字段时被 SATB 写屏障记录下来的"旧引用"。Remark 暂停时全 JVM 停下，排空所有线程的 SATB 队列，追踪那些旧引用，把它们也标记到 `_next`——**此时 `_next` 才真正完整**。若标记栈溢出（全局 Mark Stack 装不下了，见 §5），`restart_for_overflow()` 返回 true，回到 ③ 重来一遍。
+**REMARK（STW 暂停）**——并发标记跑完后，`_next` 位图里已经有大部分存活对象的标记了，但还差一批：并发标记期间 mutator 覆盖引用字段时被 SATB 写屏障记录下来的"旧引用"。Remark 暂停时全 JVM 停下，排空所有线程的 SATB 队列，追踪那些旧引用，把它们也标记到 `_next`——**此时 `_next` 才真正完整**。若标记栈溢出（全局 Mark Stack 装不下了，见 §5），`restart_for_overflow()` 返回 true，回到 (3) 重来一遍。
 
 **Remark 之前的位图状态**：`_next` 里大部分存活对象已标，但漏了 SATB 队列里攒的旧引用。Remark 补上这最后一块，之后 `_next` = 完整的存活快照。
 
-#### ④ REBUILD_REMEMBERED_SETS——重建 RSet
+#### (4) REBUILD_REMEMBERED_SETS——重建 RSet
 
 并发标记证实了哪些对象存活，现在可以更新 RSet 了。CMThread 启动并发 worker，重新扫描选中的 old Region，更新它们内部对象的"谁引用了我"信息。和 ch10/06 讲过的 RSet 是同一套数据。
 
-#### ⑤ delay_to_keep_mmu()——再等一会儿
+#### (5) delay_to_keep_mmu()——再等一会儿
 
-和 ③ 中的 delay 一样——给 mutator 让路，保证 MMU。
+和 (3) 中的 delay 一样——给 mutator 让路，保证 MMU。
 
-#### ⑥ CLEANUP（STW 暂停）——swap 收尾
+#### (6) CLEANUP（STW 暂停）——swap 收尾
 
 全 JVM 暂停。做三件事：
 
@@ -376,11 +376,11 @@ CMThread 启动多个并发 worker，用 `claim_next()` 原子认领 survivor Re
 2. **选 Mixed GC 候选**：调 `G1Policy::record_concurrent_mark_cleanup_end()` → `next_gc_should_be_mixed()`。基于 `_prev` 的存活率选出哪些 old Region 值得回收，设 `in_young_gc_before_mixed = true`。下一次分配触发的 Young GC 会晋升为 Mixed GC。
 3. **标记周期结束**：`in_young_only_phase` 根据是否有 Mixed GC 候选来设置。
 
-#### ⑦ CLEANUP_FOR_NEXT_MARK——并发清空下一轮画布
+#### (7) CLEANUP_FOR_NEXT_MARK——并发清空下一轮画布
 
-⑥ CLEANUP STW 结束后，CMThread **不睡觉**——直接进入 ⑦。`run_service()` 中 ⑥ 和 ⑦ 之间没有 `sleep_before_next_cycle()`，是连续执行的（`g1ConcurrentMarkThread.cpp:382-384`）。
+(6) CLEANUP STW 结束后，CMThread **不睡觉**——直接进入 (7)。`run_service()` 中 (6) 和 (7) 之间没有 `sleep_before_next_cycle()`，是连续执行的（`g1ConcurrentMarkThread.cpp:382-384`）。
 
-**这里容易混淆**：CMThread 跑了完整的 7 步，但**只有第 ⑦ 步和 Mixed GC 重叠**。前 6 步（包括 ③ 并发标记）全部在 Mixed GC 开始前就完成了。
+**这里容易混淆**：CMThread 跑了完整的 7 步，但**只有第 (7) 步和 Mixed GC 重叠**。前 6 步（包括 (3) 并发标记）全部在 Mixed GC 开始前就完成了。
 
 **实现**——CMThread 调用 `_cm->cleanup_for_next_mark()`（`g1ConcurrentMark.cpp:698`），内部：
 
@@ -408,10 +408,10 @@ void work(uint worker_id) {
 | 线程 | 代码位置 |
 |------|---------|
 | CMThread 自身 | `g1ConcurrentMarkThread.cpp:120` |
-| 并发标记 worker（③ mark_from_roots） | `g1ConcurrentMark.cpp:838` |
-| 并发清位图 worker（⑦ clear_bitmap） | `g1ConcurrentMark.cpp:674` |
+| 并发标记 worker（(3) mark_from_roots） | `g1ConcurrentMark.cpp:838` |
+| 并发清位图 worker（(7) clear_bitmap） | `g1ConcurrentMark.cpp:674` |
 | Concurrent Refinement 线程（消费 DCQ） | `g1ConcurrentRefineThread.cpp:108` |
-| RSet rebuild worker（④） | `g1RemSet.cpp:985` |
+| RSet rebuild worker（(4)） | `g1RemSet.cpp:985` |
 | YoungGenSamplingThread | `g1YoungRemSetSamplingThread.cpp:107` |
 
 每次 STW 暂停的开始/结束，VMThread 调用 G1CollectedHeap 的两个钩子（`g1CollectedHeap.cpp:1763-1768`）：
@@ -424,7 +424,7 @@ STW 结束 → safepoint_synchronize_end()
     → SuspendibleThreadSet::desynchronize()   // 一次性广播解除阻塞
 ```
 
-所以 timeline：CMThread 在 ⑦ 中启动并发 worker 清 `_next` → 清的过程中混入 Mixed GC STW → STS 自动阻塞 worker → STW 结束 → STS 自动解除阻塞 → worker 继续清 → …。等到全部 Mixed GC 结束，`_next` 也清干净了。各干各的位图，没有冲突。
+所以 timeline：CMThread 在 (7) 中启动并发 worker 清 `_next` → 清的过程中混入 Mixed GC STW → STS 自动阻塞 worker → STW 结束 → STS 自动解除阻塞 → worker 继续清 → …。等到全部 Mixed GC 结束，`_next` 也清干净了。各干各的位图，没有冲突。
 
 ---
 
@@ -538,7 +538,7 @@ _mark_bitmap_2.initialize(g1h->reserved_region(), next_bitmap_storage);
 
 ## 4. CMTask 并行框架——构造时造了什么，运行时怎么用
 
-§3.5 的 ③ 中提到：CMThread 在 `mark_from_roots()` 里把活派给并发 worker。这个"派活"依赖于构造函数中创建的一套基础设施。
+§3.5 的 (3) 中提到：CMThread 在 `mark_from_roots()` 里把活派给并发 worker。这个"派活"依赖于构造函数中创建的一套基础设施。
 
 ### 4.1 构造时——G1ConcurrentMark::G1ConcurrentMark() 中创建了什么
 
@@ -595,7 +595,7 @@ G1ConcurrentMark
 
 ### 4.2 运行时——mark_from_roots() 中怎么用
 
-CMThread 在 step ③ 中调用 `mark_from_roots()`（`g1ConcurrentMark.cpp:976-991`）：
+CMThread 在 step (3) 中调用 `mark_from_roots()`（`g1ConcurrentMark.cpp:976-991`）：
 
 ```cpp
 _num_concurrent_workers = calc_active_marking_workers();    // M = ConcGCThreads
@@ -635,7 +635,7 @@ do {
   └── 也没有可偷的 → offer_termination() 请求终止（§4.5）
 ```
 
-**关键**：GC Root 的标记在 Init Mark Young GC（§3.3）和 scan_root_regions（§3.5 ②）中已经完成。到这一步时，`_next` 位图里已经有最初一批被标的对象了。
+**关键**：GC Root 的标记在 Init Mark Young GC（§3.3）和 scan_root_regions（§3.5 (2)）中已经完成。到这一步时，`_next` 位图里已经有最初一批被标的对象了。
 
 **为什么并发标记要读 bitmap 而不是直接从 GC Root 往下追？** STW GC 可以这样做——暂停时对象图是静态的，从 Root 出发追踪引用链，遇到一个标一个。但并发标记不能——应用线程同时在跑，对象图在变。G1 的策略是：把"发现对象"和"扫描对象"分离。Init Mark 阶段在 `_next` bitmap 里标上第一批对象，然后 CM Task 通过 **bitmap 迭代**找到这些已标对象，扫描它们的引用字段，把新发现的对象也标到 `_next` 里。下一轮 bitmap 迭代又会发现这些新标的对象……直到没有任何新 bit 被置 1——引用图闭合。
 
@@ -981,7 +981,7 @@ void G1CMRootRegions::init(const G1SurvivorRegions* survivors, G1ConcurrentMark*
 }
 ```
 
-真正的数据要等到**运行时**——第一次 Init-Mark Young GC 暂停中，young Region 的存活对象被搬迁到 survivor Region，暂停结束时 `post_initial_mark()` 调 `_root_regions.prepare_for_scan()` 标记"可以扫了"。然后 CMThread 的 step ② 中 `scan_root_regions()` 启动并发 worker 去扫。
+真正的数据要等到**运行时**——第一次 Init-Mark Young GC 暂停中，young Region 的存活对象被搬迁到 survivor Region，暂停结束时 `post_initial_mark()` 调 `_root_regions.prepare_for_scan()` 标记"可以扫了"。然后 CMThread 的 step (2) 中 `scan_root_regions()` 启动并发 worker 去扫。
 
 `scan_root_regions()`（`g1ConcurrentMark.cpp:924`）创建 `G1CMRootRegionScanTask`，worker 数取 `min(活跃并发 worker 数, survivor Region 数)`，并发扫描：
 
@@ -1129,7 +1129,7 @@ for (uint worker_id = 0; worker_id < ConcGCThreads; worker_id++) {
 // 创建失败: initializing=true → vm_exit_out_of_memory（死路）; false → 打日志继续
 ```
 
-**③ `install_worker()` → `allocate_worker()`**（`workgroup.cpp:52-55, :284`）：
+**(3) `install_worker()` → `allocate_worker()`**（`workgroup.cpp:52-55, :284`）：
 
 ```cpp
 AbstractGangWorker* install_worker(uint id) {
@@ -1139,22 +1139,22 @@ AbstractGangWorker* install_worker(uint id) {
 }
 ```
 
-**④ `os::create_thread(new_worker, cgc_thread)`**：底层 POSIX `pthread_create`。`cgc_thread` 和 `pgc_thread` 的区别只在于栈大小（`os_posix.cpp:1587`）和 JVM 监控分类。STS 的注册不在线程层面——每个任务在 `work()` 中显式 `SuspendibleThreadSetJoiner` 加入（§3.5 ⑦）。
+**(4) `os::create_thread(new_worker, cgc_thread)`**：底层 POSIX `pthread_create`。`cgc_thread` 和 `pgc_thread` 的区别只在于栈大小（`os_posix.cpp:1587`）和 JVM 监控分类。STS 的注册不在线程层面——每个任务在 `work()` 中显式 `SuspendibleThreadSetJoiner` 加入（§3.5 (7)）。
 
-**⑤ `os::start_thread(new_worker)`**——启动线程 → `run()` → `initialize()` → `loop()`：`while(true) { wait_for_task(); run_task(data); signal_task_done(); }`
+**(5) `os::start_thread(new_worker)`**——启动线程 → `run()` → `initialize()` → `loop()`：`while(true) { wait_for_task(); run_task(data); signal_task_done(); }`
 
 `initializing = true` 时，创建失败直接 `vm_exit_out_of_memory`（死路一条）。运行时 `run_task()` 需要更多 worker 时传 `false`，创建失败只打日志。
 
-**⑤ `os::create_thread(new_worker, cgc_thread)`**——创建底层 OS 线程（POSIX 下是 `pthread_create`）。`cgc_thread` 控制的是栈大小（`:1587-1597`）和 JVM 监控分类，不影响 STS——STS 注册由各任务在 `work()` 中显式加入（§3.5 ⑦）。
+**(5) `os::create_thread(new_worker, cgc_thread)`**——创建底层 OS 线程（POSIX 下是 `pthread_create`）。`cgc_thread` 控制的是栈大小（`:1587-1597`）和 JVM 监控分类，不影响 STS——STS 注册由各任务在 `work()` 中显式加入（§3.5 (7)）。
 
-**⑥ `os::start_thread(new_worker)`**——启动线程 → GangWorker 的 `run()`（`:309`）→ `initialize()` → `loop()`：`while(true) { wait_for_task(); run_task(data); signal_task_done(); }`
+**(6) `os::start_thread(new_worker)`**——启动线程 → GangWorker 的 `run()`（`:309`）→ `initialize()` → `loop()`：`while(true) { wait_for_task(); run_task(data); signal_task_done(); }`
 
 **`initializing` 参数**：构造时传 `true`，创建失败 → `vm_exit_out_of_memory`——死路一条。运行时 `run_task()` 需要更多 worker 时传 `false`，创建失败只 `break` 循环、打日志，不崩溃。
 
 G1ConcurrentMark 中三次调用 `_concurrent_workers->run_task(&task)`：
-- ③ mark_from_roots：`G1CMConcurrentMarkingTask`（并发标记）
-- ④ rebuild_rem_sets：`G1RebuildRemSetTask`（重建 RSet）
-- ⑦ cleanup_for_next_mark：`G1ClearBitMapTask`（清位图）
+- (3) mark_from_roots：`G1CMConcurrentMarkingTask`（并发标记）
+- (4) rebuild_rem_sets：`G1RebuildRemSetTask`（重建 RSet）
+- (7) cleanup_for_next_mark：`G1ClearBitMapTask`（清位图）
 
 ### 7.2 SATB Buffer Size
 
@@ -1188,7 +1188,7 @@ struct G1RegionMarkStats {
 
 CMTask 在标记过程中每标一个对象，就用 `add_to_liveness()`（`g1ConcurrentMark.cpp:2176`）把对象的 `size()` 加到对应 Region 的 `_live_words` 上。标记完成后，G1 用它判断"这个 Region 存活数据多不多，值不值得回收"——`_live_words` 越高 -> 回收收益越低 -> 不列入 mixed GC 候选。
 
-**`_top_at_rebuild_starts[i]`**——RSet 重建时 Region i 的 `top()` 快照。并发标记结束后的 RSet rebuild 阶段（§3.5 ④）需要重新扫描选中的 old Region，但只需扫到标记完成时的堆水位线——`top()` 以上的对象是后来新分配的，天然存活，不需要重建 RSet。`_top_at_rebuild_starts[i]` 就是在 rebuild 开始前拍的快照。
+**`_top_at_rebuild_starts[i]`**——RSet 重建时 Region i 的 `top()` 快照。并发标记结束后的 RSet rebuild 阶段（§3.5 (4)）需要重新扫描选中的 old Region，但只需扫到标记完成时的堆水位线——`top()` 以上的对象是后来新分配的，天然存活，不需要重建 RSet。`_top_at_rebuild_starts[i]` 就是在 rebuild 开始前拍的快照。
 
 ### 7.4 统计计时字段
 

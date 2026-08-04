@@ -8,7 +8,7 @@
 
 ## 0. 全景——本章讲的是两个 init 函数
 
-`interpreter_init`（第 11 步，interpreter.cpp:115）是整个解释器的入口——它调 `Interpreter::initialize()`，最终进入 `TemplateInterpreter::initialize()`。`templateTable_init`（第 14 步，templateTable.cpp:547）是一个**无操作**的冗余调用——它内部做的 `TemplateTable::initialize()` 在 `TemplateInterpreter::initialize()` 的步骤②中**已被调用过**，参数完全一致，第二次调用被 `_is_initialized` 标志直接返回。
+`interpreter_init`（第 11 步，interpreter.cpp:115）是整个解释器的入口——它调 `Interpreter::initialize()`，最终进入 `TemplateInterpreter::initialize()`。`templateTable_init`（第 14 步，templateTable.cpp:547）是一个**无操作**的冗余调用——它内部做的 `TemplateTable::initialize()` 在 `TemplateInterpreter::initialize()` 的步骤(2)中**已被调用过**，参数完全一致，第二次调用被 `_is_initialized` 标志直接返回。
 
 因此本章实质只讲一个东西——`TemplateInterpreter::initialize()`（templateInterpreter.cpp:42）：
 
@@ -33,14 +33,14 @@ interpreter_init()                   ← init_globals 第 11 步
 | 组 | 生成的桩 | 用途 |
 |----|---------|------|
 | ① 慢速签名处理 | `_slow_signature_handler` | 方法参数列表的通用适配器 |
-| ② 返回入口 | `_return_entry[1..5]` × 10 种 TosState | 方法返回到调用者 |
-| ③ invoke 返回入口 | 3 种 invoke × 10 种 TosState | invokedynamic / invokevirtual / invokeinterface 的返回 |
-| ④ native 结果处理器 | `_native_abi_to_tosca[10]` | JNI 返回值的类型转换 |
-| ⑤ 安全点入口 | `_safept_entry` × 10 种 TosState | Safepoint 时保存并恢复解释器状态 |
-| ⑥ 异常处理器 | 通用 athrow + 6 种快速抛出 | NPE / AIOOBE / ASE / AE / CCE / SOE |
-| ⑦ 方法入口 | 28 种 method kind（`_entry_table[kind]`） | 所有方法类型的第一条指令 |
-| ⑧ **字节码模板表** | 202 条字节码 × 生成器 → dispatch 表 | 每条字节码一个 Codelet，构成解释器的取指-执行循环 |
-| ⑨ 去优化入口 | `_deopt_entry[1..5]` × 10 种 TosState | C2 去优化时切换回解释器 |
+| (2) 返回入口 | `_return_entry[1..5]` × 10 种 TosState | 方法返回到调用者 |
+| (3) invoke 返回入口 | 3 种 invoke × 10 种 TosState | invokedynamic / invokevirtual / invokeinterface 的返回 |
+| (4) native 结果处理器 | `_native_abi_to_tosca[10]` | JNI 返回值的类型转换 |
+| (5) 安全点入口 | `_safept_entry` × 10 种 TosState | Safepoint 时保存并恢复解释器状态 |
+| (6) 异常处理器 | 通用 athrow + 6 种快速抛出 | NPE / AIOOBE / ASE / AE / CCE / SOE |
+| (7) 方法入口 | 28 种 method kind（`_entry_table[kind]`） | 所有方法类型的第一条指令 |
+| (8) **字节码模板表** | 202 条字节码 × 生成器 → dispatch 表 | 每条字节码一个 Codelet，构成解释器的取指-执行循环 |
+| (9) 去优化入口 | `_deopt_entry[1..5]` × 10 种 TosState | C2 去优化时切换回解释器 |
 
 ---
 
@@ -74,10 +74,10 @@ void TemplateInterpreter::initialize() {
 | 步 | 做什么 | 产出 |
 |---|--------|------|
 | ① | `AbstractInterpreter::initialize()` | 基类初始化——字节码计数器重置 + `InvocationCounter::reinitialize`（ch13 §2.4 已讲） |
-| ② | `TemplateTable::initialize()` | 注册 202 个字节码模板——为每个字节码绑定生成器函数和操作数栈转型规则（§3） |
-| ③ | `new StubQueue(...)` | 创建 CodeBuffer，分配 `InterpreterCodeSize` 字节的代码空间——所有 Codelet 的汇编代码存于此 |
-| ④ | `TemplateInterpreterGenerator g(_code)` | 构造触发 `generate_all()`——遍历模板 + 生成全部桩代码（§2） |
-| ⑤ | `_active_table = _normal_table` | 激活 dispatch 表——`_active_table` 指向 `_normal_table`，解释器取指时用（§4） |
+| (2) | `TemplateTable::initialize()` | 注册 202 个字节码模板——为每个字节码绑定生成器函数和操作数栈转型规则（§3） |
+| (3) | `new StubQueue(...)` | 创建 CodeBuffer，分配 `InterpreterCodeSize` 字节的代码空间——所有 Codelet 的汇编代码存于此 |
+| (4) | `TemplateInterpreterGenerator g(_code)` | 构造触发 `generate_all()`——遍历模板 + 生成全部桩代码（§2） |
+| (5) | `_active_table = _normal_table` | 激活 dispatch 表——`_active_table` 指向 `_normal_table`，解释器取指时用（§4） |
 
 `Interpreter::initialize()` 进入 `TemplateInterpreter::initialize()`（静态方法，templateInterpreter.cpp:42）——HotSpot 在编译时通过 `#include "templateInterpreter.hpp"` 确定了解释器的具体实现。
 
@@ -97,7 +97,7 @@ class Template {
 };
 ```
 
-`TemplateTable::_template_table[202]` 是一个静态数组——每个 JVM 字节码在该数组中对应一个 `Template` 对象。步骤②中 `TemplateTable::initialize()` 填充了每个槽位的五个字段（§3），步骤④中 `generate_all()` 遍历这些槽位，对每个 `Template` 调 `_gen` 生成对应的 Codelet。
+`TemplateTable::_template_table[202]` 是一个静态数组——每个 JVM 字节码在该数组中对应一个 `Template` 对象。步骤(2)中 `TemplateTable::initialize()` 填充了每个槽位的五个字段（§3），步骤(4)中 `generate_all()` 遍历这些槽位，对每个 `Template` 调 `_gen` 生成对应的 Codelet。
 
 ---
 
@@ -228,7 +228,7 @@ _throw_StackOverflowError_entry = generate_StackOverflowError_handler();
 
 ## 3. TemplateTable::initialize()——202 条字节码模板的注册
 
-`TemplateTable::initialize()`（templateTable.cpp:244）是 200+ 行的 `def` 调用序列。每个 `def` 调用往 `_template_table[code]` 的槽位置填入一个字节码的全部注册信息。步骤④中 `generate_all()` 遍历这些槽位生成 Codelet。
+`TemplateTable::initialize()`（templateTable.cpp:244）是 200+ 行的 `def` 调用序列。每个 `def` 调用往 `_template_table[code]` 的槽位置填入一个字节码的全部注册信息。步骤(4)中 `generate_all()` 遍历这些槽位生成 Codelet。
 
 ### 3.1 def 的五种重载
 

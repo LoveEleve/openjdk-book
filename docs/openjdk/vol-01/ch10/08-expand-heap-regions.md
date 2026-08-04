@@ -70,9 +70,9 @@ uint HeapRegionManager::expand_at(uint start, uint num_regions, WorkGang* pretou
 
 **① commit 物理内存**——6 个 Mapper 各自 commit 自己那片虚拟地址空间中对应该 Region 范围的物理页（§4.1）。
 
-**② 创建 HeapRegion 对象**——`_regions` 偏置数组（`G1HeapRegionTable`）中对应 index 的位置还是 NULL——按需 `new_heap_region(i)` 创建 `HeapRegion` 对象填入。`if (NULL)` 检查是安全的：`expand()` 可能在运行时被多次调用（动态扩堆），之前的 Region 已经创建过了。
+**(2) 创建 HeapRegion 对象**——`_regions` 偏置数组（`G1HeapRegionTable`）中对应 index 的位置还是 NULL——按需 `new_heap_region(i)` 创建 `HeapRegion` 对象填入。`if (NULL)` 检查是安全的：`expand()` 可能在运行时被多次调用（动态扩堆），之前的 Region 已经创建过了。
 
-**③ 初始化 + 入空闲列表**——对每个新 Region：先 `hr->initialize(mr)` 根据 Region 的堆地址算出 `_bottom`/`_end`、初始化 `_bot_part`（BOT 视图）、设 `_type = Free`。然后 `insert_into_free_list(hr)` 按地址有序插入 `_free_list`。**从此刻起，`G1Allocator` 就能从中取了。**
+**(3) 初始化 + 入空闲列表**——对每个新 Region：先 `hr->initialize(mr)` 根据 Region 的堆地址算出 `_bottom`/`_end`、初始化 `_bot_part`（BOT 视图）、设 `_type = Free`。然后 `insert_into_free_list(hr)` 按地址有序插入 `_free_list`。**从此刻起，`G1Allocator` 就能从中取了。**
 
 ```cpp
 void HeapRegionManager::make_regions_available(uint start, uint num_regions, WorkGang* pretouch) {
@@ -208,7 +208,7 @@ for (uint i = start; i < start + num_regions; i++) {
 
 **① `bottom_addr_for_region(i)` + `MemRegion`**——用简单算术算出 Region i 在堆上的物理区间（和 §4.2 创建 Region 对象时用的同一个公式，但这里 Region 对象已存在，只是算地址）。`MemRegion(bottom, bottom+4MB)` 就是这个 Region 覆盖的堆范围。
 
-**② `hr->initialize(mr)`**——把一个 Region 设成初始状态（`heapRegion.cpp:249-256`）。
+**(2) `hr->initialize(mr)`**——把一个 Region 设成初始状态（`heapRegion.cpp:249-256`）。
 
 先补一段上下文——**BOT 是干什么的**（ch10/06 §4 详细讲过，这里简要回顾）。GC 扫描 dirty card 时，Card 的 512B 边界可能切在对象中间——读到的不是对象头。BOT 解决这个问题：给定 Card 边界地址，回退到离它最近的对象的起始地址。
 
@@ -293,8 +293,8 @@ G1CollectedHeap::expand(init_byte_size, _workers)
     → expand_at(0, 2048)
       → make_regions_available(0, 2048, _workers)
         ├── ① commit_regions: 6 个 Mapper 同步 commit 物理内存
-        ├── ② new_heap_region(i): 创建 2048 个 HeapRegion 对象
-        └── ③ hr->initialize() + insert_into_free_list(): 入空闲列表
+        ├── (2) new_heap_region(i): 创建 2048 个 HeapRegion 对象
+        └── (3) hr->initialize() + insert_into_free_list(): 入空闲列表
   → g1_policy()->record_new_heap_size() — 通知策略层
 ```
 

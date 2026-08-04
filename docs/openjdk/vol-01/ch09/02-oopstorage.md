@@ -234,15 +234,15 @@ oop* OopStorage::Block::allocate() {
 
 ① `allocated = 0b00101`
 
-② `~0b00101 = 0b11010`。CTZ = 1（bit 1 是第一个空闲位）。slot[1] 空闲。
+(2) `~0b00101 = 0b11010`。CTZ = 1（bit 1 是第一个空闲位）。slot[1] 空闲。
 
-③ `bitmask_for_index(1) = 0b00010`。`new_value = 0b00101 | 0b00010 = 0b00111`。
+(3) `bitmask_for_index(1) = 0b00010`。`new_value = 0b00101 | 0b00010 = 0b00111`。
 
-④ `cmpxchg(0b00111, &_allocated_bitmask, 0b00101)`。如果掩码还是 0b00101，写入 0b00111。
+(4) `cmpxchg(0b00111, &_allocated_bitmask, 0b00101)`。如果掩码还是 0b00101，写入 0b00111。
 
-⑤ 返回 `0b00101` = 成功 → 返回 `&_data[1]`。
+(5) 返回 `0b00101` = 成功 → 返回 `&_data[1]`。
 
-⑥ 返回 `0b00111≠0b00101` = 另一个线程抢先了（比如把 slot[3] 占了）。新值 0b00111 存到 allocated，重试。`~0b00111 = 0b11000`。CTZ = 3。slot[3] 空闲。
+(6) 返回 `0b00111≠0b00101` = 另一个线程抢先了（比如把 slot[3] 占了）。新值 0b00111 存到 allocated，重试。`~0b00111 = 0b11000`。CTZ = 3。slot[3] 空闲。
 
 **为什么是 CAS 不是 `|=`？** `|=` 不是原子的——它分解为"读 → 改 → 写"三步。释放线程也在并发操作同一个 `_allocated_bitmask`。如果 allocate 用 `|=`：
 
@@ -603,7 +603,7 @@ void OopStorage::Block::release_entries(uintx releasing, Block* volatile* deferr
 
 条件 2——之前满的，现在有空位了。Block 64 个 slot 全满：`old_allocated = 0xFFFFFFFFFFFFFFFF`。释放 slot[3]：`releasing = 0b1000`。CAS 成功。`is_full_bitmask(0xFFFF...FF)` → **TRUE**。释放前 Block 是满的，现在有空位了——这个 Block 又可以分配了。
 
-① `_release_refcount` 从 0 变 1——告诉 `is_deletable()` 别在这个窗口内删 Block。如果没这个保护：bitmask 被清零了（Block 看起来空了），但⑧还没推到 deferred list——`is_deletable()` 发现 Block 全空且不在 deferred list——认为可以删了——但释放还没完成。
+① `_release_refcount` 从 0 变 1——告诉 `is_deletable()` 别在这个窗口内删 Block。如果没这个保护：bitmask 被清零了（Block 看起来空了），但(8)还没推到 deferred list——`is_deletable()` 发现 Block 全空且不在 deferred list——认为可以删了——但释放还没完成。
 
 ---
 
@@ -712,13 +712,13 @@ bool is_deletable() const {
 
 **条件① `_allocated_bitmask == 0`。** Block 的所有 64 个 slot 都空闲。最便宜的检查，先跑。
 
-**条件② `_release_refcount == 0`。** 如果 `release_entries` 正在执行中（refcount > 0），bitmask 可能暂时为 0 但还没推到 deferred list——此时不能删。refcount 在 release_entries 开头递增、结尾递减——挡住这个窗口。
+**条件(2) `_release_refcount == 0`。** 如果 `release_entries` 正在执行中（refcount > 0），bitmask 可能暂时为 0 但还没推到 deferred list——此时不能删。refcount 在 release_entries 开头递增、结尾递减——挡住这个窗口。
 
 ```cpp
         && (OrderAccess::load_acquire(&_release_refcount) == 0)        // ② 没人在释放
 ```
 
-**条件③ `_deferred_updates_next == NULL`。** 如果 Block 还在 deferred 链表上，说明还没被 `reduce_deferred_updates` 消费——bitmask 的值虽然为 0，但 Block 不一定已经在 allocation_list 尾部。需要等消费完后 `_deferred_updates_next` 才被清空。
+**条件(3) `_deferred_updates_next == NULL`。** 如果 Block 还在 deferred 链表上，说明还没被 `reduce_deferred_updates` 消费——bitmask 的值虽然为 0，但 Block 不一定已经在 allocation_list 尾部。需要等消费完后 `_deferred_updates_next` 才被清空。
 
 ```cpp
         && (OrderAccess::load_acquire(&_deferred_updates_next) == NULL); // ③ 已出延迟队列

@@ -79,7 +79,7 @@ JVM 加载类时，常量池里每一项（类名、方法名、字段名、签�
 插入: 查不到 → 分配新 Symbol → 挂到桶链表头
 ```
 
-### 0.3 位置：universe_init 的第⑩步
+### 0.3 位置：universe_init 的第(10)步
 
 三个 Table 的创建顺序（`universe_init` 中）：
 
@@ -154,7 +154,7 @@ template <MEMFLAGS F> inline BasicHashtable<F>::BasicHashtable(int table_size, i
 
 **① `initialize(table_size, entry_size, 0)`**——把两个参数记进 `_table_size` / `_entry_size` 字段，同时清空三个空闲管理字段（`_free_list`、`_first_free_entry`、`_end_block`）——此时还没有任何条目，空闲池为空。
 
-**② `NEW_C_HEAP_ARRAY2(...)`**——在 C 堆分配一段连续内存作为桶数组，长度 20011，每个元素是一个 `HashtableBucket`。注释说 "Called on startup, no locking needed"：启动期是单线程，不需要锁。
+**(2) `NEW_C_HEAP_ARRAY2(...)`**——在 C 堆分配一段连续内存作为桶数组，长度 20011，每个元素是一个 `HashtableBucket`。注释说 "Called on startup, no locking needed"：启动期是单线程，不需要锁。
 
 `HashtableBucket` 本身极简——内部就一个字段：
 
@@ -202,7 +202,7 @@ template <class T, MEMFLAGS F> class HashtableEntry : public BasicHashtableEntry
 
 所以查表路径是：**桶 → 条目（比对 _hash）→ 取 _literal 的 Symbol* → 比较内容**。
 
-**③ 循环清零**——20011 个桶的链表头全部置 NULL。
+**(3) 循环清零**——20011 个桶的链表头全部置 NULL。
 
 此时表是**空的**——20011 个空链表头（指针指向 NULL），既没有条目也没有 Symbol。
 
@@ -399,7 +399,7 @@ C 堆                          Arena（360K）
   Hashtable 家族的其他使用者（SystemDictionary 等）
 ```
 
-RMT 复用时只需知道：**结构（①②③④）和锁模型（⑤）与 SymbolTable 完全一致**，差异只有条目类型（弱引用）和桶数。
+RMT 复用时只需知道：**结构（①(2)(3)(4)）和锁模型（(5)）与 SymbolTable 完全一致**，差异只有条目类型（弱引用）和桶数。
 
 ---
 

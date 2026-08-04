@@ -375,9 +375,9 @@ _eden_committed = MIN(_eden_committed, committed);     // ⑤ 但不能超过剩
 committed      -= _eden_committed;                     // ⑥ 扣掉 eden 已用的部分
 ```
 
-④ 使用的是 `max_length` 而不是 `length`。这意味着即使当前只有 2 个 eden Region，只要策略允许扩张到 10 个，eden_committed 就按 10 个 Region 来算。目的：避免 GC Locker 激活导致 young 区临时扩张时，jstat 的 committed 值突然跳变。
+(4) 使用的是 `max_length` 而不是 `length`。这意味着即使当前只有 2 个 eden Region，只要策略允许扩张到 10 个，eden_committed 就按 10 个 Region 来算。目的：避免 GC Locker 激活导致 young 区临时扩张时，jstat 的 committed 值突然跳变。
 
-⑤ `MIN2` 是安全兜底——如果物理总容量小于 max_length 的预算（比如堆很小），eden 不能超过实际可用内存。
+(5) `MIN2` 是安全兜底——如果物理总容量小于 max_length 的预算（比如堆很小），eden 不能超过实际可用内存。
 
 最后，**所有剩余的 committed 预算全给 old**：
 
@@ -385,7 +385,7 @@ committed      -= _eden_committed;                     // ⑥ 扣掉 eden 已用
 _old_committed += committed;                 // ⑦ 剩下的全归 old
 ```
 
-⑥ 之后 `committed` 还剩多少？`overall - survivor_committed - old_committed(原始) - eden_committed`。把这部分加回 `_old_committed`，最终得到：
+(6) 之后 `committed` 还剩多少？`overall - survivor_committed - old_committed(原始) - eden_committed`。把这部分加回 `_old_committed`，最终得到：
 
 ```
 _old_committed最终 = align_up(old_used) + (overall - survivor - align_up(old_used) - eden_committed)
@@ -467,7 +467,7 @@ void StringDedup::initialize_impl() {
 
 ### 6.1 去重机制（启用后）
 
-字符串去重（JEP 192）的目标：**让内容相同的 String 共享同一个 char[] 数组**，减少堆内存占用。整体分两个阶段：
+字符串去重（JEP 192）的目标：<strong>让内容相同的 String 共享同一个 char[] 数组</strong>，减少堆内存占用。整体分两个阶段：
 
 ```
 阶段 1（GC 暂停中）: 发现候选
@@ -803,4 +803,4 @@ GC 暂停时的 CSet 构建流程：
 3. **从物理推断逻辑**：`G1MonitoringSupport::recalculate_sizes()` 从 Region 数量推算分代容量，是对不连续 Region 的"分代假象"封装
 4. **Cache Line 感知**：`Padded<PreservedMarks>` 避免多 worker 并行 push mark 时的 false sharing
 
-> **下一篇**：[12b 补章](12b-compressed-oops-and-tlab.md)——`initialize_heap()` 剩余阶段 ③④⑤（TLAB 上限、压缩指针、TLAB 启动），随后是 [ch10 总结](12-summary.md)。
+> **下一篇**：[12b 补章](12b-compressed-oops-and-tlab.md)——`initialize_heap()` 剩余阶段 (3)(4)(5)（TLAB 上限、压缩指针、TLAB 启动），随后是 [ch10 总结](12-summary.md)。

@@ -256,11 +256,11 @@ void os::Linux::hotspot_sigmask(Thread* thread) {
 ![caller_sigmask 调试视图](../assets/signal-mask-caller.png)
 
 
-**② 存到 `OSThread._caller_sigmask`。** 这个照片留给线程退出时恢复——保证 HotSpot 不永久改变调用者的信号环境。
+**(2) 存到 `OSThread._caller_sigmask`。** 这个照片留给线程退出时恢复——保证 HotSpot 不永久改变调用者的信号环境。
 
-**③ 把自己需要的信号放开。** `unblocked_signals()` 返回一个静态全局 `sigset_t*`——它在 `signal_sets_init()`（`os_linux.cpp:540`，Stage 3 的 `os::init_2()` 中调用）里初始化好了，包含了 HotSpot 必须接收的信号：`SIGSEGV`（NullPointerException）、`SIGBUS`、`SIGFPE`、`SIGILL`、`SR_signum`（信号 12——线程挂起），以及 shutdown 钩子需要的 `SHUTDOWN1/2/3_SIGNAL`。`pthread_sigmask(SIG_UNBLOCK, ...)` 把当前屏蔽字中这些信号的屏蔽解除——线程现在能收到它们了。
+**(3) 把自己需要的信号放开。** `unblocked_signals()` 返回一个静态全局 `sigset_t*`——它在 `signal_sets_init()`（`os_linux.cpp:540`，Stage 3 的 `os::init_2()` 中调用）里初始化好了，包含了 HotSpot 必须接收的信号：`SIGSEGV`（NullPointerException）、`SIGBUS`、`SIGFPE`、`SIGILL`、`SR_signum`（信号 12——线程挂起），以及 shutdown 钩子需要的 `SHUTDOWN1/2/3_SIGNAL`。`pthread_sigmask(SIG_UNBLOCK, ...)` 把当前屏蔽字中这些信号的屏蔽解除——线程现在能收到它们了。
 
-**④ `Ctrl-\`（线程 dump）只发给 VMThread。** `vm_signals()` 只包含 `SIGBREAK`。只有 VMThread 接收（`SIG_UNBLOCK`），其他线程屏蔽（`SIG_BLOCK`）——因为 `Ctrl-\` 触发的线程 dump 必须由 VMThread 在 safepoint 中统一执行。`-Xrs` 参数使整个分支被跳过。
+**(4) `Ctrl-\`（线程 dump）只发给 VMThread。** `vm_signals()` 只包含 `SIGBREAK`。只有 VMThread 接收（`SIG_UNBLOCK`），其他线程屏蔽（`SIG_BLOCK`）——因为 `Ctrl-\` 触发的线程 dump 必须由 VMThread 在 safepoint 中统一执行。`-Xrs` 参数使整个分支被跳过。
 
 ```cpp
   log_info(os, thread)("Thread attached (tid: " UINTX_FORMAT

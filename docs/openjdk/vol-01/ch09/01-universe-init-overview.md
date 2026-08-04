@@ -87,7 +87,7 @@ java_lang_ref_Reference::referent_offset = member_offset(hc_referent_offset);
 // member_offset = hc_offset * heapOopSize + base_offset_in_bytes
 ```
 
-**细节在 [04-javaclasses-offsets.md](04-javaclasses-offsets.md)**。
+<strong>细节在 [04-javaclasses-offsets.md](04-javaclasses-offsets.md)</strong>。
 
 ### 2.2 `Universe::initialize_heap()` — 创建 GC 堆
 
@@ -119,7 +119,7 @@ _vm_weak_oop_storage =
 
 SystemDictionary 持有所有已加载类的 `java.lang.Class` 镜像、class loader 等全局 oop 引用。这些引用需要 GC 可见——OopStorage 就是专门解决这个问题的容器。Block/Slot 模型 + CAS 无锁分配 + GC 并发迭代。
 
-**细节在 [02-oopstorage.md](02-oopstorage.md)**。
+<strong>细节在 [02-oopstorage.md](02-oopstorage.md)</strong>。
 
 ### 2.4 `Metaspace::global_initialize()` — 元数据空间
 
@@ -141,7 +141,7 @@ AOTLoader::universe_init();  // #if INCLUDE_AOT
 
 前两个创建 PerfData 计数器——jstat 显示的 MU/MC/MR 就来自这里。AOT 验证 narrow oop/klass shift 兼容后加载预编译的 .so。代码量小但意义不小——没有它们 Metaspace 内存排查就是盲的。
 
-**细节在 [06-auxiliary-trivial.md](06-auxiliary-trivial.md)**。
+<strong>细节在 [06-auxiliary-trivial.md](06-auxiliary-trivial.md)</strong>。
 
 ### 2.6 `check_constraints(AfterMemoryInit)` — 堆和 Metaspace 就绪后的约束检查
 
@@ -154,7 +154,7 @@ JVM 有 800+ 启动参数，有些约束必须在堆大小确定之后才能验�
 
 约束系统有三个检查时机：`AtParse`（参数解析时）、`AfterErgo`（ergonomics 调整后）、`AfterMemoryInit`（universe_init 这里）。按顺序递增执行，`_validating_type` 单调递增保证不会乱序。
 
-**细节在 [05-jvmflag-constraints.md](05-jvmflag-constraints.md)**。
+<strong>细节在 [05-jvmflag-constraints.md](05-jvmflag-constraints.md)</strong>。
 
 ### 2.7 `init_null_class_loader_data()` — bootstrap 类加载器的元数据容器
 
@@ -167,7 +167,7 @@ ClassLoaderDataGraph::_head = _the_null_class_loader_data;
 
 CLD 通过 `ClassLoaderDataGraph::_head` 串成全局链表——GC 遍历它来找到所有存活类。
 
-**细节在 [03-classloader-data-null.md](03-classloader-data-null.md)**。
+<strong>细节在 [03-classloader-data-null.md](03-classloader-data-null.md)</strong>。
 
 ### 2.8 后置：LatestMethodCache + CDS/Table
 

@@ -22,15 +22,15 @@ init_globals()（runtime/init.cpp:101）:
 | 阶段 | generate_all() 中生成的桩 | 用途 |
 |------|--------------------------|------|
 | ① | 慢速签名处理 | 方法参数列表的通用适配 |
-| ② | 返回入口点（10 种 TosState） | 方法返回到调用者 |
-| ③ | invoke 返回入口点（3 种 × 10 种 TosState） | invokevirtual / invokeinterface / invokedynamic 的返回处理 |
-| ④ | 早期返回入口点 | JVMTI PopFrame / ForceEarlyReturn |
-| ⑤ | 原生调用结果处理器 | JNI 返回值的类型转换 |
-| ⑥ | 安全点入口点（10 种 TosState） | Safepoint 时保存解释器状态 |
-| ⑦ | 异常处理器（6 种异常类型） | NullPointer / ArrayIndex / ClassCast 等 |
-| ⑧ | 方法入口点（20+ 种 method kind） | zerolocals / synchronized / native / Math intrinsic 等 |
-| ⑨ | **字节码模板表**（202 条） | 每条 JVM 字节码生成一段 Codelet |
-| ⑩ | 去优化入口点 | C2 去优化时切换回解释器执行 |
+| (2) | 返回入口点（10 种 TosState） | 方法返回到调用者 |
+| (3) | invoke 返回入口点（3 种 × 10 种 TosState） | invokevirtual / invokeinterface / invokedynamic 的返回处理 |
+| (4) | 早期返回入口点 | JVMTI PopFrame / ForceEarlyReturn |
+| (5) | 原生调用结果处理器 | JNI 返回值的类型转换 |
+| (6) | 安全点入口点（10 种 TosState） | Safepoint 时保存解释器状态 |
+| (7) | 异常处理器（6 种异常类型） | NullPointer / ArrayIndex / ClassCast 等 |
+| (8) | 方法入口点（20+ 种 method kind） | zerolocals / synchronized / native / Math intrinsic 等 |
+| (9) | **字节码模板表**（202 条） | 每条 JVM 字节码生成一段 Codelet |
+| (10) | 去优化入口点 | C2 去优化时切换回解释器执行 |
 
 ---
 

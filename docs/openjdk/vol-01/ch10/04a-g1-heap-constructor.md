@@ -80,11 +80,11 @@ G1CollectionSet::G1CollectionSet(G1CollectedHeap* g1h, G1Policy* policy) :
 
 **① `_cset_chooser`**（`CollectionSetChooser`，`collectionSetChooser.hpp:31-66`）——Mixed GC 时**按回收效率排序的 old Region 候选队列**。内部是一个 `GrowableArray<HeapRegion*>`，`front/end` 索引模拟 FIFO 队列。Concurrent Mark 结束后的 cleanup 阶段调用 `rebuild()` 重建——并行遍历所有 Region，筛选出存活率低、RSet 完整的 old Region，按 GC 效率排序。
 
-**② `_collection_set_regions`**——**这就是 CSet 本身**。一个 `uint*` 动态数组，每个元素存的是入选 Region 的 HRM index（如 `_cset_regions = [3, 7, 12, 45, ...]`）。GC 暂停中 GC Worker 遍历这个数组，逐个 evacuate 对应的 Region。`_eden_region_length / _survivor_region_length / _old_region_length` 三个计数器标记数组里哪一段是哪种 Region。初始化列表中为 NULL——等 `G1CollectedHeap::initialize()` 末尾 `_collection_set.initialize(max_regions())` 才在 C Heap 上分配 `uint[max_regions]` 数组。
+**(2) `_collection_set_regions`**——**这就是 CSet 本身**。一个 `uint*` 动态数组，每个元素存的是入选 Region 的 HRM index（如 `_cset_regions = [3, 7, 12, 45, ...]`）。GC 暂停中 GC Worker 遍历这个数组，逐个 evacuate 对应的 Region。`_eden_region_length / _survivor_region_length / _old_region_length` 三个计数器标记数组里哪一段是哪种 Region。初始化列表中为 NULL——等 `G1CollectedHeap::initialize()` 末尾 `_collection_set.initialize(max_regions())` 才在 C Heap 上分配 `uint[max_regions]` 数组。
 
-**③ `_inc_build_state`**——枚举 `Active / Inactive`。构造时 `Inactive`。每次 GC 开始时 `start_incremental_building()` → `Active`（ch10/09 §3），GC 结束时 `stop_incremental_building()` → `Inactive`。只有在 `Active` 状态下才能向 CSet 添加 Region。
+**(3) `_inc_build_state`**——枚举 `Active / Inactive`。构造时 `Inactive`。每次 GC 开始时 `start_incremental_building()` → `Active`（ch10/09 §3），GC 结束时 `stop_incremental_building()` → `Inactive`。只有在 `Active` 状态下才能向 CSet 添加 Region。
 
-**④ 增量构建统计字段**——在 `start_incremental_building()` 中清零，在每次加入 Region 时累加，GC 开始时快照到正式字段：
+**(4) 增量构建统计字段**——在 `start_incremental_building()` 中清零，在每次加入 Region 时累加，GC 开始时快照到正式字段：
 
 | 字段 | 作用 |
 |------|------|
@@ -94,7 +94,7 @@ G1CollectionSet::G1CollectionSet(G1CollectedHeap* g1h, G1Policy* policy) :
 | `_inc_predicted_elapsed_time_ms` | 累计预测暂停耗时 |
 | `_inc_predicted_elapsed_time_ms_diffs` | 预测耗时差量（同上，异步更新） |
 
-**⑤ 正式统计字段**——GC 暂停开始时从增量字段快照得到：
+**(5) 正式统计字段**——GC 暂停开始时从增量字段快照得到：
 
 | 字段 | 作用 |
 |------|------|
@@ -382,15 +382,15 @@ HeapRegionManager() :
 
 **① `_regions`**（`G1HeapRegionTable`, `:39`）——一个 `G1BiasedMappedArray<HeapRegion*>`（偏置数组，ch10/05 §3 同名技巧）。以 Region index 为下标，存 `HeapRegion*` 指针。构造时为空——没有 `new` 任何 Region。
 
-**② 6 个 Mapper 指针**——全部 NULL。等 `G1CollectedHeap::initialize()` 中调 `_hrm.initialize(heap_storage, prev_bitmap, ...)` 时传入并绑定（ch10/05 §5）。每个 Mapper 管理一种元数据的虚拟内存（堆、prev/next 位图、BOT、Card Table、Card Counts）。`expand()` 时 6 Mapper 同步 commit（ch10/08）。
+**(2) 6 个 Mapper 指针**——全部 NULL。等 `G1CollectedHeap::initialize()` 中调 `_hrm.initialize(heap_storage, prev_bitmap, ...)` 时传入并绑定（ch10/05 §5）。每个 Mapper 管理一种元数据的虚拟内存（堆、prev/next 位图、BOT、Card Table、Card Counts）。`expand()` 时 6 Mapper 同步 commit（ch10/08）。
 
-**③ `_num_committed`**——当前已 commit 的 Region 数。构造时为 0，`expand()` 中每 commit 一批 Region 就增加。
+**(3) `_num_committed`**——当前已 commit 的 Region 数。构造时为 0，`expand()` 中每 commit 一批 Region 就增加。
 
-**④ `_allocated_heapregions_length`**——已分配 `HeapRegion` 对象的最大 index+1。例如创建了 Region #5、#10、#15，值是 16（不是 3）。用于数组越界检查。`make_regions_available()` 中更新。
+**(4) `_allocated_heapregions_length`**——已分配 `HeapRegion` 对象的最大 index+1。例如创建了 Region #5、#10、#15，值是 16（不是 3）。用于数组越界检查。`make_regions_available()` 中更新。
 
-**⑤ `_available_map`**——`CHeapBitMap`（位图）。每个 bit 对应一个 Region——bit=1 表示该 Region 已 commit 且可用（可以从中分配空闲 Region）。构造时全 0。`make_regions_available()` 中批量标记为 1。
+**(5) `_available_map`**——`CHeapBitMap`（位图）。每个 bit 对应一个 Region——bit=1 表示该 Region 已 commit 且可用（可以从中分配空闲 Region）。构造时全 0。`make_regions_available()` 中批量标记为 1。
 
-**⑥ `_free_list`**——`FreeRegionList`（按地址排序的空闲 Region 链表）。`G1Allocator` 需要新 Region 时通过 `_hrm.allocate_free_region()` 从这里取。`MtSafeChecker` 是多线程安全检查器——每次 add/remove 时断言正确的锁被持有。构造时为空链表——一个都分配不出。
+**(6) `_free_list`**——`FreeRegionList`（按地址排序的空闲 Region 链表）。`G1Allocator` 需要新 Region 时通过 `_hrm.allocate_free_region()` 从这里取。`MtSafeChecker` 是多线程安全检查器——每次 add/remove 时断言正确的锁被持有。构造时为空链表——一个都分配不出。
 
 构造时 6 个 Mapper NULL、`_free_list` 空——`expand()`（ch10/08）之后才有 Region 可用。
 

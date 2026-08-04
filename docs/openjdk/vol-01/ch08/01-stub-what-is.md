@@ -354,7 +354,7 @@ sub  rsp, 96      ; ③ 往下分配 96 字节，作为本函数的局部变量�
 低地址
 ```
 
-**② mov rbp, rsp 之后：**
+**(2) mov rbp, rsp 之后：**
 
 ```
 高地址
@@ -365,7 +365,7 @@ sub  rsp, 96      ; ③ 往下分配 96 字节，作为本函数的局部变量�
 低地址
 ```
 
-**③ sub rsp, 96 之后：**
+**(3) sub rsp, 96 之后：**
 
 ```
 高地址
@@ -521,7 +521,7 @@ r13 = call_helper 的旧值     → Java 方法期望 r13 = sender_sp
 r15 = call_helper 的旧值     → Java 方法期望 r15 = JavaThread*
 ```
 
-注意：这些旧值虽然在第②步**写到了 entry_frame 的槽位**里（以备将来恢复），但**寄存器本身还是旧值**。"保存"是把值写到内存——寄存器不会自动清空。
+注意：这些旧值虽然在第(2)步**写到了 entry_frame 的槽位**里（以备将来恢复），但**寄存器本身还是旧值**。"保存"是把值写到内存——寄存器不会自动清空。
 
 现在要覆盖它们：
 
@@ -552,13 +552,13 @@ rsp = 指向栈顶 Java 参数的下方
 ④ 设 rbx=Method*, r13=sender_sp, r15=JavaThread* → call rcx
 ```
 
-entry_frame 只是第①②步的"草稿纸"——call_stub 的本地工作区。第③步的 Java 参数是在 entry_frame **下方** push 到栈上的，第④步的跳转是最后一步。
+entry_frame 只是第①(2)步的"草稿纸"——call_stub 的本地工作区。第(3)步的 Java 参数是在 entry_frame **下方** push 到栈上的，第(4)步的跳转是最后一步。
 
 ### 4.4 Java 帧 —— 编译代码在 entry_frame 上方继续增长
 
 `call rcx` 执行后，CPU 进入编译后的 Java 方法。`call` 指令自动 push 了返回地址到栈上。Java 方法在入口处也会建自己的帧（`push rbp; mov rbp, rsp; sub rsp, frame_size`），在 entry_frame 上方继续分配 locals 区和 expression stack 区。
 
-对 Java 方法来说，call_stub 在第③步 push 到栈上的参数就是正常的 slot 0, slot 1——和从解释器传过来的参数位置一模一样。Java 方法不知道、也不需要知道是谁调用了它。
+对 Java 方法来说，call_stub 在第(3)步 push 到栈上的参数就是正常的 slot 0, slot 1——和从解释器传过来的参数位置一模一样。Java 方法不知道、也不需要知道是谁调用了它。
 
 ### 4.5 完整时间线——四张图
 
@@ -599,9 +599,9 @@ rbp→                rsp     [saved rbp   ]           [saved rbp   ]           
 ```
 
 四张图的变化：
-- **①→②**：栈往下长了 96+8=104 字节（saved rbp + entry_frame）
-- **②→③**：栈没有变——entry_frame 槽位被填入了具体值，但 rsp 位置不变
-- **③→④**：栈往下长了 `Java参数大小 + 返回地址 + Java帧大小`——编译代码在 entry_frame 下方建立了自己的帧
+- **①→(2)**：栈往下长了 96+8=104 字节（saved rbp + entry_frame）
+- **(2)→(3)**：栈没有变——entry_frame 槽位被填入了具体值，但 rsp 位置不变
+- **(3)→(4)**：栈往下长了 `Java参数大小 + 返回地址 + Java帧大小`——编译代码在 entry_frame 下方建立了自己的帧
 
 **entry_frame 到底是什么？**
 

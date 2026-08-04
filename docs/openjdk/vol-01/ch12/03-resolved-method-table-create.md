@@ -172,7 +172,7 @@ add_method(method, rmethod_name):
   ① redefine 检查: method->is_old()？
       是 → 用 method_with_idnum 换新方法（呼应 ch10）
           换不到（被删除）→ 用 Unsafe.throwNoSuchMethodError 顶替
-  ② basic_add:
+  (2) basic_add:
       再查一次（等锁期间别人可能已插入）→ 命中？返回已有的
       未命中 → ClassLoaderWeakHandle::create → 挂桶链表头
 ```

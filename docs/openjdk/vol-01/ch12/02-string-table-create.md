@@ -18,7 +18,7 @@
 
 **① "内容相同"指字符序列，不是内部字节**。JDK 9+ 的 String 内部是 `byte[]`（LATIN1 或 UTF16 编码），intern 比较的是**解码后的 Unicode 字符序列**——`LATIN1 "abc"`（`61 62 63`）和 `UTF16 "abc"`（`00 61 00 62 00 63`）字节完全不同，但字符序列相同 → intern 共享。
 
-**② `new` 和 `intern()` 是两回事**：
+**(2) `new` 和 `intern()` 是两回事**：
 
 ```
 String x = new String("a");   // 堆上新建对象（每次都新）
@@ -414,7 +414,7 @@ new StringTableHash(log2size=16, 容量上限 24, rehash 阈值 100)
 
 ① 切换只作用于本地表查找路径：`lookup()` 中 `if (_alt_hash)` 只包裹 `do_lookup` 前的重算——共享表查找在此判断之前，但 CDS 默认不开启、共享表为空直接跳过，主流流程不受影响。
 
-**② Java 层 `String.hashCode()` 的返回值不受影响**（java/lang/String.java）：
+**(2) Java 层 `String.hashCode()` 的返回值不受影响**（java/lang/String.java）：
 
 ```java
 public int hashCode() {
@@ -504,13 +504,13 @@ oop StringTable::intern(Handle string_or_null_h, jchar* name, int len, TRAPS) {
 逐行：
 
 - **① 算 hash**：Java 规范固定公式（与 §3.7 一致）
-- **② alt 判断**：若 rehash 过，换为 `halfsiphash_32`（随机 seed）。日常路径该标志为 false，跳过
-- **③ 本地表纯查找**：调 `do_lookup` 无锁遍历 CHT——`intern()` 本身**也做查找**（只查不插），命中已有 String 直接返回，不等于"看都不看就看 do_intern 插入"
-- **④ 调 `do_intern`**：只有步骤③未命中才走到这里——去建 String、get_insert_lazy 查+插（§4.4）
+- **(2) alt 判断**：若 rehash 过，换为 `halfsiphash_32`（随机 seed）。日常路径该标志为 false，跳过
+- **(3) 本地表纯查找**：调 `do_lookup` 无锁遍历 CHT——`intern()` 本身**也做查找**（只查不插），命中已有 String 直接返回，不等于"看都不看就看 do_intern 插入"
+- **(4) 调 `do_intern`**：只有步骤(3)未命中才走到这里——去建 String、get_insert_lazy 查+插（§4.4）
 
 ### 4.3 do_lookup——本地表纯查找
 
-`do_lookup` 是 `intern()` 私有实现里步骤③调用的纯查找函数——只查不插，无锁读 CHT：
+`do_lookup` 是 `intern()` 私有实现里步骤(3)调用的纯查找函数——只查不插，无锁读 CHT：
 
 ```cpp
 // stringTable.cpp
@@ -576,7 +576,7 @@ class StringTableGet : StackObj {
 3. **对每个 Node** 调 `lookup.equals(node->_value, &is_dead)`：
    - `peek()` 从句柄槽位读 oop → `NULL` → 死条目，标记 `is_dead=true`，CHT 知道需要清理
    - 非 NULL → `java_lang_String::equals` 逐字符比对——Node 里存的是 OopStorage 槽位地址（WeakHandle），并非 String 本体；`peek` 第一次跳：从槽位取 oop（堆上 String 的地址）；`equals` 第二次跳：拿出堆上 String 对象内容，与 `_str`（传入的待查字符）逐字符比对
-   - 内容不同 → 跳到下个 Node（③ 循环）
+   - 内容不同 → 跳到下个 Node（(3) 循环）
    - 内容匹配 → `resolve()` 保活读 → 存入 `_found` → 返回 true
 4. CHT 收到 equals 的 true → 调 `stg(val)` 传回匹配的 WeakHandle → `resolve + Handle` 化
 5. `do_lookup` 调 `stg.get_res_oop()` 取出匹配的 String oop 返回

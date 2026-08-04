@@ -1,6 +1,6 @@
 # 12b. initialize_heap() 收尾——TLAB 上限、压缩指针与 TLAB 启动
 
-> **本文定位**：`Universe::initialize_heap()`（universe.cpp:764-823）五个阶段中的 ③④⑤——补完 ch10 遗留的缺口。③ 设 TLAB 全局上限、④ 决定压缩指针编码模式、⑤ 启动 TLAB 子系统。ch10 前面的文章讲完 create_heap 和 G1CollectedHeap::initialize()，本文把 initialize_heap() 剩余的三行核心调用讲完。
+> **本文定位**：`Universe::initialize_heap()`（universe.cpp:764-823）五个阶段中的 (3)(4)(5)——补完 ch10 遗留的缺口。(3) 设 TLAB 全局上限、(4) 决定压缩指针编码模式、(5) 启动 TLAB 子系统。ch10 前面的文章讲完 create_heap 和 G1CollectedHeap::initialize()，本文把 initialize_heap() 剩余的三行核心调用讲完。
 >
 > **前置依赖**：[ch10/12](12-summary.md)（总结章，指出本缺口）；ch10/03（reserve_heap 与压缩指针 base 的预约）。
 
@@ -38,13 +38,13 @@ jint Universe::initialize_heap() {
 
 | 步骤 | 行号 | 做了什么 | 一句话本质 |
 |------|------|---------|-----------|
-| ③ `set_max_size` | 772 | 设置 TLAB 全局上限 | TLAB 最大 = humongous 阈值（半 Region） |
-| ④ CompressedOops | 774-812 | 决定 oop 编码的 shift/base | 4GB/32GB 两个阈值切出四种模式 |
-| ⑤ `startup_initialization` | 817-821 | 初始化 TLAB 子系统 | 算 refill 目标 + 建全局统计 + 重初始化主线程 TLAB |
+| (3) `set_max_size` | 772 | 设置 TLAB 全局上限 | TLAB 最大 = humongous 阈值（半 Region） |
+| (4) CompressedOops | 774-812 | 决定 oop 编码的 shift/base | 4GB/32GB 两个阈值切出四种模式 |
+| (5) `startup_initialization` | 817-821 | 初始化 TLAB 子系统 | 算 refill 目标 + 建全局统计 + 重初始化主线程 TLAB |
 
 ---
 
-## 2. ③ TLAB set_max_size——TLAB 不能装 humongous 对象
+## 2. (3) TLAB set_max_size——TLAB 不能装 humongous 对象
 
 ### 2.1 一行调用，两个角色
 
@@ -91,7 +91,7 @@ static size_t humongous_threshold_for(size_t region_size) {
 
 ---
 
-## 3. ④ CompressedOops——4GB/32GB 两个阈值，四种模式
+## 3. (4) CompressedOops——4GB/32GB 两个阈值，四种模式
 
 ### 3.1 背景：压缩指针是什么
 
@@ -221,7 +221,7 @@ LogMinObjAlignmentInBytes = exact_log2(ObjectAlignmentInBytes) = 3
 
 ### 3.4 reserve_heap 的压缩指针路径——五级降级尝试
 
-第 ④ 步**只负责最终确定 shift/base**——堆落在哪是 ch10/03 的 `Universe::reserve_heap()` 早就决定的。而那里远不是一次 mmap 那么简单：`ReservedHeapSpace` 构造走 `initialize_compressed_heap()`（virtualspace.cpp:490-600），**从最优模式到最差模式逐级尝试**，每级失败才降级到下一级：
+第 (4) 步**只负责最终确定 shift/base**——堆落在哪是 ch10/03 的 `Universe::reserve_heap()` 早就决定的。而那里远不是一次 mmap 那么简单：`ReservedHeapSpace` 构造走 `initialize_compressed_heap()`（virtualspace.cpp:490-600），**从最优模式到最差模式逐级尝试**，每级失败才降级到下一级：
 
 ```
 Level 0: 用户指定 HeapBaseMinAddress          ← 仅当用户显式设置 -XX:HeapBaseMinAddress
@@ -280,7 +280,7 @@ if (UseCompressedOops) {
 }
 ```
 
-于是第 ④ 步的职责收敛为（universe.cpp:782-792）：
+于是第 (4) 步的职责收敛为（universe.cpp:782-792）：
 - `end > 4GB` → shift 从 0 提到 3
 - `end ≤ 32GB` → base 归零（把预谋的 base 清零，启用 zero-based 模式）
 - 两个判断都不满足（> 32GB）→ 保持 reserve_heap 设的 base 不变
@@ -362,7 +362,7 @@ log_trace(gc, heap, coops)("Trying to allocate at address " PTR_FORMAT
 
 ---
 
-## 4. ⑤ TLAB startup_initialization——TLAB 子系统开机
+## 4. (5) TLAB startup_initialization——TLAB 子系统开机
 
 ### 4.1 全景：三件事
 
@@ -476,7 +476,7 @@ gc_waste 比例 = 0.5 / R
 
 `MAX2(_target_refills, 2U)` 下限 2 的注释："We need to set initial target refills to 2 to avoid a GC which causes VM abort during VM initialization"——如果目标太小，TLAB 刚分配就满，VM 启动期就触发 GC，而此时 VM 尚未就绪会 abort。
 
-### 4.3 ② GlobalTLABStats——TLAB 的全局统计器
+### 4.3 (2) GlobalTLABStats——TLAB 的全局统计器
 
 ```cpp
 _global_stats = new GlobalTLABStats();
@@ -532,7 +532,7 @@ init_sz = (Universe::heap()->tlab_capacity(myThread()) / HeapWordSize) /
 
 **`sample(1)` 的语义**：`GlobalTLABStats` 构造时（启动阶段）尚无任何 GC 周期可供采样，`_allocating_threads_avg` 无历史数据。`sample(1)` 以值 1 作为首个样本初始化该统计器——既为初始 TLAB 大小计算提供非零分母（避免除零），也作为后续真实采样数据的起始基准。
 
-### 4.4 ③ C2 prefetch 预留
+### 4.4 (3) C2 prefetch 预留
 
 #### 为什么需要预留：三个层层递进的问题
 
@@ -596,7 +596,7 @@ initialize(start, top, start + new_size - alignment_reserve());
 
 **为什么只在 C2/server 模式生效**：C1 编译的分配代码不含 prefetch 指令，不需要预留。server 模式默认使用 C2，其生成的分配代码带 prefetch 插桩（`AllocatePrefetchStyle` 相关），才需要这块"禁飞区"。
 
-### 4.5 ④ 主线程 TLAB 重初始化——启动时序的坑
+### 4.5 (4) 主线程 TLAB 重初始化——启动时序的坑
 
 ```cpp
 guarantee(Thread::current()->is_Java_thread(), "tlab initialization thread not Java thread");
@@ -663,7 +663,7 @@ clamp         = [min_size=2KB+reserve, max_size=2MB] → 40MB 被压到 2MB
 
 ## 5. 完成——initialize_heap() 五阶段全部讲完
 
-③④⑤ 补齐后，`Universe::initialize_heap()` 的完整讲解闭环：
+(3)(4)(5) 补齐后，`Universe::initialize_heap()` 的完整讲解闭环：
 
 ```
 ① create_heap()                       ch10/04
@@ -681,9 +681,9 @@ clamp         = [min_size=2KB+reserve, max_size=2MB] → 40MB 被压到 2MB
 
 | 步骤 | 关键数值 | 一句话 |
 |------|---------|--------|
-| ③ TLAB max | `GrainWords/2`（默认 2MB） | TLAB 不允许装 humongous 对象 |
-| ④ CompressedOops | 4GB / 32GB 两个阈值 | shift=3 需要堆 > 4GB；base=0 需要堆 ≤ 32GB |
-| ⑤ _target_refills | `100/(2×1) = 50` | TLAB 大小校准目标，控制 gc_waste ≤ 1% |
-| ⑤ 主线程重初始化 | — | 主线程 TLAB 创建早于堆，必须补初始化 |
+| (3) TLAB max | `GrainWords/2`（默认 2MB） | TLAB 不允许装 humongous 对象 |
+| (4) CompressedOops | 4GB / 32GB 两个阈值 | shift=3 需要堆 > 4GB；base=0 需要堆 ≤ 32GB |
+| (5) _target_refills | `100/(2×1) = 50` | TLAB 大小校准目标，控制 gc_waste ≤ 1% |
+| (5) 主线程重初始化 | — | 主线程 TLAB 创建早于堆，必须补初始化 |
 
 > **下一篇**：[ch10/12 总结](12-summary.md)——回顾全部 12 篇文章如何将 `initialize_heap()` 五阶段逐行讲透。

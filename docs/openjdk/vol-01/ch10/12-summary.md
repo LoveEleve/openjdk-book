@@ -150,7 +150,7 @@ Eden 满 → young GC
 
 ch12 是独立的 Metaspace 诊断章（依赖 ch09/07，非本章），与 G1 堆初始化无直接承接关系。
 
-**回到 initialize_heap() 内部**：ch10 的五阶段中，①② 由 ch10/02-04 讲透，③④⑤ 由[补章 12b](12b-compressed-oops-and-tlab.md)讲透（universe.cpp:764-823）：
+**回到 initialize_heap() 内部**：ch10 的五阶段中，①(2) 由 ch10/02-04 讲透，(3)(4)(5) 由[补章 12b](12b-compressed-oops-and-tlab.md)讲透（universe.cpp:764-823）：
 
 ```
 Universe::initialize_heap()
@@ -164,7 +164,7 @@ Universe::initialize_heap()
        └─ _target_refills = 50 + GlobalTLABStats + 主线程 TLAB 重初始化
 ```
 
-③-⑤ 是 ch10 的遗留缺口——原计划在 ch10/06 展开（压缩指针与 TLAB），但 ch10/06 实际写成了 RemSet+BOT。已由[补章 12b](12b-compressed-oops-and-tlab.md)补完（三步合计约 90 行源码，一篇搞定）。
+(3)-(5) 是 ch10 的遗留缺口——原计划在 ch10/06 展开（压缩指针与 TLAB），但 ch10/06 实际写成了 RemSet+BOT。已由[补章 12b](12b-compressed-oops-and-tlab.md)补完（三步合计约 90 行源码，一篇搞定）。
 
 **再往后**才是 `universe_init()` 主线的后续步骤（universe.cpp:675-749）：
 
@@ -189,4 +189,4 @@ ch10 用了 12 篇文章（01-11 + 补章 12b）、覆盖 200+ 行 initialize()�
 
 答案是 G1 的全部特殊性都在这里：不是一块连续内存（6 个 Mapper 分治管理）、不是简单分代（Region 类型动态切换）、不是暂停即完（并发标记 + 并发 refine + 队列系统）、失败要优雅（撤离失败有 PreservedMarks 兜底）。这 200 行就是 G1 设计哲学的浓缩。
 
-> **下一篇**：[ch11.1 LatestMethodCache](../ch11/01-latest-method-cache.md)——`universe_init()` 第 ⑧ 步，堆刚建好后的 6 个单槽方法缓存。
+> **下一篇**：[ch11.1 LatestMethodCache](../ch11/01-latest-method-cache.md)——`universe_init()` 第 (8) 步，堆刚建好后的 6 个单槽方法缓存。

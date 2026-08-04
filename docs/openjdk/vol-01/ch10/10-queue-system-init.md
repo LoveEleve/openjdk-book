@@ -61,7 +61,7 @@ dirty_card_queue_set().initialize(DirtyCardQ_CBL_mon,                   // [5] D
 [3] YoungGen Sampling Thread            ← 独立，和队列无关
 ```
 
-> **为什么先写 [2] 再写 [4][5] 再写 [1][3]**：按依赖驱动原则——理解 DCQ 必须先理解 refinement 的 zone 模型，所以本文先讲 [2]，再讲 [4][5]（两道 DCQ），最后讲独立的 [1][3]（SATB + YoungGen 采样）。
+> <strong>为什么先写 [2] 再写 [4][5] 再写 [1][3]</strong>：按依赖驱动原则——理解 DCQ 必须先理解 refinement 的 zone 模型，所以本文先讲 [2]，再讲 [4][5]（两道 DCQ），最后讲独立的 [1][3]（SATB + YoungGen 采样）。
 
 ### 1.1 四套系统各干什么
 

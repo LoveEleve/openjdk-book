@@ -205,7 +205,7 @@ Method* LatestMethodCache::get_method() {
 
 ① `_klass == NULL` 检查——O(1)。
 
-② `method_with_idnum(idnum)` 内部实现（`instanceKlass.cpp:3964-3980`）：
+(2) `method_with_idnum(idnum)` 内部实现（`instanceKlass.cpp:3964-3980`）：
 
 ```cpp
 Method* InstanceKlass::method_with_idnum(int idnum) {

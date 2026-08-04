@@ -42,6 +42,7 @@ ReservedSpace heap_rs = Universe::reserve_heap(max_byte_size, heap_alignment);
 man 手册 `mmap(2)` ：
 
 | `MAP_NORESERVE` | "Do not reserve swap space for this mapping." |
+|---|---|
 | `MAP_FIXED` | "Don't interpret addr as a hint: place the mapping at exactly that address." |
 | `MAP_ANONYMOUS` | "The mapping is not backed by any file; its contents are initialized to zero." |
 
