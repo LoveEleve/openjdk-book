@@ -135,7 +135,7 @@ void increment_unique() {
 | `std::try_to_lock` | 尝试获取，不阻塞 | 非阻塞操作 |
 | `std::adopt_lock` | 接收已锁的 mutex | 通过已有锁管理释放 |
 
-HotSpot 等价物是 `MutexLockerEx`（详见 vol-cxx ch06-RAII）。
+HotSpot 等价物是 `MutexLockerEx`（详见 vol-cxx ch05-RAII）。
 
 ## std::atomic：原子操作与无锁编程
 

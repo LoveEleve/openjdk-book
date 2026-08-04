@@ -2,7 +2,7 @@
 
 > **本文定位**：jcmd 全线——从命令行的 `VM.metaspace basic=true` 到 `VM_PrintMetadata` 进入 safepoint 遍历 CLDG 的完整 Metaspace 侧源码路径。覆盖 jcmd 基础、print_basic_report（无锁快速通道）、print_report（8 参数 × 6 ReportFlag）、JMX MemoryPool MXBean、以及 GC.class_stats per-class 元数据分解。
 >
-> **前置依赖**：[ch10/07 Metaspace 背景知识](../ch10/07-metaspace.md) + [12.1 jstat + GC 日志](01-jstat-gc-log.md)——理解 committed/used/reserved 三层、capacity vs committed 差异、PerfData 更新时机。
+> **前置依赖**：[ch09/07 Metaspace 背景知识](../ch09/07-metaspace.md) + [12.1 jstat + GC 日志](01-jstat-gc-log.md)——理解 committed/used/reserved 三层、capacity vs committed 差异、PerfData 更新时机。
 >
 > **JDK 版本**：本文基于 **JDK 11u** 源码，实证输出使用 jdk11u-copy slowdebug 构建。
 

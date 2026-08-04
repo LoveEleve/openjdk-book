@@ -46,53 +46,53 @@
   * [4.3 bytecodes_init — JVM 字节码表的初始化](openjdk/vol-01/ch04/03-bytecodes.md)
   * [4.4 classLoader_init1 边界 + os_init_globals 空实现](openjdk/vol-01/ch04/04-classloader-boundary.md)
   * [4.5 四个 trivial 函数合并](openjdk/vol-01/ch04/05-trivial-merged.md)
-* [第六章 — 编译策略选择 + CICompilerCount](openjdk/vol-01/ch06/01-policy-selection.md) — Serial vs Parallel vs G1，根据 VM 配置决定 GC 编译策略
+* [第五章 — 编译策略选择 + CICompilerCount](openjdk/vol-01/ch05/01-policy-selection.md) — Serial vs Parallel vs G1，根据 VM 配置决定 GC 编译策略
 
-* [第七章 — CodeCache 内存管理初始化](openjdk/vol-01/ch07/01-heap-layout.md) — CollectedHeap 的初始堆地址空间
+* [第六章 — CodeCache 内存管理初始化](openjdk/vol-01/ch06/01-heap-layout.md) — CollectedHeap 的初始堆地址空间
 
-* [第八章 — CPU 特性检测](openjdk/vol-01/ch08/01-cpuid.md) — VM_Version::get_processor_features()
+* [第七章 — CPU 特性检测](openjdk/vol-01/ch07/01-cpuid.md) — VM_Version::get_processor_features()
 
-* [第九章 — StubRoutines 运行时桩生成](openjdk/vol-01/ch09.md)
-  * [9.1 什么是 Stub——JVM 中为什么需要手写汇编桩](openjdk/vol-01/ch09/01-stub-what-is.md)
-  * [9.2 StubRoutines——stub 入口点的全局索引表](openjdk/vol-01/ch09/02-stubroutines-table.md)
-  * [9.3 CodeCache、BufferBlob——可执行内存从哪来](openjdk/vol-01/ch09/03-bufferblob-create.md)
-  * [9.4 机器码写入的四层抽象——从 __ push(rbp) 到 *_end = 0x55](openjdk/vol-01/ch09/04-code-writing-chain.md)
-  * [9.5 StubGenerator——十七个桩的一次性代码工厂](openjdk/vol-01/ch09/05-stubgenerator.md)
-  * [9.6 initialize1 完整知识体系](openjdk/vol-01/ch09/06-initialize1-full.md)
+* [第八章 — StubRoutines 运行时桩生成](openjdk/vol-01/ch08.md)
+  * [8.1 什么是 Stub——JVM 中为什么需要手写汇编桩](openjdk/vol-01/ch08/01-stub-what-is.md)
+  * [8.2 StubRoutines——stub 入口点的全局索引表](openjdk/vol-01/ch08/02-stubroutines-table.md)
+  * [8.3 CodeCache、BufferBlob——可执行内存从哪来](openjdk/vol-01/ch08/03-bufferblob-create.md)
+  * [8.4 机器码写入的四层抽象——从 __ push(rbp) 到 *_end = 0x55](openjdk/vol-01/ch08/04-code-writing-chain.md)
+  * [8.5 StubGenerator——十七个桩的一次性代码工厂](openjdk/vol-01/ch08/05-stubgenerator.md)
+  * [8.6 initialize1 完整知识体系](openjdk/vol-01/ch08/06-initialize1-full.md)
 
-* [第十章 — JVM 运行时世界的 Genesis](openjdk/vol-01/ch10.md)
-  * [10.1 Universe 初始化总览 + 基本类型系统创建](openjdk/vol-01/ch10/01-universe-init-overview.md)
-  * [10.2 前置概念：OopStorage——不绑 HandleMark 的 oop 槽位池](openjdk/vol-01/ch10/02-oopstorage.md)
-  * [10.3 ClassLoaderData 与空类加载器初始化](openjdk/vol-01/ch10/03-classloader-data-null.md)
-  * [10.4 硬编码偏移量——C++ 怎么读一个还没加载的类的字段](openjdk/vol-01/ch10/04-javaclasses-offsets.md)
-  * [10.5 JVM 启动参数的编译期约束系统](openjdk/vol-01/ch10/05-jvmflag-constraints.md)
-  * [10.6 辅助子系统：PerfData/MetaspaceCounters/AOTLoader](openjdk/vol-01/ch10/06-auxiliary-trivial.md)
-  * [10.7 Metaspace——类元数据的 Native Memory 管理器](openjdk/vol-01/ch10/07-metaspace.md)
+* [第九章 — JVM 运行时世界的 Genesis](openjdk/vol-01/ch09.md)
+  * [9.1 Universe 初始化总览 + 基本类型系统创建](openjdk/vol-01/ch09/01-universe-init-overview.md)
+  * [9.2 前置概念：OopStorage——不绑 HandleMark 的 oop 槽位池](openjdk/vol-01/ch09/02-oopstorage.md)
+  * [9.3 ClassLoaderData 与空类加载器初始化](openjdk/vol-01/ch09/03-classloader-data-null.md)
+  * [9.4 硬编码偏移量——C++ 怎么读一个还没加载的类的字段](openjdk/vol-01/ch09/04-javaclasses-offsets.md)
+  * [9.5 JVM 启动参数的编译期约束系统](openjdk/vol-01/ch09/05-jvmflag-constraints.md)
+  * [9.6 辅助子系统：PerfData/MetaspaceCounters/AOTLoader](openjdk/vol-01/ch09/06-auxiliary-trivial.md)
+  * [9.7 Metaspace——类元数据的 Native Memory 管理器](openjdk/vol-01/ch09/07-metaspace.md)
 
-* [第十一章 — G1 GC 初始化全链路](openjdk/vol-01/ch11/01-initialize-heap-overview.md)
-  * [11.1 前置概念：initialize_heap() 五步全景](openjdk/vol-01/ch11/01-initialize-heap-overview.md)
-  * [11.2 G1 的 Region 大小是怎么确定的](openjdk/vol-01/ch11/02-g1-region-policy.md)
-  * [11.3 堆从哪来——mmap 双阶段预约](openjdk/vol-01/ch11/03-reservedspace-mmap.md)
-  * [11.4 G1CollectedHeap 构造函数——堆对象空壳的创建](openjdk/vol-01/ch11/04a-g1-heap-constructor.md)
-  * [11.5 G1 的写前/写后双重屏障](openjdk/vol-01/ch11/04-heap-policy-construction.md)
-  * [11.6 initialize() 上半段：reserve + 写屏障 + Mapper + HRM](openjdk/vol-01/ch11/05-memory-layout-mapper.md)
-  * [11.7 跨 Region 引用——RemSet + BOT + CSet](openjdk/vol-01/ch11/06-remset-bot.md)
-  * [11.8 并发标记引擎初始化](openjdk/vol-01/ch11/07-g1-concurrent-mark-creation.md)
-  * [11.9 expand——commit 物理内存，分配 Region](openjdk/vol-01/ch11/08-expand-heap-regions.md)
-  * [11.10 策略引擎绑定堆与 CSet](openjdk/vol-01/ch11/09-g1-policy-init.md)
-  * [11.11 队列系统初始化——SATB + 双 DCQ + ConcurrentRefinement](openjdk/vol-01/ch11/10-queue-system-init.md)
-  * [11.12 分配器就位 + 收尾](openjdk/vol-01/ch11/11-allocator-ready-and-cleanup.md)
+* [第十章 — G1 GC 初始化全链路](openjdk/vol-01/ch10/01-initialize-heap-overview.md)
+  * [10.1 前置概念：initialize_heap() 五步全景](openjdk/vol-01/ch10/01-initialize-heap-overview.md)
+  * [10.2 G1 的 Region 大小是怎么确定的](openjdk/vol-01/ch10/02-g1-region-policy.md)
+  * [10.3 堆从哪来——mmap 双阶段预约](openjdk/vol-01/ch10/03-reservedspace-mmap.md)
+  * [10.4 G1CollectedHeap 构造函数——堆对象空壳的创建](openjdk/vol-01/ch10/04a-g1-heap-constructor.md)
+  * [10.5 G1 的写前/写后双重屏障](openjdk/vol-01/ch10/04-heap-policy-construction.md)
+  * [10.6 initialize() 上半段：reserve + 写屏障 + Mapper + HRM](openjdk/vol-01/ch10/05-memory-layout-mapper.md)
+  * [10.7 跨 Region 引用——RemSet + BOT + CSet](openjdk/vol-01/ch10/06-remset-bot.md)
+  * [10.8 并发标记引擎初始化](openjdk/vol-01/ch10/07-g1-concurrent-mark-creation.md)
+  * [10.9 expand——commit 物理内存，分配 Region](openjdk/vol-01/ch10/08-expand-heap-regions.md)
+  * [10.10 策略引擎绑定堆与 CSet](openjdk/vol-01/ch10/09-g1-policy-init.md)
+  * [10.11 队列系统初始化——SATB + 双 DCQ + ConcurrentRefinement](openjdk/vol-01/ch10/10-queue-system-init.md)
+  * [10.12 分配器就位 + 收尾](openjdk/vol-01/ch10/11-allocator-ready-and-cleanup.md)
 
-* [第十三章 — LatestMethodCache](openjdk/vol-01/ch13/01-latest-method-cache.md) — O(n)→O(1) 的方法查找缓存
+* [第十一章 — LatestMethodCache](openjdk/vol-01/ch11/01-latest-method-cache.md) — O(n)→O(1) 的方法查找缓存
 
-* [第十四章 — 符号表/字符串表/方法表](openjdk/vol-01/ch14.md) — 三张哈希表的创建
-  * [14.1 SymbolTable 初始化——经典链表哈希表](openjdk/vol-01/ch14/01-symbol-table-create.md)
-  * [14.2 StringTable 初始化——并发无锁 + 弱引用](openjdk/vol-01/ch14/02-string-table-create.md)
-  * [14.3 ResolvedMethodTable 初始化——经典表 + 弱引用](openjdk/vol-01/ch14/03-resolved-method-table-create.md)
+* [第十二章 — 符号表/字符串表/方法表](openjdk/vol-01/ch12.md) — 三张哈希表的创建
+  * [12.1 SymbolTable 初始化——经典链表哈希表](openjdk/vol-01/ch12/01-symbol-table-create.md)
+  * [12.2 StringTable 初始化——并发无锁 + 弱引用](openjdk/vol-01/ch12/02-string-table-create.md)
+  * [12.3 ResolvedMethodTable 初始化——经典表 + 弱引用](openjdk/vol-01/ch12/03-resolved-method-table-create.md)
 
-* [第十五章 — init_globals 门面初始化](openjdk/vol-01/ch15/01-init-globals-facade.md) — GC 屏障桩、JIT 阈值、标志位与寄存器名
+* [第十三章 — init_globals 门面初始化](openjdk/vol-01/ch13/01-init-globals-facade.md) — GC 屏障桩、JIT 阈值、标志位与寄存器名
 
-* [第十六章 — 解释器模板系统上架](openjdk/vol-01/ch16/01-interpreter-init.md) — interpreter_init 与 templateTable_init
+* [第十四章 — 解释器模板系统上架](openjdk/vol-01/ch14/01-interpreter-init.md) — interpreter_init 与 templateTable_init
 
 ## 卷 2 · 对象 — Java 的 C++ 真身
 

@@ -242,7 +242,7 @@ universe_init()
 
 `universe_init` 之所以是中枢，因为它建立了后续所有 Java 代码运行的物质基础——堆（对象分配）、Metaspace（Klass/metadata）、符号表（SymbolTable/StringTable，Java 字符串和符号的 intern）、方法缓存（`LatestMethodCache`，JVM 反射调用 Java 方法的 fast path）。它之后的 `interpreter_init`、`universe2_init`、`javaClasses_init` 都依赖这些已就绪。
 
-堆与 GC 的细节在 ch11 完整展开（`Universe::initialize_heap` 的堆预留、compressed oops 四模式、TLAB 启动）。
+堆与 GC 的细节在 ch10 完整展开（`Universe::initialize_heap` 的堆预留、compressed oops 四模式、TLAB 启动）。
 
 ---
 
@@ -253,17 +253,17 @@ universe_init()
 | 章 | 子系统 | 篇数 | 覆盖的 init_globals 函数 |
 |----|--------|------|--------------------------|
 | ch04 | 总览 + 轻量函数合并 | 5 | management_init / bytecodes_init / classLoader_init1 / os_init_globals + trivial(accessFlags/invocationCounter/InterfaceSupport/VMRegImpl) |
-| ch06 | compilationPolicy_init | 4 | compilationPolicy_init |
-| ch07 | codeCache_init | 5 | codeCache_init |
-| ch08 | VM_Version_init | 6 | VM_Version_init |
-| ch09 | stubRoutines_init1 | 5 | stubRoutines_init1 |
-| ch10 | universe_init 总览 + 辅助初始化 + Metaspace 背景 | 7 | universe_init(JavaClasses offsets/InjectedField/ClassLoaderData/JVMFlag 约束/OopStorage) + Metaspace 背景知识 |
-| ch11 | initialize_heap | 10 | universe_init → Universe::initialize_heap（按设计决策组织：Region 管理/屏障/RemSet/并发标记/停顿控制/分配/串联） |
-| ch12 | Metaspace 诊断与排查 | 5 | jstat + GC 日志 / jcmd VM.metaspace / NMT / JFR / 实战场景（CDS 交互移至 ch13） |
-| ch13 | CDS | 6 | universe_init → MetaspaceShared::initialize_shared_spaces |
-| ch14 | SymbolTable + StringTable + ResolvedMethodTable | 4 | universe_init → 三个 Table::create_table |
-| ch15 | LatestMethodCache | 3 | universe_init → 6× LatestMethodCache |
-| ch16 | interpreter_init | 3 | interpreter_init |
+| ch05 | compilationPolicy_init | 4 | compilationPolicy_init |
+| ch06 | codeCache_init | 5 | codeCache_init |
+| ch07 | VM_Version_init | 6 | VM_Version_init |
+| ch08 | stubRoutines_init1 | 5 | stubRoutines_init1 |
+| ch09 | universe_init 总览 + 辅助初始化 + Metaspace 背景 | 7 | universe_init(JavaClasses offsets/InjectedField/ClassLoaderData/JVMFlag 约束/OopStorage) + Metaspace 背景知识 |
+| ch10 | initialize_heap | 10 | universe_init → Universe::initialize_heap（按设计决策组织：Region 管理/屏障/RemSet/并发标记/停顿控制/分配/串联） |
+| ch12 | Metaspace 诊断与排查 | 5 | jstat + GC 日志 / jcmd VM.metaspace / NMT / JFR / 实战场景（CDS 交互移至 ch11） |
+| ch11 | CDS | 6 | universe_init → MetaspaceShared::initialize_shared_spaces |
+| ch12 | SymbolTable + StringTable + ResolvedMethodTable | 4 | universe_init → 三个 Table::create_table |
+| ch13 | LatestMethodCache | 3 | universe_init → 6× LatestMethodCache |
+| ch14 | interpreter_init | 3 | interpreter_init |
 | ch17 | templateTable_init | 3 | templateTable_init |
 | ch18 | SharedRuntime::generate_stubs | 5 | SharedRuntime::generate_stubs |
 | ch19 | universe2_init | 5 | universe2_init |
@@ -281,10 +281,10 @@ universe_init()
 | ch31 | MethodHandles::generate_adapters | 4 | MethodHandles::generate_adapters |
 | ch32 | compilerOracle_init + NMT + 收尾 | 4 | compilerOracle_init + NMT_stack_walkable + PrintFlagsFinal |
 
-**重头戏**（6+ 篇）：ch08 VM_Version(6) / ch10 universe_init+Metaspace(7) / ch11 initialize_heap(10) / ch13 CDS(6) / ch25 compileBroker(6)
+**重头戏**（6+ 篇）：ch07 VM_Version(6) / ch09 universe_init+Metaspace(7) / ch10 initialize_heap(10) / ch11 CDS(6) / ch25 compileBroker(6)
 
-**5 篇级**：ch07 codeCache / ch09 stubRoutines1 / ch18 generate_stubs / ch19 universe2 / ch29 universe_post / ch30 stubRoutines2
+**5 篇级**：ch06 codeCache / ch08 stubRoutines1 / ch18 generate_stubs / ch19 universe2 / ch29 universe_post / ch30 stubRoutines2
 
-写作顺序按依赖关系：ch04 → ch06-ch09（Block A）→ ch10-ch15（Block B）→ ch16-ch24（Block C）→ ch25-ch28（Block D）→ ch29-ch32（Block E）。
+写作顺序按依赖关系：ch04 → ch05-ch08（Block A）→ ch09-ch13（Block B）→ ch14-ch24（Block C）→ ch25-ch28（Block D）→ ch29-ch32（Block E）。
 
-下一章（ch06）从 `compilationPolicy_init` 开始——选择编译策略（C1/C2/Tiered）、设置编译阈值、计算编译线程数。它是 `universe_init` 的前置依赖之一。
+下一章（ch05）从 `compilationPolicy_init` 开始——选择编译策略（C1/C2/Tiered）、设置编译阈值、计算编译线程数。它是 `universe_init` 的前置依赖之一。

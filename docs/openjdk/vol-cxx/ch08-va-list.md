@@ -122,7 +122,7 @@ void logv(Thread* thread, const char* format, va_list ap) ATTRIBUTE_PRINTF(3, 0)
 
 ## ATTRIBUTE_PRINTF 的类型检查
 
-在 ch07 中已经见过 `ATTRIBUTE_PRINTF` 的宏定义。它在可变参数场景中起着关键的安全兜底作用。没有它，`printf` 家族函数是 C 语言中最危险的安全漏洞来源之一——类型不匹配的行为完全未定义。
+在 ch06 中已经见过 `ATTRIBUTE_PRINTF` 的宏定义。它在可变参数场景中起着关键的安全兜底作用。没有它，`printf` 家族函数是 C 语言中最危险的安全漏洞来源之一——类型不匹配的行为完全未定义。
 
 有了 `ATTRIBUTE_PRINTF(3, 4)`，GCC 在编译时会检查：第 3 个参数是格式串，第 4 个参数与第一个 `%` 说明符类型是否匹配，第 5 个与第二个 `%` 是否匹配，以此类推。写 `Events::log(t, "%d %s", "wrong_type", 42)` 时，GCC 会发现第 4 个参数期望 `int` 但得到 `const char*`，立即报错。
 

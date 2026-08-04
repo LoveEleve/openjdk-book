@@ -2,7 +2,7 @@
 
 > **本文定位**：StringTable 全线——从 JVM 业务作用到 `ConcurrentHashTable` + `OopStorage` 双引擎、`intern()` 完整流程（shared lookup → do_lookup → do_intern → dedup）、自动 rehash 扩容和 alt_hash 切换、GC 弱引用清理。StringTable 是三个 Table 中最复杂的一个——它需要在多线程高并发 intern 场景下保持性能，所以放弃了 SymbolTable 的简单 Hashtable + 互斥锁方案，改用 lock-free 的 ConcurrentHashTable。
 >
-> **前置依赖**：[ch10/07 Metaspace 背景知识](../ch10/07-metaspace.md) + [14.1 SymbolTable](01-symbol-table.md)——已理解 Symbol 与 String 的区别、Hashtable 基类。
+> **前置依赖**：[ch09/07 Metaspace 背景知识](../ch09/07-metaspace.md) + [14.1 SymbolTable](01-symbol-table.md)——已理解 Symbol 与 String 的区别、Hashtable 基类。
 >
 > **JDK 版本**：本文基于 **JDK 11u** 源码，实证输出使用 jdk11u-copy slowdebug 构建。
 

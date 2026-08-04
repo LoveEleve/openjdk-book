@@ -2,7 +2,7 @@
 
 > **本文定位**：JFR（Java Flight Recorder）全线——从 `JfrEvent` 基类和 `metadata.xml` 生成 event 类的机制，到 `MetaspaceTracer` 的 3 个 event 的完整触发链，再到 `JfrClassLoaderStatsClosure` 定期 per-CLD 采集。JFR 是 7 条诊断通道中**唯一能在生产环境长期开启**的——不需要 safepoint、不需要重启 VM、开销 <1%、支持事后回放。
 >
-> **前置依赖**：[ch10/07 Metaspace 背景知识](../ch10/07-metaspace.md) + [12.1 jstat](01-jstat-gc-log.md) + [12.2 jcmd](02-jcmd-metaspace.md) + [12.3 NMT](03-nmt.md)。
+> **前置依赖**：[ch09/07 Metaspace 背景知识](../ch09/07-metaspace.md) + [12.1 jstat](01-jstat-gc-log.md) + [12.2 jcmd](02-jcmd-metaspace.md) + [12.3 NMT](03-nmt.md)。
 >
 > **JDK 版本**：本文基于 **JDK 11u** 源码，实证输出使用 jdk11u-copy slowdebug 构建（JFR.start/dump/summary）。
 

@@ -188,7 +188,7 @@ uncommon trap blob 与 deopt blob 的关系是什么？为什么 C2 需要单独
   - **为什么用 vm_result_2 而不是寄存器**：C++ 函数可能在 safepoint 中阻塞，GC 可能移动对象，通过 thread 字段传递更安全；且 C ABI 只保证 rax 返回值，无法传递额外的 metadata 指针
 
   **Section 5. forward_exception_entry —— 所有存根共享的异常出口**
-  - **数据结构**：`StubRoutines::forward_exception_entry()`（ch09 生成）
+  - **数据结构**：`StubRoutines::forward_exception_entry()`（ch08 生成）
     - 一个 `address`，指向 StubRoutines 中生成的异常转发存根
     - 功能：接收 pending exception oop，查找异常处理器，跳转到处理器
   - **依赖关系**：`generate_resolve_blob` 和 `generate_handler_blob` 都有 `assert(StubRoutines::forward_exception_entry() != NULL)` 前置断言

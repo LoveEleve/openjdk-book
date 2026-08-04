@@ -4,7 +4,7 @@
 >
 > NMT 是 Metaspace 诊断工具箱中的**趋势分析**通道——jstat 是免费快照但不实时，jcmd 是手动触发但能 per-CLD，NMT 需要启动参数但有 jstat 和 jcmd 都不具备的能力：在两次采样点之间的**所有** Metaspace 内存事件都有记录。
 >
-> **前置依赖**：[ch10/07 Metaspace 背景知识](../ch10/07-metaspace.md) + [12.1 jstat + GC 日志](01-jstat-gc-log.md) + [12.2 jcmd VM.metaspace](02-jcmd-metaspace.md)——已经理解 committed/used/reserved 三层、capacity vs committed 差异。
+> **前置依赖**：[ch09/07 Metaspace 背景知识](../ch09/07-metaspace.md) + [12.1 jstat + GC 日志](01-jstat-gc-log.md) + [12.2 jcmd VM.metaspace](02-jcmd-metaspace.md)——已经理解 committed/used/reserved 三层、capacity vs committed 差异。
 >
 > **JDK 版本**：本文基于 **JDK 11u** 源码，实证输出使用 jdk11u-copy slowdebug 构建。
 

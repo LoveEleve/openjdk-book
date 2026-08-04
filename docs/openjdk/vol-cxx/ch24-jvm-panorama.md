@@ -95,7 +95,7 @@ int result = some_function(args, CHECK_0);
 | `fatal` | 所有构建 | 无条件终止 |
 | `ShouldNotReachHere` | Debug only | 断言失败 |
 
-> *详细讲解参见: [ch07 宏体系](../../openjdk/vol-cxx/ch07-macro.md)*
+> *详细讲解参见: [ch06 宏体系](../../openjdk/vol-cxx/ch06-macro.md)*
 
 ## HotSpot 不使用 STL 的完整替代体系
 
@@ -199,7 +199,7 @@ HotSpot 的宏按用途分为 5 类：
 //           LP64_ONLY、ASSERT、DEBUG_ONLY、LINUX_ONLY 等
 ```
 
-> *详细讲解参见: [ch07 宏与预处理器](../../openjdk/vol-cxx/ch07-macro.md)*
+> *详细讲解参见: [ch06 宏与预处理器](../../openjdk/vol-cxx/ch06-macro.md)*
 
 ## 静态方法模式
 
@@ -257,9 +257,9 @@ private:
 void* MetaspaceObj::operator new(size_t size, ClassLoaderData* loader, ...) throw();
 ```
 
-**StackObj 的设计精妙之处：** 通过将 `operator new` 声明为 `private`，编译器在 `new StackObj` 处直接报错——把"不应该做的事"变成"做不到的事"（ch06 RAII 的核心设计）。
+**StackObj 的设计精妙之处：** 通过将 `operator new` 声明为 `private`，编译器在 `new StackObj` 处直接报错——把"不应该做的事"变成"做不到的事"（ch05 RAII 的核心设计）。
 
-> *详细讲解参见: [ch06 RAII 中的 StackObj 部分](../../openjdk/vol-cxx/ch06-raii.md)*
+> *详细讲解参见: [ch05 RAII 中的 StackObj 部分](../../openjdk/vol-cxx/ch05-raii.md)*
 
 ## Handle 体系全景
 
@@ -309,7 +309,7 @@ void function() {
 
 HandleMark 的析构是 **O(1) 的批量释放**——不是逐个 free Handle，而是直接回滚 Arena 水位线。这是 Arena 分配器的核心性能优势。
 
-> *详细讲解参见: [ch06 RAII 中的 HandleMark 部分](../../openjdk/vol-cxx/ch06-raii.md)*
+> *详细讲解参见: [ch05 RAII 中的 HandleMark 部分](../../openjdk/vol-cxx/ch05-raii.md)*
 
 ## Klass 层级全景
 
@@ -348,7 +348,7 @@ oop/klass 二分设计是 HotSpot 的核心架构决策——每个 Java 对象�
                                有虚函数，C++ 多态分发
 ```
 
-> *详细讲解参见: [ch09 友元中的 Klass 部分](../../openjdk/vol-cxx/ch09-friend.md)*
+> *详细讲解参见: [ch08 友元中的 Klass 部分](../../openjdk/vol-cxx/ch08-friend.md)*
 
 ## HotSpot 五大 C++ 设计原则
 
@@ -381,25 +381,25 @@ C++11/14 引入遵循"好过旧方案才换"原则。`nullptr` 替代 `NULL`（�
   基础语法层：C++ 核心语法 + HotSpot 用法
   ┌─────────────────────────────────────────────┐
   │ ch01-ch04        模板、构造、类、继承         │
-  │ ch07-ch08        宏与预处理器、可变参数       │
+  │ ch06-ch07        宏与预处理器、可变参数       │
   └─────────────────────────────────────────────┘
                        │
   内存模型层：对象在内存中如何布局
   ┌─────────────────────────────────────────────┐
-  │ ch15-ch17        对象布局、继承构造语义       │
+  │ ch13-ch17        对象布局、继承构造语义       │
   │                  vtable/vptr 底层实现        │
   └─────────────────────────────────────────────┘
                        │
   语言特性层：C++ 的现代特性在 JVM 中的使用
   ┌─────────────────────────────────────────────┐
   │ ch05             虚函数与多态                │
-  │ ch09-ch14        友元、运算符重载、异常      │
+  │ ch08-ch12        友元、运算符重载、异常      │
   │                  智能指针、移动语义、lambda  │
   └─────────────────────────────────────────────┘
                        │
   工程实践层：JVM 用了什么、没用什么、为什么
   ┌─────────────────────────────────────────────┐
-  │ ch06             RAII 三件套                 │
+  │ ch05             RAII 三件套                 │
   │ ch18-ch20        STL 替代体系、并发编程      │
   │                  性能优化技巧                │
   └─────────────────────────────────────────────┘
@@ -413,7 +413,7 @@ C++11/14 引入遵循"好过旧方案才换"原则。`nullptr` 替代 `NULL`（�
   └─────────────────────────────────────────────┘
 ```
 
-每一层依赖上一层——看不懂宏（ch07）就读不懂 CHECK 宏的异常传播（ch24），不理解 RAII（ch06）就无法欣赏 HandleMark 的设计（ch24），不掌握虚函数（ch05）就看不懂 Klass 体系的多态分发（ch24）。
+每一层依赖上一层——看不懂宏（ch06）就读不懂 CHECK 宏的异常传播（ch24），不理解 RAII（ch05）就无法欣赏 HandleMark 的设计（ch24），不掌握虚函数（ch05）就看不懂 Klass 体系的多态分发（ch24）。
 
 ## 关键自查清单
 

@@ -6,7 +6,7 @@
 
 ## 已覆盖
 
-### 语言特性层（ch01-ch14）
+### 语言特性层（ch01-ch12）
 
 | 章 | HotSpot 语法点 | 源码位置 | C++ 教程对应章节 |
 |----|-------------|---------|---------------|
@@ -25,7 +25,7 @@
 | 13 | 移动语义与右值引用 / 完美转发 | `handles.hpp` Handle 类 | Stage1-04 C++11新特性全解 + Stage1-13 引用与const |
 | 14 | Lambda 表达式与闭包 / std::function | `gcClosure.hpp` GC Closure | Stage1-04 C++11新特性全解 |
 
-### 对象模型层（ch15-ch17）
+### 对象模型层（ch13-ch17）
 
 | 章 | HotSpot 语法点 | 源码位置 | C++ 教程对应章节 |
 |----|-------------|---------|---------------|
@@ -53,10 +53,10 @@
 ## 卷结构分层
 
 ```
-基础语法层:    ch01-ch04, ch07-ch08（模板/构造/类/宏/可变参数）
-语言特性层:    ch05, ch09-ch14（虚函数/友元/运算符/异常/智能指针/移动/lambda）
-内存模型层:    ch15-ch17（对象布局/多重继承/构造语义）
-工程实践层:    ch06, ch18-ch20（RAII/STL/并发/性能）
+基础语法层:    ch01-ch04, ch06-ch07（模板/构造/类/宏/可变参数）
+语言特性层:    ch05, ch08-ch12（虚函数/友元/运算符/异常/智能指针/移动/lambda）
+内存模型层:    ch13-ch17（对象布局/多重继承/构造语义）
+工程实践层:    ch05, ch18-ch20（RAII/STL/并发/性能）
 架构全景层:    ch21-ch24（类型系统/C互操作/设计模式/JVM全景）
 ```
 
@@ -77,19 +77,19 @@ Stage 0 (15篇) ─→ Stage 1 (8篇) ─→ Stage 2 (3篇) ─→ Stage 3 (11�
 - [ch03 构造函数与初始化列表](ch03-ctor-init-list.md)
 - [ch04 struct 与 class](ch04-struct-vs-class.md)
 - [ch05 虚函数与纯虚函数](ch05-virtual-inheritance.md)
-- [ch06 RAII 模式](ch06-raii.md)
-- [ch07 宏与预处理器](ch07-macro.md)
-- [ch08 可变参数](ch08-va-list.md)
-- [ch09 友元与访问控制](ch09-friend.md)
-- [ch10 运算符重载](ch10-operator-overload.md)
-- [ch11 异常处理与 noexcept](ch11-exception.md)
+- [ch05 RAII 模式](ch05-raii.md)
+- [ch06 宏与预处理器](ch06-macro.md)
+- [ch07 可变参数](ch07-va-list.md)
+- [ch08 友元与访问控制](ch08-friend.md)
+- [ch09 运算符重载](ch09-operator-overload.md)
+- [ch10 异常处理与 noexcept](ch10-exception.md)
 - [ch12 智能指针与 Handle 体系](ch12-smart-pointer.md)
-- [ch13 移动语义与右值引用](ch13-move-semantics.md)
-- [ch14 Lambda 表达式与闭包](ch14-lambda.md)
+- [ch11 移动语义与右值引用](ch11-move-semantics.md)
+- [ch12 Lambda 表达式与闭包](ch12-lambda.md)
 
 **对象模型层**
-- [ch15 对象内存布局与 vtable](ch15-obj-layout.md)
-- [ch16 多重继承、虚继承与 RTTI](ch16-multi-inherit.md)
+- [ch13 对象内存布局与 vtable](ch13-obj-layout.md)
+- [ch14 多重继承、虚继承与 RTTI](ch14-multi-inherit.md)
 - [ch17 Rule of 3/5/0 与构造语义](ch17-rule-of-five.md)
 
 **标准库与工程实践层**

@@ -199,4 +199,4 @@ CDS 为前两个 Table 提供了共享只读表——启动时 mmap 恢复，省
 
 ---
 
-ch14 全部 4 篇完成。下一篇（ch15）讲解 `LatestMethodCache`——`universe_init` 中后置的 6 个单槽方法缓存。
+ch12 全部 4 篇完成。下一篇（ch13）讲解 `LatestMethodCache`——`universe_init` 中后置的 6 个单槽方法缓存。

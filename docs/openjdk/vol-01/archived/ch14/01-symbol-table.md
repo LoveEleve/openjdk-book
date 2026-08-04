@@ -2,7 +2,7 @@
 
 > **本文定位**：SymbolTable 全线——从 JVM 业务作用到 `Hashtable<Symbol*, mtSymbol>` 内部结构、Arena vs C-heap 分配策略、double-check lock 的 lock-free 查找、`TempNewSymbol` 引用计数 RAII、unlink GC 清理机制、CDS `CompactHashTable` 共享表。
 >
-> **前置依赖**：[ch10/07 Metaspace 背景知识](../ch10/07-metaspace.md)——理解 Arena 分配器和 `Hashtable` 基类的 bucket-entry 链表结构。
+> **前置依赖**：[ch09/07 Metaspace 背景知识](../ch09/07-metaspace.md)——理解 Arena 分配器和 `Hashtable` 基类的 bucket-entry 链表结构。
 >
 > **JDK 版本**：本文基于 **JDK 11u** 源码。
 
