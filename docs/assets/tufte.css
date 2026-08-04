@@ -470,3 +470,37 @@ h3:hover .heading-link-btn, h4:hover .heading-link-btn { opacity: 1; }
   }
   .page-nav { flex-direction: column; gap: 0.4em; }
 }
+
+/* ---------- 首页咖啡杯 + 二进制雨 ---------- */
+.home-mug {
+  float: right;
+  margin: 0 0 1rem 2rem;
+  color: var(--ink);
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+}
+.home-mug svg { flex: 0 0 auto; }
+.home-rain {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.6rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  letter-spacing: 0.08em;
+  user-select: none;
+  padding-bottom: 1rem;
+}
+@media (max-width: 760px) {
+  .home-mug { float: none; margin: 0 auto 1.5rem; justify-content: center; }
+  .home-rain { text-align: left; padding-bottom: 0.5rem; }
+}
+
+/* ---------- 表格窄屏滚动 ---------- */
+@media (max-width: 760px) {
+  .markdown-section table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+}

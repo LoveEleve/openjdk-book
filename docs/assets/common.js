@@ -143,6 +143,20 @@
           return parts.join('');
         });
 
+        // 兜底：`**...[1]...**` 这类带方括号的粗体被 marked 误判（方括号当链接标记），
+        // 导致粗体不闭合、输出字面 `**`。把 `**...**` 内的方括号转义，让 marked 正确闭合。
+        hook.beforeEach(function (content) {
+          if (content.indexOf('**') === -1) return content;
+          var parts = content.split(/(```[\s\S]*?(?:```|$))/g);
+          for (var i = 0; i < parts.length; i += 2) {
+            parts[i] = parts[i].replace(/\*\*([^*]+?)\*\*/g, function (m, inner) {
+              if (inner.indexOf('[') === -1) return m;
+              return '**' + inner.replace(/\[/g, '&#91;').replace(/\]/g, '&#93;') + '**';
+            });
+          }
+          return parts.join('');
+        });
+
         /* ---------- 代码块工具栏：仅复制 ---------- */
         function initToolbar(pre) {
           if (pre.querySelector('.code-tools')) return;
@@ -899,6 +913,42 @@
         /* ============================================================
            doneEach 钩子（核心渲染入口）
            ============================================================ */
+
+        // 兜底：marked 对 `**...[2]...**` 带方括号的粗体可能输出字面 `**`
+        function fixLiteralBold() {
+          var section = document.querySelector('.markdown-section');
+          if (!section) return;
+          var walker = document.createTreeWalker(section, NodeFilter.SHOW_TEXT, {
+            acceptNode: function (node) {
+              if (!node.textContent.includes('**')) return NodeFilter.FILTER_REJECT;
+              if (node.parentElement.closest('pre, code, #toc-aside, .code-tools'))
+                return NodeFilter.FILTER_REJECT;
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          });
+          var nodes = [];
+          var n;
+          while ((n = walker.nextNode())) nodes.push(n);
+          nodes.forEach(function (node) {
+            var txt = node.textContent;
+            if (txt.indexOf('**') === -1) return;
+            var frag = document.createDocumentFragment();
+            var parts = txt.split(/(\*\*[^*]+?\*\*)/g);
+            parts.forEach(function (part) {
+              if (part && part.indexOf('**') !== -1) {
+                var s = document.createElement('strong');
+                s.textContent = part.replace(/^\*\*|\*\*$/g, '');
+                frag.appendChild(s);
+              } else if (part) {
+                frag.appendChild(document.createTextNode(part));
+              }
+            });
+            if (frag.childNodes.length) {
+              node.parentNode.replaceChild(frag, node);
+            }
+          });
+        }
+
         hook.doneEach(function () {
           document.querySelectorAll('pre[data-lang]').forEach(function (pre) {
             if (pre.dataset.toolbarInited === '1') return;
@@ -907,6 +957,9 @@
             if (codeEl) pre.dataset.rawCode = (codeEl.textContent || '').replace(/\n$/, '');
             initToolbar(pre);
           });
+
+          // 兜底：marked 对 `**...[2]...**` 带方括号的粗体可能输出字面 `**`，后处理修正
+          fixLiteralBold();
 
           renderHeadingLinks(vm);
           ensureTocObserver();
