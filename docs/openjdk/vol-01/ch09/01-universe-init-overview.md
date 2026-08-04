@@ -217,8 +217,8 @@ ResolvedMethodTable::create_table();
 | 07 | [07-metaspace.md](07-metaspace.md) | Metaspace 背景——VSL/Node/ChunkManager/SpaceManager + OccupancyMap + MetaspaceGC + purge + JEP 387 演进 |
 
 不属于 ch09 的 `universe_init` 子函数：
-- `Universe::initialize_heap()` → ch10（10 篇，按设计决策组织）
-- `Metaspace::global_initialize()` → 核心机制在 ch09/07，深入诊断在 ch12（2 篇）
+- `Universe::initialize_heap()` [→ ch10 G1 init](openjdk/vol-01/ch10)（10 篇，按设计决策组织）
+- `Metaspace::global_initialize()` → [ch09/07 Metaspace](openjdk/vol-01/ch09/07-metaspace.md)，深入诊断在 [ch12 OopStorage](openjdk/vol-01/ch12/02-string-table-create.md)（2 篇）
 - `MetaspaceShared::initialize_shared_spaces()` → ch11
 - SymbolTable/StringTable/ResolvedMethodTable → ch12
 - 6× LatestMethodCache → ch13

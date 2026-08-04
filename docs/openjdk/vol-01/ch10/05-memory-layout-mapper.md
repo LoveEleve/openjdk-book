@@ -87,7 +87,7 @@ A.field = B
 扫描 dirty card 里的引用 → 做完整记录                ← 异步，不阻塞 mutator
 ```
 
-卡表是 mutator 和后台处理之间的**缓冲层**——写屏障只标 1 字节（轻），完整记录交给后台线程异步做。后台线程怎么处理这些 dirty card → ch10/06（RemSet）和 ch10/08（Refinement）详讲。
+卡表是 mutator 和后台处理之间的**缓冲层**——写屏障只标 1 字节（轻），完整记录交给后台线程异步做。后台线程怎么处理这些 dirty card → [ch10/06 RemSet](openjdk/vol-01/ch10/06-remset-bot.md) 和 [ch10/08 Refinement](openjdk/vol-01/ch10/08-expand-heap-regions.md)详讲。
 
 卡表把堆按 512B 切分，每 512B 对应 1 字节（card）。8GB 堆 → 16MB 卡表。
 

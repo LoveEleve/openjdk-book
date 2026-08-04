@@ -73,7 +73,7 @@ void TemplateInterpreter::initialize() {
 
 | 步 | 做什么 | 产出 |
 |---|--------|------|
-| (1) | `AbstractInterpreter::initialize()` | 基类初始化——字节码计数器重置 + `InvocationCounter::reinitialize`（ch13 §2.4 已讲） |
+| (1) | `AbstractInterpreter::initialize()` | 基类初始化——字节码计数器重置 + `InvocationCounter::reinitialize`（[ch13 §2.4](openjdk/vol-01/ch13/01-init-globals-facade.md)） |
 | (2) | `TemplateTable::initialize()` | 注册 202 个字节码模板——为每个字节码绑定生成器函数和操作数栈转型规则（§3） |
 | (3) | `new StubQueue(...)` | 创建 CodeBuffer，分配 `InterpreterCodeSize` 字节的代码空间——所有 Codelet 的汇编代码存于此 |
 | (4) | `TemplateInterpreterGenerator g(_code)` | 构造触发 `generate_all()`——遍历模板 + 生成全部桩代码（§2） |
@@ -182,7 +182,7 @@ void TemplateInterpreterGenerator::generate_all() {
 
 `codelet_size()` 实际分配的量不固定——它取 `StubQueue::available_space() - 2K`，保证 CodeBuffer 中有足够空间容纳当前 Codelet。debug 构建中所有分配乘以 4（`InterpreterCodeSize * 4`），为调试断言和边界检查留额外空间。
 
-> `StubQueue` 通过 `BufferBlob::create()` 从 CodeCache（CodeHeap）分配内存——与 JIT 编译产物共享同一个可执行代码池（`BufferBlob` 结构见 ch09/03）。`StubQueue` 在 `init_globals` 期间一次性分配，其后永不清除。
+> `StubQueue` 通过 `BufferBlob::create()` 从 CodeCache（CodeHeap）分配内存——与 JIT 编译产物共享同一个可执行代码池（`BufferBlob` 结构见 [ch09/03](openjdk/vol-01/ch09/03-bufferblob-create.md)）。`StubQueue` 在 `init_globals` 期间一次性分配，其后永不清除。
 
 ---
 

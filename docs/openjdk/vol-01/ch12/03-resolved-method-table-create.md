@@ -2,7 +2,7 @@
 
 > **本文定位**：`ResolvedMethodTable::create_table()` 全线——这张表为谁服务、为什么是"SymbolTable 的表结构 + StringTable 的弱引用"的组合、redefine 怎么处理，以及三张表的设计对比收束。
 >
-> **前置依赖**：ch12/01（Hashtable 基础、锁模型）、ch12/02（OopStorage、弱引用概念）；ch10（`method_idnum`、redefine 概念）。
+> **前置依赖**：[ch12/01 SymbolTable](openjdk/vol-01/ch12/01-symbol-table-create.md)、[ch12/02 StringTable](openjdk/vol-01/ch12/02-string-table-create.md)；[ch10 G1 init](openjdk/vol-01/ch10)。
 
 ---
 

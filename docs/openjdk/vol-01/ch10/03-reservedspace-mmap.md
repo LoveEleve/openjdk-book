@@ -2,7 +2,7 @@
 
 > **本文定位**：背景知识文章。G1 的 8GB 堆不是 malloc 出来的——是 `mmap(PROT_NONE, MAP_NORESERVE)` 先占住地址空间，需要时再用 `mmap(MAP_FIXED, PROT_READ|PROT_WRITE)` 让区间可访问。这就解释了两个概念——reserve（占地址）和 commit（建页表）。
 >
-> **前置依赖**：ch10/01（全景）、ch10/02（Region 大小、heap_alignment=4MB）。
+> **前置依赖**：[ch10/01 全景](openjdk/vol-01/ch10/01-initialize-heap-overview.md)、[ch10/02 Region](openjdk/vol-01/ch10/02-g1-region-policy.md)。
 >
 > **阅读提示**：本文只需要记住两个 flag 组合：(1) `PROT_NONE|MAP_NORESERVE|MAP_ANONYMOUS` = reserve；(2) `MAP_FIXED|PROT_READ|PROT_WRITE|MAP_ANONYMOUS` = commit。以及 G1 在 reserve 完之后靠 `G1PageBasedVirtualSpace` 按页追踪哪些区间已经 commit。
 

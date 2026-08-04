@@ -12,7 +12,7 @@
 init_globals():
    9: universe_init()             ← ch09+ch10+ch12 覆盖完毕
   10: gc_barrier_stubs_init()     ← 本章 §1
-  11: interpreter_init()          → ch14（本章暂不展开）
+  11: interpreter_init()          → [ch14 解释器模板](openjdk/vol-01/ch14)（本章暂不展开）
   12: invocationCounter_init()    ← 本章 §2
   13: accessFlags_init()          ← 本章 §3
   14: templateTable_init()        → ch14

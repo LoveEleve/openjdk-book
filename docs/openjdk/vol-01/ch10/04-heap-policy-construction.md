@@ -255,7 +255,7 @@ void G1Policy::init(G1CollectedHeap* g1h, G1CollectionSet* collection_set) {
 | `_g1h` / `_collection_set` | ❌ NULL——等 `init()` 绑定 |
 | `_bot` / `_hot_card_cache` / `_g1_rem_set` | ❌ NULL——等 `initialize()` 创建 |
 
-**此时堆还没有任何内存**——`mmap` reserve 在 `initialize()` 里做（ch10/03 讲过）。`create_heap` 只是创建了"空壳对象 + 策略引擎"，真正的内存布局在 ch10/05（6 Mapper + HRM）展开。
+**此时堆还没有任何内存**——`mmap` reserve 在 `initialize()` 里做（[ch10/03 mmap](openjdk/vol-01/ch10/03-reservedspace-mmap.md) 讲过）。`create_heap` 只是创建了"空壳对象 + 策略引擎"，真正的内存布局在 [ch10/05 Mapper](openjdk/vol-01/ch10/05-memory-layout-mapper.md)展开。
 
 ---
 

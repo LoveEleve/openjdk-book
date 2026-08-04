@@ -9,7 +9,7 @@
 ch10 用 12 篇文章拆解了 G1 堆创建的全过程。覆盖的源码范围：
 
 ```
-Universe::initialize_heap()                ← ch10/01（全景）
+Universe::initialize_heap()                ← [ch10/01 全景](openjdk/vol-01/ch10/01-initialize-heap-overview.md)
 +- create_heap()                           ← ch10/04
    +- create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()
       +- new G1CollectorPolicy()           ← ch10/02
@@ -18,7 +18,7 @@ Universe::initialize_heap()                ← ch10/01（全景）
       +- new G1CollectedHeap(policy)       ← ch10/04a（75 行构造函数）
 
 +- _collectedHeap->initialize()            ← 201 行，G1 专属
-   +- Universe::reserve_heap()             ← ch10/03（两次 mmap）
+   +- Universe::reserve_heap()             ← [ch10/03 mmap](openjdk/vol-01/ch10/03-reservedspace-mmap.md)
    +- G1CardTable + BarrierSet             ← ch10/05
    +- HotCardCache                         ← ch10/05
    +- 6 个 G1RegionToSpaceMapper           ← ch10/05
@@ -34,7 +34,7 @@ Universe::initialize_heap()                ← ch10/01（全景）
    +- PreservedMarksSet                    ← ch10/11
    +- G1CollectionSet::initialize()        ← ch10/11
 
-+- TLAB set_max_size / CompressedOops / TLAB startup   ← ch10/01（概览）
++- TLAB set_max_size / CompressedOops / TLAB startup   ← [ch10/01 概览](openjdk/vol-01/ch10/01-initialize-heap-overview.md)
 ```
 
 ---
