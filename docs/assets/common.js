@@ -67,27 +67,78 @@
         }
 
         /* ============================================================
-           边注语法：^[内容] → Tufte sidenote
-           在 fenced code block 之外做替换；`code` 反引号保留渲染
+           注脚/边注系统
+           两种写法都渲染为 Tufte 边注：
+           1. ^[内容] —— 行内边注
+           2. [^id] + [^id]: 内容 —— 标准 markdown 注脚（定义行会被移除）
            ============================================================ */
         var snIdSeq = 0;
 
+        // 边注内容里的轻量行内标记：`code` 和 [文字](链接)
+        function renderNoteInline(note) {
+          return escapeHtml(note)
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
+        }
+
+        function makeSidenote(inner) {
+          snIdSeq++;
+          return '<label for="sn-' + snIdSeq + '" class="margin-toggle sidenote-number"></label>' +
+            '<input type="checkbox" id="sn-' + snIdSeq + '" class="margin-toggle"/>' +
+            '<span class="sidenote">' + inner + '</span>';
+        }
+
         function transformSidenoteSegment(seg) {
           return seg.replace(/\^\[([^\]]+)\]/g, function (_, note) {
-            snIdSeq++;
-            var inner = escapeHtml(note).replace(/`([^`]+)`/g, '<code>$1</code>');
-            return '<label for="sn-' + snIdSeq + '" class="margin-toggle sidenote-number"></label>' +
-              '<input type="checkbox" id="sn-' + snIdSeq + '" class="margin-toggle"/>' +
-              '<span class="sidenote">' + inner + '</span>';
+            return makeSidenote(renderNoteInline(note));
+          });
+        }
+
+        // 收集 [^id]: 定义（支持后续缩进行续写），并从文本中移除
+        function extractFootnoteDefs(seg, defs) {
+          var lines = seg.split('\n');
+          var out = [];
+          var cur = null; // 当前正在累积的定义 id
+          lines.forEach(function (line) {
+            var m = line.match(/^\[\^([^\]]+)\]:\s*(.*)$/);
+            if (m) {
+              cur = m[1];
+              defs[cur] = m[2] || '';
+              return;
+            }
+            // 定义的续行：4 空格或 tab 缩进
+            if (cur && /^(\s{4}|\t)\S/.test(line)) {
+              defs[cur] += ' ' + line.trim();
+              return;
+            }
+            if (line.trim() !== '') cur = null;
+            out.push(line);
+          });
+          return out.join('\n');
+        }
+
+        function transformFootnoteRefs(seg, defs) {
+          return seg.replace(/\[\^([^\]]+)\]/g, function (whole, id) {
+            if (!(id in defs)) return whole;
+            return makeSidenote(renderNoteInline(defs[id]));
           });
         }
 
         hook.beforeEach(function (content) {
-          if (content.indexOf('^[') === -1) return content;
+          if (content.indexOf('^[') === -1 && content.indexOf('[^') === -1) return content;
           // 按 ``` 围栏切分，仅处理代码块之外的片段
           var parts = content.split(/(```[\s\S]*?(?:```|$))/g);
+          var defs = {};
+          // 第一遍：收集注脚定义并移除定义行
           for (var i = 0; i < parts.length; i += 2) {
-            parts[i] = transformSidenoteSegment(parts[i]);
+            if (parts[i].indexOf('[^') !== -1) {
+              parts[i] = extractFootnoteDefs(parts[i], defs);
+            }
+          }
+          // 第二遍：替换注脚引用 + 行内边注
+          for (var j = 0; j < parts.length; j += 2) {
+            if (parts[j].indexOf('[^') !== -1) parts[j] = transformFootnoteRefs(parts[j], defs);
+            if (parts[j].indexOf('^[') !== -1) parts[j] = transformSidenoteSegment(parts[j]);
           }
           return parts.join('');
         });
@@ -105,10 +156,30 @@
             e.stopPropagation();
             var text = pre.dataset.rawCode || '';
             if (!text) return;
-            navigator.clipboard.writeText(text).then(function () {
+            function done() {
               copyBtn.textContent = '已复制';
               setTimeout(function () { copyBtn.textContent = '复制'; }, 1200);
-            });
+            }
+            function fail() {
+              copyBtn.textContent = '复制失败';
+              setTimeout(function () { copyBtn.textContent = '复制'; }, 1200);
+            }
+            function fallback() {
+              var ta = document.createElement('textarea');
+              ta.value = text;
+              ta.style.position = 'fixed';
+              ta.style.opacity = '0';
+              document.body.appendChild(ta);
+              ta.select();
+              try { document.execCommand('copy') ? done() : fail(); }
+              catch (err) { fail(); }
+              document.body.removeChild(ta);
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(done, fallback);
+            } else {
+              fallback();
+            }
           };
         }
 
