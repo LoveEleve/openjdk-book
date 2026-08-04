@@ -1,10 +1,13 @@
 /* giscus 自定义主题 — 与站内 Tufte 风格一致：纸底/墨色/衬线/直角细线 */
+/* 先导入官方 light 主题补全全部 primer 变量（防止漏定义导致黑底黑字），再覆盖 */
+@import url('https://giscus.app/themes/light.css');
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600&display=swap');
 
 :root { color-scheme: light only; }
 
-body {
+main {
   --color-canvas-default: #fffff8;
+  --color-canvas-overlay: #fffff8;
   --color-canvas-subtle: #f7f4ec;
   --color-canvas-inset: #f2efe6;
   --color-border-default: #ddd8cc;
@@ -13,18 +16,26 @@ body {
   --color-fg-muted: #555555;
   --color-fg-subtle: #888888;
   --color-accent-fg: #111111;
+  --color-accent-emphasis: #111111;
   --color-accent-muted: #444444;
   --color-accent-subtle: #efecdf;
+  --color-btn-text: #111111;
   --color-btn-bg: #f7f4ec;
   --color-btn-border: #ddd8cc;
   --color-btn-hover-bg: #efecdf;
-  --color-btn-text: #111111;
-  --color-btn-primary-bg: #111111;
   --color-btn-primary-text: #fffff8;
+  --color-btn-primary-bg: #111111;
   --color-btn-primary-hover-bg: #333333;
   --color-btn-primary-border: #111111;
+  --color-btn-primary-disabled-text: #f2efe6;
+  --color-btn-primary-disabled-bg: #888888;
   --color-neutral-muted: #efecdf;
   --color-attention-subtle: #f2efe6;
+  --color-segmented-control-bg: #f2efe6;
+  --color-segmented-control-button-bg: #fffff8;
+}
+
+body {
   font-family: 'Noto Serif SC', 'Songti SC', serif !important;
   background: #fffff8 !important;
 }
