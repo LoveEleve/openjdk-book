@@ -747,14 +747,9 @@
         }
 
         /* ---------- giscus 评论区 ---------- */
-        var GISCUS_THEME = (function () {
-          // localhost 预览时 giscus.app 拉本地 CSS 会被 Chrome 拦截（Private Network Access）
-          // → 本地用内置 light；线上用站内自定义主题
-          var h = location.hostname;
-          if (h === 'localhost' || h === '127.0.0.1') return 'light';
-          var base = (typeof pageConfig.basePath === 'string') ? pageConfig.basePath : 'docs/';
-          return location.origin + '/' + base.replace(/^\//, '').replace(/\/?$/, '/') + 'assets/giscus-theme.css';
-        })();
+        // Tufte 自定义主题走 jsdelivr CDN（https 公网地址，本地/线上都可用；
+        // giscus.app 无法加载 localhost CSS —— Chrome Private Network Access 拦截）
+        var GISCUS_THEME = 'https://cdn.jsdelivr.net/gh/LoveEleve/openjdk-book@tufte-redesign/docs/assets/giscus-theme.css';
         var GISCUS_CFG = {
           src: 'https://giscus.app/client.js',
           repo: 'LoveEleve/LoveEleve.github.io',
