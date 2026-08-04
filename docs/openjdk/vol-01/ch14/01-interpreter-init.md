@@ -83,25 +83,65 @@ void TemplateInterpreter::initialize() {
 
 ---
 
-## 1.1 Template——字节码模板的载体
+## 1.1 Template——字节码的"生成配方"
 
-`Template` 类（templateTable.hpp:44）是一个微型结构，5 个字段：
+`Template` 类（templateTable.hpp:44）不是代码——是**配方**：描述某个字节码对应的 Codelet 应该由谁来生成、带什么参数、执行前后操作数栈的类型如何变化。
 
 ```cpp
 class Template {
-  int      _flags;       // 四个标志位——ubcp / disp / clvm / iswd（位域编码）
-  TosState _tos_in;      // 操作数栈期望输入类型（如 itos=栈顶是 int，vtos=不关心类型）
-  TosState _tos_out;     // 操作数栈输出类型（模板执行后栈顶的类型变化）
-  generator _gen;        // 汇编生成器函数指针——签名为 void (*)(int arg)
-  int      _arg;         // 传给生成器的参数（如常量索引、比较条件）
+  int      _flags;       // 标志位：ubcp / disp / clvm / iswd
+  TosState _tos_in;      // 操作数栈期望输入类型（itos=栈顶是int，vtos=不关心）
+  TosState _tos_out;     // 操作数栈输出类型（模板执行后栈顶变成什么）
+  generator _gen;        // 生成器函数指针——签名为 void (*)(int arg)
+  int      _arg;         // 生成器参数（常量值、比较条件等）
 };
 ```
 
-`TemplateTable::_template_table[202]` 是一个静态数组——每个 JVM 字节码在该数组中对应一个 `Template` 对象。步骤(2)中 `TemplateTable::initialize()` 填充了每个槽位的五个字段（§3），步骤(4)中 `generate_all()` 遍历这些槽位，对每个 `Template` 调 `_gen` 生成对应的 Codelet。
+以 `_iconst_2` 为例——`TemplateTable::initialize()` 中有一行：
+
+```cpp
+def(Bytecodes::_iconst_2, ____|____|____|____, vtos, itos, iconst, 2);
+```
+
+这行 `def` 的 6 个入参和它们最终存入 `Template` 的对应关系（`_iconst_2` 是 `Bytecodes::Code` 枚举成员——202 个 JVM 字节码各对应一个枚举值，`def` 以此值作为 `_template_table` 的数组下标）：
+
+| 入参 | 值 | 存入 Template 的什么 | 含义 |
+|------|----|-------------------|------|
+| 第 1 个 | `_iconst_2` | 数组索引（非字段） | 配方放在 `_template_table[_iconst_2]` 槽位 |
+| 第 2 个 | `____\|____\|____\|____` | `_flags` = 0 | 四个标志位全不设：不需读 bcp（无操作数）、不调 VM、自行分派 |
+| 第 3 个 | `vtos` | `_tos_in` | 执行前不关心栈顶类型 |
+| 第 4 个 | `itos` | `_tos_out` | 执行后栈顶变成 int（压入了 2） |
+| 第 5 个 | `iconst` | `_gen` | 生成器函数——调它产生对应汇编代码 |
+| 第 6 个 | `2` | `_arg` | 生成器参数——"压入常量 2" |
+
+`____` 是宏常量 0——四个位置是四个**开关**，控制这个字节码的 Codelet 有什么特殊行为：
+
+- 开关 1：要不要读字节码后面的**操作数**？（`_bipush` 需要——它后面有一个字节的值要读；`_iconst_2` 不需要——2 是编译期常量）
+- 开关 2：要不要**自己跳到**下一条字节码？（绝大多数需要；不设也没关系——dispatch 表兜底）
+- 开关 3：要不要**调 JVM** 帮忙？（`_invokevirtual` 需要——解析方法得进 C++ 运行时；`_iconst_2` 不需要——纯数学压栈）
+- 开关 4：是不是**wide 版本**？
+
+全关 = 0 = `____|____|____|____`。全开着呢？`_invokevirtual` 用 `ubcp|disp|clvm|____`——前三个开关打开，第四个关。`____` 就是"这一位关着"的意思，把四位串起来让读者一眼看到每个开关是开还是关。
+
+这行 `def` 的结果：`_template_table[_iconst_2]` 槽位被填入一个配方对象。步骤(4)中 `generate_all()` 遍历到该槽位时，取出 `_gen`（=`iconst` 的函数地址），调 `_gen(2)`——生成 "push 2" 的汇编指令，写入新的 Codelet。`Template` 类本身只存数据（templateTable.hpp:44，五个字段：`_flags`、`_tos_in`、`_tos_out`、`_gen`、`_arg`），`_template_table[202]` 中每个槽位存一个配方对象。Template 是"字节码 → 汇编生成器"的映射表条目。（§3 将展示全部 202 个字节码的 def 如何被注册。）
+
+| 字段 | 值 | 含义 |
+|------|----|------|
+| `_flags` | 0 | 不需要 bcp（字节码无操作数）、不调 VM、自行分派 |
+| `_tos_in` | `vtos` | 执行前不关心栈顶类型——管它栈顶是 int、ref、还是空 |
+| `_tos_out` | `itos` | 执行后栈顶变成 int（压入了常量 2） |
+| `_gen` | `iconst` 的函数地址 | 生成器——调它生成对应的汇编代码 |
+| `_arg` | 2 | 传给生成器的参数——压入的值是 2 |
+
+步骤(2)中 `TemplateTable::initialize()` 填充了这个槽位。步骤(4)中 `generate_all()` 遍历到 `_template_table[_iconst_2]` 时，取到该 `Template`，调 `_gen(2)`——`iconst(2)` 在 Codelet 中生成 "push 2" 的汇编指令。`_tos_in` / `_tos_out` 告诉解释器如何管理操作数栈缓存（TosState cache）——在分派到该 Codelet 之前，可能需要在栈顶弹出或写入值以保证类型匹配。
+
+`TemplateTable::_template_table[202]` 是一个静态数组——每个 JVM 字节码在该数组中对应一个 `Template` 对象。Template 是"字节码 → 汇编生成器"的映射表条目。（§3 将展示全部 202 个字节码的 def 如何被注册。）
 
 ---
 
 ## 1.2 CodeletMark——Codelet 的诞生与提交
+
+**Codelet 是什么**。`InterpreterCodelet` 是解释器生成的一小段汇编代码——每个 JVM 字节码对应一个 Codelet。它在 `StubQueue` 中占一段连续空间，头部存元数据（`_size` 代码长度、`_description` 描述字符串、`_bytecode` 字节码编号），体部是生成器产出的机器指令。解释器执行字节码的过程就是：取当前字节码 → 查 dispatch 表找到对应的 Codelet 地址 → 跳转执行 → 该 Codelet 的最后一条指令跳到下一条字节码的 Codelet——**从一个 Codelet 跳到另一个 Codelet，直到方法返回**。
 
 每个 `Codelet` 的生成都由 `CodeletMark` 守卫（interpreter.cpp:84）。它解决一个问题：`generate_all()` 里有几十个独立的 `generate_*()` 调用——每个都需要自己的代码缓冲区、汇编器、以及"生成完了把机器码提交到 StubQueue"的步骤。如果没有 `CodeletMark`，这几十个函数都得手动重复这三步。
 

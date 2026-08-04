@@ -1,14 +1,12 @@
 <div class="home-mug">
 <span class="home-rain">0 1 1 0 1 0 1 1<br>1 0 0 1 0 1 0 0<br>1 1 0 0 1 0 1 1<br>0 0 1 1 0 1 0 0<br>1 0 1 0 1 1 0 1</span>
-<svg viewBox="0 0 140 160" width="96" height="110">
-  <defs><style>.s{fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;}</style></defs>
-  <path class="s" d="M60 35Q50 15 60 0" stroke-width="2"/>
-  <path class="s" d="M70 30Q80 10 70-5" stroke-width="2"/>
-  <path class="s" d="M80 35Q90 18 80 2" stroke-width="2"/>
-  <path class="s" d="M108 55Q135 55 135 80Q135 108 105 105" stroke-width="2.5"/>
-  <path class="s" d="M30 45L38 110Q40 115 70 115Q100 115 102 110L110 45" stroke-width="2.5"/>
-  <ellipse class="s" cx="70" cy="45" rx="40" ry="10" stroke-width="2.5"/>
-  <path class="s" d="M32 55Q70 65 108 55" stroke-width="1.2" opacity=".5"/>
+<svg viewBox="0 0 80 100" width="70" height="88">
+  <defs><style>.s{fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:2.2;}</style></defs>
+  <path class="s" d="M40 10C30 10 25 18 25 30L25 40C25 48 20 52 12 52"/>
+  <path class="s" d="M40 90C30 90 25 82 25 70L25 60C25 52 20 48 12 48"/>
+  <path class="s" d="M40 10C50 10 55 18 55 30L55 40C55 48 60 52 68 52"/>
+  <path class="s" d="M40 90C50 90 55 82 55 70L55 60C55 48 60 48 68 48"/>
+  <circle class="s" cx="40" cy="50" r="4" fill="currentColor" opacity=".6"/>
 </svg>
 </div>
 
