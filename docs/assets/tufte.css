@@ -153,15 +153,6 @@ body {
   font-size: 0.8rem;
   line-height: 1.6;
 }
-/* 宽屏（≥1500px，此时 TOC 挪到左边距）：代码块/表格跨进右边距区，正文仍 700px */
-@media (min-width: 1500px) {
-  .markdown-section pre {
-    max-width: none;
-    width: min(1100px, 100%);
-    clear: right; /* 给右侧浮动的边注让位 */
-  }
-  .markdown-section table { max-width: min(1100px, 100%); }
-}
 .markdown-section pre code {
   font-size: inherit;
   background: none;
@@ -260,14 +251,6 @@ label.sidenote-number::after {
     z-index: 20;
   }
 }
-@media (min-width: 1500px) {
-  .toc-aside[data-has-items="1"] {
-    /* 正文栏左缘 = 页面盒左缘 + 8.5vw 左留白，TOC 贴正文栏左边 */
-    left: auto;
-    right: calc(100vw - max((100vw - var(--page-max)) / 2, 0px) - 8.5vw + 2rem);
-    width: 10rem;
-  }
-}
 .toc-head { display: flex; flex-wrap: wrap; gap: 0.2em 1em; margin-bottom: 0.6em; }
 .toc-back, .toc-top, .toc-close, .toc-collapse {
   background: none; border: none; padding: 0; cursor: pointer;
@@ -297,12 +280,7 @@ label.sidenote-number::after {
   text-underline-offset: 0.15em;
 }
 #toc-open-btn:hover { color: var(--ink); }
-@media (min-width: 1500px) {
-  #toc-open-btn {
-    left: auto;
-    right: calc(100vw - max((100vw - var(--page-max)) / 2, 0px) - 8.5vw + 2rem);
-  }
-}
+
 @media (min-width: 1200px) {
   .toc-aside.is-collapsed { display: none !important; }
   body.toc-collapsed #toc-open-btn { display: block; }
