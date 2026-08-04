@@ -1,4 +1,4 @@
-# 14.2 StringTable 初始化——JDK 11 重写：并发无锁 + 弱引用
+# 12.2 StringTable 初始化——JDK 11 重写：并发无锁 + 弱引用
 
 > **本文定位**：`StringTable::create_table()` 全线——interned String 为什么和 SymbolTable 走上完全不同的技术路线、OopStorage 弱引用存储怎么工作、ConcurrentHashTable 怎么做到无锁读、JDK 11 为什么要重写这张表。
 >
@@ -784,4 +784,4 @@ rehash   : 单桶遍历 > 100 → safepoint 换 alt hash 同大小重建
   删除攒到 GC 后由 ServiceThread 并发批量做（懒删除，不在 GC 暂停内）
 ```
 
-> **下一篇**：[14.3 ResolvedMethodTable 初始化 + 三表对比](03-resolved-method-table-create.md)——经典表 + 弱引用的组合，以及三张表的设计对比。
+> **下一篇**：[12.3 ResolvedMethodTable 初始化 + 三表对比](03-resolved-method-table-create.md)——经典表 + 弱引用的组合，以及三张表的设计对比。

@@ -1,4 +1,4 @@
-# 13.1 LatestMethodCache —— 6 个单槽方法缓存
+# 11.1 LatestMethodCache —— 6 个单槽方法缓存
 
 > **本文定位**：`LatestMethodCache` 全线——为什么类还没加载就创建 6 个空缓存、`init()` 启动填充 + `get_method()` 快速查找、`method_idnum` 而非 `Method*` 保证 RedefineClasses 安全、为什么单槽即最优。
 >

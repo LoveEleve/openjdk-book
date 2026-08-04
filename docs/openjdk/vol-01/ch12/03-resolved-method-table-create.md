@@ -1,4 +1,4 @@
-# 14.3 ResolvedMethodTable 初始化——经典表 + 弱引用，三表收束
+# 12.3 ResolvedMethodTable 初始化——经典表 + 弱引用，三表收束
 
 > **本文定位**：`ResolvedMethodTable::create_table()` 全线——这张表为谁服务、为什么是"SymbolTable 的表结构 + StringTable 的弱引用"的组合、redefine 怎么处理，以及三张表的设计对比收束。
 >
@@ -90,7 +90,7 @@ ResolvedMethodTable()
 
 > 时序：RMT 的 `create_table()` 在 `universe_init` 第 747 行调用——在 `SystemDictionary::initialize_oop_storage()`（第 692 行）之后，`vm_weak_oop_storage`（ch08/02 讲过的 OopStorage 实例）已经建好。RMT 的条目存弱引用时是从这个已建好的池子里**租槽位**。
 
-`Hashtable<ClassLoaderWeakHandle, mtClass>`——与 SymbolTable 同一个 `BasicHashtable` 家族：桶数组 + 链表 + entry 块分配，全部复用 14.1 讲过的机制。
+`Hashtable<ClassLoaderWeakHandle, mtClass>`——与 SymbolTable 同一个 `BasicHashtable` 家族：桶数组 + 链表 + entry 块分配，全部复用 12.1 讲过的机制。
 
 **数据存在哪？四层结构**——以表里已有一条缓存的条目为例（方法 m 的 Method* = 0x5000，分配到的 OopStorage 槽位在 0xA000）：
 

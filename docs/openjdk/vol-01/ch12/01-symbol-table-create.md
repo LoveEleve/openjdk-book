@@ -1,4 +1,4 @@
-# 14.1 SymbolTable 初始化——经典链表哈希表
+# 12.1 SymbolTable 初始化——经典链表哈希表
 
 > **本文定位**：`SymbolTable::create_table()` 全线——Symbol 是什么、20011 个桶怎么来的、Arena 永久符号区干什么、为什么查找要拿锁、符号的两种命运（永久 vs 引用计数回收）。这是三个 Table（SymbolTable / StringTable / ResolvedMethodTable）初始化讲解的第一篇。
 >
@@ -64,7 +64,7 @@ JVM 加载类时，常量池里每一项（类名、方法名、字段名、签�
 
 `SymbolTable` 就是这张表——一个经典的单链表哈希表[^1]：
 
-[^1]: "旧式设计"是相对而言：JDK 11 中 StringTable 被重写为无锁的 ConcurrentHashTable（14.2 的主题），而 SymbolTable 沿用经典的 Hashtable 设计——原因在于两者的访问模式不同（类加载中频 vs intern 高频），本篇先不展开。
+[^1]: "旧式设计"是相对而言：JDK 11 中 StringTable 被重写为无锁的 ConcurrentHashTable（12.2 的主题），而 SymbolTable 沿用经典的 Hashtable 设计——原因在于两者的访问模式不同（类加载中频 vs intern 高频），本篇先不展开。
 
 下面的图只是**概览**——哈希表的具体结构（桶、链表、entry 块、rehash 能力）在 §1-§2 逐步展开：
 
@@ -135,7 +135,7 @@ HotSpot BasicHashtable（SymbolTable 的基类）:
 
 为什么质数更好：取模寻址时，如果桶数是合数而 hash 值恰好和它有公因子，结果会聚集在少数桶上；质数没有真因子，能避免这种聚集。
 
-对比：StringTable 的 ConcurrentHashTable 用掩码寻址（桶数 2^16），ResolvedMethodTable 用取模（桶数 1007）——三种方案会在 14.3 的三表对比里收束。
+对比：StringTable 的 ConcurrentHashTable 用掩码寻址（桶数 2^16），ResolvedMethodTable 用取模（桶数 1007）——三种方案会在 12.3 的三表对比里收束。
 
 构造真正做的事（基类 `BasicHashtable`）——真实代码：
 
@@ -532,4 +532,4 @@ SymbolTable 初始化全景:
        真正激进的设计（彻底无锁 + 弱引用）在下一篇 StringTable。
 ```
 
-> **下一篇**：[14.2 StringTable 初始化](02-string-table-create.md)——JDK 11 重写：并发无锁哈希表 + OopStorage 弱引用。
+> **下一篇**：[12.2 StringTable 初始化](02-string-table-create.md)——JDK 11 重写：并发无锁哈希表 + OopStorage 弱引用。
