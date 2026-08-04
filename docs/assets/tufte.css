@@ -230,7 +230,7 @@ label.sidenote-number::after {
 
 /* ---------- TOC：桌面固定在右边距区 ---------- */
 .toc-aside { display: none; }
-@media (min-width: 1400px) {
+@media (min-width: 1200px) {
   .toc-aside[data-has-items="1"] {
     display: block;
     position: fixed;
@@ -255,16 +255,17 @@ label.sidenote-number::after {
 .toc-collapse { margin-left: auto; }
 .toc-collapse:hover, .toc-back:hover, .toc-top:hover { color: var(--ink); }
 
-/* 收起后的"目录"小按钮：贴在右缘，不抢眼 */
+/* 收起后的"目录"小按钮：就在原目录位置，不挪窝 */
 #toc-open-btn {
   display: none;
   position: fixed;
   top: 5rem;
-  right: 1.2rem;
+  left: calc(max((100vw - var(--page-max)) / 2, 0px) + var(--page-pad) + var(--text-width) + 3.5rem);
   z-index: 20;
   background: none;
   border: none;
-  padding: 0;
+  border-left: 1px solid var(--rule);
+  padding: 0 0 0 1.2rem;
   cursor: pointer;
   font-family: var(--body-font);
   font-size: 0.78rem;
@@ -273,7 +274,7 @@ label.sidenote-number::after {
   text-underline-offset: 0.15em;
 }
 #toc-open-btn:hover { color: var(--ink); }
-@media (min-width: 1400px) {
+@media (min-width: 1200px) {
   .toc-aside.is-collapsed { display: none !important; }
   body.toc-collapsed #toc-open-btn { display: block; }
 }

@@ -1,0 +1,79 @@
+/* giscus 自定义主题 — 与站内 Tufte 风格一致：纸底/墨色/衬线/直角细线 */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600&display=swap');
+
+:root { color-scheme: light only; }
+
+body {
+  --color-canvas-default: #fffff8;
+  --color-canvas-subtle: #f7f4ec;
+  --color-canvas-inset: #f2efe6;
+  --color-border-default: #ddd8cc;
+  --color-border-muted: #e8e4d8;
+  --color-fg-default: #111111;
+  --color-fg-muted: #555555;
+  --color-fg-subtle: #888888;
+  --color-accent-fg: #111111;
+  --color-accent-muted: #444444;
+  --color-accent-subtle: #efecdf;
+  --color-btn-bg: #f7f4ec;
+  --color-btn-border: #ddd8cc;
+  --color-btn-hover-bg: #efecdf;
+  --color-btn-text: #111111;
+  --color-btn-primary-bg: #111111;
+  --color-btn-primary-text: #fffff8;
+  --color-btn-primary-hover-bg: #333333;
+  --color-btn-primary-border: #111111;
+  --color-neutral-muted: #efecdf;
+  --color-attention-subtle: #f2efe6;
+  font-family: 'Noto Serif SC', 'Songti SC', serif !important;
+  background: #fffff8 !important;
+}
+
+/* 直角化：去掉圆角卡片感 */
+.timeline-comment,
+.timeline-comment-header,
+.comment-box,
+.Box,
+.form-control,
+.btn,
+.tabnav-tab,
+.markdown-body blockquote {
+  border-radius: 0 !important;
+}
+
+/* 评论卡片：去掉白底盒感，融入纸面 */
+.timeline-comment {
+  background: #fffff8 !important;
+  border-color: #ddd8cc !important;
+}
+.timeline-comment-header {
+  background: #f7f4ec !important;
+  border-bottom-color: #e8e4d8 !important;
+}
+
+/* 链接与按钮去蓝 */
+a { color: #111 !important; text-decoration: underline; text-underline-offset: 0.15em; }
+.btn-link, .Link--primary { color: #111 !important; }
+.tabnav-tab.selected { border-color: #ddd8cc #ddd8cc #fffff8 !important; background: #fffff8 !important; }
+
+/* 输入框融入纸面 */
+.form-control, .comment-box-textarea {
+  background: #fffff8 !important;
+  border-color: #ddd8cc !important;
+  color: #111 !important;
+}
+.form-control:focus, .comment-box-textarea:focus {
+  border-color: #111 !important;
+  box-shadow: none !important;
+}
+
+/* markdown 内容：引用块/代码同步站内风格 */
+.markdown-body blockquote {
+  border-left: none !important;
+  padding-left: 1.5em !important;
+  color: #555 !important;
+}
+.markdown-body code, .markdown-body pre {
+  background: #f2efe6 !important;
+  border-radius: 0 !important;
+}

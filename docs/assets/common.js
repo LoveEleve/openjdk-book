@@ -747,6 +747,10 @@
         }
 
         /* ---------- giscus 评论区 ---------- */
+        var GISCUS_THEME = (function () {
+          var base = (typeof pageConfig.basePath === 'string') ? pageConfig.basePath : 'docs/';
+          return location.origin + '/' + base.replace(/^\//, '').replace(/\/?$/, '/') + 'assets/giscus-theme.css';
+        })();
         var GISCUS_CFG = {
           src: 'https://giscus.app/client.js',
           repo: 'LoveEleve/LoveEleve.github.io',
@@ -758,7 +762,7 @@
           reactionsEnabled: '1',
           emitMetadata: '0',
           inputPosition: 'top',
-          theme: 'light',
+          theme: GISCUS_THEME,
           lang: 'zh-CN'
         };
 
