@@ -461,11 +461,17 @@ h3:hover .heading-link-btn, h4:hover .heading-link-btn { opacity: 1; }
 .home-mug {
   float: right;
   margin: 0 0 1rem 2rem;
-  color: var(--ink);
-  display: flex;
-  align-items: flex-end;
-  gap: 0.4rem;
+  text-align: center;
 }
+.home-mug svg { display: block; margin: 0 auto; }
+.home-mug sub {
+  display: block;
+  margin-top: 0.4em;
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+  font-style: italic;
+}
+
 .home-mug svg { flex: 0 0 auto; }
 .home-rain {
   font-family: "JetBrains Mono", monospace;

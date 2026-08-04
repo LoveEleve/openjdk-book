@@ -1,0 +1,10 @@
+<svg viewBox="0 0 140 160" width="96" height="110">
+  <defs><style>.s{fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;}</style></defs>
+  <path class="s" d="M60 35Q50 15 60 0" stroke-width="2"/>
+  <path class="s" d="M70 30Q80 10 70-5" stroke-width="2"/>
+  <path class="s" d="M80 35Q90 18 80 2" stroke-width="2"/>
+  <path class="s" d="M108 55Q135 55 135 80Q135 108 105 105" stroke-width="2.5"/>
+  <path class="s" d="M30 45L38 110Q40 115 70 115Q100 115 102 110L110 45" stroke-width="2.5"/>
+  <ellipse class="s" cx="70" cy="45" rx="40" ry="10" stroke-width="2.5"/>
+  <path class="s" d="M32 55Q70 65 108 55" stroke-width="1.2" opacity=".5"/>
+</svg>

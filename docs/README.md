@@ -1,24 +1,16 @@
 <div class="home-mug">
 <span class="home-rain">0 1 1 0 1 0 1 1<br>1 0 0 1 0 1 0 0<br>1 1 0 0 1 0 1 1<br>0 0 1 1 0 1 0 0<br>1 0 1 0 1 1 0 1</span>
-<svg viewBox="0 0 90 110" width="68" height="84">
+<svg viewBox="0 0 140 160" width="96" height="110">
   <defs><style>.s{fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;}</style></defs>
-  <!-- 脚 -->
-  <ellipse class="s" cx="24" cy="100" rx="12" ry="6" fill="currentColor" fill-opacity=".15" stroke-width="2"/>
-  <ellipse class="s" cx="66" cy="100" rx="12" ry="6" fill="currentColor" fill-opacity=".15" stroke-width="2"/>
-  <!-- 身体 -->
-  <ellipse class="s" cx="45" cy="62" rx="32" ry="34" stroke-width="2.2"/>
-  <!-- 肚皮 -->
-  <ellipse cx="45" cy="62" rx="20" ry="22" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".5"/>
-  <!-- 嘴 -->
-  <path class="s" d="M38 32L45 37L52 32" stroke-width="2"/>
-  <path class="s" d="M42 37L45 42L48 37" stroke-width="1.2" opacity=".7"/>
-  <!-- 眼睛 -->
-  <circle cx="37" cy="27" r="3" fill="currentColor"/>
-  <circle cx="53" cy="27" r="3" fill="currentColor"/>
-  <!-- 翅膀 -->
-  <path class="s" d="M14 55C8 50 8 40 15 35" stroke-width="1.8"/>
-  <path class="s" d="M76 55C82 50 82 40 75 35" stroke-width="1.8"/>
+  <path class="s" d="M60 35Q50 15 60 0" stroke-width="2"/>
+  <path class="s" d="M70 30Q80 10 70-5" stroke-width="2"/>
+  <path class="s" d="M80 35Q90 18 80 2" stroke-width="2"/>
+  <path class="s" d="M108 55Q135 55 135 80Q135 108 105 105" stroke-width="2.5"/>
+  <path class="s" d="M30 45L38 110Q40 115 70 115Q100 115 102 110L110 45" stroke-width="2.5"/>
+  <ellipse class="s" cx="70" cy="45" rx="40" ry="10" stroke-width="2.5"/>
+  <path class="s" d="M32 55Q70 65 108 55" stroke-width="1.2" opacity=".5"/>
 </svg>
+<sub>java是世界上最好的语言.py</sub>
 </div>
 
 # 格物致知：OpenJDK 源码分析
