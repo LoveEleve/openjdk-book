@@ -1,6 +1,6 @@
-# ch12 SymbolTable + StringTable + ResolvedMethodTable 写作规划
+# ch14 SymbolTable + StringTable + ResolvedMethodTable 写作规划
 
-## ch12 目标
+## ch14 目标
 
 读者读完 4 篇后能回答以下核心问题：
 
@@ -17,7 +17,7 @@
 
 ## 定位：JVM 中三个 Table 的业务作用
 
-ch09/07 已经讲完 Metaspace 背景，ch10 讲完堆初始化。ch12 承接 `universe_init` 中的 `SymbolTable::create_table()` / `StringTable::create_table()` / `ResolvedMethodTable::create_table()`——这三个 Table 是 JVM 类加载、字符串池化、方法解析的基础设施。
+ch10/07 已经讲完 Metaspace 背景，ch11 讲完堆初始化。ch14 承接 `universe_init` 中的 `SymbolTable::create_table()` / `StringTable::create_table()` / `ResolvedMethodTable::create_table()`——这三个 Table 是 JVM 类加载、字符串池化、方法解析的基础设施。
 
 **在深入源码之前，先理解三个 Table 在 JVM 中"做什么"**：
 
@@ -67,7 +67,7 @@ CDS 路径下 StringTable 先于 SymbolTable 创建（因为 archive 中符号�
 ## 文章结构（4 篇）
 
 ```
-ch09/07 核心机制 (背景)
+ch10/07 核心机制 (背景)
   │
   ├─→ 01-symbol-table.md  ← 最难——Hashtable + Arena + CDS + RC
   │     └─ 内部结构、分配策略、lock-free lookup、unlink GC
@@ -90,7 +90,7 @@ ch09/07 核心机制 (背景)
 
 - [ ] **01-symbol-table.md**
   | 定位: SymbolTable 全线——从 JVM 业务作用到 `Hashtable` 基类到 Arena 到 CDS 共享表到 unlink GC
-  | 前置: ch09/07（理解 Arena 和 Hashtable 基类）
+  | 前置: ch10/07（理解 Arena 和 Hashtable 基类）
 
   **Section 1. SymbolTable 在 JVM 中的作用**（新增）
   - `Symbol` 是什么：C++ 的 UTF-8 字节序列，带 reference count，存在 Metaspace 中
@@ -163,7 +163,7 @@ ch09/07 核心机制 (背景)
 
 - [ ] **02-string-table.md**
   | 定位: StringTable 全线——从 JVM 业务作用到 OopStorage 到 ConcurrentHashTable 到 intern 到自动 rehash
-  | 前置: ch09/07 + 01
+  | 前置: ch10/07 + 01
 
   **Section 1. StringTable 在 JVM 中的作用**（新增）
   - Java 字符串常量池：`String.intern()`、编译期字面量、`CONSTANT_String_info` 常量解析
@@ -234,7 +234,7 @@ ch09/07 核心机制 (背景)
 
 - [ ] **03-resolved-method-table.md**
   | 定位: ResolvedMethodTable 全线——从 JVM 业务作用到 weak handle 到 GC unlink 到 redefineClasses
-  | 前置: ch09/07 + 01 + 02
+  | 前置: ch10/07 + 01 + 02
 
   **Section 1. ResolvedMethodTable 在 JVM 中的作用**（新增）
   - JDK 7 `invokedynamic` 引入后，方法解析不再是类加载时一次性完成——`invokedynamic` 的调用目标由 bootstrap method 在运行时动态计算
@@ -329,7 +329,7 @@ ch09/07 核心机制 (背景)
 
 ### 为什么 SymbolTable 放第一篇
 
-SymbolTable 使用最基础的数据结构（`RehashableHashtable`）和最简单的分配策略（Arena vs C-heap），且是整个 ch12 的入口——StringTable 和 ResolvedMethodTable 都依赖对 Symbol 和 Hashtable 基类的理解。先把它讲透，后面两篇可以直接引用"类似 SymbolTable 的 lock-free lookup"而不重复解释。
+SymbolTable 使用最基础的数据结构（`RehashableHashtable`）和最简单的分配策略（Arena vs C-heap），且是整个 ch14 的入口——StringTable 和 ResolvedMethodTable 都依赖对 Symbol 和 Hashtable 基类的理解。先把它讲透，后面两篇可以直接引用"类似 SymbolTable 的 lock-free lookup"而不重复解释。
 
 ### 为什么 StringTable 是独立一篇（不合并到 SymbolTable）
 
@@ -359,7 +359,7 @@ CDS 和非 CDS 两条路径下 `create_table` 的调用顺序不同、锁模型�
 ## 与前后章节的连接
 
 ```
-ch09/07 Metaspace 背景 ──→ ch10 堆初始化 ──→ ch11 CDS ──→ ch12 三个 Table
+ch10/07 Metaspace 背景 ──→ ch11 堆初始化 ──→ ch13 CDS ──→ ch14 三个 Table
                                                           │
                            universe_init 中                 ├─ 01: SymbolTable
                            create_table 调用               ├─ 02: StringTable  

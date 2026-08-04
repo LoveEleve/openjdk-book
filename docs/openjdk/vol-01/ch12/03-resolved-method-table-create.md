@@ -2,7 +2,7 @@
 
 > **本文定位**：`ResolvedMethodTable::create_table()` 全线——这张表为谁服务、为什么是"SymbolTable 的表结构 + StringTable 的弱引用"的组合、redefine 怎么处理，以及三张表的设计对比收束。
 >
-> **前置依赖**：ch12/01（Hashtable 基础、锁模型）、ch12/02（OopStorage、弱引用概念）；ch11（`method_idnum`、redefine 概念）。
+> **前置依赖**：ch12/01（Hashtable 基础、锁模型）、ch12/02（OopStorage、弱引用概念）；ch10（`method_idnum`、redefine 概念）。
 
 ---
 
@@ -88,7 +88,7 @@ ResolvedMethodTable()
 
 `_table_size = 1007`——硬编码的枚举常量。注意：**1007 不是质数**（19 × 53），不像 SymbolTable 刻意选质数。为什么？这张表的条目规模天然小（只有 invokedynamic 解析过的方法才进表），桶数不需要精心设计——1007 是个够用的历史值。
 
-> 时序：RMT 的 `create_table()` 在 `universe_init` 第 747 行调用——在 `SystemDictionary::initialize_oop_storage()`（第 692 行）之后，`vm_weak_oop_storage`（ch09/02 讲过的 OopStorage 实例）已经建好。RMT 的条目存弱引用时是从这个已建好的池子里**租槽位**。
+> 时序：RMT 的 `create_table()` 在 `universe_init` 第 747 行调用——在 `SystemDictionary::initialize_oop_storage()`（第 692 行）之后，`vm_weak_oop_storage`（ch08/02 讲过的 OopStorage 实例）已经建好。RMT 的条目存弱引用时是从这个已建好的池子里**租槽位**。
 
 `Hashtable<ClassLoaderWeakHandle, mtClass>`——与 SymbolTable 同一个 `BasicHashtable` 家族：桶数组 + 链表 + entry 块分配，全部复用 14.1 讲过的机制。
 
@@ -170,7 +170,7 @@ lookup(Method* method):
 add_method(method, rmethod_name):
   拿 ResolvedMethodTable_lock
   ① redefine 检查: method->is_old()？
-      是 → 用 method_with_idnum 换新方法（呼应 ch11）
+      是 → 用 method_with_idnum 换新方法（呼应 ch10）
           换不到（被删除）→ 用 Unsafe.throwNoSuchMethodError 顶替
   ② basic_add:
       再查一次（等锁期间别人可能已插入）→ 命中？返回已有的
@@ -178,7 +178,7 @@ add_method(method, rmethod_name):
 ```
 
 两处呼应前文：
-- **redefine 检查用 `method_with_idnum`**——正是 ch11 讲的机制：idnum 不变，取到最新版本
+- **redefine 检查用 `method_with_idnum`**——正是 ch10 讲的机制：idnum 不变，取到最新版本
 - **锁内再查一次**——SymbolTable 同款乐观模式
 
 ### 2.4 锁模型小结
@@ -202,7 +202,7 @@ add_method(method, rmethod_name):
 
 语义效果：ResolvedMethodName oop 没人引用时被 GC 回收，回收后条目里的 WeakHandle 变 NULL——GC 的 unlink（§3.3）扫描时删除该条目。
 
-### 3.2 redefine 处理（呼应 ch11）
+### 3.2 redefine 处理（呼应 ch10）
 
 redefine 替换方法后，表中的条目还指向旧方法。两个时机处理：
 
@@ -213,7 +213,7 @@ GC safepoint 时（adjust_method_entries）:
     是 → 换新方法 / 已删除 → 换 NSME 方法
 ```
 
-这保证了缓存里的 Method* 永远是当前版本——正是 ch11 讲的"idnum 不变、方法指针自动跟随"思想在另一处的应用。
+这保证了缓存里的 Method* 永远是当前版本——正是 ch10 讲的"idnum 不变、方法指针自动跟随"思想在另一处的应用。
 
 ### 3.3 GC 清理：unlink
 

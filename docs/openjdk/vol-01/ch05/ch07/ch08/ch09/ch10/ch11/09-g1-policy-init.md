@@ -2,13 +2,13 @@
 
 > **本文定位**：`G1CollectedHeap::initialize()` 第 1677 行。`expand()` 之后堆内存就绪，G1Policy 的 `init()` 绑定此前构造时为 NULL 的 `_g1h` 和 `_collection_set` 指针，首次计算 young list 的目标长度，并启动 CSet 的增量构建。
 >
-> **前置依赖**：[ch10/08](08-expand-heap-regions.md)（expand 完毕，堆已就绪）。
+> **前置依赖**：[ch09/08](08-expand-heap-regions.md)（expand 完毕，堆已就绪）。
 
 ---
 
 ## 1. 执行位置与背景
 
-ch10/04 构造 G1Policy 时，两个关键指针被故意设为 NULL：
+ch09/04 构造 G1Policy 时，两个关键指针被故意设为 NULL：
 
 ```cpp
 // G1Policy 构造函数
@@ -52,7 +52,7 @@ _g1h = g1h;
 _collection_set = collection_set;
 ```
 
-ch10/04 构造时这两个字段为 NULL——所有依赖它们的方法（`collector_state()`、`_analytics` 的数据采集等）在此之前都不能调用。绑定后，G1Policy 可以通过 `_g1h` 访问整个堆的状态（Region 数量、空闲列表、DCQ 等），通过 `_collection_set` 管理回收候选。
+ch09/04 构造时这两个字段为 NULL——所有依赖它们的方法（`collector_state()`、`_analytics` 的数据采集等）在此之前都不能调用。绑定后，G1Policy 可以通过 `_g1h` 访问整个堆的状态（Region 数量、空闲列表、DCQ 等），通过 `_collection_set` 管理回收候选。
 
 ### 2.2 根据实际堆大小校准新生代范围
 
@@ -63,7 +63,7 @@ if (!adaptive_young_list_length()) {
 _young_gen_sizer.adjust_max_new_size(_g1h->max_regions());
 ```
 
-`_young_gen_sizer` 是 G1Policy 构造时创建的 `G1YoungGenSizer`（ch10/04）。关键：构造时 `max_regions()` 未知，所以 `_min_desired_young_length` 和 `_max_desired_young_length` **初始都为 0**（`g1YoungGenSizer.cpp:31`）。
+`_young_gen_sizer` 是 G1Policy 构造时创建的 `G1YoungGenSizer`（ch09/04）。关键：构造时 `max_regions()` 未知，所以 `_min_desired_young_length` 和 `_max_desired_young_length` **初始都为 0**（`g1YoungGenSizer.cpp:31`）。
 
 `adjust_max_new_size(max_regions)`（`:111-123`）调 `recalculate_min_max_young_length()` 用百分比重算：
 
@@ -193,4 +193,4 @@ g1_policy()->init(this, &_collection_set)
 - ✅ `_young_list_max_length` 有上限值（~476 个）
 - ✅ CSet 进入了增量构建模式——等待首次 Young GC
 
-下一步 `SATBMarkQueueSet::initialize()`（ch10/10）——继续阅读。
+下一步 `SATBMarkQueueSet::initialize()`（ch09/10）——继续阅读。

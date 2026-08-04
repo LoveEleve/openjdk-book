@@ -2,7 +2,7 @@
 
 > **本文定位**：`G1CollectedHeap::initialize()` 前半段（`g1CollectedHeap.cpp:1569-1629`）。跟着执行流走：reserve_heap → CardTable/BarrierSet/HotCardCache → 6 Mapper → HRM.initialize。
 >
-> **前置依赖**：[ch10/03](03-reservedspace-mmap.md)（reserve_heap 的 mmap 机制）、[ch10/04](04-heap-policy-construction.md)（create_heap 创建 G1CollectedHeap 对象）。
+> **前置依赖**：[ch09/03](03-reservedspace-mmap.md)（reserve_heap 的 mmap 机制）、[ch09/04](04-heap-policy-construction.md)（create_heap 创建 G1CollectedHeap 对象）。
 
 ---
 
@@ -12,7 +12,7 @@
 
 ```cpp
 jint G1CollectedHeap::initialize() {
-  // 1. reserve_heap（ch10/03 已讲）
+  // 1. reserve_heap（ch09/03 已讲）
   ReservedSpace heap_rs = Universe::reserve_heap(max_byte_size, heap_alignment);
 
   // 2. 写屏障基础设施（本文 2 节）
@@ -28,20 +28,20 @@ jint G1CollectedHeap::initialize() {
   // 4. HRM.initialize（本文 4 节）
   _hrm.initialize(heap_storage, prev_bitmap_storage, ...);
 
-  // ... 后续步骤在 ch10/06-12 讲
+  // ... 后续步骤在 ch09/06-12 讲
 }
 ```
 
 ---
 
-## 2. reserve_heap——ch10/03 已讲
+## 2. reserve_heap——ch09/03 已讲
 
 ```cpp
 ReservedSpace heap_rs = Universe::reserve_heap(max_byte_size, heap_alignment);
 // max_byte_size = 8GB（-Xmx，生产环境 -Xms=-Xmx）
 ```
 
-`reserve_heap` 的完整机制（mmap PROT_NONE + MAP_NORESERVE + 压缩指针基址选择）在 [ch10/03](03-reservedspace-mmap.md) 已详细讲解。这里只需要知道结果：
+`reserve_heap` 的完整机制（mmap PROT_NONE + MAP_NORESERVE + 压缩指针基址选择）在 [ch09/03](03-reservedspace-mmap.md) 已详细讲解。这里只需要知道结果：
 
 - `heap_rs` 是一段**已 reserve 但未 commit** 的 8GB 虚拟地址空间——地址不可读写，没有物理页
 - `heap_rs.base()` 是堆基址，`heap_rs.size()` = 8GB
@@ -87,7 +87,7 @@ A.field = B
 扫描 dirty card 里的引用 → 做完整记录                ← 异步，不阻塞 mutator
 ```
 
-卡表是 mutator 和后台处理之间的**缓冲层**——写屏障只标 1 字节（轻），完整记录交给后台线程异步做。后台线程怎么处理这些 dirty card → ch10/06（RemSet）和 ch10/08（Refinement）详讲。
+卡表是 mutator 和后台处理之间的**缓冲层**——写屏障只标 1 字节（轻），完整记录交给后台线程异步做。后台线程怎么处理这些 dirty card → ch09/06（RemSet）和 ch09/08（Refinement）详讲。
 
 卡表把堆按 512B 切分，每 512B 对应 1 字节（card）。8GB 堆 → 16MB 卡表。
 
@@ -333,7 +333,7 @@ class G1BarrierSet: public CardTableBarrierSet {
    - `enqueue(byte)` —— card 指针入 DirtyCardQueue
 4. 如果已经是 dirty → 跳过（不重复入队）
 
-QueueSet 的详细机制（completed buffer 管理 / free list / 阈值激活 / 3 区模型）在 ch10/08 展开。
+QueueSet 的详细机制（completed buffer 管理 / free list / 阈值激活 / 3 区模型）在 ch09/08 展开。
 
 G1BarrierSet 在每次引用写操作时触发两个屏障。
 
@@ -524,15 +524,15 @@ G1CollectedHeap（collectedHeap.hpp:117）
 
 G1CollectedHeap 是"顶层入口"（记住地址范围 + 对外接口），HRM 是"Region 管理者"（commit/uncommit 决策 + 空闲链表），heap_storage 是"翻译器"（Region→页），G1PageBasedVirtualSpace 是"执行者"（mmap 系统调用）。
 
-**bot_storage（1:512，16MB）**——Block Offset Table，对象边界索引。GC 扫描时需要知道"给定一个地址，它属于哪个对象"。但堆里对象大小不一，不能直接算。BOT 每 512B 存一个 entry，记录"回退多少能找到对象起始"。详见 ch10/06。
+**bot_storage（1:512，16MB）**——Block Offset Table，对象边界索引。GC 扫描时需要知道"给定一个地址，它属于哪个对象"。但堆里对象大小不一，不能直接算。BOT 每 512B 存一个 entry，记录"回退多少能找到对象起始"。详见 ch09/06。
 
 **cardtable_storage（1:512，16MB）**——卡表，写屏障的基础。每 512B 堆对应 1 字节 card，写后屏障标 dirty。详见本文 3.1 节 G1CardTable。
 
 **card_counts_storage（1:512，16MB）**——卡访问计数，热卡缓存的基础。每 512B 堆对应 1 字节计数器，`add_card_count` 递增，`is_hot(count >= 4)` 判热。详见本文 3.3 节 HotCardCache。
 
-**prev_bitmap_storage（1:512，16MB）**——上一轮并发标记的存活位图。每 64B 堆对应 1 bit，bit=1 表示该位置有存活对象。本轮标记完成后，next bitmap swap 成 prev bitmap——GC 回收时用 prev 判断"哪些对象存活"。详见 ch10/07。
+**prev_bitmap_storage（1:512，16MB）**——上一轮并发标记的存活位图。每 64B 堆对应 1 bit，bit=1 表示该位置有存活对象。本轮标记完成后，next bitmap swap 成 prev bitmap——GC 回收时用 prev 判断"哪些对象存活"。详见 ch09/07。
 
-**next_bitmap_storage（1:512，16MB）**——本轮并发标记正在写的存活位图。并发标记期间，CMThread 标记存活对象时写这个位图。remark 完成后 swap——next 变成 prev，新的 next 清零等下一轮。详见 ch10/07。
+**next_bitmap_storage（1:512，16MB）**——本轮并发标记正在写的存活位图。并发标记期间，CMThread 标记存活对象时写这个位图。remark 完成后 swap——next 变成 prev，新的 next 清零等下一轮。详见 ch09/07。
 
 **6 个 Mapper 的协作关系**：
 ```
@@ -560,7 +560,7 @@ cardtable:      [c][c][c][c][c][c][c][c]...     [c][c][c][c][c][c][c][c]...
 
 ### 4.2 G1RegionToSpaceMapper——Region 级 commit 的翻译器
 
-**为什么需要 Mapper**——G1 的 commit/uncommit 以 Region 为单位（4MB），但 OS 的 commit 以页为单位（4KB）。`G1PageBasedVirtualSpace`（ch10/03 讲过）是页级管理器，不认识"Region"概念。Mapper 在两者之间做翻译——"commit Region 5"翻译成"commit Region 5 对应的那 1024 个页"（4MB/4KB=1024）。每个 Mapper 内部用 `_commit_map` 位图避免重复 commit。
+**为什么需要 Mapper**——G1 的 commit/uncommit 以 Region 为单位（4MB），但 OS 的 commit 以页为单位（4KB）。`G1PageBasedVirtualSpace`（ch09/03 讲过）是页级管理器，不认识"Region"概念。Mapper 在两者之间做翻译——"commit Region 5"翻译成"commit Region 5 对应的那 1024 个页"（4MB/4KB=1024）。每个 Mapper 内部用 `_commit_map` 位图避免重复 commit。
 
 6 份内存各自一个 `G1RegionToSpaceMapper`（`g1RegionToSpaceMapper.hpp:45`）。它的职责是把"Region 级别的 commit 请求"翻译成"页级别的 commit 操作"：
 
@@ -593,7 +593,7 @@ Region 5 覆盖堆地址 [20MB, 24MB)
 **为什么需要翻译**——OS 的 mmap 系统调用只认页（4KB），不认 Region（4MB）。G1 说"commit Region 5"，OS 听不懂——必须翻译成"commit 页 5120~6143"，OS 才能执行。
 
 核心字段：
-- `G1PageBasedVirtualSpace _storage`——底层页级虚拟空间（ch10/03 讲过，每页一个 bit 追踪 commit 状态）
+- `G1PageBasedVirtualSpace _storage`——底层页级虚拟空间（ch09/03 讲过，每页一个 bit 追踪 commit 状态）
 - `CHeapBitMap _commit_map`——Region 级 commit 位图（避免重复 commit）
 - `size_t _region_granularity`——Region 粒度（= `HeapRegion::GrainBytes`）
 
@@ -681,7 +681,7 @@ G1 的 Region 化是"用内存换停顿可控"——对于服务端应用（停�
 
 ```
 initialize() 前半段：
-  reserve_heap（ch10/03）→ heap_rs（已 reserve 未 commit）
+  reserve_heap（ch09/03）→ heap_rs（已 reserve 未 commit）
   → CardTable + BarrierSet + HotCardCache（写屏障三件套）
     → 写前 SATB + 写后 dirty card + 热卡缓存
   → 6 个 Mapper（6 块独立地址空间，各自 1:512 比例）

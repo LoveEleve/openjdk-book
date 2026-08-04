@@ -7,7 +7,7 @@
 ## 需要的前置知识
 
 - ch04/01-overview `init_globals` 总览和依赖关系图
-- ch05-ch08 Block A (`compilationPolicy_init`/`codeCache_init`/`VM_Version_init`/`stubRoutines_init1`)
+- ch05-ch07 Block A (`compilationPolicy_init`/`codeCache_init`/`VM_Version_init`/`stubRoutines_init1`)
 - C++ 基础：`return` 语句、`#if` 条件编译
 
 ---
@@ -33,23 +33,23 @@ jint universe_init() {
   guarantee(sizeof(oop) % sizeof(HeapWord) == 0, "...");
   TraceTime timer("Genesis", TRACETIME_LOG(Info, startuptime));
 
-  JavaClasses::compute_hard_coded_offsets();              // ch09-04
+  JavaClasses::compute_hard_coded_offsets();              // ch08-04
 
-  jint status = Universe::initialize_heap();               // → ch10  ★★★
+  jint status = Universe::initialize_heap();               // → ch09  ★★★
   if (status != JNI_OK) return status;
 
-  SystemDictionary::initialize_oop_storage();              // ch09-02
+  SystemDictionary::initialize_oop_storage();              // ch08-02
   Metaspace::global_initialize();                          // → ch12  ★★
-  MetaspaceCounters::initialize_performance_counters();    // ch09-06
+  MetaspaceCounters::initialize_performance_counters();    // ch08-06
   CompressedClassSpaceCounters::initialize_performance_counters();
   #if INCLUDE_AOT
   AOTLoader::universe_init();
   #endif
-  if (!JVMFlagConstraintList::check_constraints(           // ch09-05
+  if (!JVMFlagConstraintList::check_constraints(           // ch08-05
         JVMFlagConstraint::AfterMemoryInit))
     return JNI_EINVAL;
-  ClassLoaderData::init_null_class_loader_data();          // ch09-03
-  Universe::_finalizer_register_cache = new LatestMethodCache();  // → ch13
+  ClassLoaderData::init_null_class_loader_data();          // ch08-03
+  Universe::_finalizer_register_cache = new LatestMethodCache();  // → ch11
   Universe::_loader_addClass_cache    = new LatestMethodCache();
   Universe::_pd_implies_cache         = new LatestMethodCache();
   Universe::_throw_illegal_access_error_cache = new LatestMethodCache();
@@ -57,7 +57,7 @@ jint universe_init() {
   Universe::_do_stack_walk_cache = new LatestMethodCache();
 #if INCLUDE_CDS
   if (UseSharedSpaces) {
-    MetaspaceShared::initialize_shared_spaces();           // → ch11  ★★
+    MetaspaceShared::initialize_shared_spaces();           // → ch10  ★★
     StringTable::create_table();
   } else
 #endif
@@ -108,7 +108,7 @@ Universe::initialize_heap()
 
 失败含义：堆创建失败（OOM）或 compressed oops 配置不兼容。这是 `universe_init` 的第一个返回值检查——失败直接返回，JVM 不启动。
 
-**细节在 ch10**。
+**细节在 ch09**。
 
 ### 2.3 `SystemDictionary::initialize_oop_storage()` — GC 安全的全局 oop 存储
 
@@ -187,7 +187,7 @@ if (UseSharedSpaces) {
 ResolvedMethodTable::create_table();
 ```
 
-**细节分别在 ch13、ch11、ch12**。
+**细节分别在 ch11、ch10、ch12**。
 
 ---
 
@@ -215,9 +215,9 @@ ResolvedMethodTable::create_table();
 | 06 | [06-auxiliary-trivial.md](06-auxiliary-trivial.md) | MetaspaceCounters/CompressedClassSpaceCounters/AOTLoader |
 | 07 | [07-metaspace.md](07-metaspace.md) | Metaspace 背景——VSL/Node/ChunkManager/SpaceManager + OccupancyMap + MetaspaceGC + purge + JEP 387 演进 |
 
-不属于 ch09 的 `universe_init` 子函数：
-- `Universe::initialize_heap()` → ch10（10 篇，按设计决策组织）
-- `Metaspace::global_initialize()` → 核心机制在 ch09/07，深入诊断在 ch12（2 篇）
-- `MetaspaceShared::initialize_shared_spaces()` → ch11
+不属于 ch08 的 `universe_init` 子函数：
+- `Universe::initialize_heap()` → ch09（10 篇，按设计决策组织）
+- `Metaspace::global_initialize()` → 核心机制在 ch08/07，深入诊断在 ch12（2 篇）
+- `MetaspaceShared::initialize_shared_spaces()` → ch10
 - SymbolTable/StringTable/ResolvedMethodTable → ch12
-- 6× LatestMethodCache → ch13
+- 6× LatestMethodCache → ch11

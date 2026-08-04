@@ -272,7 +272,7 @@ code cache 是 JVM 里一段预留的本地内存区域，专门存放 JIT 编�
 
 每个编译线程编译时要先拿一块 CodeBuffer——一块临时的内存缓冲区，在里面生成机器码，编译完成后把内容拷贝到 code cache 并释放 CodeBuffer。所以同时运行的编译线程数不能超过 "code cache 剩余空间 / 每个编译器的 CodeBuffer 大小"——不然所有线程同时拿 CodeBuffer 会撑爆 code cache。
 
-ch06 会详细展开 code cache 的三段堆结构、flag 组合和扩容机制。这里只需要理解为什么编译线程数要受它约束。
+ch05 会详细展开 code cache 的三段堆结构、flag 组合和扩容机制。这里只需要理解为什么编译线程数要受它约束。
 
 公式算出的 `count` 还要经过 code cache 容量检查：
 

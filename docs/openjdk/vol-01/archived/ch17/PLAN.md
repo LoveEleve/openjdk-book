@@ -12,7 +12,7 @@
 2. **`def()` 如何注册 ~251 个模板描述符？** —6 个重载透明地将不同参数类型统一 cast 为 int，根据 wide flag 选择写入 `_template_table` 或 `_template_table_wide`。
 3. **`TemplateTable::initialize()` 逐段做了什么？** —防重入、flag 常量、标准字节码注册、wide 注册、JVM 内部字节码注册、pd_initialize、设置 `_is_initialized`。
 4. **x86 generator 函数有哪些结构模式？** —nop（最简）、iop2（参数分发）、iload（bytecode rewriting）、invokevirtual（多步骤）等典型模式。
-5. **模板注册和模板代码生成为什么是两阶段？** —注册填充 C++ 数据结构（ch17），生成调用 `_gen(_arg)` 产生 x86 机器码（ch14/02 已涉及）。两者分离是生成器模式的核心。
+5. **模板注册和模板代码生成为什么是两阶段？** —注册填充 C++ 数据结构（ch17），生成调用 `_gen(_arg)` 产生 x86 机器码（ch16/02 已涉及）。两者分离是生成器模式的核心。
 
 **不要求掌握的内容**：
 
@@ -23,15 +23,15 @@
 
 ---
 
-## ch17 与 ch14 的边界
+## ch17 与 ch16 的边界
 
-ch14 已经讲完了 Template Interpreter 的整体初始化流程（`TemplateInterpreter::initialize()`），其中包含对 `TemplateTable::initialize()` 的首次调用。ch17 聚焦于这个调用内部的注册机制——Template 描述符是什么、def() 如何工作、initialize() 逐段做什么。
+ch16 已经讲完了 Template Interpreter 的整体初始化流程（`TemplateInterpreter::initialize()`），其中包含对 `TemplateTable::initialize()` 的首次调用。ch17 聚焦于这个调用内部的注册机制——Template 描述符是什么、def() 如何工作、initialize() 逐段做什么。
 
 关键事实：
 
 ```
-interpreter_init()                           ← ch14 核心
-  └─→ TemplateInterpreter::initialize()      ← ch14 核心
+interpreter_init()                           ← ch16 核心
+  └─→ TemplateInterpreter::initialize()      ← ch16 核心
         └─→ TemplateTable::initialize()      ← 首次调用，真正注册 (~251 个模板)
               _is_initialized = true
 
@@ -252,7 +252,7 @@ x86 generator 有哪些结构模式？nop/iop2/iload/invokevirtual
 ## 与前后章节的连接
 
 ```
-ch14 interpreter_init
+ch16 interpreter_init
   │  TemplateInterpreter::initialize() 内首次调用 TemplateTable::initialize()
   │  然后调用 generate_all() 使用注册好的模板生成机器码
   ▼
@@ -275,7 +275,7 @@ ch18 SharedRuntime::generate_stubs
 2. **02 讲注册流程**：逐段 walkthrough `TemplateTable::initialize()` 的 288 行代码，按字节码类别分组。
 3. **03 讲生成器结构 + 闭环**：展示 x86 generator 的四种结构模式，并串联注册到生成的完整流程。
 
-三篇分别回答"是什么""怎么注册""注册后如何用"，与 ch14 三篇（何时建立/怎样生成/如何运行）形成对应。压成两篇会让 288 行注册代码挤在一起难以消化；拆成四篇会让 generator 示例与注册→生成闭环分离失去连贯性。
+三篇分别回答"是什么""怎么注册""注册后如何用"，与 ch16 三篇（何时建立/怎样生成/如何运行）形成对应。压成两篇会让 288 行注册代码挤在一起难以消化；拆成四篇会让 generator 示例与注册→生成闭环分离失去连贯性。
 
 ### 为什么不逐个分析 248 个字节码
 
@@ -283,7 +283,7 @@ ch17 关注注册机制而非 251 种字节码的完整清单。02 按类别分�
 
 ### 为什么 03 要 include generate_and_dispatch
 
-模板注册的最终目的就是给代码生成提供输入。如果 03 只讲 generator 不接回 `generate_and_dispatch()`，读者无法理解描述符的实际作用。这一节把 ch17 的注册内容与 ch14 的生成流程串成闭环。
+模板注册的最终目的就是给代码生成提供输入。如果 03 只讲 generator 不接回 `generate_and_dispatch()`，读者无法理解描述符的实际作用。这一节把 ch17 的注册内容与 ch16 的生成流程串成闭环。
 
 ### 为什么不过度展开 bytecode rewriting
 

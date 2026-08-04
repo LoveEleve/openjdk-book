@@ -2,7 +2,7 @@
 
 > **本文定位**：`create_heap()` 的最后一步——`new G1CollectedHeap(policy)` 的 75 行构造函数（`g1CollectedHeap.cpp:1418-1492`）。构造时堆内存还没分配，只创建了策略对象、线程池、分配器、引用队列等"空壳组件"。类比就是"先把指挥部建好，再慢慢建仓库"。
 >
-> **前置依赖**：[ch10/04](04-heap-policy-construction.md)（G1Policy 构造完毕，策略引擎就位）。后续 [ch10/05](05-memory-layout-mapper.md) 进入 `initialize()`。
+> **前置依赖**：[ch09/04](04-heap-policy-construction.md)（G1Policy 构造完毕，策略引擎就位）。后续 [ch09/05](05-memory-layout-mapper.md) 进入 `initialize()`。
 
 ---
 
@@ -10,14 +10,14 @@
 
 ### 1.1 在 create_heap() 中的位置
 
-ch10/04 讲过，`Universe::initialize_heap()` 中：
+ch09/04 讲过，`Universe::initialize_heap()` 中：
 
 ```cpp
 _collected_heap = GCConfig::arguments()->create_heap();  // → new G1CollectedHeap(policy)
-_collected_heap->initialize();                             // → 重头戏（ch10/05 起）
+_collected_heap->initialize();                             // → 重头戏（ch09/05 起）
 ```
 
-`create_heap()` 做了两件事：`new G1CollectorPolicy()`（ch10/02 + ch10/04）和 `new G1CollectedHeap(policy)`（本文）。构造完成时堆地址未知、内存未预留——只是"策略引擎 + 线程池 + 分配器 + 队列"的空壳。
+`create_heap()` 做了两件事：`new G1CollectorPolicy()`（ch09/02 + ch09/04）和 `new G1CollectedHeap(policy)`（本文）。构造完成时堆地址未知、内存未预留——只是"策略引擎 + 线程池 + 分配器 + 队列"的空壳。
 
 ### 1.2 构造函数结构
 
@@ -82,7 +82,7 @@ G1CollectionSet::G1CollectionSet(G1CollectedHeap* g1h, G1Policy* policy) :
 
 **② `_collection_set_regions`**——**这就是 CSet 本身**。一个 `uint*` 动态数组，每个元素存的是入选 Region 的 HRM index（如 `_cset_regions = [3, 7, 12, 45, ...]`）。GC 暂停中 GC Worker 遍历这个数组，逐个 evacuate 对应的 Region。`_eden_region_length / _survivor_region_length / _old_region_length` 三个计数器标记数组里哪一段是哪种 Region。初始化列表中为 NULL——等 `G1CollectedHeap::initialize()` 末尾 `_collection_set.initialize(max_regions())` 才在 C Heap 上分配 `uint[max_regions]` 数组。
 
-**③ `_inc_build_state`**——枚举 `Active / Inactive`。构造时 `Inactive`。每次 GC 开始时 `start_incremental_building()` → `Active`（ch10/09 §3），GC 结束时 `stop_incremental_building()` → `Inactive`。只有在 `Active` 状态下才能向 CSet 添加 Region。
+**③ `_inc_build_state`**——枚举 `Active / Inactive`。构造时 `Inactive`。每次 GC 开始时 `start_incremental_building()` → `Active`（ch09/09 §3），GC 结束时 `stop_incremental_building()` → `Inactive`。只有在 `Active` 状态下才能向 CSet 添加 Region。
 
 **④ 增量构建统计字段**——在 `start_incremental_building()` 中清零，在每次加入 Region 时累加，GC 开始时快照到正式字段：
 
@@ -103,7 +103,7 @@ G1CollectionSet::G1CollectionSet(G1CollectedHeap* g1h, G1Policy* policy) :
 
 GC 暂停结束时这些字段用于 G1Policy 的 Analytics 更新（预测下一次的成本）。
 
-**为什么构造函数只清零、初始化分两步**——和 `G1Policy` 的 `_g1h` 指针一样，`_collection_set_regions` 数组大小取决于 `max_regions`。构造函数时 `max_regions` 尚未确定（ch10/02 算的是 Region 大小，不是数量），必须等 `initialize()` 中 `expand()` 跑完才知道。
+**为什么构造函数只清零、初始化分两步**——和 `G1Policy` 的 `_g1h` 指针一样，`_collection_set_regions` 数组大小取决于 `max_regions`。构造函数时 `max_regions` 尚未确定（ch09/02 算的是 Region 大小，不是数量），必须等 `initialize()` 中 `expand()` 跑完才知道。
 
 ### 2.3 `_soft_ref_policy`——软引用策略
 
@@ -161,7 +161,7 @@ _workers = new WorkGang("GC Thread", ParallelGCThreads,
 _workers->initialize_workers();
 ```
 
-和 ch10/07 §7.1 的 `_concurrent_workers` 同一套 WorkGang 机制，参数不同：
+和 ch09/07 §7.1 的 `_concurrent_workers` 同一套 WorkGang 机制，参数不同：
 
 | | `_workers`（STW） | `_concurrent_workers`（并发） |
 |---|---|---|
@@ -170,7 +170,7 @@ _workers->initialize_workers();
 | STS 注册 | 否（STW 时自然是安全的） | 是（任务中显式 `SuspendibleThreadSetJoiner`） |
 | 什么时候跑 | Young/Mixed GC、Remark、Cleanup | mark_from_roots、rebuild_rem_sets、clear_bitmap |
 
-`initialize_workers()` 链路和 ch10/07 §7.1 完全相同：`NEW_C_HEAP_ARRAY` 分配 GangWorker 数组 → `add_workers(true)` → `WorkerManager::add_workers()` → `for` 循环 `new GangWorker` + `os::create_thread(pgc_thread)` + `os::start_thread()`。
+`initialize_workers()` 链路和 ch09/07 §7.1 完全相同：`NEW_C_HEAP_ARRAY` 分配 GangWorker 数组 → `add_workers(true)` → `WorkerManager::add_workers()` → `for` 循环 `new GangWorker` + `os::create_thread(pgc_thread)` + `os::start_thread()`。
 
 ### 3.2 `_young_gen_sampling_thread`——年轻代采样线程
 
@@ -282,7 +282,7 @@ class OldGCAllocRegion : public G1GCAllocRegion {
 };
 ```
 
-**为什么 `bot_updates = true`**——Old 是唯一需要**部分扫描**的 Region 类型。RSet 处理脏卡时，扫描起始地址可能落在对象中间，必须靠 BOT 回退到对象头（ch10/06 §4）。Young Region 是线性全扫，不需要 BOT。所以 Old 是三个分配区中唯一一个更新 BOT 的。
+**为什么 `bot_updates = true`**——Old 是唯一需要**部分扫描**的 Region 类型。RSet 处理脏卡时，扫描起始地址可能落在对象中间，必须靠 BOT 回退到对象头（ch09/06 §4）。Young Region 是线性全扫，不需要 BOT。所以 Old 是三个分配区中唯一一个更新 BOT 的。
 
 **`release()` 中的 Card 对齐填充**（`g1AllocRegion.cpp:366-392`）——Old Region 退役时，分配位置 `top` 可能没对齐到 Card 边界（Card = 512B）。这时主动填一个 dummy 对象，把 `top` 推到下一个 Card 起始位置：
 
@@ -380,9 +380,9 @@ HeapRegionManager() :
 
 逐个解释：
 
-**① `_regions`**（`G1HeapRegionTable`, `:39`）——一个 `G1BiasedMappedArray<HeapRegion*>`（偏置数组，ch10/05 §3 同名技巧）。以 Region index 为下标，存 `HeapRegion*` 指针。构造时为空——没有 `new` 任何 Region。
+**① `_regions`**（`G1HeapRegionTable`, `:39`）——一个 `G1BiasedMappedArray<HeapRegion*>`（偏置数组，ch09/05 §3 同名技巧）。以 Region index 为下标，存 `HeapRegion*` 指针。构造时为空——没有 `new` 任何 Region。
 
-**② 6 个 Mapper 指针**——全部 NULL。等 `G1CollectedHeap::initialize()` 中调 `_hrm.initialize(heap_storage, prev_bitmap, ...)` 时传入并绑定（ch10/05 §5）。每个 Mapper 管理一种元数据的虚拟内存（堆、prev/next 位图、BOT、Card Table、Card Counts）。`expand()` 时 6 Mapper 同步 commit（ch10/08）。
+**② 6 个 Mapper 指针**——全部 NULL。等 `G1CollectedHeap::initialize()` 中调 `_hrm.initialize(heap_storage, prev_bitmap, ...)` 时传入并绑定（ch09/05 §5）。每个 Mapper 管理一种元数据的虚拟内存（堆、prev/next 位图、BOT、Card Table、Card Counts）。`expand()` 时 6 Mapper 同步 commit（ch09/08）。
 
 **③ `_num_committed`**——当前已 commit 的 Region 数。构造时为 0，`expand()` 中每 commit 一批 Region 就增加。
 
@@ -392,7 +392,7 @@ HeapRegionManager() :
 
 **⑥ `_free_list`**——`FreeRegionList`（按地址排序的空闲 Region 链表）。`G1Allocator` 需要新 Region 时通过 `_hrm.allocate_free_region()` 从这里取。`MtSafeChecker` 是多线程安全检查器——每次 add/remove 时断言正确的锁被持有。构造时为空链表——一个都分配不出。
 
-构造时 6 个 Mapper NULL、`_free_list` 空——`expand()`（ch10/08）之后才有 Region 可用。
+构造时 6 个 Mapper NULL、`_free_list` 空——`expand()`（ch09/08）之后才有 Region 可用。
 
 ## 5. 队列组——GC Worker 的任务队列
 
@@ -429,7 +429,7 @@ StarTask 存的是一个"指向 oop 的指针"（oop*），不是 oop 本身:
   存 oop* 可以统一处理两种引用，读的时候再解引用。
 ```
 
-**和 ch10/07 的 G1CMTaskQueue 的区别**——两套独立的队列，属于不同的对象：
+**和 ch09/07 的 G1CMTaskQueue 的区别**——两套独立的队列，属于不同的对象：
 
 | | `RefToScanQueue`（本文） | `G1CMTaskQueue`（并发标记） |
 |---|---|---|
@@ -452,7 +452,7 @@ RefToScanQueue (OverflowTaskQueue):
 G1CMTaskQueue (GenericTaskQueue):
   └─ _elems[N]         (环形数组)
      → push() 满了 → 返回 false → 调用者调 move_entries_to_global_stack()
-     → 搬到外部 G1CMMarkStack（chunk 链表, ch10/07 §5）       外部救援
+     → 搬到外部 G1CMMarkStack（chunk 链表, ch09/07 §5）       外部救援
 ```
 
 **设计理由**：并发标记偶尔满一次正常——搬到全局栈让别的 worker 领走继续，不用每个队列都挂溢出栈占内存。STW 不能用外部救援（没有全局栈可搬）——必须自备溢出栈。
@@ -512,17 +512,17 @@ _ref_processor_stw(NULL),    // → initialize() — 创建 STW 引用处理器
 _ref_processor_cm(NULL),     // → initialize() — 创建 CM 引用处理器
 ```
 
-**`_card_table`**——卡表（ch10/05）。一个 `jbyte*` 数组，每 **1 byte** 覆盖 512B 堆区域（不是 1 bit）。写屏障用 `0` 标脏，`-1` 表示干净，`2`/`4` 表示 claimed/deferred 中间态。G1 额外加了 `g1_young_gen=32` 标记 young Region 的 card。依赖堆的 reserved region 地址。
+**`_card_table`**——卡表（ch09/05）。一个 `jbyte*` 数组，每 **1 byte** 覆盖 512B 堆区域（不是 1 bit）。写屏障用 `0` 标脏，`-1` 表示干净，`2`/`4` 表示 claimed/deferred 中间态。G1 额外加了 `g1_young_gen=32` 标记 young Region 的 card。依赖堆的 reserved region 地址。
 
-**`_bot`**——Block Offset Table（ch10/06 §4）。给定一个 512B 对齐的 Card 边界地址 → 找到该地址所属对象的起始地址。GC 扫描 dirty card 时，Card 边界可能切在对象中间——BOT 用指数编码快速回退到对象头。依赖 reserved region + 需要对应的 Mapper。
+**`_bot`**——Block Offset Table（ch09/06 §4）。给定一个 512B 对齐的 Card 边界地址 → 找到该地址所属对象的起始地址。GC 扫描 dirty card 时，Card 边界可能切在对象中间——BOT 用指数编码快速回退到对象头。依赖 reserved region + 需要对应的 Mapper。
 
-**`_hot_card_cache`**——热卡缓存（ch10/05）。某些 card 被反复标脏→refine→清理→再标脏（比如循环里频繁修改同一字段）。`insert()` 对每张 card 计数——超过 `G1CardLiveThreshold` 就缓存起来，返回 NULL 跳过 refine；不超过就返回卡片让 Concurrent Refinement 处理。GC 暂停时 `drain()` 集中处理缓存的卡。
+**`_hot_card_cache`**——热卡缓存（ch09/05）。某些 card 被反复标脏→refine→清理→再标脏（比如循环里频繁修改同一字段）。`insert()` 对每张 card 计数——超过 `G1CardLiveThreshold` 就缓存起来，返回 NULL 跳过 refine；不超过就返回卡片让 Concurrent Refinement 处理。GC 暂停时 `drain()` 集中处理缓存的卡。
 
-> **和 `G1FromCardCache`（ch10/06 §3.3）的区别**——两个缓存容易搞混：
+> **和 `G1FromCardCache`（ch09/06 §3.3）的区别**——两个缓存容易搞混：
 > - `_hot_card_cache`：在**脏卡消费**环节——判断"这张 card 是不是反复被 dirty，值不值得立刻 refine"。热点卡延迟到 GC 暂停集中处理，减少无用 refine。
 > - `G1FromCardCache`：在 **RSet 更新**环节（`add_reference` 内）——判断"这个线程对这个 Region 最近处理的是不是同一张 card"。是则跳过，不是则查三层 RSet 结构。
 
-**`_g1_rem_set`**——`G1RemSet`（ch10/06 §2.2）。全局协调器——消费 dirty card，扫描里面的引用，把跨 Region 引用关系**写入目标 Region 的 RSet**。它不是 RSet 本身——RSet 是 per-Region 的 `HeapRegionRemSet`，每个 Region 一个。
+**`_g1_rem_set`**——`G1RemSet`（ch09/06 §2.2）。全局协调器——消费 dirty card，扫描里面的引用，把跨 Region 引用关系**写入目标 Region 的 RSet**。它不是 RSet 本身——RSet 是 per-Region 的 `HeapRegionRemSet`，每个 Region 一个。
 
 核心字段（`g1RemSet.hpp`）：
 
@@ -536,7 +536,7 @@ class G1RemSet {
 };
 ```
 
-**工作方式**：Concurrent Refinement 线程从全局 DCQ 取 dirty card → `refine_card_concurrently()` → 扫描 card 内对象的引用字段 → 发现跨 Region 引用 → `add_reference(from, to_region)` → 更新 to_region 的 RSet（三层 Sparse/Fine/Coarse，ch10/06 §3）。GC 暂停期间的版本是 `refine_card_during_gc()`——不走热卡缓存，通过 `_scan_state` 协调多 worker 并行扫描。
+**工作方式**：Concurrent Refinement 线程从全局 DCQ 取 dirty card → `refine_card_concurrently()` → 扫描 card 内对象的引用字段 → 发现跨 Region 引用 → `add_reference(from, to_region)` → 更新 to_region 的 RSet（三层 Sparse/Fine/Coarse，ch09/06 §3）。GC 暂停期间的版本是 `refine_card_during_gc()`——不走热卡缓存，通过 `_scan_state` 协调多 worker 并行扫描。
 
 **为什么构造时 NULL**——`G1RemSet` 的构造函数需要已经创建好的 `_card_table` 和 `_hot_card_cache`——这两个在 `initialize()` 中才创建，所以 `_g1_rem_set` 也延迟到 `initialize()`。
 
@@ -557,7 +557,7 @@ completed buffers 数量:
 
 **为什么需要三段**——完全不开 refine 会导致 GC 暂停时积压太多脏卡；一直全开会抢 mutator CPU。三段让系统自适应。
 
-构造时 NULL——等 `initialize()` 中 `create_concurrent_refine()` 创建并启动 refine 线程（ch10/05）。
+构造时 NULL——等 `initialize()` 中 `create_concurrent_refine()` 创建并启动 refine 线程（ch09/05）。
 
 **`_ref_processor_stw` / `_ref_processor_cm`**——**两个独立的 `ReferenceProcessor` 实例**。ReferenceProcessor 负责 GC 期间的**引用对象处理**——`SoftReference`、`WeakReference`、`PhantomReference`、`Finalizer`。GC 扫完存活对象后，要把这些特殊的引用找出来：哪些该清除、哪些该保留、哪些需要入队（`ReferenceQueue`）。
 
@@ -607,9 +607,9 @@ _humongous_reclaim_candidates(),  // 默认构造
 _in_cset_fast_test()              // 默认构造
 ```
 
-两个都是 `G1BiasedMappedArray`（偏置数组，ch10/05 §3 同名技巧——`biased_base + (addr >> shift)` 一行定址）。构造时默认构造（对象本身是值成员，不占额外堆内存），在 `initialize()` 中调 `.initialize(start, end, granularity)` 绑定到堆地址。
+两个都是 `G1BiasedMappedArray`（偏置数组，ch09/05 §3 同名技巧——`biased_base + (addr >> shift)` 一行定址）。构造时默认构造（对象本身是值成员，不占额外堆内存），在 `initialize()` 中调 `.initialize(start, end, granularity)` 绑定到堆地址。
 
-**`_in_cset_fast_test`**（ch10/06 §5）——**O(1) 判断对象在不在 CSet**。每个 Region 占一个格子，存一个小数字：
+**`_in_cset_fast_test`**（ch09/06 §5）——**O(1) 判断对象在不在 CSet**。每个 Region 占一个格子，存一个小数字：
 
 ```
 obj_addr >> RegionShift → 格子编号 → biased_base[格子] → value
@@ -621,7 +621,7 @@ value = -1: Humongous 在 CSet
 
 GC 扫描引用时（`A → B`），必须快速判断"B 在不在 CSet"——如果在，B 需要被搬走。不能遍历 CSet 列表逐一比对——太慢。偏置数组让判断变成一条地址计算 + 一次内存读 + 一次 `> 0` 比较。
 
-**`_humongous_reclaim_candidates`**（ch10/06 §6）——**跟踪哪些 Humongous 对象可以急切回收**。也是偏置数组，每个 Region 一个 bool。Young GC 开始前检查 Humongous Region 的 RSet——如果 RSet 为空（没有任何其他 Region 引用它），标记为候选。Young GC 扫描时确认无引用后直接回收，不用等 mixed GC。
+**`_humongous_reclaim_candidates`**（ch09/06 §6）——**跟踪哪些 Humongous 对象可以急切回收**。也是偏置数组，每个 Region 一个 bool。Young GC 开始前检查 Humongous Region 的 RSet——如果 RSet 为空（没有任何其他 Region 引用它），标记为候选。Young GC 扫描时确认无引用后直接回收，不用等 mixed GC。
 
 ### 7.3 `_humongous_object_threshold_in_words`——大对象阈值
 
@@ -785,7 +785,7 @@ Young/Mixed GC 时 old pool 标记为 `not always affected`——因为它可能
 
 | 字段 | 初始值 | 作用 |
 |------|--------|------|
-| `_collector_policy` | `collector_policy`（参数传入） | ch10/04 创建的 Policy |
+| `_collector_policy` | `collector_policy`（参数传入） | ch09/04 创建的 Policy |
 | `_summary_bytes_used` | 0 | 堆使用量的汇总计数 |
 | `_old_marking_cycles_started` | 0 | 已启动的并发标记周期数 |
 | `_old_marking_cycles_completed` | 0 | 已完成的并发标记周期数 |
@@ -803,7 +803,7 @@ Young/Mixed GC 时 old pool 标记为 `not always affected`——因为它可能
 ```
 create_heap()
 ├── G1Arguments::create_heap()
-│     ├── new G1CollectorPolicy()                         ← ch10/02 + ch10/04
+│     ├── new G1CollectorPolicy()                         ← ch09/02 + ch09/04
 │     └── new G1CollectedHeap(policy)                     ← ★ 本文
 │           ├── 策略引擎: _g1_policy, _collection_set, _soft_ref_policy
 │           ├── 线程池: _workers(ParallelGCThreads, pgc_thread)
@@ -816,7 +816,7 @@ create_heap()
 │           └── 监控: _gc_timer_stw, _gc_tracer_stw, _memory_manager × 2
 │
 └── 返回 G1CollectedHeap* → Universe::initialize_heap()
-      → _collected_heap->initialize()                     ← ch10/05 起
+      → _collected_heap->initialize()                     ← ch09/05 起
 ```
 
 ---

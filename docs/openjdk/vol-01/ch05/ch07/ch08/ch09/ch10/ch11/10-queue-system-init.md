@@ -2,7 +2,7 @@
 
 > **本文定位**：`G1CollectedHeap::initialize()` 第 1679-1707 行。初始化 G1 的**四套队列基础设施**——SATB 写前快照队列、并发 refine 线程（处理脏卡）、两道 DirtyCardQueueSet（barrier 端和 GC 端）、以及 YoungGen RSet 采样线程。这是 G1 "边写边记、边跑边处理"能力的骨架。
 >
-> **前置依赖**：[ch10/09](09-g1-policy-init.md)（G1Policy init 完毕、young_list_target_length 已算好）。
+> **前置依赖**：[ch09/09](09-g1-policy-init.md)（G1Policy init 完毕、young_list_target_length 已算好）。
 
 ---
 
@@ -325,7 +325,7 @@ card_table[11] = dirty  →  从 card 11 的起始地址开始找对象
     → 继续扫描下一个对象
 ```
 
-BOT（ch10/06 §4 讲过）存的不是 card 级映射，而是**每条地址线**的查询表。任何一个 card 区的中间地址去查 BOT，它都能告诉你"从这里往前多少字节到最近的对象起始位置"。正因为 BOT 能做到这一点，**一张脏卡就足以引导 GC 找到整个对象的全部引用字段**——不需要所有被对象跨越的 card 都被标记。
+BOT（ch09/06 §4 讲过）存的不是 card 级映射，而是**每条地址线**的查询表。任何一个 card 区的中间地址去查 BOT，它都能告诉你"从这里往前多少字节到最近的对象起始位置"。正因为 BOT 能做到这一点，**一张脏卡就足以引导 GC 找到整个对象的全部引用字段**——不需要所有被对象跨越的 card 都被标记。
 
 > **注意**：如果 mutator 后来修改了 obj 在 card 12 内的另一个引用字段，card 12 也会被单独标记——但卡 11 和 12 被标记的时间点不同。这不影响正确性，GC 扫描时查看的仅仅是"card 是不是 dirty"，对每张 dirty card 都做一次 BOT 查询，重复走到同一个对象头也没关系——已经扫过的对象会被 skipped。
 
@@ -801,7 +801,7 @@ ConcurrentRefinement 创建好后，代码紧接着初始化两个 `DirtyCardQue
 
 ### 3.1 先搞清两个 DCQ Set 是什么——对照表
 
-在 [ch10/04a §5.2](04a-g1-heap-constructor.md) 已讲过一个 `_dirty_card_queue_set`——那是 `G1CollectedHeap` 的实例字段。本节和另一个静态实例一起讲清楚两个的区别和分工：
+在 [ch09/04a §5.2](04a-g1-heap-constructor.md) 已讲过一个 `_dirty_card_queue_set`——那是 `G1CollectedHeap` 的实例字段。本节和另一个静态实例一起讲清楚两个的区别和分工：
 
 | 维度 | G1BarrierSet（barrier 端 primary） | G1CollectedHeap（GC 端 secondary） |
 |------|----------------------------------|----------------------------------|
@@ -1673,4 +1673,4 @@ jint G1CollectedHeap::initialize_young_gen_sampling_thread() {
 
 > **本章小结**：四套队列基础设施都就绪了——SATB 准备收旧引用、ConcurrentRefinement 准备处理脏卡、两道 DCQ 各就各位、YoungGen 采样线程开始监控 RSet 趋势。还剩最后一步：GC 分配器就位。
 >
-> **下一篇**：[ch10/11](11-allocator-ready-and-cleanup.md)——Dummy Region + G1AllocRegion::setup + init_mutator_alloc_region + 收尾。
+> **下一篇**：[ch09/11](11-allocator-ready-and-cleanup.md)——Dummy Region + G1AllocRegion::setup + init_mutator_alloc_region + 收尾。

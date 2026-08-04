@@ -454,7 +454,7 @@ CodeBuffer c(stub_blob);
 VM_Version_StubGenerator g(&c);
 ```
 
-创建一个 `CodeBuffer` 包装 `BufferBlob`，然后创建 `VM_Version_StubGenerator`。`StubCodeGenerator` 的构造函数将 `CodeBuffer` 传给内部的 `MacroAssembler`（ch08 展开），使 `_masm` 指令直接编码到 code cache 内存。
+创建一个 `CodeBuffer` 包装 `BufferBlob`，然后创建 `VM_Version_StubGenerator`。`StubCodeGenerator` 的构造函数将 `CodeBuffer` 传给内部的 `MacroAssembler`（ch07 展开），使 `_masm` 指令直接编码到 code cache 内存。
 
 ### 2.2 get_cpu_info_stub -- 执行 CPUID + 读回全部寄存器
 

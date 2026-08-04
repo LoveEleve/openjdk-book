@@ -2,7 +2,7 @@
 
 > **本文定位**：两条不需要任何 JVM 启动参数的 Metaspace 诊断通道——jstat（PerfData 共享内存计数器）和 GC 日志（`MetaspaceSizesSnapshot` + `print_metaspace_change`）。追踪完整的 Metaspace 侧源码路径，验证每条通道的数据来源和更新时机。
 >
-> **前置依赖**：[ch09/07 Metaspace 背景知识](../ch09/07-metaspace.md)——理解 VSL/ChunkManager/SpaceManager、committed/used/reserved 三层、MetaspaceGC。
+> **前置依赖**：[ch10/07 Metaspace 背景知识](../ch10/07-metaspace.md)——理解 VSL/ChunkManager/SpaceManager、committed/used/reserved 三层、MetaspaceGC。
 >
 > **JDK 版本**：本文基于 **JDK 11u** 源码，实证输出使用 jdk11u-copy slowdebug 构建。JDK 16+ JEP 387 "Elastic Metaspace" 的实现不同但诊断接口兼容。
 

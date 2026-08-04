@@ -2,7 +2,7 @@
 
 > **本文定位**：背景知识文章。G1 把整个堆切成等大的 Region——本文回答两个问题：Region 多大、这个大小怎么算出来的。核心公式只有一行：`堆平均大小 / 2048` 向下取整到 2 的幂。本文用 `-Xms8G -Xmx8G` 贯穿全程——所有数值都有具体来由。
 >
-> **前置依赖**：ch10/01 全景。你知道 `initialize_heap` 的阶段 1 `create_heap()` 走进 `create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()`。
+> **前置依赖**：ch09/01 全景。你知道 `initialize_heap` 的阶段 1 `create_heap()` 走进 `create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()`。
 >
 > **阅读提示**：读完本文后你知道三件事：(1) Region 的计算公式和推演过程；(2) RSet 表容量怎么跟着 Region 大小走；(3) `initialize_all` 最终设置了哪几个参数。具体数值记住 Region = 4MB、CardsPerRegion = 8192、heap_alignment = 4MB 即可。
 
@@ -207,7 +207,7 @@ _min_heap_byte_size     = align_up(_min_heap_byte_size, _heap_alignment)
 
 ---
 
-## 5. 完成时的状态——ch10/03 的起点
+## 5. 完成时的状态——ch09/03 的起点
 
 两段执行完毕后，以下参数全部就位（8GB 堆为例）：
 
@@ -224,4 +224,4 @@ _min_heap_byte_size     = align_up(_min_heap_byte_size, _heap_alignment)
 | `_initial_heap_byte_size` | 8GB | 初始堆，已对齐 |
 | `_max_heap_byte_size` | 8GB | 最大堆，已对齐 |
 
-下一步：`create_heap_with_policy` 的第三步——`new G1CollectedHeap(policy)`，92 行构造函数。ch10/03 从 `G1CollectedHeap` 的 23 个字段初始化开始。
+下一步：`create_heap_with_policy` 的第三步——`new G1CollectedHeap(policy)`，92 行构造函数。ch09/03 从 `G1CollectedHeap` 的 23 个字段初始化开始。

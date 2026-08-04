@@ -2,7 +2,7 @@
 
 > **本文定位**：`G1CollectedHeap::initialize()` 第 1709-1734 行——`initialize()` 全长的最后 26 行。在此之前已经完成了 BarrierSet、HRM、ConcurrentMark、expand 等重资产初始化，这段是"通电自检"式的收尾——Dummy Region 上膛、分配器激活、监控/去重/撤离保险/CSet 存储各就各位。至此堆可接受分配。
 >
-> **前置依赖**：[ch10/10](10-queue-system-init.md)（队列系统初始化完毕）。
+> **前置依赖**：[ch09/10](10-queue-system-init.md)（队列系统初始化完毕）。
 
 ---
 
@@ -803,4 +803,4 @@ GC 暂停时的 CSet 构建流程：
 3. **从物理推断逻辑**：`G1MonitoringSupport::recalculate_sizes()` 从 Region 数量推算分代容量，是对不连续 Region 的"分代假象"封装
 4. **Cache Line 感知**：`Padded<PreservedMarks>` 避免多 worker 并行 push mark 时的 false sharing
 
-> **下一篇**：[12b 补章](12b-compressed-oops-and-tlab.md)——`initialize_heap()` 剩余阶段 ③④⑤（TLAB 上限、压缩指针、TLAB 启动），随后是 [ch10 总结](12-summary.md)。
+> **下一篇**：[12b 补章](12b-compressed-oops-and-tlab.md)——`initialize_heap()` 剩余阶段 ③④⑤（TLAB 上限、压缩指针、TLAB 启动），随后是 [ch09 总结](12-summary.md)。

@@ -1,8 +1,8 @@
 # 12b. initialize_heap() 收尾——TLAB 上限、压缩指针与 TLAB 启动
 
-> **本文定位**：`Universe::initialize_heap()`（universe.cpp:764-823）五个阶段中的 ③④⑤——补完 ch10 遗留的缺口。③ 设 TLAB 全局上限、④ 决定压缩指针编码模式、⑤ 启动 TLAB 子系统。ch10 前面的文章讲完 create_heap 和 G1CollectedHeap::initialize()，本文把 initialize_heap() 剩余的三行核心调用讲完。
+> **本文定位**：`Universe::initialize_heap()`（universe.cpp:764-823）五个阶段中的 ③④⑤——补完 ch09 遗留的缺口。③ 设 TLAB 全局上限、④ 决定压缩指针编码模式、⑤ 启动 TLAB 子系统。ch09 前面的文章讲完 create_heap 和 G1CollectedHeap::initialize()，本文把 initialize_heap() 剩余的三行核心调用讲完。
 >
-> **前置依赖**：[ch10/12](12-summary.md)（总结章，指出本缺口）；ch10/03（reserve_heap 与压缩指针 base 的预约）。
+> **前置依赖**：[ch09/12](12-summary.md)（总结章，指出本缺口）；ch09/03（reserve_heap 与压缩指针 base 的预约）。
 
 ---
 
@@ -12,8 +12,8 @@
 
 ```cpp
 jint Universe::initialize_heap() {
-  _collectedHeap = create_heap();                          // ① 已讲（ch10/04）
-  jint status = _collectedHeap->initialize();              // ② 已讲（ch10/02-11）
+  _collectedHeap = create_heap();                          // ① 已讲（ch09/04）
+  jint status = _collectedHeap->initialize();              // ② 已讲（ch09/02-11）
   if (status != JNI_OK) {
     return status;
   }
@@ -204,7 +204,7 @@ LogMinObjAlignmentInBytes = exact_log2(ObjectAlignmentInBytes) = 3
 
 ### 3.3 四个判断分支 → 四种模式
 
-`reserved_region().end()` 是堆预约的**末尾地址**（ch10/03 的 mmap 完成后才有值）。四个组合：
+`reserved_region().end()` 是堆预约的**末尾地址**（ch09/03 的 mmap 完成后才有值）。四个组合：
 
 ```
 堆末尾 ≤ 4GB？                 shift=0, base=0      → Unscaled（不压缩，直接存）
@@ -221,7 +221,7 @@ LogMinObjAlignmentInBytes = exact_log2(ObjectAlignmentInBytes) = 3
 
 ### 3.4 reserve_heap 的压缩指针路径——五级降级尝试
 
-第 ④ 步**只负责最终确定 shift/base**——堆落在哪是 ch10/03 的 `Universe::reserve_heap()` 早就决定的。而那里远不是一次 mmap 那么简单：`ReservedHeapSpace` 构造走 `initialize_compressed_heap()`（virtualspace.cpp:490-600），**从最优模式到最差模式逐级尝试**，每级失败才降级到下一级：
+第 ④ 步**只负责最终确定 shift/base**——堆落在哪是 ch09/03 的 `Universe::reserve_heap()` 早就决定的。而那里远不是一次 mmap 那么简单：`ReservedHeapSpace` 构造走 `initialize_compressed_heap()`（virtualspace.cpp:490-600），**从最优模式到最差模式逐级尝试**，每级失败才降级到下一级：
 
 ```
 Level 0: 用户指定 HeapBaseMinAddress          ← 仅当用户显式设置 -XX:HeapBaseMinAddress
@@ -352,7 +352,7 @@ log_trace(gc, heap, coops)("Trying to allocate at address " PTR_FORMAT
 
 **1. 堆 > 32GB 时压缩指针自动关闭**。`Arguments::set_use_compressed_oops()` 检测到 `MaxHeapSize` 超过 `max_heap_for_compressed_oops()`（≈ 32GB）时，自动把 `UseCompressedOops` 置为 false——引用回到 8 字节，同样的对象图多占约一倍引用内存。这是大堆内存开销暴涨的原因之一。
 
-**2. 堆 ≤ 32GB 也可能落到高位地址**。低 32GB 地址空间被占用时（ASLR 随机化、其他进程/库先 mmap 占了低地址），即使堆只有 8GB，落点在 64GB 处也走 DisjointBase。这正是 ch10/03 里 reserve_heap 优先尝试低地址预留的原因，也是五级降级存在的意义——**尽可能把堆留在可压缩的地址区间**。
+**2. 堆 ≤ 32GB 也可能落到高位地址**。低 32GB 地址空间被占用时（ASLR 随机化、其他进程/库先 mmap 占了低地址），即使堆只有 8GB，落点在 64GB 处也走 DisjointBase。这正是 ch09/03 里 reserve_heap 优先尝试低地址预留的原因，也是五级降级存在的意义——**尽可能把堆留在可压缩的地址区间**。
 
 实践：用 `-Xlog:gc+heap+coops=info` 看模式，用 `java -XX:+PrintFlagsFinal -version | grep UseCompressedOops` 确认开关状态。如果堆 > 32GB 且引用内存占比高，可以考虑缩小堆、或用 `-XX:-UseCompressedOops` 显式关闭（避免大堆场景下开关自动关闭带来的歧义）。
 
@@ -666,14 +666,14 @@ clamp         = [min_size=2KB+reserve, max_size=2MB] → 40MB 被压到 2MB
 ③④⑤ 补齐后，`Universe::initialize_heap()` 的完整讲解闭环：
 
 ```
-① create_heap()                       ch10/04
-② _collectedHeap->initialize()        ch10/02-11
+① create_heap()                       ch09/04
+② _collectedHeap->initialize()        ch09/02-11
 ③ TLAB set_max_size                  本文 §2 —— 上限 = humongous 阈值
 ④ CompressedOops 模式决策            本文 §3 —— 4GB/32GB 阈值
 ⑤ TLAB startup_initialization       本文 §4 —— refills + 统计 + 主线程重初始化
 ```
 
-此后的流程回到 `universe_init()`（ch09/01 全景）：SystemDictionary::initialize_oop_storage → Metaspace::global_initialize → ... → SymbolTable/StringTable::create_table。
+此后的流程回到 `universe_init()`（ch08/01 全景）：SystemDictionary::initialize_oop_storage → Metaspace::global_initialize → ... → SymbolTable/StringTable::create_table。
 
 ---
 
@@ -686,4 +686,4 @@ clamp         = [min_size=2KB+reserve, max_size=2MB] → 40MB 被压到 2MB
 | ⑤ _target_refills | `100/(2×1) = 50` | TLAB 大小校准目标，控制 gc_waste ≤ 1% |
 | ⑤ 主线程重初始化 | — | 主线程 TLAB 创建早于堆，必须补初始化 |
 
-> **下一篇**：[ch10/12 总结](12-summary.md)——回顾全部 12 篇文章如何将 `initialize_heap()` 五阶段逐行讲透。
+> **下一篇**：[ch09/12 总结](12-summary.md)——回顾全部 12 篇文章如何将 `initialize_heap()` 五阶段逐行讲透。

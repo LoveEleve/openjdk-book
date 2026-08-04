@@ -2,7 +2,7 @@
 
 > **本文定位**：`G1CollectedHeap::initialize()` 中段（`g1CollectedHeap.cpp:1640-1659`）。跟着执行流走：G1RemSet 创建 → BOT 创建 → CSet 快速测试位图初始化。
 >
-> **前置依赖**：[ch10/05](05-memory-layout-mapper.md)（CardTable + 写屏障 + 6 Mapper + HRM）。
+> **前置依赖**：[ch09/05](05-memory-layout-mapper.md)（CardTable + 写屏障 + 6 Mapper + HRM）。
 
 ---
 
@@ -125,7 +125,7 @@ ConcurrentRefine 线程从 DCQ 取出 dirty card 后，调 `refine_card_concurre
 GC 疏散暂停期间，GC worker 线程调 `refine_card_during_gc`（`g1RemSet.cpp:673`）——和并发版本类似，但：
 - 不走 HotCardCache（GC 期间缓存已禁用）
 - 走 `_scan_state`（`G1RemSetScanState`）协调多 worker 并行扫描
-- 用 `claimed_card` / `deferred_card` 防重复处理（详见 ch10/05 卡值状态）
+- 用 `claimed_card` / `deferred_card` 防重复处理（详见 ch09/05 卡值状态）
 
 **GC Worker 消费脏卡的前置步骤**：
 1. **`concatenate_logs`**——GC 暂停开始前（`prepare_for_oops_into_collection_set_do`），把所有线程 thread-local 的 partial buffer 提交到全局 DCQS 的 completed list，确保所有脏卡对 GC 可见（`g1RemSet.cpp:511-513`）
@@ -405,7 +405,7 @@ static jint _n_coarsenings; // 全局 coarsen 次数统计
 
 **和 HotCardCache 的区别**——两个都是缓存，但在不同环节：
 
-| | HotCardCache（ch10/05） | G1FromCardCache（本文） |
+| | HotCardCache（ch09/05） | G1FromCardCache（本文） |
 |---|---|---|
 | 在哪 | ConcurrentRefine 消费 dirty card 时 | add_reference 时 |
 | 做什么 | 判断 card 是否"热"——热就跳过 refine | 判断 card 是否"已记录"——命中跳过三层 |
@@ -434,7 +434,7 @@ class G1FromCardCache : public AllStatic {
 **"每个线程"具体是哪个**——`add_reference(from, tid)` 的 `tid` 是 worker id，包括三种情况：
 - **ConcurrentRefine 线程**（并发期间，`refine_card_concurrently` 调用时）—— 后台持续消费 DCQ
 - **GC Worker 线程**（GC 疏散暂停期间，`refine_card_during_gc` 调用时）—— 暂停时并行扫描
-- **Mutator 线程**（DCQ 背压时，`handle_zero_index → process_or_enqueue_complete_buffer → mut_process_buffer`，completed buffers 超过 `_max_completed_queue + _completed_queue_padding` 时 mutator 被强制参与处理 dirty card，减少积压）—— 详见 ch10/08
+- **Mutator 线程**（DCQ 背压时，`handle_zero_index → process_or_enqueue_complete_buffer → mut_process_buffer`，completed buffers 超过 `_max_completed_queue + _completed_queue_padding` 时 mutator 被强制参与处理 dirty card，减少积压）—— 详见 ch09/08
 
 ### 3.3.3 工作流程
 
@@ -786,7 +786,7 @@ GC 扫描引用时（如 `A → B`），必须快速判断"B 在不在 CSet"—�
 
 ### 5.2 数据结构和查询
 
-`_in_cset_fast_test`（`G1InCSetStateFastTestBiasedMappedArray`）继承 `G1BiasedMappedArray<InCSetState>`（偏置数组技巧，详见 ch10/05）。给定对象地址，`地址 >> RegionShift` 直接定位到对应的格子，O(1)：
+`_in_cset_fast_test`（`G1InCSetStateFastTestBiasedMappedArray`）继承 `G1BiasedMappedArray<InCSetState>`（偏置数组技巧，详见 ch09/05）。给定对象地址，`地址 >> RegionShift` 直接定位到对应的格子，O(1)：
 
 ```
 obj_addr >> RegionShift  →  格子编号  →  biased_base[格子编号]  →  InCSetState

@@ -105,7 +105,7 @@ StringTable::StringTable() : _local_table(NULL), _current_size(0), _has_work(0),
    → 并发哈希表：初始 2^16 桶、容量上限 2^24、rehash 阈值 100（§3 展开）
 ```
 
-> **注**：① 的 OopStorage 是什么、为什么需要它（GC 搬对象后，谁来更新你存下的对象地址）——完整设计推演见 [ch09/02 OopStorage](../ch09/02-oopstorage.md)。本文 §2 只展开 StringTable 用到的弱引用语义。
+> **注**：① 的 OopStorage 是什么、为什么需要它（GC 搬对象后，谁来更新你存下的对象地址）——完整设计推演见 [ch08/02 OopStorage](../ch08/02-oopstorage.md)。本文 §2 只展开 StringTable 用到的弱引用语义。
 
 ### 1.2 容量：2 的幂，不是质数
 
@@ -477,7 +477,7 @@ oop StringTable::intern(oop string, TRAPS) {
 - **空值检查**：`if (string == NULL) return NULL`
 - **`ResourceMark rm(THREAD)`**：标记当前 ResourceArea 水位——`as_unicode_string` 的 `jchar[]` 临时缓冲区从此处分配；函数结束时自动回滚回收
 - **`int length`**：声明，由 `as_unicode_string` 输出字符串长度
-- **包装 Handle**：`Handle h_string(THREAD, string)` 将 oop 存入线程 HandleArea 槽位——`intern()` 内部可能触发 GC（分配字符串、去重），裸 oop 会野；Handle 通过槽位间接读写，GC 更新槽位值后仍拿到最新地址（原理见 ch09/02）。这不是多余的来回包装——JNIHandleBlock（jstring 的槽位）和 HandleArea（Handle 的槽位）是两套不同的池子：JNI 管着 JNIHandleBlock 的生命周期（native 返回时自动释放），内部代码管着 HandleArea（HandleMark 按 C++ 作用域释放）；两者不能互用，`intern()` 的 GC 暴露点在 HandleMark 作用域内，必须用自己的池子。**先于 `as_unicode_string` 包装**——因为 `as_unicode_string` 使用 `CHECK_NULL`（内部可能因 OOM 抛异常触发 GC），此时 oop 已在 Handle 保护下
+- **包装 Handle**：`Handle h_string(THREAD, string)` 将 oop 存入线程 HandleArea 槽位——`intern()` 内部可能触发 GC（分配字符串、去重），裸 oop 会野；Handle 通过槽位间接读写，GC 更新槽位值后仍拿到最新地址（原理见 ch08/02）。这不是多余的来回包装——JNIHandleBlock（jstring 的槽位）和 HandleArea（Handle 的槽位）是两套不同的池子：JNI 管着 JNIHandleBlock 的生命周期（native 返回时自动释放），内部代码管着 HandleArea（HandleMark 按 C++ 作用域释放）；两者不能互用，`intern()` 的 GC 暴露点在 HandleMark 作用域内，必须用自己的池子。**先于 `as_unicode_string` 包装**——因为 `as_unicode_string` 使用 `CHECK_NULL`（内部可能因 OOM 抛异常触发 GC），此时 oop 已在 Handle 保护下
 - **提取字符**（`as_unicode_string`）：从 String 对象的内部 `byte[]`（JDK 9+ 分 LATIN1/UTF16 两种编码）转为 `jchar[]`。无论哪种编码，均用 `NEW_RESOURCE_ARRAY_RETURN_NULL(jchar, length)` 从 ResourceArea 分配新空间并逐个复制——LATIN1 逐字节零扩展（1B→2B），UTF16 逐 char 拷贝。不能直接用堆上的 `byte[]`——GC 会搬动，裸指针不安全；且 LATIN1 必须扩容。结果指向 ResourceArea 临时缓冲区，`ResourceMark` 析构时自动回收
 - **调用私有实现**：`intern(h_string, chars, length, CHECK_NULL)` 进入真正的 hash 计算 + 查表路径
 - **`return result`**

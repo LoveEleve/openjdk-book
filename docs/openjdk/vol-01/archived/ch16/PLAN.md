@@ -1,10 +1,10 @@
-# ch14 interpreter_init — Template Interpreter 写作规划
+# ch16 interpreter_init — Template Interpreter 写作规划
 
 > **源码基线**：OpenJDK 11u，x86-64，正常启用 Template Interpreter 的 HotSpot 构建。
 >
 > 本章不把结论泛化到所有架构和解释器配置；源码树中的 portable C++ interpreter 属于另一种实现路径。
 
-## ch14 目标
+## ch16 目标
 
 读者读完 3 篇后，能够回答以下问题：
 
@@ -120,11 +120,11 @@ universe2_init()
 2. **首次有效的 `TemplateTable::initialize()` 发生在 `interpreter_init()` 内部。**
 3. **顶层后置的 `templateTable_init()` 不负责生成字节码机器码。** 在正常 Template Interpreter 路径中，它是一次幂等重复调用。
 
-这也是 ch14 与 ch17 必须重新划分边界的原因：
+这也是 ch16 与 ch17 必须重新划分边界的原因：
 
-- ch14 讲 TemplateTable 如何参与解释器整体初始化和机器码生成；
+- ch16 讲 TemplateTable 如何参与解释器整体初始化和机器码生成；
 - ch17 深入 TemplateTable 如何注册每个字节码的模板描述符；
-- 不能再描述成“ch14 只搭 Codelet 框架，ch17 才生成字节码机器码”。
+- 不能再描述成“ch16 只搭 Codelet 框架，ch17 才生成字节码机器码”。
 
 ---
 
@@ -302,7 +302,7 @@ Safepoint table/poll 与 OSR 如何接入这条运行路径？
   - `generate_all()` 会生成通用与专门的 exception entries；
   - deoptimization entries 也属于解释器生成物；
   - 本章不展开完整异常表查找与反优化 frame reconstruction；
-  - 不在没有具体调用链证据时把通用异常处理强连到 ch13 `LatestMethodCache`。
+  - 不在没有具体调用链证据时把通用异常处理强连到 ch15 `LatestMethodCache`。
 
   **Section 7. OSR：解释器与编译执行的边界**
   - loop backedge 更新计数器；
@@ -335,10 +335,10 @@ Safepoint table/poll 与 OSR 如何接入这条运行路径？
 ## 与前后章节的连接
 
 ```text
-ch13 LatestMethodCache
+ch15 LatestMethodCache
   │  仅作为 init_globals 启动顺序中的前章
   ▼
-ch14 interpreter_init
+ch16 interpreter_init
   ├─ 01：初始化链 + BufferBlob/StubQueue/Codelet 存储层级
   ├─ 02：Template 描述符 + eager Codelet generation
   └─ 03：MethodKind entry + dispatch + safepoint + OSR 边界
@@ -361,9 +361,9 @@ ch17 templateTable_init
 
 三篇分别回答“何时建立”“怎样生成”“如何运行”，边界清晰。继续拆分会让同一条初始化链过度碎片化；压成一篇则会混淆启动期生成与运行期执行。
 
-### 为什么 ch14 必须讲到 TemplateTable
+### 为什么 ch16 必须讲到 TemplateTable
 
-虽然顶层 `templateTable_init()` 是 ch17 的章节名，但正常 Template Interpreter 路径会在 `interpreter_init()` 内首次调用 `TemplateTable::initialize()`，随后立刻生成代码。因此 ch14 必须说明它在初始化链中的职责；ch17 再逐项深入模板注册表内容。
+虽然顶层 `templateTable_init()` 是 ch17 的章节名，但正常 Template Interpreter 路径会在 `interpreter_init()` 内首次调用 `TemplateTable::initialize()`，随后立刻生成代码。因此 ch16 必须说明它在初始化链中的职责；ch17 再逐项深入模板注册表内容。
 
 ### 为什么不逐个分析 200 余种字节码模板
 

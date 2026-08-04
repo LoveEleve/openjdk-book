@@ -2,7 +2,7 @@
 
 > **本文定位**：沿 `init_globals()` → `interpreter_init()` → `TemplateInterpreter::initialize()` 追踪解释器初始化，回答解释器代码为什么必须在方法加载前生成，以及 `CodeCache`、`BufferBlob`、`StubQueue`、`InterpreterCodelet` 分别扮演什么角色。
 >
-> **前置依赖**：[15.1 LatestMethodCache](../ch13/01-latest-method-cache.md)——了解 `universe_init()` 阶段仍未加载 primordial classes。
+> **前置依赖**：[15.1 LatestMethodCache](../ch15/01-latest-method-cache.md)——了解 `universe_init()` 阶段仍未加载 primordial classes。
 >
 > **JDK 版本**：本文基于 **OpenJDK 11u、x86-64、正常启用 Template Interpreter 的 HotSpot 构建**。
 
@@ -620,7 +620,7 @@ interpreter_init()
 
 所以，在本文的非 `CC_INTERP` Template Interpreter 构建中，顶层 `templateTable_init()` 会再次调用 `TemplateTable::initialize()`，随后由 guard 返回；在 `CC_INTERP` 构建中，这个顶层包装函数的函数体本身为空。无论哪一种情况，它都不是本文主解释器机器码首次生成的位置。
 
-### 7.1 ch14 与 ch17 怎么划分
+### 7.1 ch16 与 ch17 怎么划分
 
 虽然顶层 `templateTable_init()` 的有效工作已经提前发生，后续章节仍然有独立分析价值：
 

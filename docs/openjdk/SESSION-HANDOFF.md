@@ -30,12 +30,12 @@
 1. 先读源码 `/data/workspace/jdk11u/src/hotspot/share/gc/g1/g1CollectedHeap.cpp:1679-1707`
 2. 用 Agent 工具深度探索 5 个初始化方法各自做了什么
 3. 参照标杆文章 `07-g1-concurrent-mark-creation.md` 的结构和深度撰写
-4. 文件名 `10-queue-system-init.md`，前置依赖标注 `[ch10/09](09-g1-policy-init.md)`
+4. 文件名 `10-queue-system-init.md`，前置依赖标注 `[ch09/09](09-g1-policy-init.md)`
 
 **11 如何开始**：
 1. 源码区间 `g1CollectedHeap.cpp:1709-1734`——Dummy Region 创建、G1AllocRegion::setup、init_mutator_alloc_region、G1MonitoringSupport、G1StringDedup、preserved_marks_set.init、CSet.initialize
 2. G1AllocRegion 的内部结构在 04a §4.1 已详细讲过——11 重点在 setup + init 流程，不需要再展开 AllocRegion 本身
-3. 文件名 `11-allocator-ready-and-cleanup.md`，前置依赖标注 `[ch10/10](10-queue-system-init.md)`
+3. 文件名 `11-allocator-ready-and-cleanup.md`，前置依赖标注 `[ch09/10](10-queue-system-init.md)`
 
 ## 写作标准
 
@@ -80,6 +80,6 @@
 **如何开始**：
 1. 先读源码 `/data/workspace/jdk11u/src/hotspot/share/gc/g1/g1CollectedHeap.cpp:1679-1707`
 2. 用 Agent 工具深度探索 5 个初始化方法各自做了什么
-3. 参照标杆文章 `/data/workspace/LoveEleve.github.io/docs/openjdk/vol-01/ch10/07-g1-concurrent-mark-creation.md` 的结构和深度撰写
-4. 文件命名 `10-queue-system-init.md`，放在 `/data/workspace/LoveEleve.github.io/docs/openjdk/vol-01/ch10/` 目录
-5. 前置依赖标注 `[ch10/09](09-g1-policy-init.md)`
+3. 参照标杆文章 `/data/workspace/LoveEleve.github.io/docs/openjdk/vol-01/ch09/07-g1-concurrent-mark-creation.md` 的结构和深度撰写
+4. 文件命名 `10-queue-system-init.md`，放在 `/data/workspace/LoveEleve.github.io/docs/openjdk/vol-01/ch09/` 目录
+5. 前置依赖标注 `[ch09/09](09-g1-policy-init.md)`

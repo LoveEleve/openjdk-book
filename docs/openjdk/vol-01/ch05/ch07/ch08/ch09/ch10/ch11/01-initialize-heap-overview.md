@@ -121,37 +121,37 @@ Universe::initialize_heap()   ← universe_init() 调用
 │   └─ GCConfig::arguments()->create_heap()
 │       └─ G1Arguments::create_heap()
 │           └─ create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()
-│               ├─ new G1CollectorPolicy()          → ch10/02 详讲
-│               │   ├─ setup_heap_region_size()     → ch10/02 详讲
-│               │   └─ setup_remset_size()          → ch10/02 详讲
-│               └─ new G1CollectedHeap(policy)     → ch10/03 详讲
+│               ├─ new G1CollectorPolicy()          → ch09/02 详讲
+│               │   ├─ setup_heap_region_size()     → ch09/02 详讲
+│               │   └─ setup_remset_size()          → ch09/02 详讲
+│               └─ new G1CollectedHeap(policy)     → ch09/03 详讲
 │
 ├─ [阶段 2] _collectedHeap->initialize()            ← G1CollectedHeap::initialize()
-│   │ 201 行，是整个 initialize_heap 中最重的一步   → ch10/03-05 详讲
+│   │ 201 行，是整个 initialize_heap 中最重的一步   → ch09/03-05 详讲
 │   │
-│   ├─ Universe::reserve_heap()                     → ch10/03 详讲
-│   │   └─ ReservedHeapSpace → mmap                 → ch10/03 详讲
+│   ├─ Universe::reserve_heap()                     → ch09/03 详讲
+│   │   └─ ReservedHeapSpace → mmap                 → ch09/03 详讲
 │   │
-│   ├─ 6 个 G1RegionToSpaceMapper                   → ch10/04 详讲
+│   ├─ 6 个 G1RegionToSpaceMapper                   → ch09/04 详讲
 │   │   └─ HeapRegionManager::initialize()
 │   │
-│   ├─ G1ConcurrentMark(~150行)                     → ch10/05 详讲
+│   ├─ G1ConcurrentMark(~150行)                     → ch09/05 详讲
 │   │   └─ SATB / DirtyCard 队列初始化
 │   │
-│   ├─ ConcurrentRefinement 线程                     → ch10/05 详讲
-│   ├─ expand(init_byte_size) —— 真正 commit 物理页  → ch10/05 详讲
-│   └─ g1_policy()->init()                          → ch10/05 详讲
+│   ├─ ConcurrentRefinement 线程                     → ch09/05 详讲
+│   ├─ expand(init_byte_size) —— 真正 commit 物理页  → ch09/05 详讲
+│   └─ g1_policy()->init()                          → ch09/05 详讲
 │
 ├─ [阶段 3] ThreadLocalAllocBuffer::set_max_size()   ← G1 视角：humongous threshold
 │
-├─ [阶段 4] Compressed Oops 编码设置                  → ch10/06 详讲
+├─ [阶段 4] Compressed Oops 编码设置                  → ch09/06 详讲
 │   ├─ narrow_oop_shift / narrow_oop_base 设置
 │   └─ narrow_ptrs_base 同步
 │
 └─ [阶段 5] ThreadLocalAllocBuffer::startup_initialization()
-    ├─ _target_refills 计算                          → ch10/06 详讲
-    ├─ GlobalTLABStats 创建                           → ch10/06 详讲
-    └─ 主线程 TLAB 重新初始化                         → ch10/06 详讲
+    ├─ _target_refills 计算                          → ch09/06 详讲
+    ├─ GlobalTLABStats 创建                           → ch09/06 详讲
+    └─ 主线程 TLAB 重新初始化                         → ch09/06 详讲
 ```
 
 ### 2.3 各个阶段的定位
@@ -198,7 +198,7 @@ Universe::create_heap()
                            └─ 92 行构造函数
 ```
 
-`GCConfig::arguments()` 返回的就是**被选中的那个 GC 的 Arguments 对象**——G1Arguments 在这里是 `FOR_EACH_SUPPORTED_GC` 循环中找到 `UseG1GC == true` 的那个。这个选择过程（`select_gc` + `SupportedGCs[]` 表）在 ch10/02 详讲。
+`GCConfig::arguments()` 返回的就是**被选中的那个 GC 的 Arguments 对象**——G1Arguments 在这里是 `FOR_EACH_SUPPORTED_GC` 循环中找到 `UseG1GC == true` 的那个。这个选择过程（`select_gc` + `SupportedGCs[]` 表）在 ch09/02 详讲。
 
 ### 3.2 `G1Arguments::create_heap()` → 模板 `create_heap_with_policy`
 
@@ -215,29 +215,29 @@ Universe::create_heap()
 ```
 
 三行模板代码展示了 G1 堆创建的三段式：
-- **步骤 A — `new G1CollectorPolicy()`**：构造时调用 `setup_heap_region_size`（确定 Region 大小的 47 行逻辑）和 `setup_remset_size`（确定 RSet 表容量的 13 行逻辑）——这两步决定了 G1 最基本的空间单元大小。ch10/02 详讲。
-- **步骤 B — `policy->initialize_all()`**：调用继承自 `CollectorPolicy` 的三阶段初始化：`initialize_alignments()` 设对齐粒度 → `initialize_flags()` 校验和调整堆大小 → `initialize_size_info()` 打日志。ch10/02 详讲。
-- **步骤 C — `new G1CollectedHeap(policy)`**：G1 堆对象的 92 行构造函数。创建 `WorkGang`（GC 线程池）、`G1Allocator`（分配器）、`G1HeapSizingPolicy`（堆大小策略）、`RefToScanQueue`（per-worker ref 队列）。但此时**堆内存还没分配**——构造函数只创建对象，不碰 OS 内存。ch10/03 详讲。
+- **步骤 A — `new G1CollectorPolicy()`**：构造时调用 `setup_heap_region_size`（确定 Region 大小的 47 行逻辑）和 `setup_remset_size`（确定 RSet 表容量的 13 行逻辑）——这两步决定了 G1 最基本的空间单元大小。ch09/02 详讲。
+- **步骤 B — `policy->initialize_all()`**：调用继承自 `CollectorPolicy` 的三阶段初始化：`initialize_alignments()` 设对齐粒度 → `initialize_flags()` 校验和调整堆大小 → `initialize_size_info()` 打日志。ch09/02 详讲。
+- **步骤 C — `new G1CollectedHeap(policy)`**：G1 堆对象的 92 行构造函数。创建 `WorkGang`（GC 线程池）、`G1Allocator`（分配器）、`G1HeapSizingPolicy`（堆大小策略）、`RefToScanQueue`（per-worker ref 队列）。但此时**堆内存还没分配**——构造函数只创建对象，不碰 OS 内存。ch09/03 详讲。
 
 ---
 
 ## 4. 阶段 2 到底做了什么——`G1CollectedHeap::initialize()` 速览
 
-阶段 2 是整个 `initialize_heap` 中最重的一步——`G1CollectedHeap::initialize()` 有 **201 行**。本文只给出快速概览，让读者知道它分成 22 个子步骤——ch10/03、04、05 再逐层展开。
+阶段 2 是整个 `initialize_heap` 中最重的一步——`G1CollectedHeap::initialize()` 有 **201 行**。本文只给出快速概览，让读者知道它分成 22 个子步骤——ch09/03、04、05 再逐层展开。
 
 ### 4.1 22 个步骤的高层分组
 
 ```
-G1CollectedHeap::initialize()  201行 ──→ 22个步骤 ──→ 分入 ch10/03、04、05
+G1CollectedHeap::initialize()  201行 ──→ 22个步骤 ──→ 分入 ch09/03、04、05
 │
-├─ [ch10/03 详讲] 基本初始化 (步骤1-4)
+├─ [ch09/03 详讲] 基本初始化 (步骤1-4)
 │   ├─ 1. os::enable_vtime() + Heap_lock 获取
 │   ├─ 2. 获取 init/max byte size + heap_alignment
 │   ├─ 3. 校验对齐(G1)
 │   └─ 4. Universe::reserve_heap(max_byte_size, alignment)
 │       → ReservedHeapSpace 创建 → OS 层面 mmap 预留虚拟地址空间
 │
-├─ [ch10/04 详讲] 内存映射体系 (步骤5-10)
+├─ [ch09/04 详讲] 内存映射体系 (步骤5-10)
 │   ├─ 5. G1CardTable + G1BarrierSet 创建
 │   ├─ 6. G1HotCardCache 创建
 │   ├─ 7. 6 个 G1RegionToSpaceMapper 创建
@@ -247,7 +247,7 @@ G1CollectedHeap::initialize()  201行 ──→ 22个步骤 ──→ 分入 ch1
 │   ├─ 9. CardTable 二次初始化 (绑定 cardtable_storage)
 │   └─ 10. Region 数量校验
 │
-├─ [ch10/05 详讲] 并发引擎 + 物理内存 (步骤11-18)
+├─ [ch09/05 详讲] 并发引擎 + 物理内存 (步骤11-18)
 │   ├─ 11. G1RemSet 创建并初始化
 │   ├─ 12. G1BlockOffsetTable 创建
 │   ├─ 13. CSet 快速判断 + Humongous 回收候选 初始化
@@ -259,7 +259,7 @@ G1CollectedHeap::initialize()  201行 ──→ 22个步骤 ──→ 分入 ch1
 │   ├─ 17. SATB 队列初始化
 │   └─ 18. ConcurrentRefinement 初始化
 │
-└─ [ch10/05 详讲] 收尾 (步骤19-22)
+└─ [ch09/05 详讲] 收尾 (步骤19-22)
     ├─ 19. Young RemSet Sampling 线程
     ├─ 20. DirtyCard 双队列初始化
     ├─ 21. Dummy Region + 分配器初始化
@@ -268,7 +268,7 @@ G1CollectedHeap::initialize()  201行 ──→ 22个步骤 ──→ 分入 ch1
 
 ### 4.2 三个"为什么"
 
-在看 ch10/03-05 的详细拆解之前，读者需要带着三个问题：
+在看 ch09/03-05 的详细拆解之前，读者需要带着三个问题：
 
 1. **为什么构造函数和 `initialize()` 要分开？** 构造函数做"轻量创建"——不需要锁、不依赖堆地址的纯计算和纯对象分配。`initialize()` 做"重量初始化"——需要持 Heap_lock、需要依赖 reserved_region() 的结果才能创建 CardTable、需要在 `_hrm` 就绪后才能创建 ConcurrentMark。错误处理路径也不同——构造失败只能抛异常让进程退出，initialize 返回 `JNI_ENOMEM` 可以优雅退出。
 
@@ -310,7 +310,7 @@ if (heap_end <= OopEncodingHeapMax (32GB))
     → narrow_oop_base = 堆地址（由 ReservedHeapSpace 预计算）
 ```
 
-G1 的大堆场景（>4GB）几乎必定需要压缩指针——32 位 oop 指向 64 位堆空间。压缩模式的决策细节——四种模式（Unscaled/ZeroBased/DisjointBase/HeapBased）的完整决策树、`narrow_klass` 的独立编码体系——在 ch10/06 详讲。
+G1 的大堆场景（>4GB）几乎必定需要压缩指针——32 位 oop 指向 64 位堆空间。压缩模式的决策细节——四种模式（Unscaled/ZeroBased/DisjointBase/HeapBased）的完整决策树、`narrow_klass` 的独立编码体系——在 ch09/06 详讲。
 
 ### 5.3 阶段 5: TLAB 启动（1 行调用 + 45 行）
 
@@ -318,7 +318,7 @@ G1 的大堆场景（>4GB）几乎必定需要压缩指针——32 位 oop 指�
 ThreadLocalAllocBuffer::startup_initialization();
 ```
 
-这 45 行做的三件事——`_target_refills` 公式、`GlobalTLABStats` 单例创建、主线程 TLAB 重新初始化——在 ch10/06 详讲。
+这 45 行做的三件事——`_target_refills` 公式、`GlobalTLABStats` 单例创建、主线程 TLAB 重新初始化——在 ch09/06 详讲。
 
 ---
 
@@ -390,4 +390,4 @@ ThreadLocalAllocBuffer::startup_initialization();
      └─ initialize_heap(62行) + G1::initialize(201行) 逐行拆解
 ```
 
-**下一篇 ch10/02 从 `G1CollectorPolicy` 的构造函数开始**——Region 大小怎么算、RSet 表容量怎么定、`initialize_all` 三阶段各自校验什么。
+**下一篇 ch09/02 从 `G1CollectorPolicy` 的构造函数开始**——Region 大小怎么算、RSet 表容量怎么定、`initialize_all` 三阶段各自校验什么。

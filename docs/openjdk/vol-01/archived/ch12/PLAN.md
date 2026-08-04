@@ -16,9 +16,9 @@
 
 ---
 
-## 定位：ch09/07 的工程实践延伸
+## 定位：ch10/07 的工程实践延伸
 
-ch09/07 已经把 Metaspace 的核心机制讲透。ch12 是**维修手册**——每条诊断通道追踪完整的 Metaspace 侧源码路径。
+ch10/07 已经把 Metaspace 的核心机制讲透。ch12 是**维修手册**——每条诊断通道追踪完整的 Metaspace 侧源码路径。
 
 ### ch12 覆盖范围
 
@@ -55,7 +55,7 @@ ch09/07 已经把 Metaspace 的核心机制讲透。ch12 是**维修手册**—�
 按认知依赖排序：零门槛通道 → 需一个命令 → 需学新框架 → 综合场景。
 
 ```
-ch09/07 核心机制
+ch10/07 核心机制
   │
   ├─→ 01-jstat-gc-log.md        ← 零门槛（不加参数就能用）
   │     ├─ jstat 数据源全路径
@@ -91,7 +91,7 @@ ch09/07 核心机制
 
 - [ ] **01-jstat-gc-log.md**
   | 定位: 零门槛通道——不加任何 JVM 参数就能用的两条诊断线
-  | 前置: ch09/07
+  | 前置: ch10/07
 
   **验证要点（写之前 MCP 确认）**：
   - [ ] jstat MC = `committed_bytes()` 不是 `_capacity_words` （已确认 ✓）
@@ -127,7 +127,7 @@ ch09/07 核心机制
 
 - [ ] **02-jcmd-metaspace.md**
   | 定位: jcmd 全线 + JMX MemoryPool MXBean——两种"主动查询" Metaspace 状态的通道
-  | 前置: ch09/07 + 01（已理解 MU/MC/committed/used 关系）
+  | 前置: ch10/07 + 01（已理解 MU/MC/committed/used 关系）
 
   **验证要点（写之前 MCP 确认）**：
   - [ ] `_capacity_words` 用 `inc_stat_nonatomically`（持 `MetaspaceExpand_lock`），`_used_words` 用 `inc_stat_atomically`（Atomic::add）（已确认 ✓）
@@ -183,7 +183,7 @@ ch09/07 核心机制
 
 - [ ] **03-nmt.md**
   | 定位: NMT 全线——从开启参数到 diff 判泄漏的完整链路
-  | 前置: ch09/07 + 01（已理解 Metaspace 内存三层状态）+ 02（已理解 capacity/committed 差异）
+  | 前置: ch10/07 + 01（已理解 Metaspace 内存三层状态）+ 02（已理解 capacity/committed 差异）
 
   **验证要点**：
   - [ ] `MemSummaryReporter::report_metadata` 的 free 合成公式（已确认 ✓）
@@ -205,7 +205,7 @@ ch09/07 核心机制
 
 - [ ] **04-jfr.md**
   | 定位: JFR 全线——event 模型到 MetaspaceTracer 的 3 个事件
-  | 前置: ch09/07 + 01-03（已掌握全部其他通道）
+  | 前置: ch10/07 + 01-03（已掌握全部其他通道）
 
   **验证要点**：
   - [ ] `MetaspaceTracer` 有 3 个方法：report_gc_threshold / report_metaspace_allocation_failure / report_metadata_oom（已确认 ✓）
@@ -253,7 +253,7 @@ ch09/07 核心机制
 ## 与前后章节的连接
 
 ```
-ch09/07 核心机制 ──→ ch12 诊断（维修手册，5 篇）
+ch10/07 核心机制 ──→ ch12 诊断（维修手册，5 篇）
   │                   │
   │  读者已理解：         ├─ 01: jstat + GC 日志（零门槛）
   │  VSL/ChunkManager   ├─ 02: jcmd VM.metaspace（需命令入门）
@@ -261,6 +261,6 @@ ch09/07 核心机制 ──→ ch12 诊断（维修手册，5 篇）
   │  split/coalesce     ├─ 04: JFR（需学框架）
   │  MetaspaceGC/purge  └─ 05: 4 种实战场景（综合）
   │
-  └──────────────────→ ch11 CDS 初始化
-                       ch12 StringTable...
+  └──────────────────→ ch13 CDS 初始化
+                       ch14 StringTable...
 ```

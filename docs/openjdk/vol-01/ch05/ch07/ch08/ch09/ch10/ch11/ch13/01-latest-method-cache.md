@@ -2,7 +2,7 @@
 
 > **本文定位**：`LatestMethodCache` 全线——为什么类还没加载就创建 6 个空缓存、`init()` 启动填充 + `get_method()` 快速查找、`method_idnum` 而非 `Method*` 保证 RedefineClasses 安全、为什么单槽即最优。
 >
-> **前置依赖**：[ch09/07 Metaspace 背景知识](../ch09/07-metaspace.md)——理解 Method*、Klass*、`method_idnum`。
+> **前置依赖**：[ch08/07 Metaspace 背景知识](../ch08/07-metaspace.md)——理解 Method*、Klass*、`method_idnum`。
 >
 > **JDK 版本**：本文基于 **JDK 11u** 源码。
 
@@ -140,7 +140,7 @@ void LatestMethodCache::init(Klass* k, Method* m) {
 
 ```
 init_globals()（init.cpp:101）
-├─ universe_init()              ← 创建堆、6 个缓存空壳（ch10 主线）
+├─ universe_init()              ← 创建堆、6 个缓存空壳（ch09 主线）
 ├─ interpreter_init() / 编译器相关
 ├─ universe2_init()             ← 加载原始类（注释："loads primordial classes"）
 ├─ compileBroker_init()

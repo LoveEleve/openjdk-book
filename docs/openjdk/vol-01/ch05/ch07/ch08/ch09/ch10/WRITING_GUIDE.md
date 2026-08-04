@@ -1,4 +1,4 @@
-# ch09 写作规范 v1.0
+# ch08 写作规范 v1.0
 
 ## 核心原则
 
@@ -47,11 +47,11 @@ Layer N+4: 并发/安全（线程安全设计，GC 协作）
 ### 长度要求
 - 每个"最小知识点"至少 30-50 行的独立展开
 - 每篇文章至少 400 行，目标 450-550 行
-- 参考 ch08/03-bufferblob-create.md（520 行）作为标杆
+- 参考 ch07/03-bufferblob-create.md（520 行）作为标杆
 
 ## 参考模板文章
 
-ch08/03-bufferblob-create.md 的结构（520 行）：
+ch07/03-bufferblob-create.md 的结构（520 行）：
 1. 前置知识（1.1 普通 new vs CodeCache, 1.2 三个堆, 1.3 placement new）
 2. BufferBlob::create 逐行拆解（2.1 size 计算, 2.2 constructor, 2.3 placement new, 2.4 content_begin）
 3. CodeBlobLayout —— 内部坐标体系

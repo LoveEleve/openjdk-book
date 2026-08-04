@@ -1,8 +1,8 @@
 # 15 init_globals 衔接——门面初始化：GC 屏障桩、JIT 阈值、标志位与寄存器名
 
-> **本文定位**：`init_globals()` 第 10-13、15-16 步——五项基础设施的预配。在 `universe_init`（ch12 三表就绪）与 `interpreter_init`（ch14 解释器模板上架）之间。五步中四项是死数据配置，只有一条（JIT 阈值）涉及运行时逻辑——但它们合在一起回答了同一个问题：**解释器和 JIT 在出手之前，需要哪些全局数据已经就位？**
+> **本文定位**：`init_globals()` 第 10-13、15-16 步——五项基础设施的预配。在 `universe_init`（ch12 三表就绪）与 `interpreter_init`（ch12 解释器模板上架）之间。五步中四项是死数据配置，只有一条（JIT 阈值）涉及运行时逻辑——但它们合在一起回答了同一个问题：**解释器和 JIT 在出手之前，需要哪些全局数据已经就位？**
 >
-> **前置依赖**：ch12（三表就绪）、ch10（G1 BarrierSet 初始化）、ch09（universe_init 序列总览）
+> **前置依赖**：ch12（三表就绪）、ch09（G1 BarrierSet 初始化）、ch08（universe_init 序列总览）
 
 ### 前置概念速查
 
@@ -10,13 +10,13 @@
 
 | 概念 | 简述 | 详细在哪 |
 |------|------|---------|
-| SATB 屏障 | G1 并发标记期间的 pre-write barrier——引用赋值之前，将字段旧值推入线程 SATB 队列，保证并发标记不丢失存活对象 | ch10 §10 |
-| 写屏障（card marking） | 引用赋值之后，将 card table 对应字节标记为 dirty——并发重扫时只检查脏卡覆盖的区域 | ch10 §10 |
-| Card Table | 堆上的字节数组，每 512B 堆区域对应一个 jbyte 标记——决定重扫范围 | ch10 §10 |
-| BarrierSet | GC 屏障的多态基类——G1BarrierSet / CardTableBarrierSet 等实现了具体的 enqueue / card mark 逻辑 | ch10 §3 |
+| SATB 屏障 | G1 并发标记期间的 pre-write barrier——引用赋值之前，将字段旧值推入线程 SATB 队列，保证并发标记不丢失存活对象 | ch09 §10 |
+| 写屏障（card marking） | 引用赋值之后，将 card table 对应字节标记为 dirty——并发重扫时只检查脏卡覆盖的区域 | ch09 §10 |
+| Card Table | 堆上的字节数组，每 512B 堆区域对应一个 jbyte 标记——决定重扫范围 | ch09 §10 |
+| BarrierSet | GC 屏障的多态基类——G1BarrierSet / CardTableBarrierSet 等实现了具体的 enqueue / card mark 逻辑 | ch09 §3 |
 | InvocationCounter | 每个方法的 32-bit 计数器——编码状态位 + 纯计数值。解释器每次方法入口递增，到达阈值后触发编译 | 本节 §2 |
-| OSR（On-Stack Replacement） | 编译循环热代码——不等方法重新调用，直接在栈帧中替换解释执行点为编译后代码 | 后续 ch14/ch17 展开 |
-| MethodData | JIT Profiling 的统计数据对象——记录每个方法的分支频率、类型反馈等，供 C2 做激进优化 | 后续 ch14 展开 |
+| OSR（On-Stack Replacement） | 编译循环热代码——不等方法重新调用，直接在栈帧中替换解释执行点为编译后代码 | 后续 ch12/ch17 展开 |
+| MethodData | JIT Profiling 的统计数据对象——记录每个方法的分支频率、类型反馈等，供 C2 做激进优化 | 后续 ch12 展开 |
 | VMReg | HotSpot 的虚拟寄存器抽象——以 32-bit 粒度编码 CPU 寄存器，64 位寄存器占两个连续的 VMReg 槽位 | 本节 §3.3 |
 
 ---
@@ -25,12 +25,12 @@
 
 ```
 init_globals()（runtime/init.cpp:101）:
-   9:  universe_init()            ← ch09+ch10+ch12 覆盖完毕
+   9:  universe_init()            ← ch08+ch09+ch12 覆盖完毕
   10:  gc_barrier_stubs_init()    ← §1
-  11:  interpreter_init()         → ch14
+  11:  interpreter_init()         → ch12
   12:  invocationCounter_init()   ← §2
   13:  accessFlags_init()         ← §3
-  14:  templateTable_init()       → ch14
+  14:  templateTable_init()       → ch12
   15:  InterfaceSupport_init()    ← §3
   16:  VMRegImpl::set_regName()   ← §3
   17:  SharedRuntime::generate_stubs() → ch17

@@ -2,7 +2,7 @@
 
 > **本文定位**：`init_globals()` 第 10-13、15-16 步——在 `universe_init`（宇宙内核就绪）与 `interpreter_init`（解释器模板上架）之间，完成五项门面级初始化：GC 屏障汇编桩、JIT 编译触发阈值、JVM_ACC 标识位、调试 GC 压力和寄存器命名。这五步中只有一个是"大"的（JIT 阈值），其余四项都是一句话级别的死数据配置——但它们共同构成了解释器和 JIT 编译器"出手"前的最后一组门面就绪。
 >
-> **前置依赖**：ch12（三表就绪）、ch10（G1 BarrierSet 初始化）、ch09（universe_init 序列总览）
+> **前置依赖**：ch12（三表就绪）、ch09（G1 BarrierSet 初始化）、ch08（universe_init 序列总览）
 
 ---
 
@@ -10,12 +10,12 @@
 
 ```
 init_globals():
-   9: universe_init()             ← ch09+ch10+ch12 覆盖完毕
+   9: universe_init()             ← ch08+ch09+ch12 覆盖完毕
   10: gc_barrier_stubs_init()     ← 本章 §1
-  11: interpreter_init()          → ch14（本章暂不展开）
+  11: interpreter_init()          → ch12（本章暂不展开）
   12: invocationCounter_init()    ← 本章 §2
   13: accessFlags_init()          ← 本章 §3
-  14: templateTable_init()        → ch14
+  14: templateTable_init()        → ch12
   15: InterfaceSupport_init()     ← 本章 §4
   16: VMRegImpl::set_regName()    ← 本章 §5
   17: SharedRuntime::generate_stubs()  → ch17

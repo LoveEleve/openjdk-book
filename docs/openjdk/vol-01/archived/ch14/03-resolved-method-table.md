@@ -2,7 +2,7 @@
 
 > **本文定位**：ResolvedMethodTable 全线——从 JVM 业务作用（invokedynamic / MethodHandles 的性能关键）到 `Hashtable<ClassLoaderWeakHandle, mtClass>` 内部结构、`compute_hash` 四元组设计、`basic_add` + `unlink` + `adjust_method_entries`。这是三个 Table 中最简单的一个——没有 ConcurrentHashTable、没有 auto-rehash、没有 CDS 共享表——但它承载了 JDK 7+ invokedynamic 的性能。
 >
-> **前置依赖**：[ch09/07 Metaspace 背景知识](../ch09/07-metaspace.md) + [14.1 SymbolTable](01-symbol-table.md) + [14.2 StringTable](02-string-table.md)——已理解 Hashtable 基类、弱引用概念。
+> **前置依赖**：[ch10/07 Metaspace 背景知识](../ch10/07-metaspace.md) + [14.1 SymbolTable](01-symbol-table.md) + [14.2 StringTable](02-string-table.md)——已理解 Hashtable 基类、弱引用概念。
 >
 > **JDK 版本**：本文基于 **JDK 11u** 源码。
 

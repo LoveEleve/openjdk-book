@@ -1,6 +1,6 @@
-# ch11 LatestMethodCache 写作规划
+# ch10 LatestMethodCache 写作规划
 
-## ch11 目标
+## ch10 目标
 
 读者读完本篇后能回答以下核心问题：
 
@@ -16,7 +16,7 @@
 
 ## 定位：universe_init 中的 6 个最新方法缓存
 
-ch09-ch10 讲完了堆初始化。ch11 承接 `universe_init` 中的 6 个 `LatestMethodCache` 创建——位于 `ClassLoaderData::init_null_class_loader_data()` 之后、`MetaspaceShared::initialize_shared_spaces()` 之前（`universe.cpp:713-720`）。
+ch08-ch09 讲完了堆初始化。ch10 承接 `universe_init` 中的 6 个 `LatestMethodCache` 创建——位于 `ClassLoaderData::init_null_class_loader_data()` 之后、`MetaspaceShared::initialize_shared_spaces()` 之前（`universe.cpp:713-720`）。
 
 源码注释说得很清楚：
 ```cpp
@@ -111,7 +111,7 @@ ch09-ch10 讲完了堆初始化。ch11 承接 `universe_init` 中的 6 个 `Late
 ## 与前后章节的连接
 
 ```
-ch09-ch10 堆初始化 ──→ ch11 LatestMethodCache
+ch08-ch09 堆初始化 ──→ ch10 LatestMethodCache
                        │
                        ├─ 6 个单槽缓存
                        ├─ 延迟填充 + idnum 安全

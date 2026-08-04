@@ -2,7 +2,7 @@
 
 > **本文定位**：背景知识文章。03（ClassLoaderData）和 06（MetaspaceCounters）都引用了 Metaspace 的内部机制——VirtualSpaceList、ChunkManager、ClassType/NonClassType 分离——但从未系统讲解。本文补上这个缺口：从 "CLD 需要一个内存分配器" 逐层推到全局 VirtualSpaceList → per-CLD SpaceManager → chunk 级复用。
 >
-> **前置依赖**：ClassLoaderData 见 [ch09/03](03-classloader-data-null.md)——理解每个 CLD 有一个独立的 Metaspace。OopStorage 见 [ch09/02](02-oopstorage.md)。
+> **前置依赖**：ClassLoaderData 见 [ch08/03](03-classloader-data-null.md)——理解每个 CLD 有一个独立的 Metaspace。OopStorage 见 [ch08/02](02-oopstorage.md)。
 >
 > **JDK 版本**：本文基于 **JDK 11u** 源码（`src/hotspot/share/memory/metaspace/`）。JDK 16 起 JEP 387 "Elastic Metaspace" 重新设计了 Metaspace——`SpaceManager` 被 `MetaspaceArena` 替代，`ChunkManager` 的 humongous `BinaryTreeDictionary` 被移除，chunk 管理改为 buddy allocator + granule 粒度 lazy commit。本文描述的三层架构（VSL + ChunkManager + SpaceManager）适用于 JDK 8~15；JDK 16+ 读者请参考 [JEP 387](https://openjdk.org/jeps/387) 和文末附录 A。
 
@@ -69,7 +69,7 @@ VirtualSpaceList:
 
 ```cpp
 class VirtualSpaceNode : public CHeapObj<mtClass> {
-  ReservedSpace _rs;              // mmap 返回的保留地址空间（ch10/03 详讲，2.2.2 回顾）
+  ReservedSpace _rs;              // mmap 返回的保留地址空间（ch09/03 详讲，2.2.2 回顾）
   VirtualSpace _virtual_space;    // committed 范围管理——commit 连续生长模型（详见 2.2.2）
   MetaWord* _top;                 // bump pointer——当前已分配的最高地址，下一次分配从此开始
   uintx _container_count;         // Node 内活跃 chunk 计数——分配时 inc，归还时 dec，
@@ -191,7 +191,7 @@ class ReservedSpace {
 };
 ```
 
-`_special=true` 表示 reserve 时就 commit 了全部页（典型是大页 `MAP_HUGETLB` 场景，reserve 和 commit 一次完成）。Metaspace 走 `_special=false`——reserve 和 commit 分离。**ch10/03 已详细讲解 ReservedSpace 的 initialize 流程和对齐重试**，本文不重复。
+`_special=true` 表示 reserve 时就 commit 了全部页（典型是大页 `MAP_HUGETLB` 场景，reserve 和 commit 一次完成）。Metaspace 走 `_special=false`——reserve 和 commit 分离。**ch09/03 已详细讲解 ReservedSpace 的 initialize 流程和对齐重试**，本文不重复。
 
 **VirtualSpace**（`virtualspace.hpp:136`）在 ReservedSpace 基础上追踪 committed 范围——假设 commit 是**连续生长**的（从低地址往高地址扩展）：
 
@@ -213,7 +213,7 @@ class VirtualSpace {
 
 **Metaspace vs G1 的 commit 模型差异**：
 
-| | Metaspace（通用 `VirtualSpace`） | G1 堆（`G1PageBasedVirtualSpace`，ch10/03 讲过） |
+| | Metaspace（通用 `VirtualSpace`） | G1 堆（`G1PageBasedVirtualSpace`，ch09/03 讲过） |
 |---|---|---|
 | commit 追踪方式 | `_low`/`_high` 两根指针，假设连续生长 | `CHeapBitMap`，每个 bit 对应一页 |
 | 支持分散 commit？ | ❌ 不支持——只能从 `_low` 往 `_high` 方向连续扩展 | ✅ 支持——可以只 commit Region 3、跳过 Region 4、再 commit Region 5 |

@@ -2,7 +2,7 @@
 
 > **本文定位**：`G1CollectedHeap::initialize()` 第 1670-1674 行。此前堆只是 `mmap` 预留了虚拟地址空间——现在真正 commit 物理内存，创建 HeapRegion 对象，放入空闲列表，让分配器可以开始分配对象。
 >
-> **前置依赖**：[ch10/07](07-g1-concurrent-mark-creation.md)（G1ConcurrentMark 创建完毕）。
+> **前置依赖**：[ch09/07](07-g1-concurrent-mark-creation.md)（G1ConcurrentMark 创建完毕）。
 
 ---
 
@@ -112,7 +112,7 @@ void HeapRegionManager::commit_regions(uint index, size_t num_regions, WorkGang*
 }
 ```
 
-**6 个 Mapper 各自独立**——每个 Mapper 内部有一块独立的虚拟地址空间（ch10/05 mmap reserve 的），各自按自己的比例翻译 Region Index → 页 Index：
+**6 个 Mapper 各自独立**——每个 Mapper 内部有一块独立的虚拟地址空间（ch09/05 mmap reserve 的），各自按自己的比例翻译 Region Index → 页 Index：
 
 ```
 _heap_mapper:              Region 0 → 页 0~1023 (4MB / 4KB = 1024 pages/region)
@@ -151,7 +151,7 @@ void commit_regions(uint start_idx, size_t num_regions, ...) {
 
 `start_idx` 是堆 Region Index，`start_page` 是自己空间的页——两层都追踪**自己**，只是下标体系不同。
 
-**为什么必须 6 份同步 commit**——只 commit 堆而不 commit 位图：GC 标记时读取位图 → bit 对应堆上的 64 字节 → 对应的位图页没 commit → 访问未 commit 页 → SIGSEGV 崩溃。ch10/05 §4.1 讲过这个约束。
+**为什么必须 6 份同步 commit**——只 commit 堆而不 commit 位图：GC 标记时读取位图 → bit 对应堆上的 64 字节 → 对应的位图页没 commit → 访问未 commit 页 → SIGSEGV 崩溃。ch09/05 §4.1 讲过这个约束。
 
 `pretouch` 参数——只在 `-XX:+AlwaysPreTouch`（默认 false）时执行。开启后遍历所有已 commit 的页，每页写一个字节 0——强制 OS 立即分配物理页（而不是等首次访问时才 page fault 懒分配），减少运行时延迟抖动。
 
@@ -179,7 +179,7 @@ HeapRegion* HeapRegionManager::new_heap_region(uint hrm_index) {
 HeapRegion::HeapRegion(uint hrm_index, G1BlockOffsetTable* bot, MemRegion mr) :
     _hrm_index(hrm_index),                    // ① 存 Region Index
     _rem_set(new HeapRegionRemSet(bot, this)), // ② 创建本 Region 的 RSet（三层 Sparse/Fine/Coarse）
-{                                              //    RSet 记录 "谁引用了我"（ch10/06 §3）
+{                                              //    RSet 记录 "谁引用了我"（ch09/06 §3）
     initialize(mr);                            // ③ 初始化空间
 }
 ```
@@ -210,9 +210,9 @@ for (uint i = start; i < start + num_regions; i++) {
 
 **② `hr->initialize(mr)`**——把一个 Region 设成初始状态（`heapRegion.cpp:249-256`）。
 
-先补一段上下文——**BOT 是干什么的**（ch10/06 §4 详细讲过，这里简要回顾）。GC 扫描 dirty card 时，Card 的 512B 边界可能切在对象中间——读到的不是对象头。BOT 解决这个问题：给定 Card 边界地址，回退到离它最近的对象的起始地址。
+先补一段上下文——**BOT 是干什么的**（ch09/06 §4 详细讲过，这里简要回顾）。GC 扫描 dirty card 时，Card 的 512B 边界可能切在对象中间——读到的不是对象头。BOT 解决这个问题：给定 Card 边界地址，回退到离它最近的对象的起始地址。
 
-BOT 是一张**覆盖整个堆的全局表**——`G1BlockOffsetTable._offset_array`，每 512B 堆空间对应 1 字节 entry。entry = 0~63 是线性偏移（回退 entry 个 word），entry ≥ 64 是指数偏移（回退 16^(entry-64) 个 card——ch10/06 §4.3 有完整编码表）。entry = 0 特殊——表示"从 Region 起始地址（_bottom）逐对象前进找"，这是 BOT 两阶段定位的起点。
+BOT 是一张**覆盖整个堆的全局表**——`G1BlockOffsetTable._offset_array`，每 512B 堆空间对应 1 字节 entry。entry = 0~63 是线性偏移（回退 entry 个 word），entry ≥ 64 是指数偏移（回退 16^(entry-64) 个 card——ch09/06 §4.3 有完整编码表）。entry = 0 特殊——表示"从 Region 起始地址（_bottom）逐对象前进找"，这是 BOT 两阶段定位的起点。
 
 每个 Region 持有一个 `G1BlockOffsetTablePart`（`g1BlockOffsetTable.hpp:109`），**不存 BOT 数据**——数据在全局 `_offset_array` 里。它只存两个指针和一条"推进线"：
 
@@ -236,7 +236,7 @@ void reset_bot() {
 }
 ```
 
-**`zero_bottom_entry_raw()`**——全局BOT数组中本Region起始Card的entry 写成 0。含义：BOT 两阶段定位的起点——看到 0 就从 Region 起始地址（_bottom）逐对象前进找（ch10/06 §4.4）。
+**`zero_bottom_entry_raw()`**——全局BOT数组中本Region起始Card的entry 写成 0。含义：BOT 两阶段定位的起点——看到 0 就从 Region 起始地址（_bottom）逐对象前进找（ch09/06 §4.4）。
 
 **`initialize_threshold_raw()`**——`_next_offset_threshold` 推进到第二个 Card 起点。第一个 Card 不需要 BOT 回退（0 = 从 Region 起始找），threshold 从第二行开始。运行时 bump-pointer 分配后 → `_bot_part.alloc_block(res, size)` → 跨过 threshold 就写 entry 并推进，没跨过就跳过。
 

@@ -389,4 +389,4 @@ heap + metaspace 就绪   ->  AOTLoader 验证+注册
 | AOTLoader | JDK 9/10 独有。验证 shift 后为 AOT 库创建独立 CodeHeap |
 | hook-after-init | 三个函数的共同模式——主系统就绪后立即注册 |
 
-ch09 到此结束。下一章（ch10）进入 `Universe::initialize_heap`——堆创建、compressed oops 四模式、TLAB 启动。
+ch08 到此结束。下一章（ch09）进入 `Universe::initialize_heap`——堆创建、compressed oops 四模式、TLAB 启动。

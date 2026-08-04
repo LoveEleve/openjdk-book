@@ -2,7 +2,7 @@
 
 > **本文定位**：`init_globals()` 第 11、14 步——解释器的全部汇编代码生成。`TemplateInterpreterGenerator::generate_all()` 一个函数生成了解释器的整套代码：方法入口、返回、调用分派、异常处理、安全点、去优化，以及将 202 条字节码模板逐个生成可执行的汇编 Codelet。这是 `universe_init`（宇宙创造完毕）之后 **JVM 真正开始生成机器指令**的时刻。
 >
-> **前置依赖**：ch13（JIT 阈值设立）、ch12（三表就绪）、ch10（G1 BarrierSet）、ch09（universe_init 序列总览）
+> **前置依赖**：ch11（JIT 阈值设立）、ch12（三表就绪）、ch09（G1 BarrierSet）、ch08（universe_init 序列总览）
 
 ---
 
@@ -73,7 +73,7 @@ void TemplateInterpreter::initialize() {
 
 | 步 | 做什么 | 产出 |
 |---|--------|------|
-| ① | `AbstractInterpreter::initialize()` | 基类初始化——字节码计数器重置 + `InvocationCounter::reinitialize`（ch13 §2.4 已讲） |
+| ① | `AbstractInterpreter::initialize()` | 基类初始化——字节码计数器重置 + `InvocationCounter::reinitialize`（ch11 §2.4 已讲） |
 | ② | `TemplateTable::initialize()` | 注册 202 个字节码模板——为每个字节码绑定生成器函数和操作数栈转型规则（§3） |
 | ③ | `new StubQueue(...)` | 创建 CodeBuffer，分配 `InterpreterCodeSize` 字节的代码空间——所有 Codelet 的汇编代码存于此 |
 | ④ | `TemplateInterpreterGenerator g(_code)` | 构造触发 `generate_all()`——遍历模板 + 生成全部桩代码（§2） |
@@ -148,7 +148,7 @@ void TemplateInterpreterGenerator::generate_all() {
 
 `codelet_size()` 实际分配的量不固定——它取 `StubQueue::available_space() - 2K`，保证 CodeBuffer 中有足够空间容纳当前 Codelet。debug 构建中所有分配乘以 4（`InterpreterCodeSize * 4`），为调试断言和边界检查留额外空间。
 
-> `StubQueue` 是解释器专用的代码缓冲区，与 JIT 用的 `CodeCache`（ch08/03）是两个独立系统：`CodeCache` 存编译后的本地代码（动态创建、可被 sweeper 回收），`StubQueue` 只在 `init_globals` 期间分配一次，大小固定、永不清除。
+> `StubQueue` 是解释器专用的代码缓冲区，与 JIT 用的 `CodeCache`（ch07/03）是两个独立系统：`CodeCache` 存编译后的本地代码（动态创建、可被 sweeper 回收），`StubQueue` 只在 `init_globals` 期间分配一次，大小固定、永不清除。
 
 ---
 

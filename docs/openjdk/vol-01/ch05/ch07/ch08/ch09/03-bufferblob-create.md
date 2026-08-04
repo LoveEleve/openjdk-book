@@ -8,15 +8,15 @@
 >
 > 本文是一本电子书的章节——不限制长度。每个概念都从最基础的问题出发讲清楚 WHY，再展示 HOW。
 >
-> **前置依赖**：02 篇讲了 StubRoutines 是一张全局表。ch06 的 `01-heap-layout.md` 详细讲解了 CodeCache 的三个堆（NonNMethod / Profiled / NonProfiled）和 PROT_EXEC 权限。本文只回顾用到的关键结论——CodeCache 用 mmap 分配可执行内存，stub 从 NonNMethod 堆分配——重心在 BufferBlob、placement new、CodeBlobLayout 这三个新概念。
+> **前置依赖**：02 篇讲了 StubRoutines 是一张全局表。ch05 的 `01-heap-layout.md` 详细讲解了 CodeCache 的三个堆（NonNMethod / Profiled / NonProfiled）和 PROT_EXEC 权限。本文只回顾用到的关键结论——CodeCache 用 mmap 分配可执行内存，stub 从 NonNMethod 堆分配——重心在 BufferBlob、placement new、CodeBlobLayout 这三个新概念。
 >
 > **阅读提示**：本文用 `p` 表示 `CodeCache::allocate` 返回的地址——用具体数值（`p + 128`、`p + 30128`）代替抽象公式，让你看清楚一块内存里每个字节的归属。
 
 ---
 
-## 1. CodeCache 回顾（ch06 已讲，这里只取结论）
+## 1. CodeCache 回顾（ch05 已讲，这里只取结论）
 
-ch06 详细讲了 CodeCache 的内部分配机制。本文只需要两个结论：
+ch05 详细讲了 CodeCache 的内部分配机制。本文只需要两个结论：
 
 - **CodeCache 是一块可执行内存**——通过 `mmap` 加 `PROT_READ | PROT_WRITE | PROT_EXEC` 权限分配，CPU 可以直接从这块内存取指令执行。普通的 `new` / `malloc` 不给执行权限，写在里面的机器码跑不了。
 - **CodeCache 内部切成三个独立的堆**—— `NonNMethod`（堆 2）存 stub、adapter 等"非 Java 方法"代码。stub 永不卸载，放在独立堆里不跟 JIT 编译的方法碎片混在一起。BufferBlob 总是从 NonNMethod 堆分配。

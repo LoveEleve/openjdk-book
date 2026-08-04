@@ -2,7 +2,7 @@
 
 > **本文定位**：`SymbolTable::create_table()` 全线——Symbol 是什么、20011 个桶怎么来的、Arena 永久符号区干什么、为什么查找要拿锁、符号的两种命运（永久 vs 引用计数回收）。这是三个 Table（SymbolTable / StringTable / ResolvedMethodTable）初始化讲解的第一篇。
 >
-> **前置依赖**：ch09/07 Metaspace 背景知识；ch11 LatestMethodCache（`Method*`、`Klass*` 概念）。
+> **前置依赖**：ch08/07 Metaspace 背景知识；ch10 LatestMethodCache（`Method*`、`Klass*` 概念）。
 
 ---
 

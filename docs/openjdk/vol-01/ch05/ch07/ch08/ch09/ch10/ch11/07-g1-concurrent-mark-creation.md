@@ -2,7 +2,7 @@
 
 > **本文定位**：`G1CollectedHeap::initialize()` 第 1661-1668 行。创建 G1 的**并发标记引擎**——双缓冲位图、标记线程、并行工作任务、全局标记栈。这是 G1 "边跑边标"能力的核心基础设施。
 >
-> **前置依赖**：[ch10/06](06-remset-bot.md)（RemSet + BOT + CSet 快速测试）。
+> **前置依赖**：[ch09/06](06-remset-bot.md)（RemSet + BOT + CSet 快速测试）。
 
 
 ## 1. 执行位置与构造函数总揽
@@ -20,7 +20,7 @@ if (_cm == NULL || !_cm->completed_initialization()) {
 _cm_thread = _cm->cm_thread();
 ```
 
-注释说得很清楚——**"Must do this late"**，必须等 `max_regions` 算好（ch10/05 里 HRM 初始化计算出来的）才能创建 CM。因为内部要分配 `max_regions` 大小的数组。
+注释说得很清楚——**"Must do this late"**，必须等 `max_regions` 算好（ch09/05 里 HRM 初始化计算出来的）才能创建 CM。因为内部要分配 `max_regions` 大小的数组。
 
 三行代码，但 `new G1ConcurrentMark(...)` 的构造函数有 **152 行**（`g1ConcurrentMark.cpp:344-495`），创建了上图中所有的数据结构。`completed_initialization()` 检查的就是构造函数最后一行设的 `_completed_initialization = true`——如果构造函数中间因为参数校验失败而提前 return，这个标志就是 false，`initialize()` 会 shutdown。
 
@@ -89,7 +89,7 @@ _mark_bitmap_1.initialize(g1h->reserved_region(), prev_bitmap_storage);
 _mark_bitmap_2.initialize(g1h->reserved_region(), next_bitmap_storage);
 ```
 
->`prev_bitmap_storage` 和 `next_bitmap_storage` 是 [ch10/05](05-memory-layout-mapper.md) 中创建的 6 个 `G1RegionToSpaceMapper` 中的两个——一个对应"上一轮标记位图"的存储，一个对应"本轮标记位图"的存储。每个 Mapper 各自预留一块独立的虚拟地址空间（8GB 堆各约 16MB），ch10/05 §4 的表格里有详细数据。
+>`prev_bitmap_storage` 和 `next_bitmap_storage` 是 [ch09/05](05-memory-layout-mapper.md) 中创建的 6 个 `G1RegionToSpaceMapper` 中的两个——一个对应"上一轮标记位图"的存储，一个对应"本轮标记位图"的存储。每个 Mapper 各自预留一块独立的虚拟地址空间（8GB 堆各约 16MB），ch09/05 §4 的表格里有详细数据。
 
 两个物理位图对象是**值成员**（嵌入在 G1ConcurrentMark 里），各自用一个独立的 `G1RegionToSpaceMapper` 做存储。`_prev` 和 `_next` 是指针——它们不持有数据，指向哪块物理位图，哪块就扮演哪个角色。
 
@@ -132,7 +132,7 @@ bitmap_index = pointer_delta(addr, heap_base) >> _shifter
 
 ### 2.3 位图的物理存储——Mapper 提供内存，BitMapView 提供操作
 
-位图的数据存在哪？不是 `new` 出来的——由 [ch10/05](05-memory-layout-mapper.md) 的 `G1RegionToSpaceMapper` 提前 `mmap` 好的一块虚拟内存。初始化就是**把这块内存"绑定"到位图对象上**：
+位图的数据存在哪？不是 `new` 出来的——由 [ch09/05](05-memory-layout-mapper.md) 的 `G1RegionToSpaceMapper` 提前 `mmap` 好的一块虚拟内存。初始化就是**把这块内存"绑定"到位图对象上**：
 
 ```cpp
 void G1CMBitMap::initialize(MemRegion heap, G1RegionToSpaceMapper* storage) {
@@ -174,7 +174,7 @@ G1 写法:  Mapper 用 mmap 提前留好内存 (比 new 灵活——可以按需
 
 **为什么不用 `new` 而用 Mapper？** 因为 G1 需要**按 Region 粒度 commit/uncommit**。堆扩展到某个 Region 时，Mapper 只 commit 那个 Region 对应的位图页面（而不是整张位图），节约物理内存。`new[]` 出来的内存全量 commit，没法按需控制。
 
-**和 card table 的对比**：card table 用偏置数组（`_byte_map_base + (addr >> 9)`）一行算出地址直接写（ch10/05 §3）。位图定位更复杂——`offset / word_bits` 算字索引 + `offset % word_bits` 算位偏移——没法缩成一行裸地址计算，所以走了 `BitMap` 的方法调用。
+**和 card table 的对比**：card table 用偏置数组（`_byte_map_base + (addr >> 9)`）一行算出地址直接写（ch09/05 §3）。位图定位更复杂——`offset / word_bits` 算字索引 + `offset % word_bits` 算位偏移——没法缩成一行裸地址计算，所以走了 `BitMap` 的方法调用。
 
 当 Mapper commit 新页面时，`G1CMBitMapMappingChangedListener::on_commit()` 回调自动清零新页面对应的位图范围，保证新 Region 的位图从全零开始。
 
@@ -362,7 +362,7 @@ CMThread 启动多个并发 worker，用 `claim_next()` 原子认领 survivor Re
 
 #### ④ REBUILD_REMEMBERED_SETS——重建 RSet
 
-并发标记证实了哪些对象存活，现在可以更新 RSet 了。CMThread 启动并发 worker，重新扫描选中的 old Region，更新它们内部对象的"谁引用了我"信息。和 ch10/06 讲过的 RSet 是同一套数据。
+并发标记证实了哪些对象存活，现在可以更新 RSet 了。CMThread 启动并发 worker，重新扫描选中的 old Region，更新它们内部对象的"谁引用了我"信息。和 ch09/06 讲过的 RSet 是同一套数据。
 
 #### ⑤ delay_to_keep_mmu()——再等一会儿
 
@@ -532,7 +532,7 @@ _mark_bitmap_2.initialize(g1h->reserved_region(), next_bitmap_storage);
 
 初始指向是任意的——`_mark_bitmap_1` 当 prev、`_mark_bitmap_2` 当 next。第一次 cleanup STW 的 swap 之后就会反过来。swap 只是交换指针，物理位图对象本身不变。
 
-`initialize(g1h->reserved_region(), mapper)` 把 Mapper 预留的虚拟内存地址作为位图存储（§2.3 讲过了），两个 Mapper（`prev_bitmap_storage` 和 `next_bitmap_storage`）来自 ch10/05 的 6 个 Mapper。
+`initialize(g1h->reserved_region(), mapper)` 把 Mapper 预留的虚拟内存地址作为位图存储（§2.3 讲过了），两个 Mapper（`prev_bitmap_storage` 和 `next_bitmap_storage`）来自 ch09/05 的 6 个 Mapper。
 
 ---
 
@@ -1018,7 +1018,7 @@ _worker_id_offset = DirtyCardQueueSet::num_par_ids() + G1ConcRefinementThreads;
 _max_num_tasks = ParallelGCThreads;
 ```
 
-`_worker_id_offset` 是 CM worker 编号的**起始偏移量**。为什么需要偏移？因为 G1 中有多种线程类型都会调用 `add_reference()`——而 `add_reference()` 内部查 `G1FromCardCache`（ch10/06, `_cache[region_idx][worker_id]`），不同线程如果使用相同编号会互相覆盖缓存条目：
+`_worker_id_offset` 是 CM worker 编号的**起始偏移量**。为什么需要偏移？因为 G1 中有多种线程类型都会调用 `add_reference()`——而 `add_reference()` 内部查 `G1FromCardCache`（ch09/06, `_cache[region_idx][worker_id]`），不同线程如果使用相同编号会互相覆盖缓存条目：
 
 ```
 线程编号分配:
@@ -1036,7 +1036,7 @@ CM 代码中用到偏移的地方（`g1RemSet.cpp:989`）：
 cl(g1h, _cm, _worker_id_offset + worker_id)  // worker_id 0..N-1 → 实际编号加上偏移
 ```
 
-这样 CM worker #0 实际使用 G1FromCardCache 的槽位 `_cache[reg][_worker_id_offset + 0]`，不会和 ConcurrentRefine 线程的槽位冲突。三类线程的编号分配详情见 [ch10/06 §3.3.4](06-remset-bot.md)。
+这样 CM worker #0 实际使用 G1FromCardCache 的槽位 `_cache[reg][_worker_id_offset + 0]`，不会和 ConcurrentRefine 线程的槽位冲突。三类线程的编号分配详情见 [ch09/06 §3.3.4](06-remset-bot.md)。
 
 **ConcGCThreads 计算**：
 

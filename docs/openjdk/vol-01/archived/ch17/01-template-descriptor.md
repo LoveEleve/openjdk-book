@@ -2,7 +2,7 @@
 
 > **本文定位**：介绍 `Template` 类的 5 字段设计、`bytecode()` 的指针减法、`_template_table` / `_template_table_wide` 静态数组结构、`def()` 的 6 个重载注册机制，以及 `_desc` 和 `transition()` 的作用。为 17.2 的完整注册流程和 17.3 的代码生成闭环建立概念基础。
 >
-> **前置依赖**：[16.1 interpreter_init](../ch14/01-interpreter-initialization.md)——理解 Template Interpreter 的初始化链和 `StubQueue`/`InterpreterCodelet` 存储结构。
+> **前置依赖**：[16.1 interpreter_init](../ch16/01-interpreter-initialization.md)——理解 Template Interpreter 的初始化链和 `StubQueue`/`InterpreterCodelet` 存储结构。
 >
 > **JDK 版本**：本文基于 **OpenJDK 11u、x86-64、正常启用 Template Interpreter 的 HotSpot 构建**。
 
@@ -10,7 +10,7 @@
 
 ## 1. Template 类：五个字段，没有冗余
 
-在 [16.2 从 Template 描述符到 Codelet](../ch14/02-codelet-generation.md) 中，我们看到一个字节码的模板描述符经过 `CodeletMark → Template::generate()` 变成了可执行的机器码片段。这一节回到描述的起点：**Template 本身存了什么**。
+在 [16.2 从 Template 描述符到 Codelet](../ch16/02-codelet-generation.md) 中，我们看到一个字节码的模板描述符经过 `CodeletMark → Template::generate()` 变成了可执行的机器码片段。这一节回到描述的起点：**Template 本身存了什么**。
 
 ```cpp
 /* === src/hotspot/share/interpreter/templateTable.hpp:44-75 === */

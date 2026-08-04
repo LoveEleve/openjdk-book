@@ -2,7 +2,7 @@
 
 > **本文定位**：`initialize_heap` 阶段 1。在堆内存预留之前，JVM 要先选 GC 类型、创建堆对象和策略对象。本文跟着 `create_heap` 的执行流走：选 GC → new G1CollectorPolicy → new G1CollectedHeap → G1Policy 构造。
 >
-> **前置依赖**：[ch10/01](01-initialize-heap-overview.md)（initialize_heap 五阶段全景）。
+> **前置依赖**：[ch09/01](01-initialize-heap-overview.md)（initialize_heap 五阶段全景）。
 
 ---
 
@@ -13,7 +13,7 @@
 ```cpp
 CollectedHeap* Universe::initialize_heap() {
   _collected_heap = create_heap();    // ← 阶段 1：本文讲这里
-  return _collected_heap->initialize(); // ← 阶段 2：ch10/05-09 讲
+  return _collected_heap->initialize(); // ← 阶段 2：ch09/05-09 讲
 }
 ```
 
@@ -137,20 +137,20 @@ G1CollectedHeap::G1CollectedHeap(G1CollectorPolicy* collector_policy) :
 | `_allocator`（构造函数体） | 对象分配器 |
 | `_heap_sizing_policy`（构造函数体） | 堆大小策略（扩展/收缩） |
 
-**NULL 等 initialize() 创建**（ch10/05-09 讲）：
+**NULL 等 initialize() 创建**（ch09/05-09 讲）：
 
 | 字段 | 作用 | 哪篇讲 |
 |---|---|---|
-| `_card_table` | 卡表 | ch10/05 |
-| `_bot` | 对象边界索引 | ch10/06 |
-| `_hot_card_cache` | 热卡缓存 | ch10/05 |
-| `_g1_rem_set` | 跨 Region 引用追踪 | ch10/06 |
-| `_cr` | 并发细化线程（ConcurrentRefine） | ch10/08 |
-| `_g1mm` | 监控支持（JMX） | ch10/09 |
-| `_ref_processor_stw` / `_ref_processor_cm` | 引用处理器（STW/CM 各一份） | ch10/09 |
-| `_young_gen_sampling_thread` | 年轻代 RSet 采样线程 | ch10/08 |
+| `_card_table` | 卡表 | ch09/05 |
+| `_bot` | 对象边界索引 | ch09/06 |
+| `_hot_card_cache` | 热卡缓存 | ch09/05 |
+| `_g1_rem_set` | 跨 Region 引用追踪 | ch09/06 |
+| `_cr` | 并发细化线程（ConcurrentRefine） | ch09/08 |
+| `_g1mm` | 监控支持（JMX） | ch09/09 |
+| `_ref_processor_stw` / `_ref_processor_cm` | 引用处理器（STW/CM 各一份） | ch09/09 |
+| `_young_gen_sampling_thread` | 年轻代 RSet 采样线程 | ch09/08 |
 | `_archive_allocator` | 归档分配器（CDS 用） | — |
-| `_eden_pool` / `_survivor_pool` / `_old_pool` | JMX 内存池 | ch10/09 |
+| `_eden_pool` / `_survivor_pool` / `_old_pool` | JMX 内存池 | ch09/09 |
 
 **计数器/状态**：
 
@@ -209,7 +209,7 @@ GC 结束
   → 决定是否触发 concurrent marking
 ```
 
-这个循环的具体实现（Analytics 怎么从 19 个序列预测成本、MMU 怎么约束暂停、IHOP 怎么算触发阈值）在 ch10/08 展开。本文只讲构造时准备了哪些"零件"。
+这个循环的具体实现（Analytics 怎么从 19 个序列预测成本、MMU 怎么约束暂停、IHOP 怎么算触发阈值）在 ch09/08 展开。本文只讲构造时准备了哪些"零件"。
 
 ---
 
@@ -255,7 +255,7 @@ void G1Policy::init(G1CollectedHeap* g1h, G1CollectionSet* collection_set) {
 | `_g1h` / `_collection_set` | ❌ NULL——等 `init()` 绑定 |
 | `_bot` / `_hot_card_cache` / `_g1_rem_set` | ❌ NULL——等 `initialize()` 创建 |
 
-**此时堆还没有任何内存**——`mmap` reserve 在 `initialize()` 里做（ch10/03 讲过）。`create_heap` 只是创建了"空壳对象 + 策略引擎"，真正的内存布局在 ch10/05（6 Mapper + HRM）展开。
+**此时堆还没有任何内存**——`mmap` reserve 在 `initialize()` 里做（ch09/03 讲过）。`create_heap` 只是创建了"空壳对象 + 策略引擎"，真正的内存布局在 ch09/05（6 Mapper + HRM）展开。
 
 ---
 

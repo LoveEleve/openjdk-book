@@ -2,7 +2,7 @@
 
 > **本文定位**：背景知识文章。G1 的 8GB 堆不是 malloc 出来的——是 `mmap(PROT_NONE, MAP_NORESERVE)` 先占住地址空间，需要时再用 `mmap(MAP_FIXED, PROT_READ|PROT_WRITE)` 让区间可访问。这就解释了两个概念——reserve（占地址）和 commit（建页表）。
 >
-> **前置依赖**：ch10/01（全景）、ch10/02（Region 大小、heap_alignment=4MB）。
+> **前置依赖**：ch09/01（全景）、ch09/02（Region 大小、heap_alignment=4MB）。
 >
 > **阅读提示**：本文只需要记住两个 flag 组合：(1) `PROT_NONE|MAP_NORESERVE|MAP_ANONYMOUS` = reserve；(2) `MAP_FIXED|PROT_READ|PROT_WRITE|MAP_ANONYMOUS` = commit。以及 G1 在 reserve 完之后靠 `G1PageBasedVirtualSpace` 按页追踪哪些区间已经 commit。
 
@@ -63,7 +63,7 @@ Universe::reserve_heap(8G, 4M)                ← G1 调用的入口
                  └─ anon_mmap(NULL, 8G, ...)  ← 实际系统调用
 ```
 
-其中 `ReservedHeapSpace` 是 `ReservedSpace` 的子类——构造时创建的是同一个 `ReservedSpace` 对象，子类只是在构造函数里额外调了 `initialize_compressed_heap`（因为 `UseCompressedOops` 在 8GB 堆下默认开启），reserve 的同时让堆底落在压缩编码可用的地址范围（ch10/16 详讲）。最底层的 `anon_mmap` 只有一个。
+其中 `ReservedHeapSpace` 是 `ReservedSpace` 的子类——构造时创建的是同一个 `ReservedSpace` 对象，子类只是在构造函数里额外调了 `initialize_compressed_heap`（因为 `UseCompressedOops` 在 8GB 堆下默认开启），reserve 的同时让堆底落在压缩编码可用的地址范围（ch09/16 详讲）。最底层的 `anon_mmap` 只有一个。
 
 `ReservedHeapSpace` 继承自 `ReservedSpace`，构造后 mmap 的结果记在顶层的 7 个字段里。对理解堆预约机制，关键是这三个：
 

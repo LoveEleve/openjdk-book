@@ -2,7 +2,7 @@
 
 > **本文定位**：建立所有存根共同依赖的基础概念。不涉及任何具体存根（resolve/safepoint/deopt），而是讲清楚**存根操作的每一块积木**——RegisterSaver、last_Java_frame、vm_result_2、forward_exception_entry、CodeBlob 类型、CodeBuffer/OopMap。后续 4 篇文章的每一个存根都是这些积木的组合。
 >
-> **前置依赖**：[ch08 stubRoutines_init1](../ch08/01-overview.md)（`forward_exception_entry` 已生成）、[ch06 codeCache_init](../ch06/01-overview.md)（CodeCache 已就绪）。
+> **前置依赖**：[ch09 stubRoutines_init1](../ch09/01-overview.md)（`forward_exception_entry` 已生成）、[ch07 codeCache_init](../ch07/01-overview.md)（CodeCache 已就绪）。
 >
 > **JDK 版本**：本文基于 **OpenJDK 11u、x86-64、正常启用 C2 的 HotSpot 构建**。
 
@@ -404,7 +404,7 @@ __ jmp(rax);                                     // 跳转到目标
 static address forward_exception_entry() { return _forward_exception_entry; }
 ```
 
-`_forward_exception_entry` 是一个 `address`，指向 `StubGenerator::generate_forward_exception()` 在 ch08 生成的异常转发存根。这个存根的功能是：
+`_forward_exception_entry` 是一个 `address`，指向 `StubGenerator::generate_forward_exception()` 在 ch09 生成的异常转发存根。这个存根的功能是：
 
 1. 从 `JavaThread::pending_exception_offset()` 读取 pending exception oop
 2. 查找异常处理器
@@ -419,7 +419,7 @@ assert(StubRoutines::forward_exception_entry() != NULL,
        "must be generated before");
 ```
 
-这是对 ch08 `stubRoutines_init1` 的硬依赖——`forward_exception_entry` 必须在 `generate_stubs()` 之前就绪。
+这是对 ch09 `stubRoutines_init1` 的硬依赖——`forward_exception_entry` 必须在 `generate_stubs()` 之前就绪。
 
 ### 5.3 使用模式
 
