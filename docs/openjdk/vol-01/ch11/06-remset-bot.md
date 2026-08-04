@@ -19,6 +19,9 @@ size_t granularity = HeapRegion::GrainBytes;
 _g1_rem_set = new G1RemSet(this, _card_table, _hot_card_cache);
 _g1_rem_set->initialize(max_capacity(), max_regions());
 
+// 设 FreeRegionList 的 "不切实际长度" sentinel——用于断言 free list 长度不会异常
+FreeRegionList::set_unrealistically_long_length(max_regions() + 1);
+
 // 2. BOT 创建
 _bot = new G1BlockOffsetTable(reserved_region(), bot_storage);
 
@@ -26,6 +29,8 @@ _bot = new G1BlockOffsetTable(reserved_region(), bot_storage);
 _in_cset_fast_test.initialize(start, end, granularity);
 _humongous_reclaim_candidates.initialize(start, end, granularity);
 ```
+
+>`FreeRegionList::set_unrealistically_long_length(max_regions() + 1)` 设的是一个**静态哨兵值** `_unrealistically_long_length`。`max_regions() + 1` 意思是"超过堆里所有 Region 的数量"——对任何合法操作都不可达。FreeRegionList 用 `is_unrealistically_long()` 判断 free list 长度是否碰线（碰线说明内部状态坏了）。这里刚算完 `max_regions()`，顺手设了这个常量。
 
 ---
 

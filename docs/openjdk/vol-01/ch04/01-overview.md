@@ -248,7 +248,7 @@ universe_init()
 
 ## 章节地图
 
-30 个函数背后的子系统原理极为庞大，按子系统/原理分章，共 28 章（ch04-ch32）118 篇文档：
+30 个函数背后的子系统原理极为庞大，按子系统/原理分章，共 28 章（ch04-ch32）121 篇文档：
 
 | 章 | 子系统 | 篇数 | 覆盖的 init_globals 函数 |
 |----|--------|------|--------------------------|
@@ -259,12 +259,12 @@ universe_init()
 | ch09 | stubRoutines_init1 | 5 | stubRoutines_init1 |
 | ch10 | universe_init 总览 + 辅助初始化 + Metaspace 背景 | 7 | universe_init(JavaClasses offsets/InjectedField/ClassLoaderData/JVMFlag 约束/OopStorage) + Metaspace 背景知识 |
 | ch11 | initialize_heap | 10 | universe_init → Universe::initialize_heap（按设计决策组织：Region 管理/屏障/RemSet/并发标记/停顿控制/分配/串联） |
-| ch12 | Metaspace 深入 | 2 | Metaspace 诊断与排查 + CDS 与 Metaspace 交互（核心机制在 ch10/07） |
+| ch12 | Metaspace 诊断与排查 | 5 | jstat + GC 日志 / jcmd VM.metaspace / NMT / JFR / 实战场景（CDS 交互移至 ch13） |
 | ch13 | CDS | 6 | universe_init → MetaspaceShared::initialize_shared_spaces |
 | ch14 | SymbolTable + StringTable + ResolvedMethodTable | 4 | universe_init → 三个 Table::create_table |
 | ch15 | LatestMethodCache | 3 | universe_init → 6× LatestMethodCache |
-| ch16 | interpreter_init | 5 | interpreter_init |
-| ch17 | templateTable_init | 4 | templateTable_init |
+| ch16 | interpreter_init | 3 | interpreter_init |
+| ch17 | templateTable_init | 3 | templateTable_init |
 | ch18 | SharedRuntime::generate_stubs | 5 | SharedRuntime::generate_stubs |
 | ch19 | universe2_init | 5 | universe2_init |
 | ch20 | javaClasses_init | 4 | javaClasses_init |
@@ -283,7 +283,7 @@ universe_init()
 
 **重头戏**（6+ 篇）：ch08 VM_Version(6) / ch10 universe_init+Metaspace(7) / ch11 initialize_heap(10) / ch13 CDS(6) / ch25 compileBroker(6)
 
-**5 篇级**：ch07 codeCache / ch09 stubRoutines1 / ch16 interpreter / ch18 generate_stubs / ch19 universe2 / ch29 universe_post / ch30 stubRoutines2
+**5 篇级**：ch07 codeCache / ch09 stubRoutines1 / ch18 generate_stubs / ch19 universe2 / ch29 universe_post / ch30 stubRoutines2
 
 写作顺序按依赖关系：ch04 → ch06-ch09（Block A）→ ch10-ch15（Block B）→ ch16-ch24（Block C）→ ch25-ch28（Block D）→ ch29-ch32（Block E）。
 
