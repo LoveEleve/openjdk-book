@@ -312,11 +312,34 @@
               '<div class="toc-head">' +
                 '<button type="button" class="toc-back" aria-label="返回" title="返回">← 返回</button>' +
                 '<button type="button" class="toc-top" aria-label="回到顶部" title="回到顶部">↑ 顶部</button>' +
+                '<button type="button" class="toc-collapse" aria-label="收起目录" title="收起目录">收起 →</button>' +
               '</div>' +
               '<div class="toc-body"></div>';
             document.body.appendChild(toc);
+
+            var openBtn = document.createElement('button');
+            openBtn.id = 'toc-open-btn';
+            openBtn.type = 'button';
+            openBtn.textContent = '目录';
+            openBtn.title = '展开目录';
+            document.body.appendChild(openBtn);
+
+            toc.querySelector('.toc-collapse').onclick = function () { setTocCollapsed(true); };
+            openBtn.onclick = function () { setTocCollapsed(false); };
           }
           return toc;
+        }
+
+        function setTocCollapsed(collapsed) {
+          var toc = ensureTocDom();
+          toc.classList.toggle('is-collapsed', collapsed);
+          var hasItems = toc.getAttribute('data-has-items') === '1';
+          document.body.classList.toggle('toc-collapsed', collapsed && hasItems);
+          try { localStorage.setItem('docsify:toc-collapsed', collapsed ? '1' : '0'); } catch (e) {}
+        }
+
+        function isTocCollapsed() {
+          try { return localStorage.getItem('docsify:toc-collapsed') === '1'; } catch (e) { return false; }
         }
 
         function setTocBackState() {
@@ -334,6 +357,11 @@
           if (!body) return false;
 
           toc.setAttribute('data-has-items', items.length ? '1' : '0');
+
+          // 同步收起状态（跨页面持久）
+          var collapsed = isTocCollapsed() && items.length > 0;
+          toc.classList.toggle('is-collapsed', collapsed);
+          document.body.classList.toggle('toc-collapsed', collapsed);
 
           if (!items.length) { body.innerHTML = ''; return true; }
 

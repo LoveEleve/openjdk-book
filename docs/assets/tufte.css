@@ -110,6 +110,9 @@ body {
 .markdown-section li { margin: 0.2em 0; }
 .markdown-section hr { border: none; border-top: 1px solid var(--rule); margin: 3rem 0; max-width: var(--text-width); }
 .markdown-section img { max-width: 100%; }
+/* 直接挂在正文容器下的图片（raw HTML 图）同样不许超栏，避免与右侧目录重叠
+   !important：medium-zoom attach 时会写内联 max-width:100% */
+.markdown-section > img { max-width: var(--text-width) !important; }
 .markdown-section a > img { cursor: zoom-in; }
 
 /* ---------- 引用块：无左边框，缩进 + 灰 ---------- */
@@ -244,12 +247,36 @@ label.sidenote-number::after {
   }
 }
 .toc-head { display: flex; gap: 1em; margin-bottom: 0.6em; }
-.toc-back, .toc-top, .toc-close {
+.toc-back, .toc-top, .toc-close, .toc-collapse {
   background: none; border: none; padding: 0; cursor: pointer;
   font-family: var(--body-font); font-size: 0.78rem; color: var(--ink-faint);
   text-decoration: underline; text-underline-offset: 0.15em;
 }
-.toc-close { display: none; }
+.toc-collapse { margin-left: auto; }
+.toc-collapse:hover, .toc-back:hover, .toc-top:hover { color: var(--ink); }
+
+/* 收起后的"目录"小按钮：贴在右缘，不抢眼 */
+#toc-open-btn {
+  display: none;
+  position: fixed;
+  top: 5rem;
+  right: 1.2rem;
+  z-index: 20;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--body-font);
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+#toc-open-btn:hover { color: var(--ink); }
+@media (min-width: 1400px) {
+  .toc-aside.is-collapsed { display: none !important; }
+  body.toc-collapsed #toc-open-btn { display: block; }
+}
 .toc-body-a {
   display: block;
   color: var(--ink-soft);
