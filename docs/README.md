@@ -16,8 +16,6 @@
 
 ## 卷 0 · 地基
 
-## 卷 0 · 地基
-
 * [第一章 — java 命令到底是什么](openjdk/vol-00/ch01.md) — 一个 C 编译出来的可执行文件
 * [第二章 — 编译你自己的 JDK](openjdk/vol-00/ch02.md) — configure → make → 你的第一个 JDK
 * [第三章 — make 到底做了什么](openjdk/vol-00/ch03.md) — 8 阶段流水线拆解 make 的 1 分 31 秒
@@ -48,6 +46,22 @@
   * [4.3 bytecodes_init — JVM 字节码表的初始化](openjdk/vol-01/ch04/03-bytecodes.md)
   * [4.4 classLoader_init1 边界 + os_init_globals 空实现](openjdk/vol-01/ch04/04-classloader-boundary.md)
   * [4.5 四个 trivial 函数合并](openjdk/vol-01/ch04/05-trivial-merged.md)
+* [第六章 — Policy 选择：Serial vs Parallel vs G1](openjdk/vol-01/ch06/01-policy-selection.md) — GC 策略根据 VM 配置决定
+* [第七章 — 堆布局初始化](openjdk/vol-01/ch07/01-heap-layout.md) — Collec``tedHeap 的初始堆地址空间
+* [第八章 — CPU 特性检测](openjdk/vol-01/ch08/01-cpuid.md) — VM_Version::get_processor_features()
+* [第九章 — StubRoutines 初始化](openjdk/vol-01/ch09.md) — 运行时 Stub 桩生成（6 篇）
+  * [9.1 Stub 概念](openjdk/vol-01/ch09/01-stub-what-is.md)
+  * [9.2 StubRoutines 表](openjdk/vol-01/ch09/02-stubroutines-table.md)
+  * [9.3 BufferBlob 创建](openjdk/vol-01/ch09/03-bufferblob-create.md)
+  * [9.4 机器码写入链](openjdk/vol-01/ch09/04-code-writing-chain.md)
+  * [9.5 StubGenerator](openjdk/vol-01/ch09/05-stubgenerator.md)
+  * [9.6 initialize1 全貌](openjdk/vol-01/ch09/06-initialize1-full.md)
+* [第十章 — Universe 初始化](openjdk/vol-01/ch10.md) — JVM 基本类型系统创建（7 篇）
+* [第十一章 — G1 GC 初始化](openjdk/vol-01/ch11/01-initialize-heap-overview.md) — G1CollectedHeap 全链路（12 篇）
+* [第十三章 — LatestMethodCache](openjdk/vol-01/ch13/01-latest-method-cache.md) — O(n)→O(1) 的方法查找缓存
+* [第十四章 — 符号表/字符串表/方法表](openjdk/vol-01/ch14.md) — 三张哈希表的创建（3 篇）
+* [第十五章 — init_globals 门面](openjdk/vol-01/ch15/01-init-globals-facade.md) — 全部 30 个初始化步骤的总编排
+* [第十六章 — 解释器初始化](openjdk/vol-01/ch16/01-interpreter-init.md) — TemplateInterpreter::initialize() 五步骨架
 
 ## 卷 2 · 对象 — Java 的 C++ 真身
 
