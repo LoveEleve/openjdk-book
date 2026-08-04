@@ -2,11 +2,17 @@
 <span class="home-rain">0 1 1 0 1 0 1 1<br>1 0 0 1 0 1 0 0<br>1 1 0 0 1 0 1 1<br>0 0 1 1 0 1 0 0<br>1 0 1 0 1 1 0 1</span>
 <svg viewBox="0 0 80 100" width="70" height="88">
   <defs><style>.s{fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:2.2;}</style></defs>
-  <path class="s" d="M40 10C30 10 25 18 25 30L25 40C25 48 20 52 12 52"/>
-  <path class="s" d="M40 90C30 90 25 82 25 70L25 60C25 52 20 48 12 48"/>
-  <path class="s" d="M40 10C50 10 55 18 55 30L55 40C55 48 60 52 68 52"/>
-  <path class="s" d="M40 90C50 90 55 82 55 70L55 60C55 48 60 48 68 48"/>
-  <circle class="s" cx="40" cy="50" r="4" fill="currentColor" opacity=".6"/>
+  <!-- Tux - Linux 企鹅 -->
+  <ellipse class="s" cx="40" cy="65" rx="28" ry="30" stroke-width="2"/>
+  <ellipse class="s" cx="40" cy="60" rx="16" ry="19" opacity=".7" stroke-width="1.2"/>
+  <!-- 嘴 -->
+  <path class="s" d="M30 38L40 42L50 38" stroke-width="1.8"/>
+  <!-- 眼睛 -->
+  <circle cx="33" cy="32" r="2.5" fill="currentColor"/>
+  <circle cx="47" cy="32" r="2.5" fill="currentColor"/>
+  <!-- 脚 -->
+  <ellipse class="s" cx="26" cy="92" rx="10" ry="5" stroke-width="2"/>
+  <ellipse class="s" cx="54" cy="92" rx="10" ry="5" stroke-width="2"/>
 </svg>
 </div>
 
