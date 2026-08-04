@@ -748,6 +748,10 @@
 
         /* ---------- giscus 评论区 ---------- */
         var GISCUS_THEME = (function () {
+          // localhost 预览时 giscus.app 拉本地 CSS 会被 Chrome 拦截（Private Network Access）
+          // → 本地用内置 light；线上用站内自定义主题
+          var h = location.hostname;
+          if (h === 'localhost' || h === '127.0.0.1') return 'light';
           var base = (typeof pageConfig.basePath === 'string') ? pageConfig.basePath : 'docs/';
           return location.origin + '/' + base.replace(/^\//, '').replace(/\/?$/, '/') + 'assets/giscus-theme.css';
         })();
