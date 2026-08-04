@@ -62,9 +62,15 @@ body {
   border-bottom-color: #e8e4d8 !important;
 }
 
-/* 链接与按钮去蓝 */
-a { color: #111 !important; text-decoration: underline; text-underline-offset: 0.15em; }
+/* 链接去蓝（排除按钮，否则会盖掉 .btn-primary 的浅色文字变成黑底黑字） */
+a:not(.btn) { color: #111 !important; text-decoration: underline; text-underline-offset: 0.15em; }
 .btn-link, .Link--primary { color: #111 !important; }
+.btn-primary, a.btn-primary {
+  color: #fffff8 !important;
+  background: #111111 !important;
+  border-color: #111111 !important;
+}
+.btn-primary:hover, a.btn-primary:hover { background: #333333 !important; }
 .tabnav-tab.selected { border-color: #ddd8cc #ddd8cc #fffff8 !important; background: #fffff8 !important; }
 
 /* 输入框融入纸面 */
