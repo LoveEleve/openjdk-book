@@ -2,7 +2,7 @@
 
 > **本文定位**：`init_globals()` 第 10-13、15-16 步——在 `universe_init`（宇宙内核就绪）与 `interpreter_init`（解释器模板上架）之间，完成五项门面级初始化：GC 屏障汇编桩、JIT 编译触发阈值、JVM_ACC 标识位、调试 GC 压力和寄存器命名。这五步中只有一个是"大"的（JIT 阈值），其余四项都是一句话级别的死数据配置——但它们共同构成了解释器和 JIT 编译器"出手"前的最后一组门面就绪。
 >
-> **前置依赖**：ch12（三表就绪）、ch10（G1 BarrierSet 初始化）、ch09（universe_init 序列总览）
+> **前置依赖**：[ch12 三表就绪](openjdk/vol-01/ch12/02-string-table-create.md)、[ch10 G1 BarrierSet](openjdk/vol-01/ch10)、[ch09 universe_init](openjdk/vol-01/ch09)
 
 ---
 

@@ -2,7 +2,7 @@
 
 > **本文定位**：`init_globals()` 第 10-13、15-16 步——五项基础设施的预配。在 `universe_init`（ch12 三表就绪）与 `interpreter_init`（ch14 解释器模板上架）之间。五步中四项是死数据配置，只有一条（JIT 阈值）涉及运行时逻辑——但它们合在一起回答了同一个问题：**解释器和 JIT 在出手之前，需要哪些全局数据已经就位？**
 >
-> **前置依赖**：ch12（三表就绪）、ch10（G1 BarrierSet 初始化）、ch09（universe_init 序列总览）
+> **前置依赖**：[ch12 三表就绪](openjdk/vol-01/ch12/02-string-table-create.md)、[ch10 G1 BarrierSet](openjdk/vol-01/ch10)、[ch09 universe_init](openjdk/vol-01/ch09)
 
 ### 前置概念速查
 

@@ -2,7 +2,7 @@
 
 > **本文定位**：`init_globals()` 第 11、14 步——解释器的全部汇编代码生成。这不是一两个函数调用，而是 `TemplateInterpreterGenerator::generate_all()` 所完成的一整套 Codelet 生成：方法入口、返回、调用分派、异常处理、安全点、去优化，以及将 202 条字节码模板逐个生成为可执行的汇编代码。这是 `universe_init` 之后 **JVM 真正的"代码生成"阶段**。
 >
-> **前置依赖**：ch13（JIT 阈值设立）、ch12（三表就绪）、ch10（G1 BarrierSet）、ch09（universe_init 序列总览）
+> **前置依赖**：[ch13 JIT 阈值设立](openjdk/vol-01/ch13/01-init-globals-facade.md)、[ch12 三表就绪](openjdk/vol-01/ch12/02-string-table-create.md)、[ch10 G1 BarrierSet](openjdk/vol-01/ch10)、[ch09 universe_init](openjdk/vol-01/ch09)
 
 ---
 

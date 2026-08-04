@@ -2,7 +2,7 @@
 
 > **本文定位**：`init_globals()` 第 11、14 步——解释器的全部汇编代码生成。`TemplateInterpreterGenerator::generate_all()` 一个函数生成了解释器的整套代码：方法入口、返回、调用分派、异常处理、安全点、去优化，以及将 202 条字节码模板逐个生成可执行的汇编 Codelet。这是 `universe_init`（宇宙创造完毕）之后 **JVM 真正开始生成机器指令**的时刻。
 >
-> **前置依赖**：ch13（JIT 阈值设立）、ch12（三表就绪）、ch10（G1 BarrierSet）、ch09（universe_init 序列总览）
+> **前置依赖**：[ch13 JIT 阈值设立](openjdk/vol-01/ch13/01-init-globals-facade.md)、[ch12 三表就绪](openjdk/vol-01/ch12/02-string-table-create.md)、[ch10 G1 BarrierSet](openjdk/vol-01/ch10)、[ch09 universe_init](openjdk/vol-01/ch09)
 
 ---
 
@@ -97,7 +97,7 @@ class Template {
 };
 ```
 
-以 `_iconst_2` 为例——`TemplateTable::initialize()` 中有一行：
+步骤(2)中调用了 `TemplateTable::initialize()`——它的内部是 200+ 行 `def` 函数调用。`def` 是 `TemplateTable::def()`，一个注册函数，每调用一次就往 `_template_table[202]` 数组的某个槽位填入一个 `Template` 对象——"每个字节码的配方"。以 `_iconst_2` 为例，`initialize()` 中有一行：
 
 ```cpp
 def(Bytecodes::_iconst_2, ____|____|____|____, vtos, itos, iconst, 2);
@@ -114,26 +114,20 @@ def(Bytecodes::_iconst_2, ____|____|____|____, vtos, itos, iconst, 2);
 | 第 5 个 | `iconst` | `_gen` | 生成器函数——调它产生对应汇编代码 |
 | 第 6 个 | `2` | `_arg` | 生成器参数——"压入常量 2" |
 
-`____` 是宏常量 0——四个位置是四个**开关**，控制这个字节码的 Codelet 有什么特殊行为：
+`____` 是宏常量 0——四个位置对应四个标志位，每个标志控制该字节码对应的 Codelet 在**生成时和运行时**的一种特殊行为。四个位的含义和各字节码的取值情况在 §3.2 完整展开，这里先用 `_iconst_2` 逐一说明为什么全是 0：
 
-- 开关 1：要不要读字节码后面的**操作数**？（`_bipush` 需要——它后面有一个字节的值要读；`_iconst_2` 不需要——2 是编译期常量）
-- 开关 2：要不要**自己跳到**下一条字节码？（绝大多数需要；不设也没关系——dispatch 表兜底）
-- 开关 3：要不要**调 JVM** 帮忙？（`_invokevirtual` 需要——解析方法得进 C++ 运行时；`_iconst_2` 不需要——纯数学压栈）
-- 开关 4：是不是**wide 版本**？
+| 标志位 | 含义 | 为何 `_iconst_2` 为 0 |
+|--------|------|----------------------|
+| `ubcp`（uses_bcp） | 该字节码需要**读取 bcp 后面的操作数**——bcp 是解释器的"程序计数器"，指向当前字节码。`_bipush` 设 `ubcp`，因为要读 bcp 后面的 1 个字节作为压入的数值 | `_iconst_2` 压入的常量 2 是编译期已知的——不需要读操作数 |
+| `disp`（does_dispatch） | 该 Codelet 执行完后**自行跳转到下一条字节码**（不设则靠 dispatch 表兜底）。绝大多数设此位——解释器不希望每个 Codelet 末尾多一条 dispatch 查表指令 | `_iconst_2` 功能极简（压栈后返回），但也设了此位（实际源码中此位为 false——见注） |
+| `clvm`（calls_vm） | 该 Codelet 内部可能通过 `call_VM` 宏**进入 C++ 运行时**——需要处理 JNI、safepoint、OopMap 等。`_invokevirtual`、`_new`、`_ldc` 等涉及类加载/方法解析的字节码设此位 | `_iconst_2` 纯数学压栈，不需要 VM 帮助 |
+| `iswd`（wide_bit） | 该模板是字节码的 **wide 版本**——wide 前缀把局部变量索引从 1 字节扩展为 2 字节（如 `_iload_w` 用 2 字节索引） | `_iconst_2` 没有 wide 形式 |
 
-全关 = 0 = `____|____|____|____`。全开着呢？`_invokevirtual` 用 `ubcp|disp|clvm|____`——前三个开关打开，第四个关。`____` 就是"这一位关着"的意思，把四位串起来让读者一眼看到每个开关是开还是关。
+四个标志位全为 0 时的表示：`____|____|____|____`。当某一位被设时，该位的位置用对应的标志常量替代。`_invokevirtual` 需要三个标志，所以其 `def` 调用的第二参数为 `ubcp|disp|clvm|____`——前三个设了，第四位保持 `____`。（§3.2 完整展开 202 个字节码的标志位组合。）
 
-这行 `def` 的结果：`_template_table[_iconst_2]` 槽位被填入一个配方对象。步骤(4)中 `generate_all()` 遍历到该槽位时，取出 `_gen`（=`iconst` 的函数地址），调 `_gen(2)`——生成 "push 2" 的汇编指令，写入新的 Codelet。`Template` 类本身只存数据（templateTable.hpp:44，五个字段：`_flags`、`_tos_in`、`_tos_out`、`_gen`、`_arg`），`_template_table[202]` 中每个槽位存一个配方对象。Template 是"字节码 → 汇编生成器"的映射表条目。（§3 将展示全部 202 个字节码的 def 如何被注册。）
+这行 `def` 调用完成后，`_template_table[_iconst_2]` 数组槽位被填入一个 `Template` 对象。`def` 内部将收到的 6 个入参按顺序填充：第 1 个（`_iconst_2`）是数组下标——决定填入哪个槽位，不存入 Template；第 2-6 个依次填入 Template 的五个字段——`_flags`（=0）、`_tos_in`、`_tos_out`、`_gen`、`_arg`。五个字段**全部填充**，`_flags` = 0 不等于"没填"——它是"四个标志位全关"的具体值。
 
-| 字段 | 值 | 含义 |
-|------|----|------|
-| `_flags` | 0 | 不需要 bcp（字节码无操作数）、不调 VM、自行分派 |
-| `_tos_in` | `vtos` | 执行前不关心栈顶类型——管它栈顶是 int、ref、还是空 |
-| `_tos_out` | `itos` | 执行后栈顶变成 int（压入了常量 2） |
-| `_gen` | `iconst` 的函数地址 | 生成器——调它生成对应的汇编代码 |
-| `_arg` | 2 | 传给生成器的参数——压入的值是 2 |
-
-步骤(2)中 `TemplateTable::initialize()` 填充了这个槽位。步骤(4)中 `generate_all()` 遍历到 `_template_table[_iconst_2]` 时，取到该 `Template`，调 `_gen(2)`——`iconst(2)` 在 Codelet 中生成 "push 2" 的汇编指令。`_tos_in` / `_tos_out` 告诉解释器如何管理操作数栈缓存（TosState cache）——在分派到该 Codelet 之前，可能需要在栈顶弹出或写入值以保证类型匹配。
+关于 `_gen` 的值 `iconst`：它是 `TemplateTable` 类的一个**静态成员函数**的地址——C++ 中函数名可以直接转成函数的内存地址，`Template._gen` 存的就是这个地址。`generate_all()`（§2）在后面会逐个取出每个 Template 的 `_gen`，按地址调用生成器产生该字节码的机器码。完整的 202 个字节码的 `def` 注册过程见 §3。
 
 `TemplateTable::_template_table[202]` 是一个静态数组——每个 JVM 字节码在该数组中对应一个 `Template` 对象。Template 是"字节码 → 汇编生成器"的映射表条目。（§3 将展示全部 202 个字节码的 def 如何被注册。）
 
@@ -188,7 +182,7 @@ void TemplateInterpreterGenerator::generate_all() {
 
 `codelet_size()` 实际分配的量不固定——它取 `StubQueue::available_space() - 2K`，保证 CodeBuffer 中有足够空间容纳当前 Codelet。debug 构建中所有分配乘以 4（`InterpreterCodeSize * 4`），为调试断言和边界检查留额外空间。
 
-> `StubQueue` 是解释器专用的代码缓冲区，与 JIT 用的 `CodeCache`（ch08/03）是两个独立系统：`CodeCache` 存编译后的本地代码（动态创建、可被 sweeper 回收），`StubQueue` 只在 `init_globals` 期间分配一次，大小固定、永不清除。
+> `StubQueue` 通过 `BufferBlob::create()` 从 CodeCache（CodeHeap）分配内存——与 JIT 编译产物共享同一个可执行代码池（`BufferBlob` 结构见 ch09/03）。`StubQueue` 在 `init_globals` 期间一次性分配，其后永不清除。
 
 ---
 
