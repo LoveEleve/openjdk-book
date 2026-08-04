@@ -434,7 +434,7 @@ G1MonitoringSupport 的构造函数（g1MonitoringSupport.cpp:78-180）做了三
 2. 创建 3 个 `CollectorCounters`（incremental / full / concurrent 三类 GC 次数和耗时计数器）
 3. 创建 2 个 `GenerationCounters` + 4 个 `HSpaceCounters`，即上表映射到的 jstat 列
 
-所有这些计数器受 `UsePerfData` 开关控制（见 [ch03/06 perfMemory_init](#/openjdk/vol-01/ch03/06-main-thread-create.md#perfmemory_init--jstat-的共享内存文件)），默认打开。
+所有这些计数器受 `UsePerfData` 开关控制（见 [ch03/06 perfMemory_init](openjdk/vol-01/ch03/06-main-thread-create.md#perfmemory_init--jstat-的共享内存文件)），默认打开。
 
 
 
