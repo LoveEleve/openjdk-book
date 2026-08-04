@@ -409,8 +409,30 @@
             openBtn.title = '展开目录';
             document.body.appendChild(openBtn);
 
+            // 窄屏 TOC 浮标（<1200px）
+            var badge = document.createElement('button');
+            badge.id = 'toc-badge';
+            badge.type = 'button';
+            badge.textContent = '目录';
+            badge.title = '展开目录';
+            document.body.appendChild(badge);
+
+            // 窄屏 TOC 遮罩
+            var overlayBg = document.createElement('div');
+            overlayBg.id = 'toc-overlay-bg';
+            document.body.appendChild(overlayBg);
+
             toc.querySelector('.toc-collapse').onclick = function () { setTocCollapsed(true); };
             openBtn.onclick = function () { setTocCollapsed(false); };
+
+            badge.onclick = function () {
+              toc.classList.add('toc-overlay');
+              overlayBg.classList.add('open');
+            };
+            overlayBg.onclick = function () {
+              toc.classList.remove('toc-overlay');
+              overlayBg.classList.remove('open');
+            };
           }
           return toc;
         }
@@ -442,6 +464,9 @@
           if (!body) return false;
 
           toc.setAttribute('data-has-items', items.length ? '1' : '0');
+
+          // 窄屏 TOC 浮标：有标题时才显示
+          document.body.classList.toggle('page-has-toc', items.length > 0);
 
           // 同步收起状态（跨页面持久）
           var collapsed = isTocCollapsed() && items.length > 0;
@@ -562,6 +587,8 @@
               var body = toc.querySelector('.toc-body');
               if (body) body.innerHTML = '';
             }
+            document.body.classList.remove('page-has-toc');
+            return;
             return;
           }
           if (tocRenderTimer) clearTimeout(tocRenderTimer);
@@ -594,14 +621,18 @@
             var currentPath = (vm && vm.route && vm.route.path) ? vm.route.path : (location.hash || '#/');
             if (isHomePath(currentPath)) return;
 
-            // 面包屑：一行小字 + ⌘K 提示
+            // 面包屑：一行小字 + ⌘K 提示 + 移动端"搜索"
             var bc = ensureBreadcrumb(section);
             var h1 = section.querySelector('h1');
             var title = h1 ? (h1.textContent || '').replace(/\s+/g, ' ').trim() : '文章';
-            bc.innerHTML = '<a href="#/">首页</a>' +
+            bc.innerHTML = '<div class="bc-left"><a href="#/">首页</a>' +
               '<span class="sep"> / </span>' +
-              '<span>' + title + '</span>' +
-              '<span class="kbd-hint">⌘K 搜索</span>';
+              '<span>' + title + '</span></div>' +
+              '<span class="kbd-hint">⌘K 搜索</span>' +
+              '<span class="mobile-search-hint">搜索</span>';
+            // 移动端搜索按钮：openFts 在闭包内，需通过事件绑定
+            var ms = bc.querySelector('.mobile-search-hint');
+            if (ms) ms.onclick = function () { openFts(); loadSearchIndex(vm); };
 
             // 上一篇 / 下一篇
             var nav = section.querySelector('#page-nav');
