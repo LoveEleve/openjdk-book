@@ -21,7 +21,7 @@ init_globals()（runtime/init.cpp:101）:
 
 | 阶段 | generate_all() 中生成的桩 | 用途 |
 |------|--------------------------|------|
-| ① | 慢速签名处理 | 方法参数列表的通用适配 |
+| (1) | 慢速签名处理 | 方法参数列表的通用适配 |
 | (2) | 返回入口点（10 种 TosState） | 方法返回到调用者 |
 | (3) | invoke 返回入口点（3 种 × 10 种 TosState） | invokevirtual / invokeinterface / invokedynamic 的返回处理 |
 | (4) | 早期返回入口点 | JVMTI PopFrame / ForceEarlyReturn |

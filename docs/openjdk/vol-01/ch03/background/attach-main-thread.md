@@ -239,10 +239,10 @@ JavaThread._osthread → osthread {
 ```cpp
 void os::Linux::hotspot_sigmask(Thread* thread) {
   sigset_t caller_sigmask;
-  pthread_sigmask(SIG_BLOCK, NULL, &caller_sigmask);   // ①
-  thread->osthread()->set_caller_sigmask(caller_sigmask); // ②
-  pthread_sigmask(SIG_UNBLOCK, unblocked_signals(), NULL); // ③
-  if (!ReduceSignalUsage) {                                // ④
+  pthread_sigmask(SIG_BLOCK, NULL, &caller_sigmask);   // (1)
+  thread->osthread()->set_caller_sigmask(caller_sigmask); // (2)
+  pthread_sigmask(SIG_UNBLOCK, unblocked_signals(), NULL); // (3)
+  if (!ReduceSignalUsage) {                                // (4)
     if (thread->is_VM_thread())
       pthread_sigmask(SIG_UNBLOCK, vm_signals(), NULL);
     else
@@ -251,7 +251,7 @@ void os::Linux::hotspot_sigmask(Thread* thread) {
 }
 ```
 
-**① 拍照保存当前的屏蔽字。** `caller_sigmask` 是栈上的局部变量，类型是 `sigset_t`（在 glibc 上是 `unsigned long[16]——1024 bit 的位图，覆盖 1024 个信号位置）。`pthread_sigmask(SIG_BLOCK, NULL, &caller_sigmask)` 第二个参数是 `NULL`——不修改屏蔽字，只把当前每个信号位填到 `caller_sigmask` 数组里。常见的主线程默认情况下 word 0 会有非零位（CRT/启动器屏蔽了 SIGINT、SIGHUP 等），JNI 附加线程的值取决于原生代码的设置。`caller_sigmask` 在调试器中显示如下：
+**(1) 拍照保存当前的屏蔽字。** `caller_sigmask` 是栈上的局部变量，类型是 `sigset_t`（在 glibc 上是 `unsigned long[16]——1024 bit 的位图，覆盖 1024 个信号位置）。`pthread_sigmask(SIG_BLOCK, NULL, &caller_sigmask)` 第二个参数是 `NULL`——不修改屏蔽字，只把当前每个信号位填到 `caller_sigmask` 数组里。常见的主线程默认情况下 word 0 会有非零位（CRT/启动器屏蔽了 SIGINT、SIGHUP 等），JNI 附加线程的值取决于原生代码的设置。`caller_sigmask` 在调试器中显示如下：
 
 ![caller_sigmask 调试视图](../assets/signal-mask-caller.png)
 

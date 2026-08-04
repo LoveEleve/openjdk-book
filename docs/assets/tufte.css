@@ -444,15 +444,23 @@ h3:hover .heading-link-btn, h4:hover .heading-link-btn { opacity: 1; }
    响应式
    ============================================================ */
 
-/* 平板：边距区压缩，边注变行内缩进块 */
+/* 平板：边距区压缩，调整正文留白 */
 @media (max-width: 1399px) {
   .markdown-section { padding-left: 5%; width: 90%; }
+}
+
+/* 窄屏（<1200px）：边距空间不够浮右，边注变行内缩进块（左竖线 + 小字 + 灰色区分正文） */
+@media (max-width: 1199px) {
   .sidenote {
     float: none;
     display: block;
     width: auto;
-    margin: 0.8em 0 0.8em 2em;
+    margin: 0.8em 0 0.8em 1em;
+    padding-left: 0.8em;
+    border-left: 2px solid var(--rule);
     clear: none;
+    font-size: 0.82rem;
+    color: var(--ink-soft);
   }
 }
 
