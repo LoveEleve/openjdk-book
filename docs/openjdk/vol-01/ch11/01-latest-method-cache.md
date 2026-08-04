@@ -2,7 +2,7 @@
 
 > **本文定位**：`LatestMethodCache` 全线——为什么类还没加载就创建 6 个空缓存、`init()` 启动填充 + `get_method()` 快速查找、`method_idnum` 而非 `Method*` 保证 RedefineClasses 安全、为什么单槽即最优。
 >
-> **前置依赖**：[ch09/07 Metaspace 背景知识](../ch09/07-metaspace.md)——理解 Method*、Klass*、`method_idnum`。
+> **前置依赖**：[ch09/07 Metaspace](#/openjdk/vol-01/ch09/07-metaspace.md)——理解 Method*、Klass*、`method_idnum`。
 >
 > **JDK 版本**：本文基于 **JDK 11u** 源码。
 

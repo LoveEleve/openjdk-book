@@ -189,4 +189,4 @@ ch10 用了 12 篇文章（01-11 + 补章 12b）、覆盖 200+ 行 initialize()�
 
 答案是 G1 的全部特殊性都在这里：不是一块连续内存（6 个 Mapper 分治管理）、不是简单分代（Region 类型动态切换）、不是暂停即完（并发标记 + 并发 refine + 队列系统）、失败要优雅（撤离失败有 PreservedMarks 兜底）。这 200 行就是 G1 设计哲学的浓缩。
 
-> **下一篇**：[ch11.1 LatestMethodCache](../ch11/01-latest-method-cache.md)——`universe_init()` 第 (8) 步，堆刚建好后的 6 个单槽方法缓存。
+> **下一篇**：[ch11.1 LatestMethodCache](#/openjdk/vol-01/ch11/01-latest-method-cache.md)——`universe_init()` 第 (8) 步，堆刚建好后的 6 个单槽方法缓存。

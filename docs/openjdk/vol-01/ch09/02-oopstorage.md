@@ -4,7 +4,7 @@
 >
 > 本文从设计推演出发——如果你来设计这个容器，你会怎么做？每一步都是"最简单的方案为什么不行，下一步怎么修"。
 >
-> **前置依赖**：Handle 的机制见 [ch03/background/handles-all.md](../ch03/background/handles-all.md)。
+> **前置依赖**：Handle 的机制见 [ch03/background/handles-all](#/openjdk/vol-01/ch03/background/handles-all)。
 
 ---
 
@@ -38,7 +38,7 @@ GC 后：AppClassLoader 被移到 0x7fdc02000000
 Handle:   Handle → 槽位(oop*)  → [AppClassLoader]  ← GC 更新槽位，安全
 ```
 
-（Handle/HandleArea/HandleMark 机制见 [ch03/background/handles-all.md](../ch03/background/handles-all.md)）
+（Handle/HandleArea/HandleMark 机制见 [ch03/background/handles-all](#/openjdk/vol-01/ch03/background/handles-all)）
 
 但 HandleArea 是 Arena（栈式分配器）。HandleMark 构造时记录当前水位，析构时回滚——HandleMark 期间分配的所有槽位全部回收。
 
