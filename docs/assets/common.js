@@ -863,10 +863,8 @@
         }
 
         /* ---------- giscus 评论区 ---------- */
-        // Tufte 自定义主题走 jsdelivr CDN（https 公网地址，本地/线上都可用；
-        // giscus.app 无法加载 localhost CSS —— Chrome Private Network Access 拦截）
-        // 注意：@分支 的 CDN 缓存刷新不可靠，用 commit hash 锁定版本；改动主题后需更新此 hash
-        var GISCUS_THEME = 'https://cdn.jsdelivr.net/gh/LoveEleve/openjdk-book@48ec9f0ea837ffcb41f0e6ad9830f85e578cc4da/docs/assets/giscus-theme.css';
+        // Tufte 自定义主题走 jsdelivr CDN，用 @main 分支自动跟踪更新
+        var GISCUS_THEME = 'https://cdn.jsdelivr.net/gh/LoveEleve/openjdk-book@main/docs/assets/giscus-theme.css';
         var GISCUS_CFG = {
           src: 'https://giscus.app/client.js',
           repo: 'LoveEleve/LoveEleve.github.io',
