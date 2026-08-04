@@ -7,37 +7,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0" />
   <meta name="referrer" content="no-referrer" />
 
-  <!-- CDN 样式基座 -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple.css" />
+  <!-- 字体：JetBrains Mono（代码） + Noto Serif SC（中文衬线），et-book 自托管见 tufte.css -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap" />
 
-  <!-- 公共样式 -->
-  <link rel="stylesheet" href="docs/assets/common.css" />
-  <link rel="stylesheet" href="docs/assets/paper.css?v=2" />
-
-  <!-- 根页面特有样式 -->
-  <style>
-    :root {
-      --body-font: "LXGW WenKai", "PingFang SC", "Microsoft YaHei", sans-serif;
-      --code-font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    }
-    body { font-family: var(--body-font); }
-  </style>
+  <!-- 唯一样式表（Tufte 风格） -->
+  <link rel="stylesheet" href="docs/assets/tufte.css" />
 </head>
 <body>
   <div id="app">正在加载...</div>
-
-  <button id="search-toggle" class="search-toggle" type="button" aria-label="全文搜索" title="全文搜索（Ctrl/⌘+K）">
-    <span class="search-icon" aria-hidden="true">
-      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-        <path d="M10 18a8 8 0 1 1 5.3-14.1A8 8 0 0 1 10 18Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-        <path d="M21 21l-4.35-4.35" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-      </svg>
-    </span>
-    <span class="search-text">搜索</span>
-    <span class="search-hint">Ctrl/⌘+K</span>
-  </button>
 
   <!-- ========== 根页面配置（必须在 common.js 前设置） ========== -->
   <script>
@@ -50,30 +28,9 @@
   <!-- ========== 公共脚本 ========== -->
   <script src="docs/assets/common.js"></script>
 
-  <!-- ========== 代码块清理插件（必须在 docsify 之前注册） ========== -->
-  <script>
-  window.$docsify = window.$docsify || {};
-  window.$docsify.plugins = window.$docsify.plugins || [];
-  window.$docsify.plugins.push(function (hook) {
-    hook.doneEach(function () {
-      document.querySelectorAll('.fold-gutter').forEach(function(el) { el.remove(); });
-      document.querySelectorAll('.fold-wrap').forEach(function(wrap) {
-        var scroll = wrap.querySelector('.fold-code-scroll');
-        if (scroll && wrap.parentNode) {
-          while (scroll.firstChild) {
-            wrap.parentNode.insertBefore(scroll.firstChild, wrap);
-          }
-          wrap.parentNode.removeChild(wrap);
-        }
-      });
-    });
-  });
-  </script>
-
   <!-- ========== CDN JS 依赖 ========== -->
   <script src="https://cdn.jsdelivr.net/npm/medium-zoom@1/dist/medium-zoom.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/js/docsify-themeable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-c.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-cpp.min.js" defer></script>

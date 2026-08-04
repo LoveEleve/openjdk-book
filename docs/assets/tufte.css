@@ -1,0 +1,415 @@
+/* ============================================================
+   Tufte 风格重构 — 唯一样式表
+   设计原则：书籍排版 / 单色 / 零装饰 / 宽边距 + 边注
+   ============================================================ */
+
+/* ---------- et-book 自托管字体（Tufte 官方，MIT 允许再分发） ---------- */
+@font-face {
+  font-family: etbook;
+  src: url("fonts/et-book/et-book-roman-line-figures.woff") format("woff");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: etbook;
+  src: url("fonts/et-book/et-book-display-italic-old-style-figures.woff") format("woff");
+  font-weight: normal;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: etbook;
+  src: url("fonts/et-book/et-book-bold-line-figures.woff") format("woff");
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------- 排版变量 ---------- */
+:root {
+  --ink: #111;
+  --ink-soft: #444;
+  --ink-faint: #888;
+  --paper: #fffff8;
+  --rule: #ddd8cc;          /* 细线（三线表/代码块顶底线） */
+  --body-font: etbook, "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --code-font: "JetBrains Mono", "Noto Serif SC", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --text-width: 700px;      /* 正文栏宽 */
+  --page-max: 1400px;
+  --page-pad: 12.5%;        /* Tufte 经典左留白 */
+}
+
+/* ---------- 基座 ---------- */
+html { font-size: 16px; }
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body-font);
+  font-size: 1rem;
+  line-height: 1.9;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  counter-reset: sidenote-counter;
+}
+
+/* docsify 骨架：无主题基座，自建 */
+#app { min-height: 100vh; }
+#app:empty::before { content: ""; }
+.content { padding-top: 3.5rem; }
+
+/* docsify 自动生成的标题侧栏：不用，隐藏 */
+.sidebar, .sidebar-toggle, .app-name { display: none !important; }
+
+/* ---------- 正文栏（Tufte 网格核心） ---------- */
+.markdown-section {
+  width: 87.5%;
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 0 0 6rem calc(var(--page-pad) - 4%);
+}
+.markdown-section > * {
+  max-width: var(--text-width);
+}
+
+/* ---------- 标题 ---------- */
+.markdown-section h1,
+.markdown-section h2,
+.markdown-section h3,
+.markdown-section h4 {
+  font-family: var(--body-font);
+  color: var(--ink);
+  line-height: 1.3;
+  scroll-margin-top: 2rem;
+}
+.markdown-section h1 { font-size: 2rem; font-weight: bold; margin: 0 0 2.2rem; letter-spacing: 0.01em; }
+.markdown-section h2 { font-size: 1.5rem; font-weight: bold; margin: 3.2rem 0 1rem; }
+.markdown-section h3 { font-size: 1.2rem; font-weight: bold; margin: 2.4rem 0 0.8rem; }
+.markdown-section h4 { font-size: 1rem; font-weight: bold; margin: 2rem 0 0.6rem; }
+
+/* ---------- 段落与行内 ---------- */
+.markdown-section p { margin: 0 0 1.2em; }
+.markdown-section a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+  text-decoration-color: var(--ink-faint);
+}
+.markdown-section a:hover { text-decoration-color: var(--ink); }
+/* docsify 给标题包的锚点链接：不显示下划线 */
+.markdown-section h1 a, .markdown-section h2 a,
+.markdown-section h3 a, .markdown-section h4 a { text-decoration: none; }
+.markdown-section strong { font-weight: bold; }
+.markdown-section em { font-style: italic; }
+.markdown-section ul,
+.markdown-section ol { margin: 0 0 1.2em; padding-left: 1.6em; }
+.markdown-section li { margin: 0.2em 0; }
+.markdown-section hr { border: none; border-top: 1px solid var(--rule); margin: 3rem 0; max-width: var(--text-width); }
+.markdown-section img { max-width: 100%; }
+.markdown-section a > img { cursor: zoom-in; }
+
+/* ---------- 引用块：无左边框，缩进 + 灰 ---------- */
+.markdown-section blockquote {
+  margin: 1.4em 0 1.4em 2em;
+  padding: 0;
+  border: none;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
+.markdown-section blockquote p { margin: 0 0 0.6em; }
+
+/* ---------- 行内代码：与正文同色同底 ---------- */
+.markdown-section code {
+  font-family: var(--code-font);
+  font-size: 0.82em;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+}
+
+/* ---------- 代码块：无边框无底色，细顶底线 ---------- */
+.markdown-section pre {
+  margin: 1.6em 0;
+  padding: 1em 0;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+.markdown-section pre code {
+  font-size: inherit;
+  background: none;
+  padding: 0;
+  display: block;
+  white-space: pre;
+}
+.markdown-section pre[data-lang] { position: relative; }
+.markdown-section pre[data-lang]::after {
+  content: attr(data-lang);
+  display: none; /* 语言标签隐藏，克制 */
+}
+
+/* Prism 单色化：只保留极弱区分 */
+.token.comment, .token.prolog, .token.doctype, .token.cdata { color: var(--ink-faint); font-style: italic; }
+.token.keyword, .token.tag { color: inherit; font-weight: bold; }
+.token.string, .token.char, .token.attr-value, .token.regex { color: var(--ink-soft); }
+.token.number, .token.boolean, .token.constant { color: var(--ink-soft); }
+.token.function, .token.class-name, .token.attr-name { color: inherit; }
+.token.operator, .token.punctuation { color: inherit; }
+.token.important, .token.bold { font-weight: bold; }
+.token.italic { font-style: italic; }
+
+/* ---------- 表格：booktabs 三线表 ---------- */
+.markdown-section table {
+  border-collapse: collapse;
+  margin: 1.6em 0;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  border-top: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+}
+.markdown-section th, .markdown-section td {
+  padding: 0.4em 1em 0.4em 0;
+  border: none;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown-section thead th { border-bottom: 1px solid var(--ink); font-weight: bold; }
+.markdown-section tbody tr:last-child td { padding-bottom: 0.6em; }
+
+/* ============================================================
+   边注（sidenote）— Tufte 标志性特征
+   写作语法：^[边注内容]
+   ============================================================ */
+input.margin-toggle { display: none; }
+
+label.sidenote-number { counter-increment: sidenote-counter; }
+label.sidenote-number::after {
+  content: counter(sidenote-counter);
+  font-size: 0.7em;
+  vertical-align: super;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.sidenote {
+  counter-increment: none;
+  float: right;
+  clear: right;
+  width: 38%;
+  margin-right: -46%;
+  margin-top: 0;
+  margin-bottom: 1em;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  vertical-align: baseline;
+  position: relative;
+}
+.sidenote::before {
+  content: counter(sidenote-counter) " ";
+  font-size: 0.7em;
+  vertical-align: super;
+}
+.sidenote code { font-size: 0.9em; }
+
+/* ============================================================
+   功能 UI（极简形态）
+   ============================================================ */
+
+/* ---------- TOC：桌面固定在右边距区 ---------- */
+.toc-aside { display: none; }
+@media (min-width: 1400px) {
+  .toc-aside[data-has-items="1"] {
+    display: block;
+    position: fixed;
+    top: 5rem;
+    left: calc(max((100vw - var(--page-max)) / 2, 0px) + var(--page-pad) + var(--text-width) + 3.5rem);
+    width: 17rem;
+    max-height: calc(100vh - 8rem);
+    overflow-y: auto;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    border-left: 1px solid var(--rule);
+    padding-left: 1.2rem;
+    z-index: 20;
+  }
+}
+.toc-head { display: flex; gap: 1em; margin-bottom: 0.6em; }
+.toc-back, .toc-top, .toc-close {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-family: var(--body-font); font-size: 0.78rem; color: var(--ink-faint);
+  text-decoration: underline; text-underline-offset: 0.15em;
+}
+.toc-close { display: none; }
+.toc-body-a {
+  display: block;
+  color: var(--ink-soft);
+  text-decoration: none;
+  padding: 0.1em 0;
+  border-left: 2px solid transparent;
+}
+.toc-body-a:hover { color: var(--ink); }
+.toc-body-a.is-active { color: var(--ink); border-left-color: var(--ink); margin-left: -1.2rem; padding-left: 1.2rem; }
+.toc-l2 { margin-left: 0; }
+.toc-l3 { margin-left: 1em; font-size: 0.95em; }
+.toc-l4 { margin-left: 2em; font-size: 0.9em; }
+.toc-group { margin-top: 0.4em; }
+.toc-group-toggle { display: none; }
+#toc-fab { display: none; }
+
+/* ---------- 面包屑：一行小字 ---------- */
+.page-breadcrumb {
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+  margin: 0 0 2.5rem;
+  letter-spacing: 0.02em;
+}
+.page-breadcrumb a { color: inherit; text-decoration: none; }
+.page-breadcrumb a:hover { text-decoration: underline; }
+.page-breadcrumb .sep { margin: 0 0.5em; }
+
+/* ---------- 上/下篇：章末纯文字一行 ---------- */
+.page-nav {
+  max-width: var(--text-width);
+  margin: 4rem 0 0;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+}
+.page-nav a { color: var(--ink-soft); text-decoration: none; }
+.page-nav a:hover { color: var(--ink); text-decoration: underline; }
+
+/* ---------- 标题锚点：hover 弱显现 ---------- */
+.heading-link-btn {
+  opacity: 0;
+  border: none; background: none; padding: 0 0 0 0.4em;
+  cursor: pointer; color: var(--ink-faint);
+  transition: opacity 0.15s;
+  vertical-align: baseline;
+}
+h1:hover .heading-link-btn, h2:hover .heading-link-btn,
+h3:hover .heading-link-btn, h4:hover .heading-link-btn { opacity: 1; }
+.heading-link-btn svg { width: 0.7em; height: 0.7em; }
+
+/* ---------- 代码工具栏：hover 弱"复制" ---------- */
+.code-tools {
+  position: absolute;
+  top: 0.2em; right: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.markdown-section pre:hover .code-tools { opacity: 1; }
+.code-tools .tool-btn,
+.code-tools .btn-copy {
+  background: none; border: none; padding: 0.2em 0.4em;
+  font-family: var(--body-font); font-size: 0.72rem;
+  color: var(--ink-faint); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 0.15em;
+}
+.code-tools .tool-btn:hover { color: var(--ink); }
+.code-tools .btn-toggle, .code-tools .lang-tag { display: none; }
+
+/* ---------- 全文搜索：⌘K 全屏遮罩，单色 ---------- */
+#fts-modal { position: fixed; inset: 0; z-index: 2000; display: none; }
+#fts-modal.open { display: block; }
+.fts-backdrop { position: absolute; inset: 0; background: rgba(255, 255, 248, 0.97); }
+.fts-panel {
+  position: relative;
+  width: min(560px, 90vw);
+  margin: 12vh auto 0;
+  background: var(--paper);
+}
+.fts-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--ink);
+  background: none;
+  padding: 0.5em 0;
+  font-family: var(--body-font);
+  font-size: 1.3rem;
+  color: var(--ink);
+  outline: none;
+  border-radius: 0;
+}
+.fts-input::placeholder { color: var(--ink-faint); }
+.fts-meta { font-size: 0.78rem; color: var(--ink-faint); padding: 0.5em 0; }
+#fts-close {
+  position: absolute; right: 0; top: 0.6em;
+  background: none; border: none; cursor: pointer;
+  font-family: var(--body-font); font-size: 0.8rem; color: var(--ink-faint);
+}
+#fts-results { max-height: 55vh; overflow-y: auto; margin-top: 0.5em; }
+.fts-item {
+  display: block;
+  padding: 0.5em 0;
+  border-bottom: 1px solid var(--rule);
+  text-decoration: none;
+  color: var(--ink);
+}
+.fts-item:hover { background: none; }
+.fts-item .fts-title { font-weight: bold; font-size: 0.95rem; }
+.fts-item .fts-path { font-size: 0.75rem; color: var(--ink-faint); }
+.fts-item .fts-snippet { font-size: 0.82rem; color: var(--ink-soft); }
+.fts-item mark, .fts-mark { background: none; color: inherit; border-bottom: 2px solid var(--ink); padding: 0; }
+
+/* ---------- giscus：融为正文一节 ---------- */
+#giscus { max-width: var(--text-width); margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
+.giscus-card { border: none; background: none; padding: 0; }
+.giscus-head { margin-bottom: 0.8em; }
+.giscus-title { font-size: 1rem; font-weight: bold; color: var(--ink); }
+.giscus-meta, .giscus-badge { display: none; }
+
+/* ---------- 文章元信息：小字 ---------- */
+.page-meta-card { border: none; background: none; padding: 0; margin: 0 0 2rem; font-size: 0.8rem; color: var(--ink-faint); }
+.page-meta-head { border: none; }
+.page-tip { display: none; }
+
+/* ---------- medium-zoom 遮罩：纸色 ---------- */
+.medium-zoom-overlay { background: var(--paper) !important; }
+.medium-zoom-image--opened { border-radius: 0; }
+
+/* ---------- 快捷键提示小字（面包屑行尾） ---------- */
+.kbd-hint { float: right; font-size: 0.75rem; color: var(--ink-faint); }
+
+/* ============================================================
+   响应式
+   ============================================================ */
+
+/* 平板：边距区压缩，边注变行内缩进块 */
+@media (max-width: 1399px) {
+  .markdown-section { padding-left: 5%; width: 90%; }
+  .sidenote {
+    float: none;
+    display: block;
+    width: auto;
+    margin: 0.8em 0 0.8em 2em;
+    clear: none;
+  }
+}
+
+/* 手机：单栏，边注点击编号展开 */
+@media (max-width: 760px) {
+  .content { padding-top: 2rem; }
+  .markdown-section { width: 92%; padding-left: 4%; }
+  .markdown-section h1 { font-size: 1.6rem; }
+  .markdown-section h2 { font-size: 1.3rem; }
+  label.margin-toggle { cursor: pointer; }
+  .sidenote { display: none; margin: 0.8em 0; width: 100%; }
+  .margin-toggle:checked + .sidenote {
+    display: block;
+    float: none;
+  }
+  .page-nav { flex-direction: column; gap: 0.4em; }
+}

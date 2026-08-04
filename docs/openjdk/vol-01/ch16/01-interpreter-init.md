@@ -103,13 +103,13 @@ class Template {
 
 ## 1.2 CodeletMark——Codelet 的诞生与提交
 
-每个 `Codelet` 的生成都由 `CodeletMark` 守卫（interpreter.cpp:84）：
+每个 `Codelet` 的生成都由 `CodeletMark` 守卫（interpreter.cpp:84）。它解决一个问题：`generate_all()` 里有几十个独立的 `generate_*()` 调用——每个都需要自己的代码缓冲区、汇编器、以及"生成完了把机器码提交到 StubQueue"的步骤。如果没有 `CodeletMark`，这几十个函数都得手动重复这三步。
 
 ```cpp
 class CodeletMark {
-  InterpreterCodelet* _clet;              // 从 StubQueue 分配的空间
-  CodeBuffer          _cb;               // 代码缓冲区包装器
-  InterpreterMacroAssembler** _masm;     // 汇编器——生成机器指令的入口
+  InterpreterCodelet* _clet;              // 从 StubQueue 切出的空间片段
+  CodeBuffer          _cb;               // 把 _clet 包装为 CodeBuffer 供汇编器写入
+  InterpreterMacroAssembler** _masm;     // 二级指针——构造时将汇编器地址写回给调用者
 
 public:
   CodeletMark(InterpreterMacroAssembler*& masm, const char* description, Bytecodes::Code bytecode);
@@ -117,14 +117,31 @@ public:
 };
 ```
 
-这是一个 RAII 守卫——构造时从 `StubQueue` 请求代码空间、创建汇编器；析构时将生成的机器码提交到 `StubQueue`。
+三个字段的协作：
 
-构造时（interpreter.cpp:84）：
-1. `AbstractInterpreter::code()->request(codelet_size())`——从 CodeBuffer 中切出 `codelet_size()` 字节空间（默认：可用空间 - 2K，interpreter.hpp:98-107）
+- **`_clet`**（`InterpreterCodelet*`）：从 `StubQueue` 用 `request(codelet_size())` 切出的一块空间。构造后它不是普通的 `malloc` 内存——`StubQueue` 内部有链表/队列管理它的位置
+- **`_cb`**（`CodeBuffer`）：将 `_clet` 包装为标准 `CodeBuffer` 接口——汇编器（`InterpreterMacroAssembler`）只认识 `CodeBuffer`，不直接认识 `InterpreterCodelet`
+- **`_masm`**（`InterpreterMacroAssembler**`）：一个**二级指针**——构造时 `new InterpreterMacroAssembler(&_cb)`，将汇编器地址写入 `*_masm`。调用者在 `CodeletMark` 作用域内通过这个 `masm` 引用调用 `_masm->push()、_masm->mov()、...` 生成机器码
+
+二级指针是关键技巧——`generate_all()` 中的用法展示了这个模式：
+
+```cpp
+void TemplateInterpreterGenerator::generate_all() {
+  InterpreterMacroAssembler* _masm = NULL;  // 初始为空
+
+  { CodeletMark cm(_masm, "slow signature handler");
+    AbstractInterpreter::_slow_signature_handler = generate_slow_signature_handler();
+  }  // cm 析构 → 生成的代码被提交，_masm 被置为 NULL
+```
+
+`CodeletMark` 构造时将 `new InterpreterMacroAssembler(&_cb)` 的地址写入 `_masm`——之后 `generate_slow_signature_handler()` 内部通过 `_masm` 生成机器码。析构时对齐、flush、commit、将 `_masm` 置为 NULL——防止作用域外的代码意外持有悬空汇编器指针。
+
+构造时（interpreter.cpp:84）三步：
+1. `AbstractInterpreter::code()->request(codelet_size())`——从 CodeBuffer 切出空间（默认：可用空间 - 2K，interpreter.hpp:98-107）
 2. `_clet->initialize(description, bytecode)`——标记 Codelet 的名字和字节码编号（调试打印用）
-3. `new InterpreterMacroAssembler(&_cb)`——创建汇编器，传入 Codelet 的代码缓冲区。汇编器是平台相关的——在 x86-64 上，`InterpreterMacroAssembler` 继承自 `MacroAssembler`，为解释器定制了 bcp 寄存器（r13）和 locals 寄存器（r14）
+3. `new InterpreterMacroAssembler(&_cb)`——创建汇编器，传入 Codelet 的代码缓冲区
 
-析构时（interpreter.cpp:99）：
+析构时（interpreter.cpp:99）三步：
 1. 对齐 + flush——保证机器码按字边界对齐、全部写入 CodeBuffer
 2. `AbstractInterpreter::code()->commit(committed_code_size, ...)`——将实际生成的机器码大小提交给 StubQueue，更新其内部指针
 3. `*_masm = NULL`——防止 Codelet 外部继续持有汇编器引用

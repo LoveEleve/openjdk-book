@@ -1,139 +1,13 @@
 /* ============================================================
-   LoveEleve's Tech Blog — 公共脚本 (Common JS)
-   
-   包含：主题切换 / 极简风格 / docsify 配置 / 插件系统
-   
-   页面特有功能通过 window.__blogHooks 注册：
-   - __blogHooks.pageConfig : 页面专属配置覆盖
+   LoveEleve's Tech Blog — 公共脚本 (Common JS) · Tufte 重构版
+
+   保留：docsify 配置 / 边注语法 / 代码复制 / 图片缩放 /
+         全文搜索(⌘K) / TOC / 面包屑 / 上下篇 / 标题锚点 / giscus
+   删除：主题切换 / 极简风格切换 / 代码行折叠 / 阅读进度条
    ============================================================ */
 
 (function () {
   'use strict';
-
-  /* ============================================================
-     极简风格：Paper / Mono / Soft（持久化）
-     ============================================================ */
-  (function () {
-    var KEY = 'docsify:min-style';
-    var STYLES = ['mono', 'paper', 'soft'];
-    var LABELS = { soft: '柔和', mono: '黑白', paper: '纸感' };
-
-    function getStyle() {
-      try { return localStorage.getItem(KEY) || 'mono'; }
-      catch (e) { return 'mono'; }
-    }
-    function normalize(style) {
-      return STYLES.indexOf(style) >= 0 ? style : 'mono';
-    }
-    function render(style) {
-      var btn = document.getElementById('style-toggle');
-      if (!btn) return;
-      var text = btn.querySelector('.style-text');
-      btn.setAttribute('data-style', style);
-      if (text) text.textContent = LABELS[style] || style;
-      btn.title = '风格：' + (LABELS[style] || style) + '（点击切换）';
-    }
-    function apply(style, persist) {
-      var s = normalize(style);
-      document.documentElement.setAttribute('data-min-style', s);
-      if (persist) { try { localStorage.setItem(KEY, s); } catch (e) {} }
-      render(s);
-    }
-    function nextStyle(cur) {
-      var idx = STYLES.indexOf(cur);
-      return STYLES[(idx + 1 + STYLES.length) % STYLES.length] || 'mono';
-    }
-    apply(getStyle(), false);
-    document.addEventListener('click', function (e) {
-      var btn = e && e.target && e.target.closest ? e.target.closest('#style-toggle') : null;
-      if (!btn) return;
-      e.preventDefault();
-      var cur = btn.getAttribute('data-style') || getStyle();
-      apply(nextStyle(cur), true);
-    }, true);
-    window.__docsifyStyle = {
-      get: getStyle,
-      apply: function (s) { apply(s, true); },
-      list: function () { return STYLES.slice(); }
-    };
-  })();
-
-  /* ============================================================
-     主题切换：跟随系统 / 暗色 / 亮色（持久化）
-     ============================================================ */
-  (function () {
-    var KEY = 'docsify:theme-mode';
-    var MODES = ['auto', 'dark', 'light'];
-    var media = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'))
-      ? window.matchMedia('(prefers-color-scheme: dark)') : null;
-
-    function getMode() {
-      try { return localStorage.getItem(KEY) || 'auto'; }
-      catch (e) { return 'auto'; }
-    }
-    function resolve(mode) {
-      // 站点固定纸感浅色，不跟随系统暗色
-      return 'light';
-    }
-    function renderButton(mode, resolved) {
-      var btn = document.getElementById('theme-toggle');
-      if (!btn) return;
-      var icon = btn.querySelector('.theme-icon');
-      var text = btn.querySelector('.theme-text');
-      btn.setAttribute('data-mode', mode);
-      if (mode === 'auto') {
-        if (icon) icon.textContent = '⭮';
-        if (text) text.textContent = '跟随';
-        btn.title = '主题：跟随系统（点击切换）';
-        return;
-      }
-      if (resolved === 'dark') {
-        if (icon) icon.textContent = '☾';
-        if (text) text.textContent = '暗色';
-        btn.title = '主题：暗色（点击切换）';
-        return;
-      }
-      if (icon) icon.textContent = '☀';
-      if (text) text.textContent = '亮色';
-      btn.title = '主题：亮色（点击切换）';
-    }
-    function dispatchChange(mode, resolved) {
-      try {
-        window.dispatchEvent(new CustomEvent('docsify-theme-change', {
-          detail: { mode: mode, resolved: resolved }
-        }));
-      } catch (e) {}
-    }
-    function apply(mode, persist) {
-      var resolved = resolve(mode);
-      document.documentElement.setAttribute('data-theme', resolved);
-      document.documentElement.setAttribute('data-theme-mode', mode);
-      if (persist) { try { localStorage.setItem(KEY, mode); } catch (e) {} }
-      renderButton(mode, resolved);
-      dispatchChange(mode, resolved);
-    }
-    function nextMode(cur) {
-      var idx = MODES.indexOf(cur);
-      return MODES[(idx + 1 + MODES.length) % MODES.length] || 'auto';
-    }
-    apply(getMode(), false);
-    if (media) {
-      var handler = function () { if (getMode() === 'auto') apply('auto', false); };
-      try { media.addEventListener('change', handler); }
-      catch (e) { try { media.addListener(handler); } catch (err) {} }
-    }
-    document.addEventListener('click', function (e) {
-      var btn = e && e.target && e.target.closest ? e.target.closest('#theme-toggle') : null;
-      if (!btn) return;
-      e.preventDefault();
-      apply(nextMode(btn.getAttribute('data-mode') || getMode()), true);
-    }, true);
-    window.__docsifyTheme = {
-      getMode: getMode,
-      apply: function (m) { apply(m || 'auto', true); },
-      resolve: resolve
-    };
-  })();
 
   /* ============================================================
      docsify 核心配置 + 插件
@@ -144,7 +18,6 @@
   window.$docsify = Object.assign({
     name: ' ',
     nameLink: '#/',
-    repo: 'https://github.com/LoveEleve/LoveEleve.github.io',
     loadSidebar: false,
     subMaxLevel: 3,
     sidebarDisplayLevel: 0,
@@ -173,21 +46,7 @@
       }
     },
 
-    tabs: { persist: true, sync: true, theme: 'material' },
-
-    'flexible-alerts': {
-      style: 'callout',
-      note: { label: 'NOTE' },
-      tip: { label: 'TIP' },
-      warning: { label: 'WARNING' },
-      danger: { label: 'DANGER' }
-    },
-
     plugins: [
-      /* ============================================================
-         主插件函数：代码增强 / 图片缩放 / 画图 / 元信息 / 搜索 / TOC / 阅读 / giscus
-         行数：~2026 至 ~4409（逻辑与原始一致）
-         ============================================================ */
       function (hook, vm) {
 
         /* ---------- 工具函数 ---------- */
@@ -200,217 +59,56 @@
             .replace(/'/g, '&#39;');
         }
 
-        function safeHighlight(line, lang) {
-          try {
-            if (window.Prism && Prism.languages && Prism.languages[lang]) {
-              return Prism.highlight(line, Prism.languages[lang], lang);
-            }
-          } catch (e) {}
-          return escapeHtml(line);
+        // docsify route.path 不带 '#'，首页是 '/'（手动改 hash 时可能是 '#/...'）
+        function isHomePath(p) {
+          p = (p || '').split('?')[0];
+          return p === '/' || p === '' || p === '/README'
+            || p === '#/' || p === '#' || p === '#/README';
         }
 
-        /* ---------- 代码块括号折叠分析 ---------- */
-        function buildFoldBlocks(lines) {
-          var blocks = [];
-          var stack = [];
-          var inBlockComment = false;
-          var inString = null;
-          var escape = false;
+        /* ============================================================
+           边注语法：^[内容] → Tufte sidenote
+           在 fenced code block 之外做替换；`code` 反引号保留渲染
+           ============================================================ */
+        var snIdSeq = 0;
 
-          function scanLine(line) {
-            var openCount = 0;
-            var closeCount = 0;
-            for (var i = 0; i < line.length; i++) {
-              var ch = line[i];
-              var next = i + 1 < line.length ? line[i + 1] : '';
-              if (escape) { escape = false; continue; }
-              if (inString) {
-                if (ch === '\\') { escape = true; continue; }
-                if (ch === inString) { inString = null; }
-                continue;
-              }
-              if (inBlockComment) {
-                if (ch === '*' && next === '/') { inBlockComment = false; i++; }
-                continue;
-              }
-              if (ch === '/' && next === '/') break;
-              if (ch === '/' && next === '*') { inBlockComment = true; i++; continue; }
-              if (ch === '"' || ch === "'") { inString = ch; continue; }
-              if (ch === '{') openCount++;
-              if (ch === '}') closeCount++;
-            }
-            return { openCount: openCount, closeCount: closeCount };
-          }
-
-          lines.forEach(function (line, idx) {
-            var counts = scanLine(line);
-            for (var i = 0; i < counts.openCount; i++) stack.push(idx);
-            for (var i = 0; i < counts.closeCount; i++) {
-              if (!stack.length) continue;
-              var start = stack.pop();
-              if (idx >= start + 2) blocks.push({ start: start, end: idx, folded: false });
-            }
+        function transformSidenoteSegment(seg) {
+          return seg.replace(/\^\[([^\]]+)\]/g, function (_, note) {
+            snIdSeq++;
+            var inner = escapeHtml(note).replace(/`([^`]+)`/g, '<code>$1</code>');
+            return '<label for="sn-' + snIdSeq + '" class="margin-toggle sidenote-number"></label>' +
+              '<input type="checkbox" id="sn-' + snIdSeq + '" class="margin-toggle"/>' +
+              '<span class="sidenote">' + inner + '</span>';
           });
-          blocks.sort(function (a, b) { return a.start - b.start || b.end - a.end; });
-          return blocks;
         }
 
-        var INLINE_FOLD_MAX_LINES = 360;
-
-        /* ---------- 行级折叠初始化 ---------- */
-        function initInlineFolding(pre) {
-          var langRaw = (pre.getAttribute('data-lang') || '').toLowerCase();
-          var lang = langRaw === 'plain' ? 'markup' : langRaw;
-          var codeEl = pre.querySelector('code');
-          if (!codeEl) return;
-          var raw = (codeEl.textContent || '').replace(/\n$/, '');
-          var lines = raw.split('\n');
-          if (lines.length > INLINE_FOLD_MAX_LINES) {
-            pre.dataset.rawCode = raw;
-            pre.dataset.inlineFoldSkipped = '1';
-            return;
+        hook.beforeEach(function (content) {
+          if (content.indexOf('^[') === -1) return content;
+          // 按 ``` 围栏切分，仅处理代码块之外的片段
+          var parts = content.split(/(```[\s\S]*?(?:```|$))/g);
+          for (var i = 0; i < parts.length; i += 2) {
+            parts[i] = transformSidenoteSegment(parts[i]);
           }
-          var blocks = buildFoldBlocks(lines);
-          var blocksByStart = new Map();
-          var ellipsisByStart = new Map();
+          return parts.join('');
+        });
 
-          codeEl.innerHTML = '';
-          var wrap = document.createElement('div');
-          wrap.className = 'fold-wrap';
-
-          var gutter = document.createElement('div');
-          gutter.className = 'fold-gutter';
-          var scroll = document.createElement('div');
-          scroll.className = 'fold-code-scroll';
-
-          blocks.forEach(function (b) {
-            blocksByStart.set(b.start, b);
-            b.endIdx = b.end;
-          });
-
-          var ellSet = new Set();
-          lines.forEach(function (line, idx) {
-            var gr = document.createElement('div');
-            gr.className = 'fold-gutter-row';
-            var block = blocksByStart.get(idx);
-            if (block) {
-              var tog = document.createElement('span');
-              tog.className = 'fold-toggle';
-              tog.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5l8 7-8 7z"/></svg>';
-              gr.appendChild(tog);
-            }
-            var lnNum = document.createElement('span');
-            lnNum.style.cssText = 'font-size:11px;color:var(--code-muted);min-width:20px;text-align:right;opacity:0.5;';
-            lnNum.textContent = idx + 1;
-            gr.appendChild(lnNum);
-            gutter.appendChild(gr);
-
-            var cr = document.createElement('div');
-            cr.className = 'fold-code-row';
-            cr.setAttribute('data-line', idx);
-            cr.innerHTML = safeHighlight(line, lang);
-
-            var ell;
-            blocks.forEach(function (b) {
-              if (b.start === idx && b.end !== undefined) {
-                ell = document.createElement('span');
-                ell.className = 'fold-ellipsis';
-                var hiddenCount = b.end - b.start - 2;
-                ell.textContent = '... ' + (hiddenCount > 1 ? hiddenCount + ' 行' : '');
-                cr.appendChild(ell);
-                ellipsisByStart.set(idx, ell);
-              }
-            });
-
-            scroll.appendChild(cr);
-          });
-
-          wrap.appendChild(gutter);
-          wrap.appendChild(scroll);
-          codeEl.appendChild(wrap);
-          pre.dataset.rawCode = raw;
-
-          function recompute() {
-            var allEls = scroll.querySelectorAll('.fold-code-row');
-            var hidden = new Set();
-            blocks.forEach(function (b) {
-              if (b.folded) {
-                for (var i = b.start + 1; i <= b.end - 1; i++) hidden.add(i);
-              }
-            });
-            allEls.forEach(function (el) {
-              var li = parseInt(el.getAttribute('data-line'), 10);
-              el.classList.toggle('is-hidden', hidden.has(li));
-            });
-            blocks.forEach(function (b) {
-              var toggleEl = gutter.querySelectorAll('.fold-toggle')[Array.from(blocksByStart.keys()).indexOf(b.start)];
-              if (toggleEl) toggleEl.classList.toggle('is-folded', b.folded);
-              var startEl = scroll.querySelector('[data-line="' + b.start + '"]');
-              if (startEl) startEl.classList.toggle('is-fold-head', b.folded);
-            });
-          }
-
-          blocks.forEach(function (b) {
-            var start = b.start;
-            var pick = b;
-            var toggles = gutter.querySelectorAll('.fold-toggle');
-            var idxInBlocks = Array.from(blocksByStart.keys()).indexOf(start);
-            var toggle = toggles[idxInBlocks];
-            if (toggle) {
-              toggle.onclick = function (e) {
-                e.stopPropagation();
-                pick.folded = !pick.folded;
-                recompute();
-              };
-            }
-            var ell = ellipsisByStart.get(start);
-            if (ell) {
-              ell.onclick = function (e) {
-                e.stopPropagation();
-                pick.folded = false;
-                recompute();
-              };
-            }
-          });
-          recompute();
-        }
-
-        /* ---------- 代码块工具栏 ---------- */
+        /* ---------- 代码块工具栏：仅复制 ---------- */
         function initToolbar(pre) {
           if (pre.querySelector('.code-tools')) return;
-          var lang = (pre.getAttribute('data-lang') || '').toUpperCase();
           var tools = document.createElement('div');
           tools.className = 'code-tools';
-          tools.innerHTML =
-            '<div class="code-tools-left">' +
-              '<span>' + lang + '</span>' +
-            '</div>' +
-            '<div class="code-tools-right">' +
-              '<span class="tool-btn btn-copy">复制</span>' +
-              '<span class="tool-btn btn-toggle">收起代码</span>' +
-            '</div>';
+          tools.innerHTML = '<span class="tool-btn btn-copy">复制</span>';
           pre.insertBefore(tools, pre.firstChild);
 
           var copyBtn = tools.querySelector('.btn-copy');
-          var toggleBtn = tools.querySelector('.btn-toggle');
-
           copyBtn.onclick = function (e) {
             e.stopPropagation();
             var text = pre.dataset.rawCode || '';
+            if (!text) return;
             navigator.clipboard.writeText(text).then(function () {
               copyBtn.textContent = '已复制';
               setTimeout(function () { copyBtn.textContent = '复制'; }, 1200);
             });
-          };
-
-          var handleToggle = function (e) {
-            if (e) e.stopPropagation();
-            var isCollapsed = pre.classList.toggle('is-collapsed');
-            toggleBtn.textContent = isCollapsed ? '展开代码' : '收起代码';
-          };
-          toggleBtn.onclick = handleToggle;
-          pre.onclick = function () {
-            if (pre.classList.contains('is-collapsed')) handleToggle();
           };
         }
 
@@ -419,6 +117,7 @@
         var zoomBindTimer = null;
         var zoomBindTimer2 = null;
         var zoomDelegationInited = false;
+        var ZOOM_BG = 'rgba(255, 255, 248, 0.96)';
 
         function ensureImageZoomDelegation() {
           if (zoomDelegationInited) return;
@@ -437,12 +136,12 @@
             if (!img) return;
             var section = img.closest('.markdown-section');
             if (!section) return;
-            if (img.closest('#giscus') || img.closest('#page-meta')) return;
+            if (img.closest('#giscus') || img.closest('#page-meta') || img.closest('.sidenote')) return;
             if (img.hasAttribute('data-no-zoom')) return;
             if (!window.mediumZoom) return;
             e.preventDefault(); e.stopPropagation();
             if (!zoomInstance) {
-              zoomInstance = window.mediumZoom({ background: 'rgba(0,0,0,0.78)', margin: 40 });
+              zoomInstance = window.mediumZoom({ background: ZOOM_BG, margin: 40 });
             }
             zoomInstance.open({ target: img });
           }, true);
@@ -451,17 +150,16 @@
         function bindZoomToImages() {
           if (!window.mediumZoom) return;
           if (!zoomInstance) {
-            zoomInstance = window.mediumZoom({ background: 'rgba(0,0,0,0.78)', margin: 40 });
+            zoomInstance = window.mediumZoom({ background: ZOOM_BG, margin: 40 });
           }
           var imgs = Array.from(document.querySelectorAll('.markdown-section img'))
             .filter(function (img) {
-              return !img.closest('#giscus') && !img.closest('#page-meta') && !img.hasAttribute('data-no-zoom');
+              return !img.closest('#giscus') && !img.closest('#page-meta') && !img.closest('.sidenote') && !img.hasAttribute('data-no-zoom');
             });
           try { zoomInstance.detach(); } catch (e) {}
           if (imgs.length) zoomInstance.attach(imgs);
           ensureImageZoomDelegation();
         }
-
 
         /* ---------- 搜索索引系统 ---------- */
         var SEARCH_INDEX_KEY = 'docsify:search-index';
@@ -581,9 +279,7 @@
         var tocRenderTimer = null;
         var tocObs = null;
         var scrollTimer = null;
-        var tocMobileBound = false;
         var tocLinkClickHandler = null;
-        var TOC_BODY_CLASS = 'has-toc-aside';
 
         function buildTocItems(section) {
           var items = [];
@@ -614,28 +310,13 @@
             toc.setAttribute('data-has-items', '0');
             toc.innerHTML =
               '<div class="toc-head">' +
-                '<div class="toc-title">目录</div>' +
-                '<div class="toc-actions">' +
-                  '<button type="button" class="toc-action toc-back" aria-label="返回" title="返回">' +
-                    '<svg class="toc-icon" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M19 12H5m7-7l-7 7 7 7"/></svg>' +
-                  '</button>' +
-                  '<button type="button" class="toc-action toc-top" aria-label="回到顶部" title="回到顶部">' +
-                    '<svg class="toc-icon" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M18 15l-6-6-6 6"/></svg>' +
-                  '</button>' +
-                '</div>' +
-                '<button type="button" class="toc-close" aria-label="关闭目录" title="关闭">×</button>' +
+                '<button type="button" class="toc-back" aria-label="返回" title="返回">← 返回</button>' +
+                '<button type="button" class="toc-top" aria-label="回到顶部" title="回到顶部">↑ 顶部</button>' +
               '</div>' +
               '<div class="toc-body"></div>';
             document.body.appendChild(toc);
           }
           return toc;
-        }
-
-        function setTocFabState(hasItems) {
-          document.body.classList.toggle(TOC_BODY_CLASS, !!hasItems);
-          var fab = document.querySelector('#toc-fab');
-          if (!fab) return;
-          fab.style.display = hasItems ? '' : 'none';
         }
 
         function setTocBackState() {
@@ -653,60 +334,24 @@
           if (!body) return false;
 
           toc.setAttribute('data-has-items', items.length ? '1' : '0');
-          setTocFabState(items.length > 0);
 
           if (!items.length) { body.innerHTML = ''; return true; }
 
           var flatList = [];
-          function walk(list, depth) {
+          function walk(list) {
             list.forEach(function (item) {
-              flatList.push({ id: item.id, text: item.text, level: item.level, hasChildren: item.children.length > 0 });
-              if (item.children.length) walk(item.children, depth + 1);
+              flatList.push({ id: item.id, text: item.text, level: item.level });
+              if (item.children.length) walk(item.children);
             });
           }
-          walk(items, 0);
+          walk(items);
 
-          // 构建 h2 分组
-          var html = '';
-          var currentGroup = null;
-          flatList.forEach(function (item) {
-            if (item.level === 2) {
-              if (currentGroup) html += '</div></div>';
-              currentGroup = { items: [], hasChildren: item.hasChildren };
-              html += '<div class="toc-group">' +
-                '<div class="toc-group-head">' +
-                  '<button class="toc-group-toggle' + (item.hasChildren ? '' : ' is-hidden') + '" type="button">' +
-                    '<svg class="toc-caret" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5l8 7-8 7z"/></svg>' +
-                  '</button>' +
-                  '<a class="toc-body-a toc-group-link toc-l' + item.level + '" href="#' + item.id + '">' + item.text + '</a>' +
-                '</div>' +
-                '<div class="toc-children">';
-            } else if (currentGroup) {
-              html += '<a class="toc-body-a toc-l' + item.level + '" href="#' + item.id + '">' + item.text + '</a>';
-            } else {
-              html += '<a class="toc-body-a toc-l' + item.level + '" href="#' + item.id + '">' + item.text + '</a>';
-            }
-          });
-          if (currentGroup) html += '</div></div>';
-
-          // 没有 h2 的情况下平铺
-          if (!html) {
-            html = flatList.map(function (item) {
-              return '<a class="toc-body-a toc-l' + item.level + '" href="#' + item.id + '">' + item.text + '</a>';
-            }).join('');
-          }
-
+          var html = flatList.map(function (item) {
+            return '<a class="toc-body-a toc-l' + item.level + '" href="#' + item.id + '">' + item.text + '</a>';
+          }).join('');
           body.innerHTML = html;
 
-          // 绑定折叠
-          body.querySelectorAll('.toc-group-toggle').forEach(function (btn) {
-            btn.onclick = function () {
-              var group = btn.closest('.toc-group');
-              if (group) group.classList.toggle('is-collapsed');
-            };
-          });
-
-          // 绑定 TOC 链接点击 —— 阻止 hash 路由导航，改用 scrollIntoView 平滑滚动
+          // TOC 链接点击 —— 阻止 hash 路由，平滑滚动 + 记录跳转栈
           if (tocLinkClickHandler) body.removeEventListener('click', tocLinkClickHandler);
           tocLinkClickHandler = function (e) {
             var a = e.target.closest ? e.target.closest('.toc-body-a') : null;
@@ -752,7 +397,6 @@
               if (activeLink) activeLink.classList.remove('is-active');
               best.classList.add('is-active');
               activeLink = best;
-              // 滚动 TOC 让当前项可见
               if (best.offsetTop) {
                 var tocBody = best.closest('.toc-body');
                 if (tocBody) tocBody.scrollTop = best.offsetTop - tocBody.clientHeight / 3;
@@ -767,7 +411,6 @@
           window.addEventListener('scroll', throttledScroll, { passive: true });
           setTimeout(tocScrollUpdate, 200);
 
-          // TOC 按钮交互
           var topBtn = document.querySelector('#toc-aside .toc-top');
           if (topBtn) topBtn.onclick = function () { window.scrollTo({ top: 0, behavior: 'smooth' }); };
           var backBtn = document.querySelector('#toc-aside .toc-back');
@@ -783,26 +426,11 @@
           return true;
         }
 
-        function ensureTocMobileDelegation() {
-          if (tocMobileBound) return;
-          tocMobileBound = true;
-
-          // Fab 按钮（小屏目录入口）
-          document.addEventListener('click', function (e) {
-            var fab = e && e.target && e.target.closest ? e.target.closest('#toc-fab') : null;
-            var toc = document.querySelector('#toc-aside');
-            if (fab) { e.preventDefault(); if (toc) toc.classList.toggle('is-open'); return; }
-            var closeBtn = e && e.target && e.target.closest ? e.target.closest('#toc-aside .toc-close') : null;
-            if (closeBtn) { e.preventDefault(); if (toc) toc.classList.remove('is-open'); return; }
-            // 点击 TOC 浮层外部关闭
-            if (toc && toc.classList.contains('is-open')) {
-              var inside = e && e.target && e.target.closest
-                ? (e.target.closest('#toc-aside') || e.target.closest('#toc-fab')) : null;
-              if (!inside) toc.classList.remove('is-open');
-            }
-          }, true);
-
-          // MutationObserver 自愈
+        // MutationObserver 自愈
+        var tocObserverBound = false;
+        function ensureTocObserver() {
+          if (tocObserverBound) return;
+          tocObserverBound = true;
           if (window.MutationObserver) {
             tocObs = new MutationObserver(function () {
               try { scheduleTocRender(); } catch (e) {}
@@ -814,14 +442,13 @@
 
         function scheduleTocRender(vm) {
           var path = (vm && vm.route && vm.route.path) ? vm.route.path : ((location.hash || '#/').split('?')[0] || '#/');
-          if (path === '#/' || path === '#/README') {
+          if (isHomePath(path)) {
             var toc = document.querySelector('#toc-aside');
             if (toc) {
               toc.setAttribute('data-has-items', '0');
               var body = toc.querySelector('.toc-body');
               if (body) body.innerHTML = '';
             }
-            setTocFabState(false);
             return;
           }
           if (tocRenderTimer) clearTimeout(tocRenderTimer);
@@ -833,27 +460,7 @@
           }, 350);
         }
 
-        /* ---------- 进度条 / 面包屑 / 上一篇下一篇 ---------- */
-        function ensureProgressBar() {
-          if (document.getElementById('read-progress')) return;
-          var bar = document.createElement('div');
-          bar.id = 'read-progress';
-          document.body.appendChild(bar);
-          var ticking = false;
-          window.addEventListener('scroll', function () {
-            if (ticking) return;
-            ticking = true;
-            requestAnimationFrame(function () {
-              ticking = false;
-              var scrollTop = window.scrollY || document.documentElement.scrollTop;
-              var docHeight = document.documentElement.scrollHeight - window.innerHeight;
-              var pct = docHeight > 0 ? Math.min(100, (scrollTop / docHeight) * 100) : 0;
-              var barEl = document.getElementById('read-progress');
-              if (barEl) barEl.style.width = pct + '%';
-            });
-          }, { passive: true });
-        }
-
+        /* ---------- 面包屑 / 上一篇下一篇 ---------- */
         function ensureBreadcrumb(section) {
           var bc = section.querySelector('#page-breadcrumb');
           if (!bc) {
@@ -872,19 +479,18 @@
             var section = document.querySelector('.markdown-section');
             if (!section) return;
             var currentPath = (vm && vm.route && vm.route.path) ? vm.route.path : (location.hash || '#/');
-            currentPath = (currentPath || '').split('?')[0];
-            var isHome = currentPath === '#/' || currentPath === '#/README';
-            if (isHome) return;
+            if (isHomePath(currentPath)) return;
 
-            // 面包屑
+            // 面包屑：一行小字 + ⌘K 提示
             var bc = ensureBreadcrumb(section);
             var h1 = section.querySelector('h1');
             var title = h1 ? (h1.textContent || '').replace(/\s+/g, ' ').trim() : '文章';
             bc.innerHTML = '<a href="#/">首页</a>' +
-              '<span class="crumb-sep"> / </span>' +
-              '<span>' + title + '</span>';
+              '<span class="sep"> / </span>' +
+              '<span>' + title + '</span>' +
+              '<span class="kbd-hint">⌘K 搜索</span>';
 
-            // 上一篇 / 下一篇 — 从 markdown-section 链接获取
+            // 上一篇 / 下一篇
             var nav = section.querySelector('#page-nav');
             if (!nav) {
               nav = document.createElement('div');
@@ -897,7 +503,7 @@
 
             var allLinks = Array.from(document.querySelectorAll('.markdown-section a[href^="#/"]'))
               .map(function (a) { return { href: a.getAttribute('href') || '', text: (a.textContent || '').trim() }; })
-              .filter(function (l) { return l.href && l.href.indexOf('#') === 0 && l.href.indexOf('#/') === 0; });
+              .filter(function (l) { return l.href && l.href.indexOf('#/') === 0; });
 
             if (!allLinks.length) { nav.innerHTML = ''; return; }
 
@@ -912,18 +518,12 @@
             var next = currentIdx < allLinks.length - 1 ? allLinks[currentIdx + 1] : null;
 
             nav.innerHTML =
-              '<a class="' + (prev ? '' : 'is-disabled') + '" href="' + (prev ? prev.href : '#') + '">' +
-                '<div class="nav-kicker">← 上一篇</div>' +
-                '<div class="nav-title">' + (prev ? prev.text : '没有了') + '</div>' +
-              '</a>' +
-              '<a class="' + (next ? '' : 'is-disabled') + '" href="' + (next ? next.href : '#') + '">' +
-                '<div class="nav-kicker">下一篇 →</div>' +
-                '<div class="nav-title">' + (next ? next.text : '没有了') + '</div>' +
-              '</a>';
+              (prev ? '<a class="nav-prev" href="' + prev.href + '">← ' + prev.text + '</a>' : '<span></span>') +
+              (next ? '<a class="nav-next" href="' + next.href + '">' + next.text + ' →</a>' : '<span></span>');
           } catch (e) {}
         }
 
-        /* ---------- 标题复制链接 ---------- */
+        /* ---------- 标题锚点 ---------- */
         function renderHeadingLinks(vm) {
           try {
             var section = document.querySelector('.markdown-section');
@@ -950,7 +550,7 @@
           } catch (e) {}
         }
 
-        /* ---------- 全文搜索（Ctrl/⌘+K） ---------- */
+        /* ---------- 全文搜索（Ctrl/⌘+K，无页面按钮） ---------- */
         var ftsBound = false;
         var ftsModal = null;
         var ftsVisible = false;
@@ -977,7 +577,7 @@
 
         function openFts() {
           var modal = ensureFtsModal();
-          modal.classList.add('is-open');
+          modal.classList.add('open');
           ftsVisible = true;
           var input = document.getElementById('fts-input');
           if (input) { setTimeout(function () { input.focus(); input.select(); }, 50); }
@@ -985,7 +585,7 @@
 
         function closeFts() {
           var modal = document.getElementById('fts-modal');
-          if (modal) modal.classList.remove('is-open');
+          if (modal) modal.classList.remove('open');
           ftsVisible = false;
         }
 
@@ -1022,7 +622,7 @@
               (r.snippet ? '<div class="fts-snippet">' + r.snippet + '</div>' : '') +
               '</a>';
           }).join('');
-          document.getElementById('fts-results').innerHTML = html || '<div style="padding:12px;color:#57606a;">无匹配结果</div>';
+          document.getElementById('fts-results').innerHTML = html || '<div class="fts-empty">无匹配结果</div>';
 
           document.querySelectorAll('#fts-results .fts-item').forEach(function (item) {
             item.addEventListener('click', function (e) {
@@ -1094,12 +694,6 @@
           ftsBound = true;
           ensureFtsModal();
 
-          var searchBtn = document.getElementById('search-toggle');
-          if (searchBtn) searchBtn.addEventListener('click', function (e) {
-            e.preventDefault();
-            ftsVisible ? closeFts() : (openFts(), loadSearchIndex(vm));
-          });
-
           var input = document.getElementById('fts-input');
           if (input) input.addEventListener('input', function () { performSearch(input.value); });
           document.getElementById('fts-close').addEventListener('click', closeFts);
@@ -1159,16 +753,10 @@
             host = document.createElement('div');
             host.id = 'giscus';
             host.innerHTML =
-              '<div class="giscus-card">' +
-                '<div class="giscus-head">' +
-                  '<div class="giscus-head-left">' +
-                    '<div class="giscus-title">评论</div>' +
-                    '<div class="giscus-meta">GitHub Discussions</div>' +
-                  '</div>' +
-                  '<a class="giscus-badge" href="https://github.com/LoveEleve/LoveEleve.github.io/discussions" target="_blank" rel="noopener noreferrer">打开讨论区</a>' +
-                '</div>' +
-                '<div class="giscus-body"></div>' +
-              '</div>';
+              '<div class="giscus-head">' +
+                '<div class="giscus-title">评论</div>' +
+              '</div>' +
+              '<div class="giscus-body"></div>';
             section.appendChild(host);
           }
           return host;
@@ -1205,50 +793,20 @@
           host.appendChild(s);
         }
 
-        var giscusThemeBound = false;
-        function rerenderGiscus(term) {
-          var host = ensureGiscusHost();
-          if (!host) return;
-          var mount = host.querySelector('.giscus-body') || host;
-          try {
-            host.querySelectorAll('iframe.giscus-frame').forEach(function (el) { el.remove(); });
-            host.querySelectorAll('script[src*="giscus.app/client.js"]').forEach(function (el) { el.remove(); });
-          } catch (e) {}
-          mount.innerHTML = '';
-          renderOrUpdateGiscus(term);
-        }
-
-        function bindThemeChangeForGiscus() {
-          if (giscusThemeBound) return;
-          giscusThemeBound = true;
-          window.addEventListener('docsify-theme-change', function (ev) {
-            var resolved = (ev && ev.detail && ev.detail.resolved)
-              ? ev.detail.resolved
-              : (document.documentElement.getAttribute('data-theme') || 'light');
-            var want = resolved === 'dark' ? 'dark' : 'light';
-            if (GISCUS_CFG.theme === want) return;
-            GISCUS_CFG.theme = want;
-            rerenderGiscus(getGiscusTerm(vm));
-          });
-        }
-
-        bindThemeChangeForGiscus();
-
         /* ============================================================
            doneEach 钩子（核心渲染入口）
            ============================================================ */
         hook.doneEach(function () {
           document.querySelectorAll('pre[data-lang]').forEach(function (pre) {
-            if (pre.dataset.inlineFoldInited === '1') return;
-            pre.dataset.inlineFoldInited = '1';
-            initInlineFolding(pre);
+            if (pre.dataset.toolbarInited === '1') return;
+            pre.dataset.toolbarInited = '1';
+            var codeEl = pre.querySelector('code');
+            if (codeEl) pre.dataset.rawCode = (codeEl.textContent || '').replace(/\n$/, '');
             initToolbar(pre);
           });
 
           renderHeadingLinks(vm);
-
-          try { ensureTocMobileDelegation(); } catch (e) {}
-          try { setTocFabState(false); } catch (e) {}
+          ensureTocObserver();
 
           try {
             var p = (vm && vm.route && vm.route.path) ? vm.route.path : ((location.hash || '#/').split('?')[0] || '#/');
@@ -1260,14 +818,13 @@
           try { setTocBackState(); } catch (e) {}
 
           scheduleTocRender(vm);
-          ensureProgressBar();
           renderBreadcrumbAndNav(vm);
           ensureFullTextSearch(vm);
           maybeApplyPendingHighlight(vm);
 
-          // 评论：首页不加载
+          // 评论：首页不加载，改为预建搜索索引
           var cPath = (vm && vm.route && vm.route.path) ? vm.route.path : '#/';
-          if (cPath === '#/' || cPath === '#/README') {
+          if (isHomePath(cPath)) {
             loadSearchIndex(vm);
           } else {
             renderOrUpdateGiscus(getGiscusTerm(vm));
