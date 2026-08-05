@@ -2,13 +2,13 @@
 
 > **本文定位**：`init_globals()` 第 11、14 步——解释器的全部汇编代码生成。`TemplateInterpreterGenerator::generate_all()` 一个函数生成了解释器的整套代码：方法入口、返回、调用分派、异常处理、安全点、去优化，以及将 202 条字节码模板逐个生成可执行的汇编 Codelet。这是 `universe_init`（宇宙创造完毕）之后 **JVM 真正开始生成机器指令**的时刻。
 >
-> **前置依赖**：[ch13 JIT 阈值设立](openjdk/vol-01/ch13/01-init-globals-facade.md)、[ch12 三表就绪](openjdk/vol-01/ch12/02-string-table-create.md)、[ch10 G1 BarrierSet](openjdk/vol-01/ch10)、[ch09 universe_init](openjdk/vol-01/ch09)
+> **前置依赖**：[第 13 章 JIT 阈值设立](openjdk/vol-01/ch13/01-init-globals-facade.md)、[第 12 章 三表就绪](openjdk/vol-01/ch12/02-string-table-create.md)、[第 10 章 G1 BarrierSet](openjdk/vol-01/ch10)、[第 9 章 universe_init](openjdk/vol-01/ch09)
 
 ---
 
 ## 0. 全景——本章讲的是两个 init 函数
 
-`interpreter_init`（第 11 步，interpreter.cpp:115）是整个解释器的入口——它调 `Interpreter::initialize()`，最终进入 `TemplateInterpreter::initialize()`。`templateTable_init`（第 14 步，templateTable.cpp:547）是一个**无操作**的冗余调用——它内部做的 `TemplateTable::initialize()` 在 `TemplateInterpreter::initialize()` 的步骤(2)中**已被调用过**，参数完全一致，第二次调用被 `_is_initialized` 标志直接返回。
+`interpreter_init`（第 11 步，interpreter.cpp:115）是整个解释器的入口——它调 `Interpreter::initialize()`，最终进入 `TemplateInterpreter::initialize()`。`templateTable_init`（第 14 步，templateTable.cpp:547）是一个**无操作**的冗余调用——它内部做的 `TemplateTable::initialize()` 在 `TemplateInterpreter::initialize()` 的步骤(3)中**已被调用过**，参数完全一致，第二次调用被 `_is_initialized` 标志直接返回。
 
 因此本章实质只讲一个东西——`TemplateInterpreter::initialize()`（templateInterpreter.cpp:42）：
 
@@ -16,14 +16,14 @@
 interpreter_init()                   ← init_globals 第 11 步
   +- Interpreter::initialize()
   |    +- TemplateInterpreter::initialize()   ← 本章全部内容
-  |         +- §1 五步初始化流程
-  |         +- §2 generate_all()——生成全部桩代码
+  |         +- §1 七步初始化流程
+  |         +- §2 generate_all()——生成全部桩代码（步骤(5)中触发）
   |         |    +- 方法入口
   |         |    +- 返回桩
   |         |    +- 异常桩
   |         |    +- 安全点与去优化
-  |         +- §3 TemplateTable::initialize()——注册 202 条字节码模板
-  |         +- §4 DispatchTable 三表切换
+  |         +- §3 TemplateTable::initialize()——注册 202 条字节码模板（步骤(3)）
+  |         +- §4 DispatchTable 三表切换（步骤(7)）
   +- Forte::register_stub          ← Profiling 工具注册解释器代码区为"桩"
   +- JvmtiExport::post_dynamic_code_generated ← JVMTI 代理收到通知（动态代码生成）
 ```
@@ -53,33 +53,48 @@ interpreter_init()                   ← init_globals 第 11 步
 void TemplateInterpreter::initialize() {
   if (_code != NULL) return;
 
-  AbstractInterpreter::initialize();                          // (1) 基类初始化
+  assert((int)Bytecodes::number_of_codes <= (int)DispatchTable::length,
+         "dispatch table too small");                         // (1) 合法性断言
 
-  TemplateTable::initialize();                                // (2) 注册 202 条字节码模板
+  AbstractInterpreter::initialize();                          // (2) 基类初始化
+
+  TemplateTable::initialize();                                // (3) 注册 202 条字节码模板
 
   { ResourceMark rm;
-    _code = new StubQueue(new InterpreterCodeletInterface,   // (3) 创建 CodeBuffer
-                          InterpreterCodeSize, NULL, "Interpreter");
+    TraceTime timer("Interpreter generation", TRACETIME_LOG(Info, startuptime));
+    int code_size = InterpreterCodeSize;
+    NOT_PRODUCT(code_size *= 4;)
+    _code = new StubQueue(new InterpreterCodeletInterface,   // (4) 创建 CodeBuffer
+                          code_size, NULL, "Interpreter");
 
-    TemplateInterpreterGenerator g(_code);                    // (4) 生成全部汇编代码
-    _code->deallocate_unused_tail();                          //    回收未用尾部空间
+    TemplateInterpreterGenerator g(_code);                    // (5) 生成全部汇编代码
+    _code->deallocate_unused_tail();
   }
 
-  _active_table = _normal_table;                              // (5) 激活 dispatch 表
+  if (PrintInterpreter) {                                     // (6) 调试打印（日常关）
+    ResourceMark rm;
+    print();
+  }
+
+  _active_table = _normal_table;                              // (7) 激活 dispatch 表
 }
 ```
 
-五个步骤从"空壳"走到"可执行解释器"：
+七步从"空壳"走到"可执行解释器"：
 
 | 步 | 做什么 | 产出 |
 |---|--------|------|
-| (1) | `AbstractInterpreter::initialize()` | 基类初始化——字节码计数器重置 + `InvocationCounter::reinitialize`（[ch13 §2.4](openjdk/vol-01/ch13/01-init-globals-facade.md)） |
-| (2) | `TemplateTable::initialize()` | 注册 202 个字节码模板——为每个字节码绑定生成器函数和操作数栈转型规则（§3） |
-| (3) | `new StubQueue(...)` | 创建 CodeBuffer，分配 `InterpreterCodeSize` 字节的代码空间——所有 Codelet 的汇编代码存于此 |
-| (4) | `TemplateInterpreterGenerator g(_code)` | 构造触发 `generate_all()`——遍历模板 + 生成全部桩代码（§2） |
-| (5) | `_active_table = _normal_table` | 激活 dispatch 表——`_active_table` 指向 `_normal_table`，解释器取指时用（§4） |
+| (1) | `assert(dispatch 表大小)` | 编译时合法性检查，确保字节码数量不超过分派表容量 |
+| (2) | `AbstractInterpreter::initialize()` | 基类初始化——字节码计数器重置 + `InvocationCounter::reinitialize`（[第 13 章 §2.4](openjdk/vol-01/ch13/01-init-globals-facade.md)） |
+| (3) | `TemplateTable::initialize()` | 注册 202 个字节码模板——为每个字节码绑定生成器函数和操作数栈转型规则（§3） |
+| (4) | `new StubQueue(...)` | 创建 CodeBuffer，分配 `InterpreterCodeSize` 字节的代码空间——所有 Codelet 的汇编代码存于此 |
+| (5) | `TemplateInterpreterGenerator g(_code)` | 构造触发 `generate_all()`——遍历模板 + 生成全部桩代码（§2） |
+| (6) | `if (PrintInterpreter) print()` | 调试打印——仅在 `-XX:+PrintInterpreter` 时输出生成的 Codelet 列表，日常不执行 |
+| (7) | `_active_table = _normal_table` | 激活 dispatch 表——`_active_table` 指向 `_normal_table`，解释器取指时用（§4） |
 
 `Interpreter::initialize()` 进入 `TemplateInterpreter::initialize()`（静态方法，templateInterpreter.cpp:42）——HotSpot 在编译时通过 `#include "templateInterpreter.hpp"` 确定了解释器的具体实现。
+
+> 五步的执行顺序是 (1)→(2)→(3)→(4)→(5)。本章的讲解按**概念深度递进**而非严格按步序——先展开 Template 和 CodeletMark 这两个贯穿全程的核心概念（§1.1-§1.2），再逐级展开 generate_all（§2）、TemplateTable（§3）和 DispatchTable（§4）。
 
 ---
 
@@ -97,7 +112,7 @@ class Template {
 };
 ```
 
-步骤(2)中调用了 `TemplateTable::initialize()`——它的内部是 200+ 行 `def` 函数调用。`def` 是 `TemplateTable::def()`，一个注册函数，每调用一次就往 `_template_table[202]` 数组的某个槽位填入一个 `Template` 对象——"每个字节码的配方"。以 `_iconst_2` 为例，`initialize()` 中有一行：
+步骤(3)中调用了 `TemplateTable::initialize()`——它的内部是 200+ 行 `def` 函数调用。`def` 是 `TemplateTable::def()`，一个注册函数，每调用一次就往 `_template_table[202]` 数组的某个槽位填入一个 `Template` 对象——"每个字节码的配方"。以 `_iconst_2` 为例，`initialize()` 中有一行：
 
 ```cpp
 def(Bytecodes::_iconst_2, ____|____|____|____, vtos, itos, iconst, 2);
@@ -135,9 +150,33 @@ def(Bytecodes::_iconst_2, ____|____|____|____, vtos, itos, iconst, 2);
 
 ## 1.2 CodeletMark——Codelet 的诞生与提交
 
-**Codelet 是什么**。`InterpreterCodelet` 是解释器生成的一小段汇编代码——每个 JVM 字节码对应一个 Codelet。它在 `StubQueue` 中占一段连续空间，头部存元数据（`_size` 代码长度、`_description` 描述字符串、`_bytecode` 字节码编号），体部是生成器产出的机器指令。解释器执行字节码的过程就是：取当前字节码 → 查 dispatch 表找到对应的 Codelet 地址 → 跳转执行 → 该 Codelet 的最后一条指令跳到下一条字节码的 Codelet——**从一个 Codelet 跳到另一个 Codelet，直到方法返回**。
+**Codelet 是什么**。`InterpreterCodelet` 是解释器为每个字节码生成的一小段汇编代码——每个 Codelet 在 `StubQueue` 中占一段连续空间，头部存元数据（`_size` 代码长度、`_description` 描述字符串、`_bytecode` 字节码编号），体部是生成器产出的机器指令。「可以简单的理解为 -- 该段连续空间 = 元数据 + 数据(机器指令)」
 
-每个 `Codelet` 的生成都由 `CodeletMark` 守卫（interpreter.cpp:84）。它解决一个问题：`generate_all()` 里有几十个独立的 `generate_*()` 调用——每个都需要自己的代码缓冲区、汇编器、以及"生成完了把机器码提交到 StubQueue"的步骤。如果没有 `CodeletMark`，这几十个函数都得手动重复这三步。
+Codelet 和 JIT 编译后的方法代码有本质区别：JIT 把整个方法编译成一大段连续的机器码，顺序执行；解释器则是**每个字节码一个 Codelet**——执行一条字节码的 Codelet 后，它的最后一条指令跳到下一条字节码的 Codelet，而不是继续顺序执行。
+
+```
+方法 `int add(int a, int b)` → 字节码序列:
+  iload_0,  iload_1,  iadd,  ireturn
+
+解释器执行:
+  iload_0 的 Codelet: push a 到栈顶 → jmp iload_1 的 Codelet
+  iload_1 的 Codelet: push b 到栈顶 → jmp iadd 的 Codelet
+  iadd 的 Codelet:   栈顶两数相加     → jmp ireturn 的 Codelet
+  ireturn 的 Codelet: 栈顶值弹出返回   → 调用者
+
+每行末尾的 "jmp 下一字节码的 Codelet" 就是 dispatch——
+查 dispatch 表找到目标 Codelet 的入口地址，跳转。
+```
+
+总结：解释器**在 Codelet 之间跳来跳去**执行一个方法——每个 Codelet 只做一件事（压栈、运算、跳转），和方法体的大块连续汇编完全不同。
+
+`generate_all()` 把 202 个字节码的 Template 逐个变成 Codelet。Template 是配方，但怎么把配方"翻译"成机器码？每个字节码的 Template 变成 Codelet 需要三样东西：
+
+- **代码空间**——Codelet 的机器码要存在哪？从 `StubQueue` 中切一块。`StubQueue` 底层通过 `BufferBlob::create()` 从 CodeCache（CodeHeap）分配内存——这块可执行内存池和 JIT 编译产物共享（[第 9 章第 3 篇](openjdk/vol-01/ch09/03-bufferblob-create.md)），与第 9 章讲过的 CodeCache 动态分配/回收流程不同
+- **翻译工具**——需要一个能把汇编操作码变成真实机器指令的**汇编器**，每个 Codelet 需要独立的汇编器实例
+- **提交管理**——机器码生成完了，要把占用的确切字节数报给 StubQueue，让它可以接着分配下一个 Codelet
+
+CodeletMark 把这三步打包成一个自动化的生命周期——构造时自动搞定前两步，析构时自动搞定第三步。
 
 ```cpp
 class CodeletMark {
@@ -153,36 +192,71 @@ public:
 
 三个字段的协作：
 
-- **`_clet`**（`InterpreterCodelet*`）：从 `StubQueue` 用 `request(codelet_size())` 切出的一块空间。构造后它不是普通的 `malloc` 内存——`StubQueue` 内部有链表/队列管理它的位置
-- **`_cb`**（`CodeBuffer`）：将 `_clet` 包装为标准 `CodeBuffer` 接口——汇编器（`InterpreterMacroAssembler`）只认识 `CodeBuffer`，不直接认识 `InterpreterCodelet`
-- **`_masm`**（`InterpreterMacroAssembler**`）：一个**二级指针**——构造时 `new InterpreterMacroAssembler(&_cb)`，将汇编器地址写入 `*_masm`。调用者在 `CodeletMark` 作用域内通过这个 `masm` 引用调用 `_masm->push()、_masm->mov()、...` 生成机器码
+- **`_clet`**（`InterpreterCodelet*`）：从 `StubQueue` 用 `request(codelet_size())` 切出的一块空间。`StubQueue` 构造时通过 `BufferBlob::create()` 从 CodeCache 一次性分配了一大块内存（§1 步骤(3)），之后 `request()` 从这块大内存中按需切小段给每个 Codelet——不是每个 Codelet 单独调一次 `BufferBlob`
+- **`_cb`**（`CodeBuffer`）：将 `_clet` 的空间包装为 `CodeBuffer` 接口——`CodeBuffer` 不是汇编器，是汇编器**写入机器码的目标空间**（一块地址范围 + 当前写入位置游标）。汇编器做的是"往这个空间里不停写机器码，游标后移"
+- **`_masm`**（`InterpreterMacroAssembler**`）：一个**二级指针**——`CodeletMark` 构造时 `new InterpreterMacroAssembler(&_cb)` 创建了汇编器，并把它的地址存入 `*_masm`。调用者在 `CodeletMark` 作用域内通过这个 `_masm` 引用调用 `_masm->push()`、`_masm->mov()` 等生成机器码——汇编器把每条指令的机器码写入 `_cb` 指向的空间。析构时 `*_masm = NULL` 防止外部继续持有悬空指针
 
-二级指针是关键技巧——`generate_all()` 中的用法展示了这个模式：
+`CodeletMark` 的构造函数声明为 `CodeletMark(InterpreterMacroAssembler*& masm, ...)`——`masm` 是**引用参数**。构造时它创建一个汇编器，把地址赋给 `masm`——调用者拿到的 `masm` 就指向了刚创建的汇编器。`generate_all()` 中的典型用法：
 
 ```cpp
-void TemplateInterpreterGenerator::generate_all() {
-  InterpreterMacroAssembler* _masm = NULL;  // 初始为空
+InterpreterMacroAssembler* _masm = NULL;
 
-  { CodeletMark cm(_masm, "slow signature handler");
-    AbstractInterpreter::_slow_signature_handler = generate_slow_signature_handler();
-  }  // cm 析构 → 生成的代码被提交，_masm 被置为 NULL
+// 每生成一个 Codelet，开一个 CodeletMark 作用域
+{ CodeletMark cm(_masm, "slow signature handler");
+  AbstractInterpreter::_slow_signature_handler = generate_slow_signature_handler();
+} // cm 析构: flush 机器码 → commit 到 StubQueue → _masm 置为 NULL
+
+// 下一个 Codelet
+{ CodeletMark cm(_masm, "return entry points");
+  // ... 通过 _masm 生成返回桩代码 ...
+} // 析构时自动提交
 ```
 
-`CodeletMark` 构造时将 `new InterpreterMacroAssembler(&_cb)` 的地址写入 `_masm`——之后 `generate_slow_signature_handler()` 内部通过 `_masm` 生成机器码。析构时对齐、flush、commit、将 `_masm` 置为 NULL——防止作用域外的代码意外持有悬空汇编器指针。
+进入 `{ }` 块时：CodeletMark 构造 → 从 StubQueue 切空间（`request`）→ 创建汇编器 → `_masm` 指向它。块内的 `generate_*()` 通过 `_masm->push()`、`_masm->mov()` 等生成机器码。离开 `{}` 块时：CodeletMark 析构 → 对齐 flush → commit 到 StubQueue → `_masm = NULL`。调用者不需要手动管理任何资源——就是块的开和关。
 
-构造时（interpreter.cpp:84）三步：
-1. `AbstractInterpreter::code()->request(codelet_size())`——从 CodeBuffer 切出空间（默认：可用空间 - 2K，interpreter.hpp:98-107）
-2. `_clet->initialize(description, bytecode)`——标记 Codelet 的名字和字节码编号（调试打印用）
-3. `new InterpreterMacroAssembler(&_cb)`——创建汇编器，传入 Codelet 的代码缓冲区
+构造函数的三个参数：
 
-析构时（interpreter.cpp:99）三步：
-1. 对齐 + flush——保证机器码按字边界对齐、全部写入 CodeBuffer
-2. `AbstractInterpreter::code()->commit(committed_code_size, ...)`——将实际生成的机器码大小提交给 StubQueue，更新其内部指针
-3. `*_masm = NULL`——防止 Codelet 外部继续持有汇编器引用
+```cpp
+CodeletMark(InterpreterMacroAssembler*& masm,        // 引用——构造后 masm 指向刚创建的汇编器
+            const char* description,                  // Codelet 的名称（调试打印用）
+            Bytecodes::Code bytecode);               // 关联的字节码编号（默认值 _illegal——"不属于任何字节码"）
+```
 
-`codelet_size()` 实际分配的量不固定——它取 `StubQueue::available_space() - 2K`，保证 CodeBuffer 中有足够空间容纳当前 Codelet。debug 构建中所有分配乘以 4（`InterpreterCodeSize * 4`），为调试断言和边界检查留额外空间。
+第三个参数有默认值——上面的示例中"slow signature handler"和"return entry points"是辅助桩代码，不绑定到具体字节码，所以没传第三个参数。字节码模板的 Codelet 才传对应的 `_iconst_2` / `_invokevirtual` 等。
 
-> `StubQueue` 通过 `BufferBlob::create()` 从 CodeCache（CodeHeap）分配内存——与 JIT 编译产物共享同一个可执行代码池（`BufferBlob` 结构见 [ch09/03](openjdk/vol-01/ch09/03-bufferblob-create.md)）。`StubQueue` 在 `init_globals` 期间一次性分配，其后永不清除。
+构造时（interpreter.cpp:84）：
+
+```cpp
+CodeletMark::CodeletMark(InterpreterMacroAssembler*& masm,
+                         const char* description,
+                         Bytecodes::Code bytecode) :
+  _clet((InterpreterCodelet*)AbstractInterpreter::code()->request(codelet_size())),
+  _cb(_clet->code_begin(), _clet->code_size()) {
+  _clet->initialize(description, bytecode);
+  masm = new InterpreterMacroAssembler(&_cb);
+  _masm = &masm;
+}
+```
+
+初始化列表中先调 `request(codelet_size())` 从 StubQueue 切出一块空间，存入 `_clet`（`codelet_size()` = 可用空间减 2K，debug 构建中 `InterpreterCodeSize` 乘以 4）。`_cb` 将这块空间包装为 `CodeBuffer`。进入函数体后，`initialize(description, bytecode)` 把名称和字节码编号写入 Codelet 头部。然后 `new InterpreterMacroAssembler(&_cb)` 创建平台相关的汇编器，地址通过 `masm` 引用参数流出给调用者。
+
+析构时（interpreter.cpp:99）：
+
+```cpp
+CodeletMark::~CodeletMark() {
+  (*_masm)->align(wordSize);
+  (*_masm)->flush();
+  int committed_code_size = (*_masm)->code()->pure_insts_size();
+  if (committed_code_size) {
+    AbstractInterpreter::code()->commit(committed_code_size, (*_masm)->code()->strings());
+  }
+  *_masm = NULL;
+}
+```
+
+先 `align(wordSize)` 将机器码按字边界补 nop，`flush()` 把汇编器缓冲的指令全部写入 CodeBuffer。然后 `commit(committed_code_size, ...)` 将实际生成的字节数告知 StubQueue——更新 `_queue_end` 和 `_number_of_stubs`，为下一次 `request` 做好准备。最后 `*_masm = NULL` 防止块外代码持有已析构 Codelet 的悬空汇编器指针。
+
+> `StubQueue` 通过 `BufferBlob::create()` 从 CodeCache（CodeHeap）分配内存——与 JIT 编译产物共享同一个可执行代码池（`BufferBlob` 结构见 [第 9 章第 3 篇](openjdk/vol-01/ch09/03-bufferblob-create.md)）。`StubQueue` 在 `init_globals` 期间一次性分配，其后永不清除。
 
 ---
 
@@ -262,7 +336,7 @@ _throw_StackOverflowError_entry = generate_StackOverflowError_handler();
 
 ## 3. TemplateTable::initialize()——202 条字节码模板的注册
 
-`TemplateTable::initialize()`（templateTable.cpp:244）是 200+ 行的 `def` 调用序列。每个 `def` 调用往 `_template_table[code]` 的槽位置填入一个字节码的全部注册信息。步骤(4)中 `generate_all()` 遍历这些槽位生成 Codelet。
+`TemplateTable::initialize()`（templateTable.cpp:244）是 200+ 行的 `def` 调用序列。每个 `def` 调用往 `_template_table[code]` 的槽位置填入一个字节码的全部注册信息。步骤(5)中 `generate_all()` 遍历这些槽位生成 Codelet。
 
 ### 3.1 def 的五种重载
 
@@ -385,4 +459,4 @@ Safepoint 发生:
 
 202 种字节码的 Codelet 组成了"取指-跳转"循环的全部内容。这是 JVM 在启动后执行任何 Java 代码之前的最后一步——从此 `init_globals` 不再生成新的代码，控制权移交给 Java 程序的执行。
 
-> **下一篇**：[ch17 SharedRuntime::generate_stubs](runtime_stubs.md)<!-- 404: target not found, 请作者补正文 -->——运行时桩生成：方法调用解析、安全点处理、去优化桩。
+> **下一篇**：[第 17 章 SharedRuntime::generate_stubs](runtime_stubs.md)<!-- 404: target not found, 请作者补正文 -->——运行时桩生成：方法调用解析、安全点处理、去优化桩。
