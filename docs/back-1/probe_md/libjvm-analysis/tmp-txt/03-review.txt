@@ -1,0 +1,30 @@
+Deep-review 03-object-model — the JVM object model phase. 7 docs, freshly fixed.
+
+## Benchmark
+probe_md/libjvm-analysis/01-jvm-startup/ (~48/55 after full fix)
+probe_md/libjvm-analysis/02-class-loading/ (~55/60 after full fix)
+
+## Review dimensions
+
+### 1. markOop completeness (10 pts)
+Does doc 01 explain ALL 64 bits of markOop with actual bit positions? The 5 lock states (unlocked/biasable/biased/lightweight/inflated) with exact bit patterns? Hash code storage and the hash-vs-bias conflict?
+
+### 2. oop/klass hierarchy completeness (10 pts)
+Does doc 02 show oopDesc → instanceOop → arrayOop → typeArrayOop hierarchy? Doc 03 show Klass → InstanceKlass → ArrayKlass hierarchy? _klass field at header offset 8? narrow_klass compression in CDS?
+
+### 3. compressedOops depth (10 pts)
+Does doc 04 explain: zero-based vs disjoint base vs heap-based? Shift formula? Why heap < 32GB matters? Decode/encode assembly (lea instruction)? ObjectAlignmentInBytes interaction?
+
+### 4. Object allocation fast path (10 pts)
+TLAB allocation? bump-the-pointer? Slow path (eden allocation, CAS, GC)? MemAllocator::allocate() walkthrough? Collision with GC safepoint?
+
+### 5. Synchronization primitives (10 pts)
+Biased locking: epoch, bias pattern, revocation. Lightweight lock: BasicLock, displaced header, CAS. Heavyweight: ObjectMonitor, cxq/EntryList. Lock inflation?
+
+### 6. Production grounding (5 pts)
+All docs now have production opener — are they authentic or superficial? BiasedLocking revocation storm? compressedOops >32GB heap NPE? False sharing with @Contended?
+
+### 7. Against 01/02 benchmark (5 pts)
+GDB density, Mermaid density, source evidence, beginner concept sidebars?
+
+Output: phase score /60, top 3 gaps, "if 2 docs" recommendation.

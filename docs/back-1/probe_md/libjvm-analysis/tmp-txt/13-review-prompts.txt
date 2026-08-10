@@ -1,0 +1,210 @@
+Deep-review 4 prompts for 13-launcher phase. Each ~500-600 lines. These prompts will produce the ACTUAL documents — if they have gaps, the docs will have gaps.
+
+## Prompts
+probe_md/13-launcher/prompt-00-Libjli-Overview.md (32K, ~530 lines)
+probe_md/13-launcher/prompt-01-Argument-Parsing.md (32K, ~530 lines)
+probe_md/13-launcher/prompt-02-JVM-Loading.md (37K, ~600 lines)
+probe_md/13-launcher/prompt-03-Main-Class-Loading.md (40K, ~660 lines)
+
+## Benchmark
+probe_md/libjvm-analysis/05-jit-compiler/prompt-03-Chaitin-RegAlloc.md (360 lines, 50/60 — scored in 05 review)
+
+---
+
+## 1. Production Authenticity — 10 pts per prompt
+
+### What "good" looks like:
+§〇 shows a REAL error string from emessages.h with line number. The scenario is a SPECIFIC 3am page: "CI/CD pipeline 阻塞" or "生产滚动更新失败。" The diagnostic path is ACTIONABLE: exact commands, exact flags, exact log grep patterns.
+
+### What "bad" looks like:
+Scenario is generic ("启动失败"), error message is paraphrased not quoted, diagnostic is vague ("检查配置").
+
+### Per-prompt checks:
+
+**P00**: §〇 should use `Error: Could not create the Java Virtual Machine. A fatal exception has occurred.` (emessages.h:60). Does it show HOW to determine if dlopen failed vs JNI_CreateJavaVM failed? The diagnostic commands from the 13-fix-readme fix should be PRESENT: `ulimit -v`, `ldd`, `strace -e openat`, `java -Xlog:modules=debug`.
+
+**P01**: §〇 should use the ZGC on JDK 11 scenario. Specific: `-XX:+UseZGC` on JDK 11 experimental flag → JVM starts → C2 compilation → NullPointerException in ZBarrierSetC2 → SIGSEGV. The diagnostic should include: `-XX:+PrintFlagsFinal | grep UseZGC` to confirm flag was parsed, `-XX:-UseZGC` exclusion for confirmation.
+
+**P02**: §〇 should use the multi-version JDK conflict: JAVA_HOME=JDK8, /etc/alternatives=JDK11 → `Error: could not find libjava.so`. Diagnostic: `readlink -f /proc/self/exe`, `echo $JAVA_HOME`, `stat $JAVA_HOME/lib/libjava.so`, `which java`.
+
+**P03**: §〇 should use Spring Boot fat JAR scenario: `Error: Could not find the main class org.springframework.boot.loader.JarLauncher`. Diagnostic: `jar xf app.jar META-INF/MANIFEST.MF && cat META-INF/MANIFEST.MF`, `unzip -l app.jar | grep JarLauncher`, check nested JAR layout.
+
+### Scoring per prompt:
+9-10: exact error string + specific scenario + actionable diagnostic commands from fix prompt
+7-8: good scenario but diagnostic slightly vague
+5-6: scenario exists but no exact error string or diagnostic too generic
+3-4: hypothetical or generic scenario
+1-2: no production scenario or completely broken
+
+---
+
+## 2. First-Principles Depth — 10 pts per prompt
+
+### What "good" looks like:
+Each §四 question group starts from "If you designed the java launcher from scratch..." and DERIVES HotSpot's choice as the logical consequence of constraints. The counterfactual is QUANTIFIED: "RTLD_LAZY instead of RTLD_NOW: saves 200ms symbol resolution at dlopen time, but threads crash LATER with undefined symbol errors — tradeoff is startup speed vs runtime reliability."
+
+### What "bad" looks like:
+Question groups describe mechanisms: "JLI_Launch has 12 parameters." No counterfactual, no "why," no alternative cost. Just documentation restated as questions.
+
+### Per-prompt checks (≥6 out of 8 groups must be counterfactual-driven):
+
+**P00 checks — spot-check 3 groups**:
+- 4.1 JLI_Launch 12 parameters: "Why 12 params not 2 (argc, argv)?" → Because platform-specific startup flags are pre-resolved. Counterfactual: "If libjli only got argc/argv: every platform's main() would need to extract version/flags/eproduct name differently → duplicate logic across Windows/Mac/Linux."
+- 4.4 LoadJavaVM/dlopen: RTLD_NOW vs RTLD_LAZY tradeoff — quantified? "RTLD_LAZY saves ~200ms at startup but crashes later with 'undefined symbol' in production traffic."
+- 4.5 Thread creation: "If JVM ran in primordial thread: stack overflow corrupts launcher stack." Quantified: "pthread stack = 8MB separate → 10 threads × 8MB = 80MB overhead. Tradeoff between isolation and memory."
+
+**P01 checks**:
+- 4.2 LaunchMode: "4 modes, 4 execution paths. Counterfactual: if -jar and -cp path shared logic → classpath conflict between jar mode (overwrite) and cp mode (append) → non-deterministic class loading." Explicit classpath overwrite mechanism at java.c:338-340.
+- 4.5 Wildcard expansion: "Why expand at startup not at class load? opendir 1000 JARs = ~2ms. Per-class opendir: 1000 classes × 2ms = 2s startup. 1000x difference."
+- 4.8 -version flag: "Why handle BEFORE JNI_CreateJavaVM? Saving 2s of JVM startup for printing a version string."
+
+**P02 checks**:
+- 4.3 JAVA_HOME preference: "JAVA_HOME is checked before /proc/self/exe as a performance shortcut — saves 5-10 syscalls. But the cost: stale JAVA_HOME → wrong JVM loaded → startup failure with misleading error."
+- 4.6 dlopen(RTLD_NOW|RTLD_GLOBAL): "RTLD_GLOBAL: why not RTLD_LOCAL? -agentlib needs dlsym(RTLD_DEFAULT, 'JNI_GetCreatedJavaVMs') → requires JVM symbols in global table."
+- 4.8 libjsig preloading: "Why signal chain setup BEFORE JVM starts? Because JVM's signal handlers install in Threads::create_vm → if signal chain isn't ready → SIGPROF from profiler delivered to raw JVM handler → crash."
+
+**P03 checks**:
+- 4.4 LauncherHelper indirection: "Why Java helper instead of direct FindClass? JNI FindClass returns null → 4-step exception handling in C vs 1-step catch block in Java. LauncherHelper wraps JNI complexity for better error messages."
+- 4.6 CallStaticVoidMethod: "After this call, libjli never executes again. JVM owns the process. What if main() throws and there's no catch? ExceptionDescribe + exit(1) — the JVM exits, not the launcher."
+- 4.7 Class-Path vs wildcard: "Timing difference: wildcard expanded at ParseArguments (before JVM). Class-Path appended at java.class.path init (after JVM starts). Class-Path JARs load AFTER system classes → can't override java.lang.String."
+
+### Scoring per prompt:
+9-10: 6+ groups have explicit counterfactuals with quantified tradeoffs
+7-8: 4-5 groups counterfactual-driven
+5-6: 2-3 groups
+3-4: mostly "what" questions
+1-2: no counterfactuals
+
+---
+
+## 3. Beginner Callout Completeness — 10 pts per prompt
+
+### What "good" looks like:
+§一 or §六 specifies 4-5 callout boxes. Each callout has: term name + 2-3 sentence definition + example. The defined concepts are the ones a Java engineer genuinely doesn't know (dlopen, dlsym, /proc/self/exe, LaunchMode) — not obvious ones (command line, JVM).
+
+### What "bad" looks like:
+Callouts are missing entirely, or they define terms the reader already knows (argc/argv defined in C, JVM defined in Java).
+
+### Expected callouts per prompt:
+- P00: dlopen, dlsym, /proc/self/exe, JNI, LaunchMode (5)
+- P01: LaunchMode (repeated if needed), wildcard expansion, JVM option vs application arg (3)
+- P02: dlopen/RTLD_NOW/RTLD_GLOBAL, dlsym, jvm.cfg, InvocationFunctions, stat() (5)
+- P03: JAR manifest, LauncherHelper, FindClass vs Class.forName, JNI exception handling (4)
+
+### Per-prompt check: are ALL expected callouts present? Are definitions clear, avoiding jargon? Do they use JNIExceptionDescribe terminology that a JNI novice wouldn't understand?
+
+### Scoring per prompt:
+9-10: all expected callouts present + clearly defined
+7-8: all present, 1-2 definitions unclear
+5-6: 1-2 callouts missing
+3-4: >2 missing OR definitions use undefined terms
+1-2: no callouts
+
+---
+
+## 4. Source File Accuracy — 10 pts per prompt
+
+### Verify §三 tables against actual source tree:
+- `src/java.base/share/native/libjli/java.c` exists? ✅
+- `src/java.base/unix/native/libjli/java_md_solinux.c` exists? ✅
+- `src/java.base/unix/native/libjli/java_md_common.c` exists? ✅
+- `src/java.base/share/native/libjli/args.c` exists?
+- `src/java.base/share/native/libjli/wildcard.c` exists?
+- `src/java.base/share/native/libjli/parse_manifest.c` exists?
+- `src/java.base/share/native/libjli/manifest_info.h` exists?
+- `src/java.base/share/native/libjli/java.h` exists?
+- `src/java.base/share/native/libjli/emessages.h` exists?
+
+### Verify line numbers where claimed. Spot-check 3 critical line numbers per prompt:
+- P00: JLI_Launch at java.c:220 (fixed from 219)
+- P02: dlopen at java_md_solinux.c:571, dlsym at java_md_solinux.c:624 (fixed from 623)
+- P03: GetStaticMethodID at java.c:560
+
+### Scoring per prompt:
+9-10: all paths correct, all spot-checked line numbers verified
+7-8: all paths correct, 1 line number off
+5-6: 1-2 paths missing or wrong
+3-4: several errors
+1-2: major source file errors
+
+---
+
+## 5. Cross-Reference Coherence — 10 pts per prompt
+
+### Per-prompt §一 must state:
+- P00: "Reader completed 01-jvm-startup §一. This is the prequel — 00 covers what happens BEFORE JNI_CreateJavaVM."
+- P01: "Reader completed 00. P01 expands ParseArguments(), a step in 00's JLI_Launch trace."
+- P02: "Reader completed 00. P02 expands LoadJavaVM(), a step in 00's JLI_Launch trace."
+- P03: "Reader completed 00. P03 expands LoadMainClass(), the final step in 00's JLI_Launch trace."
+
+### Cross-phase references:
+- ALL: reference 01-jvm-startup §一 (JNI_CreateJavaVM handoff point)
+- P02: reference 19-signal-chaining (libjsig interaction)
+- P03: reference 02-class-loading (FindClass behavior), 14-zip-jimage (JAR/ZIP parsing)
+
+### §§八 prohibitions must include:
+- "❌ Don't explain JNI_CreateJavaVM internals (01 §一 covers)"
+- "❌ Don't explain C language basics (argc, argv)"
+- "❌ Don't explain POSIX dlopen semantics in depth (11-os-layer covers)"
+- For P03: "❌ Don't explain JAR/ZIP file format (14-zip-jimage covers)"
+
+### Scoring per prompt:
+9-10: all internal + external references present and accurate
+7-8: most present, 1-2 missing
+5-6: only basic references
+3-4: missing prerequisites
+1-2: wrong or contradictory
+
+---
+
+## 6. Against 05 Benchmark — 10 pts per prompt
+
+### Compare each prompt to 05 prompt-03 Chaitin (50/60):
+
+**Section completeness**: 10 sections all present? §〇§一§二§三§四§五§六§七§八§九§十?
+
+**§四 depth**: ≥8 question groups? 05 prompt-03 has 7 groups. These prompts need ≥8 given libjli's simpler source.
+
+**§八 prohibitions**: ≥8 prohibitions? 05 prompt-03 has 8. Verify.
+
+**§九 requirements**: ≥8 required behaviors? 05 prompt-03 has 10. Verify.
+
+**§十 GDB assertions**: ≥8 assertions with breakpoint+expected output?
+
+### Per prompt: size check
+- P00: 32K ≈ 530 lines — healthy
+- P01: 32K ≈ 530 lines — healthy
+- P02: 37K ≈ 600 lines — good
+- P03: 40K ≈ 660 lines — good
+- Benchmark: 05 prompt-03 = 360 lines (14K) — these are larger. Why? More detailed or bloated? Check if there's content VALUE or just verbosity.
+
+### Scoring per prompt:
+9-10: matches or exceeds 05-03 depth in all dimensions
+7-8: solid, slightly less depth in 1 dimension
+5-6: noticeably less depth than benchmark
+3-4: missing major sections
+1-2: doesn't approach benchmark quality
+
+---
+
+## Output
+
+### Per-prompt score matrix
+| Prompt | Production | First-principles | Beginners | Source files | Cross-refs | Benchmark | /60 |
+|--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 00-Overview | | | | | | | |
+| 01-Arguments | | | | | | | |
+| 02-JVM-Load | | | | | | | |
+| 03-MainClass | | | | | | | |
+
+### Phase coherence: /10 (dependency chain, terminology consistency, coverage)
+
+### Total: /250
+
+### Top 3 gaps (exact prompt:section)
+
+### Best prompt (and why)
+
+### Worst prompt (and what to fix)
+
+### Ready to write docs? Yes / Conditionally / No

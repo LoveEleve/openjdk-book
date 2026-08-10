@@ -1,0 +1,24 @@
+Close 3 minor gaps from 05-jit-compiler review (413/425). Edit existing docs only.
+
+## Fix 1: 06-OopMap-GC-Roots.md §四.1 — add bitmask vs list comparison
+
+Find the paragraph discussing OopMap size (~10 bytes/safepoint). After it, add:
+
+"A simple list encoding: each oop = 4 bytes (2B register/slot index + 2B type encoding) → 5 oops per safepoint = 20 bytes. Bitmask: delta-compressed offsets → ~2 bytes per oop → 5 oops = ~10 bytes. With 15,000 nmethods × avg 5 safepoints each = 75,000 OopMaps × 10 bytes saved = 750KB CodeCache savings. This is why HotSpot chose bitmask over list — it's a small difference per OopMap, but at JVM scale (millions of OopMaps), it matters."
+
+## Fix 2: 03-Chaitin-RegAlloc.md §四.2 — clarify comparison table
+
+In the Standard Chaitin vs HotSpot comparison table, the HotSpot column merges "Simplify + Select" into one row labeled "same." Add a second sub-row explicitly showing:
+
+| Phase | Standard Chaitin 1982 | HotSpot (chaitin.cpp:336-583) |
+|-------|----------------------|-------------------------------|
+| AggressiveCoalesce | Not present | Between IFG_virtual and IFG_physical (line 425) ← KEY DIFFERENCE |
+| Physical IFG | Not separate — single IFG | After Coalesce — vregs now mapped to real 16 GPR constraints |
+| Simplify | After Spill Cost computation | After Physical IFG (line 515) — removes low-degree nodes |
+| Select | After Simplify — color | After Simplify (line 519) — assign first available GPR |
+
+## Fix 3: 07-Profile-Data-Flow.md §4.2 — add coffee shop metaphor alongside existing scenario
+
+After the "10 warmup calls → HashMap 100%" counterfactual, add:
+
+"Think of it like this: if you measure customer behavior by watching the first 10 people enter a coffee shop at 7am — 100% order coffee. You'd conclude 'everyone drinks coffee, buy more beans.' Then lunchtime arrives — 40% order tea instead. Your morning-biased measurement cost you money. Profile maturity = waiting until you've seen enough customers (500+) to see the REAL pattern before making expensive decisions (C2 compilation)."

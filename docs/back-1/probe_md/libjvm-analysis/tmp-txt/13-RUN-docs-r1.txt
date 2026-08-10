@@ -1,0 +1,164 @@
+Produce 2 docs from their prompts. Each ~800-1000 lines. These are the FIRST extension-phase docs — they set the quality standard for phases 13-20.
+
+## Prompts (read FULLY — every section)
+probe_md/13-launcher/prompt-00-Libjli-Overview.md (32K, ~530 lines, 58/60)
+probe_md/13-launcher/prompt-01-Argument-Parsing.md (32K, ~530 lines, 55/60)
+
+## Output
+probe_md/13-launcher/00-Libjli-Overview.md (~900 lines)
+probe_md/13-launcher/01-Argument-Parsing.md (~800 lines)
+
+## Style references (study these before writing)
+- Production opener: probe_md/libjvm-analysis/10-services-diag/04-VMError-hs_err.md
+- Pipeline exposition: probe_md/libjvm-analysis/05-jit-compiler/01-C2-Pipeline.md (1141 lines)
+- Beginner sidebars: probe_md/libjvm-analysis/04-interpreter/02-Stack-Frame.md
+
+## Verification SOP
+```
+rg -n <function> <source> → verify → report discrepancies
+```
+
+---
+
+## 00-Libjli-Overview.md — Content Arc (§ by §)
+
+### §〇 — Production: "CI/CD pipeline 阻塞 at 3am"
+Exact error: `Error: Could not create the Java Virtual Machine. Error: A fatal exception has occurred. Program will exit.` (emessages.h:60, JVM_ERROR1).
+
+The reader was paged at 3am. Release deploy failing. The error message says "could not create JVM" — but WHY? Is it dlopen failing to load libjvm.so? Or JNI_CreateJavaVM returning an error? Or LoadMainClass failing?
+
+3-branch diagnosis:
+```
+Branch A: DLL_ERROR1 → dlopen(libjvm.so) failed
+  → stat <jre>/lib/amd64/server/libjvm.so → file missing? corrupted? wrong arch?
+  → ldd <java_binary> → check libjvm.so dependencies
+
+Branch B: JVM_ERROR1 → JNI_CreateJavaVM returned != JNI_OK
+  → ulimit -v → virtual memory limit < requested heap?
+  → java -Xlog:modules=debug -version 2>&1 | grep ERROR
+
+Branch C: CLS_ERROR1 → LoadMainClass failed
+  → java -cp <classpath> -jar <jarfile> -Xdiag → JVM diagnostic message
+```
+
+### §一 — Narrative + Calls + De-glamorization
+"本文不是你想象的 'java 命令手册'。这是 libjli.so 的 ENGINEERING documentation——从 `bash$ java` 到 `main()` 执行，每一步的源码行号和设计推导。"
+
+"05-jit-compiler 教了你 C2 的 Sea of Nodes。01-jvm-startup 教了你 JNI_CreateJavaVM 之后的 2 秒。本文教你的——是 01 之前的那 0.05 秒。因为 JVM 从 shell 命令变成进程的那 0.05 秒里，每一行代码都是问题排查的线索。"
+
+Prerequisites: 01-jvm-startup §一 (JNI_CreateJavaVM call knows what happens AFTER). Within 13: "本文是 13 的基础。01-Argument-Parsing 展开 ParseArguments，02-JVM-Loading 展开 LoadJavaVM，03-MainClass-Loading 展开 LoadMainClass。"
+
+5 Beginner sidebars (as spec'd in prompt §一):
+1. **dlopen**: "POSIX 系统调用——把共享库 .so 文件加载到进程地址空间。dlopen('libjvm.so') 之后，libjvm.so 的 20MB 代码段被映射到进程的虚拟内存中。多个 JVM 进程共享同一份物理页。"
+2. **dlsym**: "POSIX 系统调用——根据函数名字符串在已加载的共享库中查找函数地址。dlsym(handle, 'JNI_CreateJavaVM') 返回函数指针。"
+3. **/proc/self/exe**: "Linux 内核为每个进程创建的符号链接——指向实际可执行文件的绝对路径。不需要 $PATH 或 $JAVA_HOME。即使 java 是符号链接，/proc/self/exe 也指向最终目标."
+4. **JNI**: "Java Native Interface——09-native-interface 已分析。libjli 使用 JNI 调用 JNI_CreateJavaVM 和 CallStaticVoidMethod."
+5. **LaunchMode**: "java.h:231 的枚举：LM_CLASS(1)=普通类加载，LM_JAR(2)=-jar 模式，LM_MODULE(3)=-m 模块模式，LM_SOURCE(4)=源文件模式."
+
+### §二 — Environment
+OpenJDK 11 slowdebug, 64-bit Linux x86_64. Source: src/java.base/share/native/libjli/, src/java.base/unix/native/libjli/. Build: `make jdk`. GDB: `gdb --args java -jar app.jar`.
+
+### §三 — Source Files (table from prompt §三)
+
+### §四 — JLI_Launch Full Trace (the CORE of the doc)
+This is the MARQUEE section. Eight-step walkthrough with source code snippets:
+
+**Step 1: JLI_Launch entry at java.c:220**
+Show the 12-parameter signature. Explain EACH parameter: argc/argv from bash, jargc/jargv from JVM-specific args (Windows, MacOS pre-processing), appclassc/appclassv from platform launcher, fullversion/dotversion from JDK version strings, pname/lname for process naming, javaargs for -X/-XX flags already classified by platform launcher, cpwildcard for wildcard expansion flag, javaw for Windows-specific, ergo for ergonomic tuning.
+
+"Why 12 instead of 2? Because the `java` command is NOT always launched from bash. On Windows: WinMain pre-processes. On MacOS: NSApplicationMain pre-processes. Each platform resolves different startup flags BEFORE JLI_Launch is called. The 12 parameters are the COMMON protocol all platforms agree on."
+
+**Step 2: SelectVersion at java.c:1056**
+Reads JAR manifest or release file to determine required JRE version. If JAR was compiled with JDK 17 but system has JDK 11 → SelectVersion switches jrepath to JDK 17's JRE. Counterfactual: "If SelectVersion didn't exist: JNI_CreateJavaVM starts JDK 11 → ClassLoader encounters JDK 17 bytecodes → ClassFormatError → wasted 2s startup + guaranteed failure."
+
+**Step 3: CreateExecutionEnvironment at java_md_solinux.c:284**
+Finds the JRE installation. Priority: $JAVA_HOME (if set, shortcut) → /proc/self/exe (zero-config fallback). Walks up from bin/java → lib/libjava.so as JRE anchor file.
+
+**Step 4: LoadJavaVM at java.c:300 → dlopen at java_md_solinux.c:571**
+dlopen(libjvm.so, RTLD_NOW|RTLD_GLOBAL). RTLD_NOW = resolve ALL symbols immediately — fail NOW if missing, not LATER during production. RTLD_GLOBAL = JVM symbols visible to all future dlopen calls (required for -agentlib). Counterfactual: "RTLD_LAZY saves ~200ms at startup but crashes with 'undefined symbol: JVM_FindSignal' during JIT compilation → 2s wasted → crash → restart → crash again."
+
+**Step 5: JVMInit → JavaMain → thread creation at java_md_solinux.c:786**
+pthread_create with custom stack size (8MB), disabled guard page. "Running Java code in primordial thread caused many problems" (java.c:202). Counterfactual: "If JVM ran in primordial thread: pthread stack is shared with launcher → JVM startup modifies stack unpredictably → launcher's local variables corrupted → undefined behavior."
+
+**Step 6: ParseArguments at java.c:1296** (overview — details in 01)
+Separates JVM options from application arguments. Mode detection: -jar → LM_JAR, -cp → LM_CLASS, -m → LM_MODULE.
+
+**Step 7: LoadMainClass at java.c:523** (overview — details in 03)
+LoadMainClass → LauncherHelper.checkAndLoadMain() → Class.forName(mainClassName) → find main(String[]).
+
+**Step 8: CallStaticVoidMethod at java.c:566**
+The IRREVERSIBLE transition. After this call, libjli's C stack is dormant — JVM's Java stack takes over. If main() returns → exit. If main() throws → ExceptionDescribe → exit(1). "libjli never RETURNS from CallStaticVoidMethod. The JVM OWNS the process now."
+
+### §五 — Mermaid: 13/01 responsibility split
+Sequence diagram with lanes: Shell → libjli → libjvm → Java. From `bash$ java` to `main()`. Annotated with timing (~0.05s for libjli, ~2s for libjvm).
+
+### §六 — Timing Analysis
+libjli: 0.05s → arg parsing 0.02s + JRE discovery 0.01s + dlopen 0.01s + JNI setup 0.01s.
+libjvm (01): 2s → Threads::create_vm 1.9s + Universe::genesis 0.1s.
+"If your app takes 3s to start, 67% is JVM init, 1.6% is libjli, and the rest is your app. But 100% of startup ERROR MESSAGES come from libjli."
+
+### §七 — GDB: 6 breakpoints trace
+Full (gdb) session format: break at java.c:220, java.c:1056, java_md_solinux.c:284, java_md_solinux.c:571, java.c:1545, java.c:523, java.c:566. Show each breakpoint hit + register state + commentary.
+
+### §八 — Story-format interview answer
+"Q: What happens between `java MyClass` and `main()`?"
+Two-segment story — libjli 0.05s + libjvm 2s.
+
+---
+
+## 01-Argument-Parsing.md — Content Arc (§ by §)
+
+### §〇 — Production: "ZGC on JDK 11 — experimental flag, silent crash"
+JDK 11 production. Engineer adds `-XX:+UseZGC` for lower latency. ZGC is experimental in JDK 11 (requires `-XX:+UnlockExperimentalVMOptions`). The flag passes through libjli's ParseArguments → classified as JVM option → passed to JNI_CreateJavaVM. JVM starts normally → 1s warmup → C2 compilation begins → `ZBarrierSetC2::emit_barrier_stub()` → NullPointerException → SIGSEGV → hs_err shows `V [libjvm.so+0x...] ZBarrierSetC2::emit_barrier_stub`. Root cause: JVM flag was forwarded correctly but was dangerous.
+
+Diagnostic: `-XX:+PrintFlagsFinal | grep -i zgc` → confirms flag was set → `-XX:-UseZGC` exclusion → if crash stops → ZGC was the cause → report to OpenJDK or wait for JDK 15.
+
+### §二 — Standard Environment
+Same as 00 §二.
+
+### §三 — Source Files (from prompt §三)
+
+### §四 — ParseArguments Deep-Dive (8 steps)
+
+**4.1: ParseArguments entry at java.c:1296**
+~300 lines of state-machine logic. Initialized with mode=LM_UNKNOWN. Iterates through argv parsing each token.
+
+**4.2: Mode detection — -jar, -cp, -m, --source**
+First non-flag argument determines mode:
+- Starts with `-jar` → mode=LM_JAR, what=next_arg
+- Starts with `-cp` or `-classpath` → mode=LM_CLASS, classpath=next_arg
+- Starts with `-m` → mode=LM_MODULE
+- Starts with `--source` → mode=LM_SOURCE
+- Otherwise → mode=LM_CLASS, what=first non-flag arg
+
+Counterfactual: "If mode detection was order-independent: `java app.jar -jar` would be valid but ambiguous — is app.jar the JAR or the class? Mode detection ORDER prevents ambiguity."
+
+**4.3: JVM option classification — AddOption**
+`-Xms8g` → AddOption("-Xms8g") → push to _java_args linked list. `-XX:+UseG1GC` → AddOption → push. `-Dfoo=bar` → AddOption → push. At JNI_CreateJavaVM time: convert linked list → JavaVMOption[] array. Counterfactual: "If libjli didn't classify: JVM would receive `app.jar` as a JVM option → Arguments::parse() → 'unrecognized option: app.jar' → fatal error → exit. Classification IS the boundary between JVM and application."
+
+**4.4: -Xms/-Xmx dual parsing**
+Why parse heap size in BOTH libjli and libjvm? libjli: extract for `ShowSettings()` output and early error detection. libjvm: actual heap allocation with GC-specific constraints. Counterfactual: "If libjli tried to validate heap size: needs GC-specific knowledge (G1 min heap 1MB, Parallel min 768KB). Duplicate GC logic in launcher → maintenance nightmare."
+
+**4.5: Wildcard expansion — opendir + readdir**
+`java -cp 'lib/*' MyClass` → lib/ → opendir → readdir entries → isJarFileName(name) → only .jar/.JAR → qsort alphabetically → join with `:` separator → SetClassPath(expanded_paths). Counterfactual: "If wildcards NOT expanded at startup: ClassLoader must opendir for every class load → 1000 classes × 2ms opendir = 2s wasted per class → 2000s for 1000 classes."
+
+**4.6: Classpath construction — -jar vs -cp conflict**
+Mode=LM_JAR: java.c:338-340 `if (mode == LM_JAR) SetClassPath(what)` OVERWRITES ALL classpath. User's `-cp` is IGNORED. All classes MUST come from JAR + manifest Class-Path. Counterfactual: "If -cp supplemented -jar classpath: same class (com.Foo) in JAR and external directory → which one loads first? depends on classpath order → non-deterministic → Heisenbug."
+
+**4.7: -version specification — BEFORE JNI_CreateJavaVM**
+-version, -Xinternalversion, -showversion → handled BEFORE LoadJavaVM → save 2s JVM startup for printing version. Counterfactual: "If -version waited until JVM starts: every `java -version` costs 2s → CI/CD pipeline with 100 version checks → 200s wasted daily."
+
+**4.8: Mutually exclusive arguments**
+`-jar` and `-cp` together → error (java.c:1757). `-m` and `-jar` together → error. Counterfactual: "If mutually exclusive args were silently accepted: last flag wins → user thinks -cp works but JAR mode overwrites → class loading fails with 'ClassNotFoundException' not 'bad arguments' → 3am debugging nightmare."
+
+### §五 — Mermaid: ParseArguments state machine
+
+### §六 — GDB: break at ParseArguments, step through mode detection, check AddOption list, verify classpath
+
+### §七 — Interview: Q3 + Q4 from README §五
+
+---
+
+## Fix review gaps during writing
+- 01: add `-XX:-UseZGC` exclusion confirmation step to §〇 diagnostic
+- Both: add missing generic prohibitions from review gap #3 to §八

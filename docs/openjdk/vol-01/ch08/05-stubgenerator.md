@@ -507,3 +507,8 @@ StubCodeDesc 全局链表：
 ---
 
 **接下来**：最后一篇文章（`06-initialize1-full.md`）把前面 5 篇文章的所有知识串起来，逐行拆解 `initialize1()` 的 13 行代码，展示从 NULL 表到完整函数指针表的全过程。
+
+
+## 设计权衡
+
+**为什么用 `StubCodeGenerator` 基类而不是每个 stub 独立管理 `CodeBuffer`？** `StubCodeGenerator` 的构造函数接收 `CodeBuffer*`，内部创建 `MacroAssembler` 并绑定到它。所有 stub 生成的入口都是 `StubCodeGenerator` 的子类（`VM_Version_StubGenerator`、`InterpreterGenerator`、`StubGenerator`）。这保证了每个 stub 的生成流程一致——`CodeBuffer→MacroAssembler→generate_xxx()→flush()`。如果不统一管理，某个 stub 生成器可能忘记 `flush()` 或没有在合适的位置设置 `StubCodeMark`（用于 JFR 事件的 stub 名称标注），导致工具链（`jcmd`、JFR）无法追踪这个 stub。

@@ -1,8 +1,9 @@
 # 7.1 codeCache_init -- CodeCache 内存管理初始化
 
-> **本文定位**：`init_globals()` 第 107 行 `codeCache_init()` 的完整源码讲解。你要理解的是 JVM 如何分配和管理一块有执行权限的内存，用于存放 JIT 编译后的 x86 机器码。
->
-> **前置条件**：读者已理解 `init_globals()` 的总体结构和 Stage 3 的上下文（ch05），知道 `ReservedCodeCacheSize` 已经被放大到 240MB（`compilerDefinitions.cpp:197`），`SegmentedCodeCache` 已被设为 `true`。
+> **前置依赖**：[ch04/01 init_globals 总览](openjdk/vol-01/ch04/01-overview.md)：30 项时序 / [ch05 compilationPolicy_init](openjdk/vol-01/ch05/01-policy-selection.md)：编译线程数确定
+> → **后续**：[ch07 VM_Version_init](openjdk/vol-01/ch07)：CPU 特性检测
+
+> **本文定位**：`init_globals()` 第 107 行 `codeCache_init()` 的完整源码讲解。你要理解的是 JVM 如何分配和管理一块有执行权限的内存，用于存放 JIT 编译后的 x86 机器码。`ReservedCodeCacheSize` 已被放大到 240MB（`compilerDefinitions.cpp:197`），`SegmentedCodeCache` 已被设为 `true`。
 
 ---
 
@@ -1799,3 +1800,12 @@ used 接近 0 是因为还没有任何 Java 方法被编译——初始化刚完
 **分段不隔离**：三个堆物理地址连续——`NonNMethod` 堆的最后 1 字节紧接着 `Profiled` 堆的第 1 字节。但这只是地址连续，分配逻辑是隔离的——NonNMethod 堆的碎片不会进入 Profiled 堆的分配器视野。
 
 **初始状态的可见性**：此时 code cache 中只有一个内容——`flush_icache_stub`，它被分配在 NonNMethod 堆的 `_memory` 开头。三个堆的 segmap 已经被 `clear()` 清零，`_next_segment = 0` 指向第一个可用 segment。
+
+
+## 设计权衡
+
+**为什么要分段（SegmentedCodeCache）而不是一个大 CodeCache？** 如果不分段，所有类型的 compiled code（nmethod、stub、adapter、buffer）都分配在同一块内存中——频繁的 stub 释放（分配新 stub → 回收旧 stub）会在代码中间产生碎片。分段后，NonNMethod 堆（5MB）专门存放生存周期短的 stub/adapter/runtime stub，Profiled 堆（22MB）和 NonProfiled 堆（21MB）分别存放不同优化级别的 nmethod——各自独立分配、独立回收，碎片互不干扰。这类似于 JVM 的堆分代——短命对象在 Young Gen 快速回收，长命对象在 Old Gen 稳定存放。
+
+**为什么 CodeHeap 的 segment 粒度是 64 字节？** x86_64 的 L1 I-cache line 是 64 字节。如果 segment 粒度是 32 字节，两个相邻的 nmethod 可能共享同一个 cache line——释放一个 nmethod 时，另一个还在 cache 里的 nmethod 会因 false sharing 被 CPU 重新取指。64 字节对齐意味着每个 segment 的起始地址总是 cache line 对齐的——false sharing 完全消除。同时 64 字节也不是任意选择的——`ICache::line_size` 是平台相关的，在 x86 上就是 64。
+
+**为什么 `codeCache_init()` 只有两行？** `icache_init()` 填充一个单字节数组（用于 JIT 的 inline cache stub 生成）——这是强制 CPU 的 L1-I 缓存把 stub 所在的内存行标记为 modified，保证 CPU 后续取指时读到的是刚写入的机器码。`CodeCache::initialize()` 是真正的重量级逻辑——但它之所以能被一行调用，是因为 `initialize_heaps()` 里的 7 步已经把地址、大小、granularity、保护页全算好了。`codeCache_init()` 的简洁是"一函数一职责"设计原则的结果——不做参数验证（Flag 已在 ch05 的 `compilationPolicy_init()` 和 `compilerDefinitions.cpp` 中设为固定值），不做错误处理（虚拟地址预留失败 → JVM 崩溃，不需要 `if` 分支）。

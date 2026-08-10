@@ -1,0 +1,30 @@
+Audit then fix all 🔴+🟡 docs in 02-class-loading. Match 01-jvm-startup quality standard.
+
+## Benchmark docs
+probe_md/libjvm-analysis/01-jvm-startup/06-universe_init-Deep-Dive.md (✅ green, 50/50)
+probe_md/libjvm-analysis/01-jvm-startup/19-Container-Cgroup-Support.md (NEW, production-rich)
+
+## Quality standard (every doc must have)
+- Production scenario opener: real crash/fault at 3am
+- ≥5 "why X instead of Y" design rationale sections
+- Source evidence per claim (file:line)
+- GDB session with (gdb) prompt format
+- Interview-ready: could a reader answer the mapped interview question?
+
+## Step 1: Audit 🔴 06-Annotations-Attributes (1 doc)
+Read the full doc. Score: production/design/GDB/interview → /50. Output fix priority + exact sections to add.
+
+## Step 2: Audit 🟡 00/01/04/05/07/12 (6 docs)
+For each, same audit. Then fix in priority order.
+
+## Step 3: Fix ALL
+For each doc: add missing production opener + missing design rationale + GDB session format.
+
+## Step 4: Class-loading production gaps (check and fix)
+- Metaspace OOM from class loading → does any doc show full trace from ClassFileParser→Metaspace allocation→OOM?
+- Class leak (repeated redeploy in app server) → does any doc explain ClassLoaderData release + ClassUnloading?
+- CDS not working → VerifyError after archive rebuild → does doc 09 cover stale archive detection?
+- Container: class metadata loading in memory-constrained K8s pods → where's the diagnostic path?
+
+## Output
+Per-doc: before→after lines, what was added, score change. Phase summary.

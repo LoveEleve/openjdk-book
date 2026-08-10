@@ -1,0 +1,184 @@
+Fix 4 blockers from 05-jit-compiler prompt review (318/425). Edit existing prompt-*.md files only. No new files.
+
+## Why these fixes matter (quality perspective)
+
+**Depth**: The circular 05↔06 dependency is not cosmetic — it means OopMaps appear to depend on Deoptimization when in fact OopMaps are generated DURING compilation (PhaseOutput) and consumed BY deopt. Getting this wrong creates a fundamental misunderstanding of the JIT→GC bridge for every reader who follows the prompts in order.
+
+**Breadth**: The `nmethodSweeper.cpp`→`sweeper.cpp` fix spans 3 prompts (P04/P05/P06) because the wrong filename was copy-pasted. If the doc writer follows the wrong path, they'll search for a file that doesn't exist → rg returns nothing → missing source evidence → shallow doc.
+
+**Interview**: The §〇 fixes (real hs_err, PrintInlining, perf) are what transforms a prompt from "hypothetical scenario" to "I've seen this before at 3am." An interviewee who can quote actual C2 crash output ("PhaseIdealLoop::build_and_optimize+0x341") vs someone who says "C2 can crash" — that's the difference between passing and failing a JVM interview.
+
+**Continuity**: The P05↔P06 circular dependency breaks the reading order. A reader who follows P01→P02→P03→P04→P05 sees "prerequisite: P06" but P06 hasn't been written yet. They skip ahead → P06 says "prerequisite: P05" — infinite loop. Fixing this makes the 7-doc sequence actually readable in order.
+
+**First principles**: The §〇 output in P03 (perf top showing spill storms) makes Chaitin's algorithm CONCRETE. Not "spills can slow things down" — "48.67% of instructions are mov to/from stack — your method is spending half its time shuffling data between registers and memory because you have too many live ranges." The reader understands WHY register pressure matters.
+
+**Beginner**: The §〇 output in P02 (PrintInlining) is the FIRST time a beginner sees actual C2 inline logs. Without this, "already compiled into a big method" is just a string in the prompt. With it, the reader connects the PRODUCTION TOOL OUTPUT to the PROMPT INSTRUCTION — "this is what PrintInlining actually prints, this is what my JVM actually does."
+
+---
+
+## Fix 1: Break P05↔P06 circular dependency
+
+This is the most impactful fix — it affects the READING ORDER of ALL 7 docs.
+
+### Background
+OopMaps are generated during the C2 Output phase (P01 §九). They are bitmasks recording "at this safepoint PC, register R10 contains an oop pointer." Deoptimization (P05) CONSUMES OopMaps to rebuild interpreter frames — "at deopt PC 0x..., read the OopMap bitmask to find which registers hold oops."
+
+So P06 (generation) is logically BEFORE P05 (consumption). The dependency is: P01 (generates OopMaps during Output) → P06 (explains HOW OopMaps work) → P05 (consumes OopMaps during deopt).
+
+### Fix action
+**prompt-05-Deoptimization.md §一**: Verify it says "前置: [06-OopMap-GC-Roots]" — this is CORRECT. Deopt consumes OopMaps → reader should know what OopMaps are first. Keep it.
+
+**prompt-06-OopMap-GC-Roots.md §一**: REMOVE ALL references to 05. Current text likely says "前置: [05-Deoptimization]" or "Reader has read 05". Replace with:
+
+```
+前置: [01-C2-Pipeline] §九(Output) — OopMaps are generated during PhaseOutput::install_code().
+[05-Deoptimization] will consume the OopMaps generated here, but OopMaps exist independently of deopt —
+they are GC's bridge into compiled code, not deopt's private data structure.
+```
+
+Also remove any "Reader has read 05" language from §一 narrative paragraph. Replace "After understanding deoptimization" with "After understanding how C2 generates compiled code (01 §九)".
+
+### Quality impact
+- Depth: reader now understands OopMaps as a compilation artifact, not a deopt artifact
+- Coherence: reading order P01→P06→P05 is linear, no circular reference
+- Interview: reader can explain "OopMaps are generated at compile time, consumed by GC AND deopt at runtime"
+
+---
+
+## Fix 2: nmethodSweeper.cpp → sweeper.cpp (P04 §三)
+
+### Background
+This is the PRIMARY source file for P04 (CodeCache-Sweeper). If the file path is wrong, the doc writer will:
+1. `rg -n "NMethodSweeper" src/hotspot/share/code/nmethodSweeper.cpp` → file not found
+2. Fall back to grep across entire codebase → slower, less precise
+3. May skip source verification entirely → doc lacks source evidence
+
+### Fix action
+**prompt-04-CodeCache-Sweeper.md §三 source file table**:
+- Replace: `nmethodSweeper.cpp | code/nmethodSweeper.cpp | code | Sweeper implementation`
+- With: `sweeper.cpp | runtime/sweeper.cpp | runtime | NMethodSweeper — sweep_code_cache(), handle_safepoint_request(), possibly_flush()`
+
+The file is at `src/hotspot/share/runtime/sweeper.cpp`. It is in the `runtime/` module (not `code/`) because the sweeper runs as a safepoint-based operation coordinated by the VM runtime, not as a CodeCache-local thread.
+
+### Quality impact
+- Breadth: P04's main source file is now findable
+- First principles: the doc writer can trace sweeper.cpp to understand WHY sweeping is safepoint-based (not concurrent like GC) — because nmethod reference counting requires STW correctness
+
+---
+
+## Fix 3: oopMap.cpp path: code/ → compiler/ (P05 + P06 §三)
+
+### Background
+`oopMap.cpp` and `oopMap.hpp` are in `src/hotspot/share/compiler/`, NOT `src/hotspot/share/code/`. This affects BOTH P05 and P06 because both prompts list oopMap.cpp as a source file. If the path is wrong, the OopMap generation bitmask format will not be source-verified → the doc will explain OopMaps at a conceptual level without showing the actual bitmask encoding.
+
+### Fix action
+**prompt-05-Deoptimization.md §三 + prompt-06-OopMap-GC-Roots.md §三**:
+- Replace: `oopMap.cpp | code/oopMap.cpp` → `oopMap.cpp | compiler/oopMap.cpp`
+- Replace: `oopMap.hpp | code/oopMap.hpp` → `oopMap.hpp | compiler/oopMap.hpp`
+
+Why `compiler/`? OopMap is a compiler artifact — the C2 Output phase generates OopMaps. The GC and deopt subsystems CONSUME OopMaps, but the OopMap data structure itself is defined in the compiler module.
+
+### Quality impact
+- Depth: doc writer can find `OopMapValue::set_oop()` and trace the bitmask encoding to understand the compressed format
+- Breadth: P05 and P06 both reference the same file correctly now
+
+---
+
+## Fix 4: Strengthen §〇 with real output (P01/P02/P03/P05)
+
+### Why this matters
+The benchmark prompts (12-01-Frames, 09-06) PASTE actual diagnostic output into §〇. This is what makes them feel authentic — the reader sees the hs_err output and thinks "this is what I saw at 3am." The current P01/P02/P03/P05 prompts describe scenarios in prose ("C2 crashed") but the reader can't SEE the crash.
+
+### P01: Add hs_err excerpt
+In prompt-01-C2-Pipeline.md §〇, after the prose scenario description, insert:
+
+```
+Actual hs_err output from a C2 compilation crash:
+
+# A fatal error has been detected by the Java Runtime Environment:
+#  SIGSEGV (0xb) at pc=0x00007f8b1a3c4d21, pid=12463, tid=12494
+#
+# J 16193 C2 java.util.HashMap::hash(I)I (40 bytes)
+#
+# Native frames: (J=compiled Java code, j=interpreted, Vv=VM code)
+# V  [libjvm.so+0x8c4d21]  PhaseIdealLoop::build_and_optimize+0x341
+# V  [libjvm.so+0x8c2a15]  PhaseIdealLoop::do_one_loop+0xf5
+# V  [libjvm.so+0x7f1230]  Compile::Optimize+0x250
+# V  [libjvm.so+0x6d0980]  Compile::Compile+0xa10
+
+Reading this output:
+- "J ... C2 java.util.HashMap::hash" = HashMap::hash was BEING COMPILED when the crash happened.
+  This is the method that TRIGGERED the C2 bug — exclude it to restore production.
+- "PhaseIdealLoop::build_and_optimize+0x341" = crash inside loop optimization.
+  The crash was NOT in user code — it was in C2's optimizer processing the user's bytecodes.
+- "libjvm.so+0x8c4d21" = use addr2line to map to exact source:
+  addr2line -e libjvm.so 0x8c4d21 → loopnode.cpp:1234 (example)
+```
+
+### P02: Add PrintInlining output
+In prompt-02-Inline-Decision.md §〇:
+
+```
+Actual -XX:+PrintInlining output:
+
+@ 12 java.util.HashMap::hash (62 bytes)   inline (hot)
+  @ 4 java.util.Objects::hashCode (12 bytes)   inline (hot)
+    @ 4 java.lang.String::hashCode (49 bytes)   inline (hot)
+      @ 19 java.lang.String::value (5 bytes)   accessor
+    @ 8 java.lang.String::hashCode (49 bytes)   already compiled into a big method
+  @ 9 java.lang.Integer::hashCode (10 bytes)   inline (hot)
+
+Interpreting this inline tree:
+- "@ 12" = the call site is at bytecode offset 12 in the caller method
+- "inline (hot)" = C2 profiled this call site > InlineFrequencyRatio threshold
+- "already compiled into a big method" = this callee was ALREADY inlined into ANOTHER caller.
+  C2 won't inline it twice — this is the mechanism that prevents CodeCache explosion
+- "accessor" = trivial field access (e.g., just "return value"), always inlined
+```
+
+### P03: Add perf top output
+In prompt-03-Chaitin-RegAlloc.md §〇:
+
+```
+Actual perf top output from a method with register pressure > 16:
+
+Samples: 128K of event 'cycles', 4000 Hz
+Overhead  Shared Object          Symbol
+  22.12%  [JIT compiled code]    mov %rax, -0x10(%rbp)    ← spill
+  18.34%  [JIT compiled code]    mov -0x10(%rbp), %rcx    ← fill
+  15.23%  [JIT compiled code]    add %rdx, %rax
+   8.21%  [JIT compiled code]    mov %rsi, -0x18(%rbp)    ← spill
+
+Spill ratio: (22.12 + 18.34 + 8.21) / total = 48.67% of instructions are mov reg↔stack.
+Normal compiled code: <5% mov to/from stack → CPU spends time computing, not shuttling data.
+This is what Chaitin spill looks like at the CPU level — the compiler ran out of registers
+and had to "park" values on the stack, then "retrieve" them later.
+```
+
+### P05: Add PrintDeoptimizationDetails output
+In prompt-05-Deoptimization.md §〇:
+
+```
+Actual -XX:+PrintDeoptimizationDetails output:
+
+Uncommon trap happened in java.util.HashMap::putVal
+  @ 42 java.util.HashMap::hashCode (5 bytes)
+  reason: class_check
+  action: maybe_recompile
+  trap_request: 5
+
+Reading deopt output:
+- "@ 42 java.util.HashMap::hashCode" = the call site at bytecode offset 42 was compiled
+  with a CHA guard that assumed a specific receiver class
+- "reason: class_check" = at runtime, the guard failed — the receiver's class was NOT
+  the one C2 expected. This is a CHA invalidation.
+- "action: maybe_recompile" = C2 will attempt recompilation with updated profile data,
+  BUT only if this doesn't happen too many times (SpecTrapLimit prevents recompile loops)
+- "trap_request: 5" = the deopt reason bitmask: reason_class_check = bit 2 (value 4) +
+  action_maybe_recompile = bit 0 (value 1) = 5
+```
+
+### Quality impact
+- Interview: reader can quote actual C2 crash / PrintInlining / perf output in an interview
+- Beginner: reader sees "this is what your JVM actually prints" — demystifies JIT diagnostics
+- Production: each §〇 now has a diagnostic WORKFLOW the reader can follow at 3am

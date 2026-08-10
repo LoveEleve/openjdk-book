@@ -1,0 +1,38 @@
+# 16-nio-network — Review 清单
+
+## 当前产出
+
+```
+probe_md/16-nio-network/00-Epoll-Selector.md  ← 新会话产出, 待review
+```
+
+## 对比基准
+
+| 指标 | Phase 15 文档 | 本批 prompt 要求 | 合格标准 |
+|------|:---:|:---:|------|
+| 行数 | ~1000+ | 400+ | ≥ 600 |
+| Mermaid | 入口→出口 全链路 | 4-lane sequence | ✓ |
+| 源码引用 | 每个声明都粘贴源码 | 3-5行每声明 | ✓ |
+| GDB/straces | 完整 GDB 会话 | 6 断言 | ✓ |
+| Interview | §一末尾, ~300字 | ✓ | ✓ |
+
+## Review 命令
+
+```
+/jvm probe_md/16-nio-network/00-Epoll-Selector.md 有没有达到预期？对比Phase15的文档格式和质量
+```
+
+如果通过，继续下一篇:
+
+```
+/jvm probe_md/16-nio-network/prompts/prompt-01-SocketChannel-Native.md
+```
+
+## Review 标准 (来自 memory)
+
+1. 所有①源文件的每个关键函数 → 文档中有对应源码分析
+2. 所有系统调用 → 正常路径 + errno + 内核实现
+3. /proc 参数 → 已提及
+4. counterfactual → 每个设计决策点都有
+5. 生产诊断: strace + jcmd + jstack + GDB
+6. Mermaid 序列图完整

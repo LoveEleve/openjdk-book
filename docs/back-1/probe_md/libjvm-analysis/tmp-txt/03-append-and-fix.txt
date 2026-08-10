@@ -1,0 +1,56 @@
+Enhance then fix 03-object-model to 01/02 standard. This is the OBJECT MODEL phase — markOop encoding, oopDesc hierarchy, Klass family, compressedOops, biased locking bits.
+
+## Step 1: Append to README (don't touch §〇~§六)
+
+After existing §六 (7 docs), ADD:
+
+### §七 面试高频问题 × 文档直接对应
+| 面试问题 | 直接看这篇 | 为什么 |
+|----------|-----------|--------|
+| "Java 对象在内存中长什么样？markOop 64 位每一位的含义？" | 01-markOop | ... |
+| "Object header 多大？为什么 12/16 bytes？（32/64-bit）" | 01 + 02 | ... |
+| "compressedOops 怎么用 32 位存 64 位指针？" | 04-compressedOops | ... |
+| "为什么 heap < 32GB 零基压缩可用，>32GB 不可用？" | 04 | ... |
+| "Java 对象对齐为什么是 8 bytes？能改吗？" | 04 | ... |
+| "synchronized 的偏向锁怎么存储在 markOop 中？" | 01-markOop §biased_lock | ... |
+| "对象怎么计算 identity hash code？存哪？" | 01 §hash | ... |
+| "Klass 和 oop 什么关系？怎么互相查找？" | 03-Klass-Family | ... |
+| "instanceof 在 JVM 内部怎么实现的？" | 03 §secondary_super_cache | ... |
+
+### §八 生产故障 × 文档诊断指引
+| 生产场景 | 症状 | 看这篇 | 诊断 |
+|---------|------|--------|------|
+| compressedOops 导致 >32GB 堆时 NullPointerException | 堆 33GB, NPE 随机出现 | 04 | 检查压缩模式，验证 base+shift |
+| GC 标记时间异常长（偏向锁撤销风暴） | -XX:+UseBiasedLocking STW 数秒 | 01 §biased_lock | jcmd 暂停偏向锁 |
+| identity hash code 和锁冲突（偏向锁无法安装） | synchronized 性能退化 | 01 §hash/lock 冲突 | 打印 BiasedLockingStarupDelay |
+| 伪共享 (false sharing) 导致 cache line 竞争 | CPU 高，吞吐低 | 05-Contended | `@Contended` padding size |
+| JOL (Java Object Layout) 输出不对 | 升级 JDK 后对象大小变化 | 02-oop-layout | GDB `p sizeof` vs JOL 对照 |
+
+### §九 深度评审检查点（自检 7 篇文档）
+| # | 文档 | 生产故障 | 面试题 | why 设计 | GDB | 评级 |
+|---|------|:---:|:---:|:---:|:---:|:---:|
+(Matrix for all 7 docs — honestly rate)
+
+### §十 深度审计问题 (≥10)
+Tier 1 markOop / Tier 2 oop hierarchy / Tier 3 compressedOops / Tier 4 locks
+
+### §十一 和前后阶段的连接
+01-jvm-startup → 02-class-loading → 03-object-model → 04-interpreter → 06-gc-memory
+
+---
+
+## Step 2: Fix ALL 🔴+🟡 docs from §九 audit
+For each flagged doc: add production scenario opener + missing design rationale + GDB session format.
+
+Key gaps to watch:
+- markOop: does the doc explain ALL 64 bits with actual bit positions? Hash age + biased lock + lock bits?
+- compressedOops: zero-based vs disjoint base — is the fallback chain clear?
+- Klass hierarchy: ArkDesc / InstanceKlass / ArrayKlass hierarchy with secondary_super_cache for fast instanceof?
+- Object alignment: -XX:ObjectAlignmentInBytes interaction with compressedOops shift?
+
+## Verification SOP
+```
+sverklo_investigate(expand_graph=true)  # broad search (180s timeout)
+codegraph query + callers                # precise verify
+rg -n "<function>" <source>             # line numbers (prefer rg 5-10x faster)
+```

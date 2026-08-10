@@ -1,0 +1,209 @@
+Deep-review entire 05-jit-compiler phase. 7 docs + README, 4779 lines. This is the MOST COMPLEX phase — Sea of Nodes, Chaitin coloring, deoptimization. The review must verify that the phase actually TEACHES these concepts, not just names them.
+
+## Documents
+probe_md/libjvm-analysis/05-jit-compiler/README.md (667 lines)
+probe_md/libjvm-analysis/05-jit-compiler/01-C2-Pipeline.md (1141 lines)
+probe_md/libjvm-analysis/05-jit-compiler/02-Inline-Decision.md (502 lines)
+probe_md/libjvm-analysis/05-jit-compiler/03-Chaitin-RegAlloc.md (444 lines)
+probe_md/libjvm-analysis/05-jit-compiler/04-CodeCache-Sweeper.md (500 lines)
+probe_md/libjvm-analysis/05-jit-compiler/05-Deoptimization.md (467 lines)
+probe_md/libjvm-analysis/05-jit-compiler/06-OopMap-GC-Roots.md (494 lines)
+probe_md/libjvm-analysis/05-jit-compiler/07-Profile-Data-Flow.md (564 lines)
+
+## Benchmark
+04-interpreter: 49→55+/60 after review+fix
+03-object-model: 48→58→60/60
+
+---
+
+## 1. Does P01's "100 bytecodes → 10 x86 instructions" trace actually work? (15 pts)
+
+This is THE core insight of the entire phase. If P01 fails here, the whole phase fails.
+
+### Specific checks:
+- Does the trace follow a SINGLE concrete method from Parse to Output? (Not jump between examples)
+- Are Node counts tracked at EACH phase? (Parse: 20 → IGVN: 18 → Inline: 45 → IGVN: 40 → ... → Match: 15 instructions)
+- Are the transformations EXPLAINED? "ParmNode(0) loaded twice → GVN merge → 1 load" — not magic, explained
+- Does the trace show WHY inline triggered IGVN again? (Inline added Nodes → IGVN finds new redundancies)
+- Does it show the BEFORE/AFTER x86 for at least 2 phases? (e.g., Parse → x86 pseudocode, Match → actual x86)
+- Is there a Mermaid diagram summarizing the entire pipeline with counts?
+
+### Scoring:
+13-15: complete trace with counts, transformations, before/after x86, Mermaid
+10-12: trace exists but missing counts or x86 for some phases
+7-9: trace skips phases
+4-6: no cohesive trace, just disconnected examples
+1-3: no trace
+
+---
+
+## 2. Is Chaitin's algorithm order CORRECT in 03? (10 pts)
+
+### This is a VERIFICATION check, not an opinion:
+- Step sequence must be: Live → IFG_virtual → AggressiveCoalesce → IFG_physical → Simplify → Select → (spill → ConservativeCoalesce → loop)
+- AggressiveCoalesce MUST be between virtual IFG and physical IFG (line 425 in chaitin.cpp)
+- Simplify at line 515, Select at line 519
+- The doc MUST state that this order DIFFERS from textbook Chaitin 1982
+
+### Scoring:
+10: correct order + explicit textbook comparison + line number verification
+7-9: correct order but no textbook comparison
+4-6: minor ordering error (one step swapped)
+1-3: major ordering error (Coalesce after coloring → WRONG)
+
+---
+
+## 3. Production authenticity of §〇 openers (10 pts)
+
+For EACH of 7 docs: is §〇 a real production failure with actual tool output?
+
+Checklist:
+- P01: hs_err with `PhaseIdealLoop::build_and_optimize+0x341` — real C2 crash
+- P02: `-XX:+PrintInlining` output with inline tree — real JVM diagnostic
+- P03: `perf top` output with spill percentages — real perf data
+- P04: `CodeCache is full. Compiler has been disabled.` — real JVM log
+- P05: `-XX:+PrintDeoptimizationDetails` with CHA invalidation — real deopt log
+- P06: hs_err with `bad oop` in `G1ParScanThreadState` — real GC crash
+- P07: profile pollution scenario with PrintInlining + PrintDeoptimization — real multi-tool analysis
+
+### Scoring:
+9-10: 6+ docs have real output
+7-8: 4-5 docs with real output
+5-6: 2-3 docs with output, rest prose
+3-4: mostly prose scenarios
+1-2: no real output
+
+### Also check:
+- Does each §〇 have a FIX? Not just "this happened" — "here's what you DO about it at 3am"
+- Is the fix actionable? "Exclude method" → shows CompileCommand syntax. "Increase CodeCache" → shows flag + MB value.
+
+---
+
+## 4. Interview readiness — can a reader actually ANSWER interview questions? (10 pts)
+
+### Spot-check 3 interview answers:
+
+**P01 §九**: "Walk me through C2's pipeline."
+- Is the answer a STORY? "First, Parse reads bytecodes and converts them to Nodes... Then IGVN hash-consing finds duplicates..."
+- Or is it a list? "C2 has 9 phases: Parse, IGVN, Inline, ..."
+- Story > list for interview delivery
+
+**P03 §八**: "Chaitin着色算法的核心思想？"
+- Does it mention the CORRECT order (Coalesce before coloring)?
+- Does it explain WHY Coalesce before coloring matters?
+- Does it mention spill cost and the loop?
+
+**P07 §七**: "C1的profile怎么到C2？"
+- Does it cover the 4-layer pipeline?
+- Does it explain WHY ci objects are immutable snapshots?
+- Does it explain Maturity and the danger of immature profiles?
+
+### Scoring:
+9-10: all 3 answers are story-format, correct, and memorable
+7-8: 2 good, 1 weak
+5-6: answers exist but are fact-dumps
+3-4: missing key details
+1-2: no interview content
+
+---
+
+## 5. Beginner-friendliness — does a Java engineer who knows 04-interpreter understand 05? (10 pts)
+
+### Hardest concepts to parse (check each in the actual docs):
+- **Sea of Nodes** (P01): Is this explained? "Unlike linear IR where instructions are in order, Sea of Nodes has NO order — Nodes float freely, connected only by data + control edges. Think of it as 'all operations exist simultaneouly, constrained only by what they depend on.'" Or does the doc just name-drop "Sea of Nodes" without explanation?
+- **Chaitin's algorithm** (P03): The doc says "Live → IFG → Coalesce → Simplify → Select." Does it explain what EACH of these means? Live Range? Interference Graph? Coalesce? Simplify? Or does it assume the reader knows graph theory?
+- **Deopt** (P05): Does it explain "why would C2 make an assumption that could be wrong?" The answer: because the assumption is true 99.9% of the time → common case is FAST → rare case goes to interpreter → but the common case is 99.9% of calls. If the doc doesn't explain this tradeoff, the reader thinks deopt is a "bug" instead of a "feature."
+- **OopMap** (P06): Does it explain WHY bitmask encoding? Not "it uses bitmask" — "what's the alternative (list) and why is it worse?"
+- **Profile Maturity** (P07): Does it explain the warmup problem? "If you measured your customers' behavior by watching the first 10 people enter your store, you'd think everyone wants coffee at 7am. You need to watch until lunchtime to see the real pattern."
+
+### Also check:
+- Are the "你需要知道的" sidebars from the prompts PRESENT in the final docs?
+- Are they readable? Or do they use other undefined terms?
+- Is there a FIRST paragraph where a reader with zero compiler knowledge would stop understanding? Quote it.
+
+### Scoring:
+9-10: every complex concept has a beginner-friendly explanation + sidebars
+7-8: most concepts explained, 1-2 weak spots
+5-6: several concepts name-dropped without explanation
+3-4: assumes compiler knowledge not in prerequisites
+1-2: unreadable for target audience
+
+---
+
+## 6. Cross-document coherence (10 pts)
+
+### Reading order check:
+Can a reader follow 01→02→03→04→05→06→07?
+
+- 01 references 02? "The Inline phase (Phase 3) is expanded in [02-Inline-Decision] §四"
+- 02 references 01? "Reader has read [01-C2-Pipeline] §三(IGVN) + §四(Inline)"
+- 03 references 01? "Reader has read [01-C2-Pipeline] §八(Matching)"
+- 05 references 06? "OopMap consumed during frame rebuild — explained in [06-OopMap-GC-Roots] §四.2"
+- 06 does NOT reference 05! (Circular dep was fixed — verify)
+- 07 references 02? "Profile data consumed by InlineTree — explained in [02-Inline-Decision] §四.3"
+
+### Consistency check:
+- Same term, same meaning across 7 docs? "IGVN" = Iterative GVN (not "Ideal GVN")
+- Same file paths across 7 docs? sweeper.cpp NOT nmethodSweeper.cpp. compiler/oopMap.cpp NOT code/oopMap.cpp
+- Same algorithm order in P03 vs README? (Both correct)
+
+### Scoring:
+9-10: clean reading order + consistent terminology + correct file paths
+7-8: minor inconsistency
+5-6: dependency gap or terminology drift
+3-4: broken reading order
+1-2: contradictory information across docs
+
+---
+
+## 7. First-principles depth (10 pts)
+
+### Counterfactual check per doc:
+- P01: Does it explain WHY Sea of Nodes instead of linear IR? "Graph matching for instruction selection is NP-hard — HotSpot avoids this by using ADL patterns with manual matching."
+- P02: Does it explain WHY frequency-weighted inline? "Inline = CodeCache cost (callee size) vs benefit (call overhead × call count). Inline when benefit > cost."
+- P03: Does it explain WHY Coalesce before coloring? "Eliminating movs BEFORE physical IFG reduces register pressure → fewer spills."
+- P04: Does it explain WHY safepoint-based sweeping? "Concurrent free while threads hold references → ABA problem. Deferred: mark now, free at safepoint."
+- P05: Does it explain WHY only at deopt points? "If all PCs had OopMaps: 10% CodeCache overhead. Only at safepoints: 2% overhead. The common case (between safepoints) doesn't need GC roots."
+- P06: Does it explain WHY bitmask not list? "Compressed: 10 bytes per safepoint vs 40 bytes. 150MB CodeCache savings."
+- P07: Does it explain WHY ci objects are immutable snapshots? "If ciKlass changed mid-compilation: inline decisions based on STALE data → compile final decisions → deopt when they're wrong."
+
+### Scoring:
+9-10: 6+ docs have explicit counterfactuals with quantified alternatives
+7-8: 4-5 docs
+5-6: 2-3 docs
+3-4: mostly "what" not "why"
+1-2: no first-principles reasoning
+
+---
+
+## 8. GDB density (5 pts)
+
+### Count GDB sessions per doc:
+- Real (gdb) prompt format with `$1 = ...` output
+- NOT "break at X, check Y" conceptual descriptions
+
+Scoring: 1 point per 2 docs with real GDB sessions (0-5).
+
+---
+
+## Output
+
+### Per-document quick audit
+| Doc | Trace/Correctness | Production | Interview | Beginner | Coherence | First-principles | GDB | /65 |
+|-----|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| README | — | | — | | | | — | /50 |
+| 01-Pipeline | /15 | | | | | | | |
+| 02-Inline | — | | | | | | | /50 |
+| 03-Chaitin | /10 | | | | | | | /60 |
+| 04-CodeCache | — | | | | | | | /50 |
+| 05-Deopt | — | | | | | | | /50 |
+| 06-OopMap | — | | | | | | | /50 |
+| 07-Profile | — | | | | | | | /50 |
+
+### Phase score: /425
+
+### Top 3 gaps (exact doc:section)
+
+### Best paragraph in the entire phase
+
+### Ready for 06-gc-memory? Yes/Conditionally/No

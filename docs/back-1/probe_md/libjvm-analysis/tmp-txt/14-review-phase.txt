@@ -1,0 +1,188 @@
+Deep-review 14-zip-jimage phase — 5 docs + README, ~4244 lines. Physical I/O bridge between classpath resolution and ClassFileParser.
+
+## Documents
+probe_md/14-zip-jimage/README.md (~620 lines)
+probe_md/14-zip-jimage/00-Zip-Class-Loading.md (793 lines)
+probe_md/14-zip-jimage/01-Jimage-Format.md (757 lines)
+probe_md/14-zip-jimage/02-Compression-Zlib.md (668 lines)
+probe_md/14-zip-jimage/03-ClassLoader-Bridge.md (733 lines)
+probe_md/14-zip-jimage/04-Jar-URL-Nesting.md (673 lines)
+
+## Benchmark
+13-launcher (173+/175 with README)
+
+---
+
+## 1. Source Correction Integrity — 10 pts
+
+### Verify ALL 7 corrections from README source verification are reflected in docs:
+
+| # | Correction | 00 | 01 | 02 | 03 | 04 |
+|---|-----------|:--:|:--:|:--:|:--:|:--:|
+| 1 | No ZipEntry.c — all ZIP in zip_util.c | | — | — | | — |
+| 2 | ZIP hash O(1) at zip_util.c:568/1172, NOT binary search | | — | — | — | — |
+| 3 | defineClass1 receives pre-read bytes from Java ZipFile, NOT calls ZIP_GetEntry | — | — | — | | — |
+| 4 | zlib 1.2.11 bundled at zlib.h:26, NOT system | — | — | | — | — |
+| 5 | jimage perfect hashing HASH_MULTIPLIER=0x01000193, magic 0xCAFEDADA | — | | — | — | — |
+| 6 | jimage dlopen libzip.so at imageDecompressor.cpp:83 | — | | | — | — |
+| 7 | CRC32 in Java ZipFile layer, NOT native class loading | | — | — | | — |
+
+Fill ✓/✗ per doc per correction. Any ✗ = -1 pt each.
+
+### Scoring:
+10: all corrections reflected in all applicable docs
+8-9: 1-2 minor misses
+5-7: several misses
+1-4: fundamental source errors persist
+
+---
+
+## 2. Production Authenticity — 10 pts
+
+### Per-doc §〇 verification:
+
+**00**: `ZipException: invalid entry CRC (expected 0x... but got 0x...)` — exact format? Attribution to Java ZipFile CRC32 (correction #7)? Diagnostic: `jar tvf app.jar`? Fix: re-download?
+
+**01**: `FindException: Module java.base not found` — JIMAGE_Open magic fail (correction #5)? `jimage info` diagnostic?
+
+**02**: `java.util.zip.ZipException: invalid stored block lengths` — zlib inflate fail (correction #4)? Verify JAR compression?
+
+**03**: `NoClassDefFoundError` with entry present in JAR — directory entry (size=0, trailing '/') root cause? `unzip -l` diagnostic?
+
+**04**: ZipException on nested JAR — Spring Boot fat JAR? Standard ZipFile limitation? 2x inflate performance model?
+
+### Scoring:
+9-10: all 5 openers with exact errors + diagnostics + correction-aware
+7-8: 4/5 solid
+5-6: scenarios exist but diagnostic details thin
+3-4: generic scenarios
+1-2: no production grounding
+
+---
+
+## 3. First-Principles Depth — 10 pts
+
+### Counterfactual count per doc (read actual doc body):
+
+00: ≥5 counterfactuals quantified? "Hash vs binary: 10x faster, 20% memory overhead" / "Cache vs no-cache: 1.5s saved" / "mmap vs fd: reliability vs speed"
+01: ≥5? "Perfect hash vs standard: 0vs1.2 probes" / "dlopen vs own inflate: code dup + version mismatch" / "pre-processing: 20-30% better compression"
+02: ≥5? "Bundled vs system zlib: determinism" / "-MAX_WBITS vs MAX_WBITS: raw vs wrappered" / "CRC32+Adler-32: dual defense"
+03: ≥5? "Java reads vs native reads: error handling + concurrency" / "SetByteArrayRegion vs DirectBuffer: copy cost vs JNI complexity"
+04: ≥5? "Cache inner JarFile vs no-cache: 100ms vs 0ms" / "zipfs vs custom classloader: portability vs performance"
+
+### Scoring:
+9-10: 25+ counterfactuals across 5 docs, all quantified
+7-8: 20-24
+5-6: 15-19
+3-4: mostly descriptions
+1-2: no first-principles
+
+---
+
+## 4. Interview Readiness — 10 pts
+
+### Verify README §五 Qs are backed by actual doc content:
+
+Spot-check 3 Qs against docs:
+Q1: "How does JVM read .class from JAR?" → 00 answer: hash lookup + inflate + CRC32. Verifiable?
+Q2: "Why jimage instead of ZIP?" → 01 answer: perfect hash O(1) + pre-processing + mmap. Story-format?
+Q5: "How does defineClass1 bridge?" → 03 answer: Java reads bytes → JNI passes to JVM. Correction #3 reflected?
+
+### Scoring:
+9-10: all README Qs have story-format answers in docs
+7-8: most solid
+5-6: answers exist but fact-dumps
+3-4: thin
+1-2: no interview content
+
+---
+
+## 5. Beginner-Friendliness — 10 pts
+
+### Callout boxes present per doc?
+00: ZIP Central Directory, hash table, ZIP_GetFromCache, Inflater bridge (4)
+01: perfect hashing, location table, magic number, Redirect table, String table (5)
+02: DEFLATE, zlib, inflateInit2_, -MAX_WBITS, CRC32 vs Adler-32 (5)
+03: defineClass1, JNI SetByteArrayRegion, bridge architecture, error propagation (4)
+04: fat JAR, LaunchedURLClassLoader, JarURLConnection, zipfs, 2x inflate (5)
+
+### Concept leap check: where would Java engineer with zero ZIP knowledge get lost?
+- "LOC header offset stored in CEN" — LOC explained?
+- "mmap MAP_SHARED" — mmap explained?
+- "JNI GetStringUTFChars" — JNI explained?
+
+### Scoring:
+9-10: all callouts present, clear, used before code
+7-8: most present, 1-2 unclear
+5-6: 1-2 missing per doc
+3-4: significant gaps
+1-2: no scaffolding
+
+---
+
+## 6. Cross-Document Coherence — 10 pts
+
+### Reading order: 00→01→02→03→04?
+- 01 §一: "Reader completed 00 (ZIP path). This doc explains JDK 9+ alternative."
+- 02 §一: "Reader completed 00 (inflate is triggered during ZIP read). This doc dives into the engine."
+- 03 §一: "Reader completed 00+01 (ZIP + jimage I/O). This doc explains bridge to JVM."
+- 04 §一: "Reader completed 00+03 (ZIP + bridge). This doc covers nested JAR edge case."
+
+### Cross-phase:
+- ALL reference 13-launcher (classpath→JAR) and 02-class-loading (ClassFileParser)?
+- 03 references 09-native-interface (JNI)?
+
+### Terminology: "ZIP_Open" vs "ZIP open" consistent? "hash table" vs "hash table lookup"?
+
+### Scoring:
+9-10: clean chain + cross-phase + consistent terms
+7-8: minor gaps
+5-6: some references missing
+3-4: broken reading order
+1-2: contradictory
+
+---
+
+## 7. Line Number Accuracy — 5 pts
+
+### Spot-check 3 critical lines per doc:
+
+00: readCEN at zip_util.c:568, ZIP_GetEntry2 at zip_util.c:1172, ZIP_Open at zip_util.c:760
+01: JIMAGE_Open at jimage.cpp:95, HASH_MULTIPLIER at imageFile.hpp:162, dlopen at imageDecompressor.cpp:83
+02: zlib.h:26 (version), Inflater.c inflateBytes, -MAX_WBITS usage
+03: ClassLoader.c defineClass1, JVM_DefineClass at jvm.cpp
+04: JarURLConnection.connect(), ZipFile constructor
+
+### Scoring:
+5: all spot-checks match
+4: 12-14/15 match
+3: 10-11/15 match
+2: 7-9/15 match
+1: <7/15 match
+
+---
+
+## Output
+
+### Correction pass/fail
+| C1 | C2 | C3 | C4 | C5 | C6 | C7 | Score |
+|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:---:|
+| | | | | | | | /10 |
+
+### Per-doc scores
+| Doc | Corrections | Production | 1st-Prin | Interview | Beginner | Coherence | Line# | /70 |
+|-----|:----------:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| README | — | 10 | 10 | 10 | 10 | 10 | — | 50/50 |
+| 00-Zip | | | | | | | | |
+| 01-Jimage | | | | | | | | |
+| 02-Zlib | | | | | | | | |
+| 03-Bridge | | | | | | | | |
+| 04-Nesting | | | | | | | | |
+
+### Phase total: /320 (or with README /370)
+
+### Top 3 gaps
+
+### Best doc
+
+### Ready for 15-core-native?

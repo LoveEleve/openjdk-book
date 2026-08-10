@@ -1,5 +1,8 @@
 # 3.6 第一个 JavaThread：主线程登记
 
+> **前置依赖**：[3.5 OS 后初始化](05-os-init2.md)：OS 基础设施就绪 / [3.2 9 阶段骨架](02-threads-create-vm.md)
+> → **后续**：[ch04 init_globals 总览](openjdk/vol-01/ch04/01-overview.md)：30 项初始化序列
+
 Stage 3 结束时，JVM 的 OS 层基础设施已经全部就绪——信号处理器注册完成、安全点轮询页分配完成、200+ 个 flag 全部锁定。但所有这些基础设施都是"悬浮在空中"的——没有线程来承载它们。
 
 **当前执行到这里的线程是谁？** 回顾 3.1 的"此刻的进程与线程"——JLI 层在进入 JVM 之前做了 `pthread_create`，此时进程中有两个 OS 线程：
@@ -2061,6 +2064,16 @@ Counter 和 Variable 的区别：Counter 只能递增（如膨胀次数——只
 | `ObjectMonitor::_sync_Inflations` 等 | PerfCounter | ObjectMonitor（静态） | 注册 | 7 个 PerfData 计数器 |
 | `ObjectMonitor::InitializationCompleted` | `static int` | ObjectMonitor 函数级静态 | 1 | 防重复初始化 |
 
+
+## 设计权衡
+
+**为什么 `new JavaThread()` 不创建新的 OS 线程？** HotSpot 的 `JavaThread` 是一个 C++ 包装对象——它不拥有 OS 线程，只"记录"和"管理"一个已经存在的 OS 线程。在 `create_vm` 的 Stage 4，执行代码的线程是 ch01 中 `pthread_create` 出来的 LWP-2——JVM 不需要再创建线程，只需要创建一个 `JavaThread` 对象来描述它。`JavaThread` 存储了这个 OS 线程的栈边界（`stack_base()`/`stack_end()`）、线程状态（`_thread_state`）、JNI 环境（`jni_environment()`）、ParkEvent（用于 `synchronized` 等待/通知的 OS 原语）。后面 CompilerThread、GC 线程的创建才是 `new JavaThread()` + `os::create_thread()` —— 那是真创建 OS 线程。
+
+**为什么用 `mprotect(PROT_NONE)` 做栈守卫页而不是 pthread 的 guard page？** pthread 的默认 guard page 只有一页（4KB），JVM 需要多层守卫——Yellow 页（可恢复，抛 `StackOverflowError`）和 Red 页（不可恢复，线程终止）。HotSpot 在 Stage 4 通过 `os::create_main_thread()` → `JavaThread::create_stack_guard_pages()` 把 `pthread_attr_setguardsize(0)` 设为 0（关掉 pthread 自己的 guard），然后用 `os::guard_memory()` 在自己计算的位置上 `mmap` + `mprotect(PROT_NONE)` 多个连续内存页。这是"更细粒度的栈保护"——牺牲 pthread 的免费 guard page，换取 JVM 的 yellow/red zone 两级栈溢出语义。
+
+**为什么 Stage 4 放在 Stage 3 之后？** Stage 4 的 `JavaThread` 构造需要知道栈大小（来自 `-Xss` flag）和栈守卫页大小（来自 `StackGuardPages` flag）——这些值在 Stage 2 的 `Arguments::parse()` 中解析、在 Stage 3 的 `Arguments::adjust_after_os()` 中做了最终调整（如 `-Xss` 需对齐到页边界）。如果 Stage 4 在 Stage 2 之前，`JavaThread` 的栈配置就是未定义的默认值。
+
+---
 ---
 ## 下一阶段
 

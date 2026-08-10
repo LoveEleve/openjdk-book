@@ -1,0 +1,193 @@
+Deep-review 04-interpreter phase. 6 enhanced docs + README. This is the BYTECODE EXECUTION phase — the reader now knows how objects are built (03), now they learn how bytecodes OPERATE on those objects.
+
+## Phase context (continuity check)
+The reader has completed 01(jvm-startup)→02(class-loading)→03(object-model). 04 must feel like a natural next step: "now I have objects from 03, how does code RUN on them?" If 04 doesn't explicitly connect to 03 — if it feels like a standalone interpreter manual — the continuity is broken.
+
+## Benchmark phases
+- 03-object-model: 58→60/60 after fixes. 7 docs. Synchronization primitives + compressedOops assembly added.
+- 02-class-loading: 55-57/60 after fixes. 14 docs. Verifier rewrite + JVMTI + container gaps closed.
+- 01-jvm-startup: ~48/55 after fixes. 26 docs. Container doc + Arguments parse doc + GDB session transcripts.
+
+---
+
+## 1. Production grounding — 10 pts
+
+For each doc, the production opener must be AUTHENTIC — not "you may experience slow startup if..." but "you DID experience this at 3am, here's exactly what you saw and how to fix it."
+
+Checklist per doc:
+- 00-Interpreter-Overview: "Agent pins VM" — does it show the EXACT jstack output that reveals _at_breakpoint? Does it explain WHY NotifyFramePop causes JIT prohibition (deopt would break debugger's frame view)? Does it give a real fix (remove agent, not "add flag")?
+- 01-TemplateInterpreter-Init: "TemplateInterpreter 45% CPU" — does it show real perf top output with addresses? Does it show the COMPILE queue depth? Does it explain CICompilerCount tuning (don't just say "increase it" — give the formula)?
+- 02-Stack-Frame: "type mismatch crash" — does this actually happen in production? (Answer: yes — bytecode instrumentation agents corrupt TOS state). Does it show the SIGSEGV register dump and explain HOW to identify TOS corruption from the register state?
+- 03-MethodEntry: "safepoint timeout 8000ms" — does it show real GC log output? Does it show jstack proving all threads in TemplateInterpreter? Does it give the fix (find the method, add safepoint poll — or OS-level timeout)?
+- 04-Bytecode-Dispatch: "reflection 50x slow" — does it show real perf output comparing Method.invoke() vs direct call? Does it show the MethodAccessorGenerator chain layer by layer?
+- 05-InterpreterRuntime: "TieredStopAtLevel=0 100x latency" — does it show a real benchmark? Does it explain WHEN this happens in production (misconfiguration, not intentional)?
+
+### Scoring
+9-10: 5+ docs have authentic, fixable production scenarios with real tool output
+7-8: 3-4 docs have authentic scenarios
+5-6: scenarios exist but lack concrete diagnostics (jstack/GC log/perf)
+3-4: scenarios feel contrived or theoretical
+1-2: no production grounding
+
+---
+
+## 2. First-principles depth — 10 pts
+
+Each doc must have at least one section that STARTS from "if you built a bytecode interpreter from scratch..." and DERIVES the JVM design as the logical consequence of constraints.
+
+Key first-principles questions this phase MUST answer:
+- "If you built a bytecode interpreter, would you put a type checker before every instruction? If not, how do you guarantee type safety?" → ANSWER: TOS state machine — compile-time type safety via per-TOS template variants. The verifier (02-class-loading) guarantees bytecode correctness, so the interpreter can skip runtime checks.
+- "If you built a bytecode interpreter, how would you decide which code to execute for bytecode X?" → ANSWER: dispatch table — 256-entry jump table. O(1) lookup. switch-case = O(n) average.
+- "If you built a bytecode interpreter, where would you check for safepoints?" → ANSWER: backward branches. Forward-only code naturally exits. Polling every bytecode costs too much.
+- "If you built a bytecode interpreter, how would you decide when to compile to native code?" → ANSWER: dual counters. Invocation for whole method, BackEdge for hot loops. Decay prevents transient compilation.
+
+Checklist per doc:
+- Does the doc DERIVE the design or just DESCRIBE it?
+- Does it present the ALTERNATIVE (what would happen if they did it differently) and quantify the cost?
+- Does it connect the first-principles reasoning to the actual source code?
+
+### Scoring
+9-10: 4+ docs derive designs from first principles with quantified alternatives
+7-8: 2-3 docs derive
+5-6: docs describe designs but don't derive
+3-4: "why" is presented as "because the code does it this way" (circular)
+1-2: no design rationale at all
+
+---
+
+## 3. Interview readiness — 10 pts
+
+After reading ALL 6 docs, can the reader answer:
+
+**"Walk me through what happens from `aload_0` to the value appearing in the expression stack."**
+
+This is a Senior JVM Engineer interview question at Google/AWS/Oracle. The answer requires combining knowledge from:
+- 02-Stack-Frame: expression stack layout, TOS state (tos_illegal → tos_oop after aload_0)
+- 01-TemplateInterpreter-Init: Template for _aload_0 is at dispatch_table[42], _gen() generated it at startup
+- 04-Bytecode-Dispatch: dispatch: movzbl opcode from bcp → jmp *dispatch_table[opcode*8]
+- 12-cpu-layer (referenced): at CPU level: movzbl (%r13, %r14) → shr → jmp
+
+Can the reader compose these pieces into a coherent answer? Or are the docs siloed?
+
+Checklist:
+- Does each doc's 面试回答模板 answer a SPECIFIC question, or just restate content?
+- Is the answer structured as a real interview response (hook → main point → evidence → connection)?
+- Are there 2-3 "进阶追问" (follow-up questions) that test depth?
+
+### Scoring
+9-10: reader can compose 'aload_0' answer from across docs + each doc has quality interview templates
+7-8: interview templates exist but don't compose into cross-doc answers
+5-6: templates are thin or formulaic
+3-4: no interview content beyond README table
+1-2: README interview table has no backing in docs
+
+---
+
+## 4. Continuity & overlap — 10 pts
+
+04 MUST reference but DUPLICATE ZERO content from:
+- 01-jvm-startup/18-Interpreter-Template-Dispatch.md (595 lines) — Template struct, DispatchTable layout
+- 12-cpu-layer/02-Interpreter.md (567 lines) — CPU-level dispatch (movzbl+jmp), safepoint testl at CPU level
+
+04's unique contribution: RUNTIME SEMANTICS — "why" questions that 01/18 and 12/02 don't answer:
+- 01/18 answers: "what are the Template fields?" 04 answers: "why per-TOS state?"
+- 12/02 answers: "how does testl work at CPU level?" 04 answers: "why only at backward branches?"
+- 12/02 answers: "how does movzbl dispatch?" 04 answers: "why 3-entry doors?"
+
+Checklist:
+- Does 04 explicitly state what 01/18 and 12/02 cover, and what 04 ADDS?
+- Are cross-references (e.g., "详见 [01/18] §X") present and accurate?
+- Does any 04 doc re-explain Template struct fields (duplicate of 01/18)?
+- Does any 04 doc re-explain x86 movzbl instruction (duplicate of 12/02)?
+
+Within 04 itself: do the 6 docs form a coherent course?
+- 00 is overview → 01 explains HOW templates are generated → 02 explains the STATE they manage → 03 explains the SAFEPOINT they check → 04 explains the INVOCATION they dispatch → 05 explains HOW they trigger JIT
+- Does the reader feel this progression? Or are docs 02 and 03 unrelated?
+
+### Scoring
+9-10: clean separation from 01/18+12/02 + coherent internal progression
+7-8: separation mostly clean but 1-2 duplication instances
+5-6: significant overlap or internal discontinuity
+3-4: major overlap, docs feel disconnected
+1-2: duplicate content, no coherence
+
+---
+
+## 5. Beginner-friendliness — 10 pts
+
+The reader is a Java engineer who:
+- Has completed 01-02-03 (knows Thread, Class, Object structures)
+- Has ZERO assembly knowledge
+- Has never traced bytecode execution before
+
+Hardest concepts to parse (check each):
+- Template::_gen() function pointer → is the concept of "function pointer used as callback to generate machine code" explained?
+- TOS state machine → is "state machine" defined? Is the 10-state transition table self-explanatory?
+- safepoint polling page → is "mprotect disarm = SIGSEGV" explained? Or does it assume prior 08-safepoint knowledge?
+- BackEdgeCounter → is "OSR" defined? "On-Stack Replacement"?
+- CP cache acceleration → is the concept of "ConstantPool entry gets cached result of first resolution" explained step-by-step?
+
+Checklist:
+- Does each doc explain concepts BEFORE using them? Or throw terms at the reader?
+- Do GDB sessions include explanation of WHY each command is run?
+- If a term is used in doc 04 that was defined in doc 02, is there a reference back?
+- Are there any paragraphs where a Java engineer would just "nope out" (too dense, too many undefined terms)?
+
+### Scoring
+9-10: every concept defined before use, smooth reading for zero-assembly reader
+7-8: most concepts defined, 1-2 weak spots
+5-6: concepts used without definition, reader needs external references
+3-4: assumes prior assembly/OS knowledge not present in prerequisites
+1-2: unreadable for target audience
+
+---
+
+## 6. GDB density & authenticity — 5 pts
+
+GDB sessions must show ACTUAL `(gdb)` prompt output, not just "break at X, check Y."
+
+### Scoring
+5: 5+ docs have full GDB sessions with (gdb) prompts, register values, and commentary
+4: 4+ docs
+3: 3 docs  
+2: 2 docs
+1: 1 or fewer
+
+---
+
+## 7. Phase comparison — 5 pts
+
+Against 03 (60/60) and 02 (55-57/60): is 04 at the same quality level?
+
+Check:
+- Does 04 have a Container/K8s awareness section? (03 added container to 01, 02 added container to 10) If no container awareness → -1
+- Does 04 explain the performance implications of its mechanisms? (03 quantified CAS contention, 02 quantified Verifier overhead)
+- Does 04 have beginner sidebar callout boxes comparable to 03's "前置5题" format?
+
+### Scoring
+5: exceeds 03 quality in at least 1 dimension
+4: matches 03 quality
+3: slightly below
+2: clearly below
+1: doesn't approach 03/02 quality
+
+---
+
+## Output
+
+### Per-document quick matrix
+| Doc | Production | First-principles | Interview | Overlap | Beginner | GDB | /55 |
+|-----|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 00 | | | | | | | |
+| ... | | | | | | | |
+
+### Phase score: /60
+
+### Top 3 gaps (with exact doc:section references)
+
+### "If 2 docs" recommendation
+
+### Memorable sentence
+The SINGLE best sentence in the entire phase — the one a reader will quote in an interview.
+
+### Ready for 05-JIT? Yes/conditionally/No

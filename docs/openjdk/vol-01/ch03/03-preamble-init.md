@@ -1,5 +1,8 @@
 # 3.3 Stage 1 — 前置初始化
 
+> **前置依赖**：[01 JNI_CreateJavaVM](01-overview.md) → [02 Threads::create_vm 总览](02-threads-create-vm.md)：9 阶段骨架
+> → **后续**：[04 参数解析](04-args-parse.md)：Stage 2 详细展开
+
 `Threads::create_vm` 入口在 `thread.cpp`。Stage 1 是进入正式 JVM 初始化之前的准备工作——版本检查、TLS 注册、输出流初始化、参数处理、OS 初始化——每一项都是后续能正常走下去的前提。
 
 Stage 1 的完整代码：
@@ -720,6 +723,12 @@ void end()
 ```
 
 `_timer.milliseconds()` 返回从 `start()` 到现在经过的毫秒数。`Management::record_vm_startup_time()` 把启动耗时写入 PerfData 共享内存。在本机 HelloWorld 运行中，这个值约 200-300ms（debug build）。
+
+## 设计权衡
+
+**为什么 `ThreadLocalStorage::init()` 在 `os::init()` 之前？** TLS（Thread-Local Storage）是操作系统给每个线程分配的私有存储空间——HotSpot 用它存储 `Thread*` 指针（`ThreadLocalStorage::set_thread()`），让任何 C++ 代码通过 `Thread::current()` 拿到当前线程对象。`os::init()` 内部会注册信号处理器，而信号处理器需要 `Thread::current()` 来判断"当前线程是 JavaThread 还是裸 OS 线程"来决定处理策略。如果 TLS 没初始化，`os::init()` 内部的信号处理器注册就会在 `Thread::current()` 返回 NULL 的状态下执行——行为不可预测。
+
+**为什么 `os::init()` 要放在 Stage 1 而不是更晚？** `os::init()` 做了三件必须在任何 JVM 业务代码之前就位的事：(1) 设置页大小（`os::vm_page_size()`）——后续所有内存分配（CodeCache 分段、堆区域计算、Metaspace chunk 分配）都依赖这个值；(2) 注册信号处理器——SIGSEGV 的 implicit null check、SIGBUS 的安全点轮询，没有这些处理器 JIT 编译的代码跑不了；(3) 初始化线程调度器——后续 `pthread_create` 所有子线程（CompilerThread、GC 线程）都依赖 OS 线程 API 的就绪状态。这三项没有替代方案——不能"先分配再设页大小"，不能"先在没信号处理器的环境下运行"。
 
 ---
 

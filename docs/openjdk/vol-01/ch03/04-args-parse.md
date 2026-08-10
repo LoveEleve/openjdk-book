@@ -1,5 +1,8 @@
 # 3.4 Stage 2：参数解析
 
+> **前置依赖**：[02 Threads::create_vm 总览](02-threads-create-vm.md)：9 阶段骨架 → [03 前置初始化](03-preamble-init.md)：Stage 1
+> → **后续**：[05 OS 后初始化](05-os-init2.md)：Stage 3 详细展开
+
 从 `Threads::create_vm` 的 Stage 2 开始，命令行的 `-Xms/-Xmx/-XX:+UseG1GC` 才真正拿到语义。Stage 2 的源码：
 
 ```c
@@ -842,6 +845,14 @@ HotSpot 有三轮约束校验：`AfterErgo`（此刻）、`AfterMemoryInit`（�
 ## JVMFlagWriteableList::mark_startup() 和 PauseAtStartup
 
 `mark_startup` 遍历所有标记为 writable 的 flag，保存它们此刻的值——用于 `jcmd VM.flags -all` 显示"启动值 vs 当前值"。`PauseAtStartup` 是一个调试用 flag：如果用户传了 `-XX:+PauseAtStartup`，`os::pause()` 会暂停 JVM 进程等待调试器连接。
+
+## 设计权衡
+
+**为什么 `Arguments::parse()` 必须在堆初始化之前？** 堆的大小来自 `-Xms`/`-Xmx`，GC 算法来自 `-XX:+UseG1GC`，这些值在 `Arguments::parse()` 中从命令行提取并写入全局 Flag 变量。Stage 4 的 `init_globals()` → `universe_init()` → `initialize_heap()` 在创建 Java 堆时直接读取这些 Flag——如果参数还没解析，堆的大小就是未定义的。HotSpot 严格遵循"先解析所有 Flag → 再初始化所有依赖 Flag 的子系统"的顺序——不存在"先建堆再调大小"的 C++ 编程可能性。
+
+**为什么 `Arguments::apply_ergo()` 放在 `Arguments::parse()` 之后而不是之前？** Ergo（自动调优）的逻辑是"用户没设的我来设，用户设了的我不碰"。比如用户传了 `-Xms512m -Xmx2g`，Ergo 看到 `InitialHeapSize` 和 `MaxHeapSize` 已经被设置了就跳过；但如果用户只传了 `-Xmx2g` 没传 `-Xms`，Ergo 会根据 `MaxHeapSize` 和物理内存推算 `InitialHeapSize` 的合理值。如果 Ergo 在 parse 之前执行，它拿到的 Flag 全是从配置文件（`jvm.cfg`/`flags.sh`）读出的默认值，无法知道用户的实际意图。
+
+**为什么 `Arguments::parse()` 失败直接 `return JNI_EINVAL` 而不是 try-catch 继续？** HotSpot 的启动流程没有异常处理机制——C++ 异常在 JVM 内部被禁用（`-fno-exceptions` 编译选项）。任何初始化阶段的错误都必须通过返回错误码传播，调用方检查返回值决定是否继续。这保证了启动路径的直截了当——不像 Java 的 try-catch 那样有隐藏的控制流跳转。
 
 ---
 

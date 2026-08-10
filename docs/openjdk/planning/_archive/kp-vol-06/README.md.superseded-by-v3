@@ -1,0 +1,11 @@
+# vol-06 JDK Native 桥接层 — 知识规划
+
+> 5 域：Launcher / ZIP-JIMAGE / Core Native / NIO Network / SA Postmortem
+
+| # | 域 | 方案 | 源码位置 |
+|:--:|-----|:--:|------|
+| 39 | Launcher (libjli) | 🟡B | `java.base/share/native/libjli/` |
+| 40 | ZIP/JIMAGE | 🟡B | `java.base/share/native/libzip/` + `libjimage/` |
+| 41 | Core Native (libjava) | 🟡B | `java.base/share/native/libjava/` |
+| 42 | NIO Network | 🟡B | `java.base/share/native/libnio/` + `libnet/` |
+| 43 | SA Postmortem | 🟡B | `jdk.hotspot.agent/` |

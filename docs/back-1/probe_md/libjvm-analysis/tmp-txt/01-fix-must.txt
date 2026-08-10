@@ -1,0 +1,100 @@
+Rewrite 2 MUST-fix docs in 01-jvm-startup to 07-12 phase quality standard. Read each doc fully, then rebuild it. The existing content is a skeleton — keep accurate parts, replace/all the rest.
+
+## Verification SOP
+```
+sverklo_investigate(expand_graph=true)  # broad search (no timeout)
+codegraph query "<function>"            # confirm function exists
+codegraph callers "<function>"          # confirm call chain
+rg -n "<function>" <source>             # confirm line numbers
+```
+
+## Style references (study their quality first)
+probe_md/libjvm-analysis/01-jvm-startup/07-G1CollectedHeap-Initialize-Deep-Dive.md (✅ green, 50/50)
+probe_md/libjvm-analysis/01-jvm-startup/01-JVM-Startup-Structure-Init.md (✅ green)
+
+## Quality targets (all docs must have)
+- Production scenario opener: real crash/fault the reader has experienced at 3am
+- Every claim backed by file:line source evidence
+- ≥5 "why X instead of Y" design rationale sections
+- GDB verification with exact breakpoints and expected output
+- Beginner concepts explained before used
+- Interview-ready content table
+
+---
+
+## Doc 1: 18-Interpreter-Template-Dispatch.md (18/50 → target 45+)
+
+This is the JVM's execution heart — every bytecode hits this path. Current: 120 lines of structure description with no depth.
+
+### Rewrite with:
+1. **Production opener**: "Your bytecode instrumentation crashes JVM with `ShouldNotReachHere()` — because you added a new bytecode >255 and hit empty dispatch slot."
+
+2. **Template struct deep-dive** (file:line from templateInterpreter.hpp):
+   - Every field annotated: _count, _tos_in, _tos_out, _gen, _desc
+   - How `_gen()` function pointer connects to TemplateInterpreterGenerator
+
+3. **DispatchTable internals** (templateInterpreter.hpp + .cpp):
+   - EntryPoint struct layout (entry, at_entry, iep_entry)
+   - `set_entry()` mechanism
+   - `_active_table` vs `_normal_table` — why two tables, safepoint-based swap
+
+4. **TemplateTable::template_for()** walkthrough (templateTable.cpp):
+   - Bytecode → Template* mapping
+   - Why 256 slots for 239 bytecodes (alignment + `_fast_*` variants)
+
+5. **≥5 design rationales**:
+   - Why DispatchTable (array) not switch/case or hash table
+   - Why Template (data struct) separate from TemplateTable (code generator)
+   - Why generate-at-startup not precompiled binary
+   - Why per-TOS-state entries instead of runtime TOS check
+   - Why 32-byte stride per entry (cache line alignment)
+
+6. **GDB verification**:
+   - Break at `TemplateInterpreterGenerator::set_entry_points()`
+   - Print `_active_table[0..5]`, verify layout
+   - Step through `template_for(Bytecodes::_iload)`, verify Template fields
+
+7. **TOS state machine diagram**: 10 TOS states, how bytecode transitions between them
+
+---
+
+## Doc 2: 13b-Compiler-Stubs-MH.md (19/50 → target 45+)
+
+Covers JIT infrastructure — compiler threads, stubs, MethodHandle adapters. Current: 159 lines of surface description.
+
+### Rewrite with:
+1. **Production opener**: "`-XX:CICompilerCount=1` causes compile queue backlog → method stuck in interpreter → 100x slowdown → p99 latency spike."
+
+2. **compilation_init walkthrough** (init.cpp + compileBroker.cpp):
+   - Phase1 vs Phase2 split — why two phases (basic Infrastructure vs JVM-fully-initialized)
+   - `make_compiler_thread()` with file:line — thread creation, entry function, queue polling loop
+   - Compiler queue structure: `CompileTask`, `CompileQueue`, add/remove
+
+3. **StubRoutines generate** (stubRoutines.cpp + stubGenerator_x86_64.cpp):
+   - What stubs get generated: exception, deopt, safepoint, arraycopy, etc.
+   - Why generate at startup (not first-use): avoid runtime allocation in signal context
+
+4. **MethodHandle adapters** (methodHandles.cpp + methodHandles_x86.cpp):
+   - `generate_adapters()` → `linkToStatic`/`linkToVirtual`/`linkToSpecial`/`linkToInterface` trampolines
+   - What each trampoline does at CPU level (register setup, jump target)
+   - Why 4 trampolines (vtable/itable/special dispatch differ)
+
+5. **≥5 design rationales**:
+   - Why stubs in CodeCache not in libjvm.so (dynamically generated, CPU-specific)
+   - Why SoftRef clock uses os::javaTimeMillis not System.nanoTime
+   - Why MethodHandle adapters generated at startup (not JIT-compiled lazily)
+   - Why compiler threads are daemon (JVM exits during compile backlog)
+   - Why ref processing deferred to Phase2 (GC infrastructure not ready in Phase1)
+
+6. **GDB verification**:
+   - Break at `compileBroker_init()`, print `_c1_count`/`_c2_count`
+   - Break at `generate_adapters()`, dump adapter entry addresses
+   - Verify stub addresses are in CodeCache range (not libjvm.so)
+
+7. **Cross-reference**: Connect to 01's CodeCache section, 05's stubRoutines, 18's interpreter dispatch
+
+## Verification (after writing both)
+```bash
+rg -n "<function>" <source>        # verify every line number
+codegraph callers "<function>"     # verify call chains
+```

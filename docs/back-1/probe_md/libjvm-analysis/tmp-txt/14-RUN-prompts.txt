@@ -1,0 +1,141 @@
+Produce 5 prompts for 14-zip-jimage phase. Standard 10-section format (§〇~§十). Each prompt must contain EXACT specifications — not "cover X", but "here's the SPECIFIC counterfactual, the SPECIFIC source line, the SPECIFIC beginner callout text."
+
+## README
+probe_md/14-zip-jimage/README.md (618 lines, 68+/70, source-verified)
+
+## Benchmark prompts
+probe_md/13-launcher/prompts/prompt-02-JVM-Loading.md (58/60 — best)
+probe_md/13-launcher/prompts/prompt-03-Main-Class-Loading.md (57/60)
+
+## Output
+probe_md/14-zip-jimage/prompts/prompt-00-Zip-Class-Loading.md (target: 350+ lines)
+probe_md/14-zip-jimage/prompts/prompt-01-Jimage-Format.md (target: 350+ lines)
+probe_md/14-zip-jimage/prompts/prompt-02-Compression-Zlib.md (target: 350+ lines)
+probe_md/14-zip-jimage/prompts/prompt-03-ClassLoader-Bridge.md (target: 350+ lines)
+probe_md/14-zip-jimage/prompts/prompt-04-Jar-URL-Nesting.md (target: 300+ lines)
+
+## Quality mandate (applies to ALL 5 prompts)
+- **Depth**: every §四 question group starts from counterfactual with quantified alternative
+- **Breadth**: §三 source files must include the FULL corrected source set from README
+- **Interview**: §一 includes story-format interview answer template from README §五
+- **Continuity**: §一 explicitly states "Reader comes from 13-launcher (classpath→JAR) + 02-class-loading (ClassFileParser). This doc is the bridge."
+- **First principles**: ≥5 question groups with "if you designed class storage from scratch..."
+- **Beginner**: §六 specifies callout boxes for ZIP Central Directory, DEFLATE, jimage, CRC32, zlib
+
+## CRITICAL: Source corrections to reflect in ALL prompts
+
+The source verification found 7 corrections that MUST be reflected:
+1. **No ZipEntry.c** — all ZIP logic in `zip_util.c` (1697 lines)
+2. **ZIP lookup is hash O(1)**, not binary search — `readCEN` at zip_util.c:568 builds hash table, `ZIP_GetEntry2` at zip_util.c:1172 does hash%tablelen → chain walk
+3. **ClassLoader.defineClass1 receives PRE-READ bytes from Java ZipFile** — does NOT call ZIP_GetEntry. Java layer: ZipFile.getInputStream() → native Inflater.c → zlib inflate → returns bytes → passes to ClassLoader.defineClass1(bytes)
+4. **zlib 1.2.11 is source-bundled** — not system library. `zlib.h:26`
+5. **jimage uses perfect hashing** — `HASH_MULTIPLIER = 0x01000193`, magic `0xCAFEDADA`, version MAJOR=1 MINOR=0
+6. **jimage decompressor dlopens libzip.so** — to reuse `ZIP_InflateFully` from libzip. `imageDecompressor.cpp:83`
+7. **CRC32 verification in Java layer** — `java.util.zip.ZipFile`, not native class loading path
+
+## Each prompt: 10-section structure
+
+### §〇 Background & Production
+REAL error string from source. The EXACT output the engineer sees. Not "you might see a ZipException" — "`java.util.zip.ZipException: invalid entry CRC` at class loading time."
+
+### §一 Task + Narrative + De-glamorization + Beginner Callouts
+"This is NOT a ZIP format tutorial. We won't explain Phil Katz's original PKZIP spec. This is ENGINEERING documentation: how HotSpot reads .class bytes from JAR files in source-code-specific detail."
+"Reader knows from 13-launcher HOW classpath resolves to JAR paths. Reader knows from 02-class-loading HOW ClassFileParser parses bytes. This doc answers: how do bytes get from DISK to PARSER."
+
+Beginner callout specifications (exact text per prompt):
+- 00: ZIP Central Directory, CEN header, LOC header, chained hash table, ZIP_GetFromCache
+- 01: perfect hashing, HASH_MULTIPLIER, location table, Redirect table, magic number
+- 02: DEFLATE/inflate, zlib, inflateInit2_, CRC32 vs Adler-32, Inflater cache
+- 03: defineClass1, JNI GetStringUTFChars, SetByteArrayRegion, ZipFile.getInputStream
+- 04: nested ZIP, zipfs, LaunchedURLClassLoader, JarURLConnection
+
+### §二 Standard Environment
+OpenJDK 11 slowdebug, 64-bit Linux. Source: src/java.base/share/native/libzip/, src/java.base/share/native/libjimage/, src/java.base/unix/native/libjimage/. Build: `make jdk`.
+
+### §三 Source Files Table
+MUST use full repo paths. Corrections 1-7 reflected.
+
+### §四 Deep Dive (≥6 question groups)
+Each: (a) what to look for, (b) exact file:line from README source verification, (c) "why" counterfactual quantified, (d) alternative approach cost. Cover ≥2 README §八 deep questions per prompt.
+
+### §五 Article Structure
+ASCII dependency diagram: production opener → concept → source → GDB → interview.
+
+### §六 Writing Requirements
+Mermaid diagram for: ZIP read path (00), jimage lookup (01), inflate pipeline (02), defineClass1 bridge (03), nested JAR resolution (04). GDB format throughout. Beginner callout boxes. Cross-refs.
+
+### §7~§10
+Standard: Output Format / ≥8 Prohibited / ≥8 Required / ≥8 GDB
+
+---
+
+## prompt-00 (Zip-Class-Loading) — EXACT specifications
+
+### §〇: "Corrupted app.jar at 3am"
+`java.util.zip.ZipException: invalid entry CRC (expected 0xabcd1234 but got 0xdeadbeef)` — CRC32 verification in Java ZipFile layer failed. JAR was corrupted during network transfer or disk write. Every class load from this JAR will fail until the JAR is replaced.
+
+### §四 groups:
+4.1: ZIP_Open at zip_util.c:XXX — how does the JVM "open" a JAR? mmap entire file or buffered read? Find the exact mechanism.
+4.2: readCEN at zip_util.c:568 — builds chained hash table from Central Directory. Counterfactual: "If binary search instead of hash: O(log n) = 12 comparisons for 3000 entries. Hash: 1-2 probes at 75% load factor. 10x faster." 
+4.3: ZIP_GetEntry2 at zip_util.c:1172 — hash%tablelen lookup + chain walk for collision resolution. Counterfactual: "If linear scan of CEN instead of hash: 1500 comparisons average for 3000 entries → 750x slower per class load."
+4.4: ZIP_GetFromCache — handle reuse across class loads from same JAR. Counterfactual: "If no cache: each class load = re-open JAR + re-read CEN (0.5ms) → 3000 classes × 0.5ms = 1.5s."
+4.5: DEFLATE decompression for entry — Inflater.c bridge → zlib inflate(). Cached Inflater state.
+4.6: ZIP_Lock/ZIP_Unlock — concurrent class loading from same JAR. Multiple threads reading different entries → lock on ZIP handle.
+
+### §十 GDB: break at zip_util.c:568 (readCEN), zip_util.c:1172 (ZIP_GetEntry2), Inflater.c:XXX (inflate). Show hash table structure, entry offset, inflated bytes.
+
+---
+
+## prompt-01 (Jimage-Format) — EXACT specifications
+
+### §〇: "JDK upgrade → FindException"
+`java.lang.module.FindException: Module java.base not found`. JIMAGE_Open at jimage.cpp:XXX → checks magic 0xCAFEDADA → fails (wrong version, corrupted file, or partial JDK upgrade).
+
+### §四 groups:
+4.1: JIMAGE_Open at jimage.cpp:XXX — magic check, version check, redirect/location/string table parsing.
+4.2: Perfect hashing — HASH_MULTIPLIER = 0x01000193. `hash = 1; for each char c: hash = hash * HASH_MULTIPLIER + c`. Counterfactual: "If standard hash with collisions: need secondary probe for each miss → 1.2x more probes. Perfect hash: 0 collisions by construction (all known at image build time)."
+4.3: Location table — `location_table[name_hash]` = offset in resource data. O(1) guaranteed. Counterfactual: "If ZIP's table: O(1) average but not guaranteed → worst case O(n) with degenerate hash. jimage perfect hash → always O(1)."
+4.4: String table — shared strings extracted from class data → deduplication → better compression.
+4.5: imageDecompressor.cpp:83 → dlopen("libzip.so") → reuse ZIP_InflateFully. Counterfactual: "If jimage had its own inflate: code duplication + possible zlib version mismatch. dlopen libzip: single zlib, single inflate pipeline, zero duplication."
+4.6: Pre-processing — shared constant pool strings extracted → stored ONCE in string table → entries reference via offset. Class data compressed WITHOUT duplicate strings → 20-30% better compression than raw DEFLATE.
+
+---
+
+## prompt-02 (Compression-Zlib) — EXACT specifications
+
+### §〇: "corrupt compressed data at startup"
+`java.util.zip.ZipException: invalid stored block lengths` — zlib's inflate() encountered malformed DEFLATE stream. Root cause: JAR was built with incompatible compressor or truncated during copy.
+
+### §四 groups:
+4.1: Inflater.c native bridge — `Java_java_util_zip_Inflater_inflateBytes()` → inflate().
+4.2: zlib bundled at zlib.h:26 (version 1.2.11). Counterfactual: "If system zlib: Linux/Windows version mismatch → inflate fails → ClassNotFoundException for all classes. Bundled: known version, verified behavior."
+4.3: inflateInit2_ → inflate → inflateEnd pipeline. Caching Inflater state across entries.
+4.4: CRC32 vs Adler-32 — dual verification. Adler-32 in zlib stream (catches decompression errors). CRC32 in ZIP entry (catches disk corruption).
+4.5: DEFLATE compression ratio analysis — class files: ~50% typical. Constant pools highly compressible. Bytecodes moderately compressible.
+
+---
+
+## prompt-03 (ClassLoader-Bridge) — EXACT specifications
+
+### §〇: "NoClassDefFoundError but class IS in JAR"
+`java.lang.NoClassDefFoundError: com/example/Foo`. JAR is on classpath, Central Directory has "com/example/Foo.class" entry, but ClassLoader.defineClass1 returns null. Root cause: ZIP entry is a directory stub (size=0, name ends with '/'), not a file entry. Fix: rebuild JAR without directory entries.
+
+### §四 groups:
+4.1: ClassLoader.c → Java_java_lang_ClassLoader_defineClass1() — receives byte[] FROM JAVA, not reads bytes. Counterfactual: "If defineClass1 called ZIP_GetEntry directly: native code handles I/O + zlib + CRC32. Java exception handling unavailable → crash. ZipFile handles I/O in Java → proper IOException → ClassNotFoundException."
+4.2: Architecture: ZipFile.getInputStream() → native Inflater → bytes → ClassLoader.defineClass1(bytes). Separation of concerns.
+4.3: JNI_SetByteArrayRegion — copies inflated bytes from native to Java heap.
+4.4: defineClass1 → JVM internal: SystemDictionary::define_class → ClassFileParser (02 territory).
+
+---
+
+## prompt-04 (Jar-URL-Nesting) — EXACT specifications
+
+### §〇: "Spring Boot fat JAR — ZipException"
+ZipException accessing nested JAR: `BOOT-INF/lib/spring-core.jar` inside `app.jar`. Standard java.util.zip.ZipFile only handles real .jar files → fails on zip entry within another zip.
+
+### §四 groups:
+4.1: Standard ZipFile limitation — ZIP_Open expects real file path → nested path fails.
+4.2: JarURLConnection protocol — `jar:file:///app.jar!/BOOT-INF/lib/spring-core.jar!/META-INF/MANIFEST.MF`.
+4.3: Spring Boot LaunchedURLClassLoader — custom URL stream handler for nested JARs.
+4.4: JDK 13+ zipfs — ZipFileSystemProvider → treats nested JAR as filesystem.
+4.5: Performance — nested JAR = 2x decompression (inflate outer entry → parse inner CEN).

@@ -1,0 +1,15 @@
+Fix 3 minor review gaps in 14-zip-jimage docs. Edit existing files only.
+
+## Gap 1: Line reference clarity (00+01+04)
+- 00-Zip-Class-Loading.md: add parenthetical note at ZIP_Open reference line: "(ZIP_Open wrapper at zip_util.c:911, calls ZIP_Open_Generic at zip_util.c:763)"
+- 01-Jimage-Format.md: add parenthetical at JIMAGE_Open reference: "(function head at jimage.cpp:59, opens image at jimage.cpp:95)"
+
+## Gap 2: 02-Zlib — add -MAX_WBITS beginner callout
+In 02-Compression-Zlib.md, find the 1.2 section explaining -MAX_WBITS vs MAX_WBITS. Add a standalone Beginner Callout box with:
+
+"**-MAX_WBITS vs MAX_WBITS**: zlib's windowBits parameter in inflateInit2. MAX_WBITS (positive 15): expect zlib-wrapped stream with 2-byte header. -MAX_WBITS (negative 15): expect raw DEFLATE with no header. JAR entries use raw DEFLATE → -MAX_WBITS. The negative sign tells zlib 'skip the header check.' Using wrong mode → 'incorrect header check' error → ZipException."
+
+## Gap 3: 04-Nesting — add inner CEN parsing beginner callout
+In 04-Jar-URL-Nesting.md, find the section explaining how Spring Boot parses inner JAR's Central Directory. Add:
+
+"**Inner CEN parsing**: Standard ZipFile reads CEN by seeking to END header (last 22 bytes of file) → gets CEN offset → reads CEN. For nested JARs, the 'file' is a byte[] in memory (extracted from outer JAR entry). Spring Boot's JarFile reimplements this: parse END from byte buffer → get CEN offset → read CEN entries from byte buffer → build hash table. Same algorithm, different data source."

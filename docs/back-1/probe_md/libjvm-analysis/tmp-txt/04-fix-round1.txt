@@ -1,0 +1,132 @@
+Enhance 3 docs in 04-interpreter. Read each fully, then ADD content at appropriate sections.
+
+## ⛔ HARD RULES
+- ENHANCE only: read → find insertion point → insert new content → save. NEVER create new files. NEVER delete existing content.
+- Preserve the existing § structure. Add new content as additional § or expanded subsections.
+- Every new section must have: "why" rationale + source evidence + GDB verification format
+
+## Quality mandate (5 dimensions)
+- **Depth**: don't say "there are 3 entry points." Say "3 entry points exist because: normal=allocates frame (hot path, zero branches), exception=no allocation (exception is rare, don't waste 200 cycles creating a frame you'll pop immediately), return=restores caller (zero allocation). Merging them into 1 would add 2 conditional branches to the hottest code path in the JVM — every method call pays."
+- **Breadth**: cover the ENTIRE path from entry → dispatch → execution → exit. Don't focus on one aspect and ignore the rest.
+- **Interview**: after reading, the reader should be able to answer: "walk me through what happens from `aload_0` to the value appearing in the expression stack." Context: this is a standard Senior JVM engineer interview question.
+- **First principles**: start every design rationale from "if you were building a bytecode interpreter from scratch..." and show why JVM's choice is the logical conclusion of constraints (speed, memory, safety). Don't just describe what happened — derive it.
+- **Beginner-friendliness**: every concept used in a new section must either be explained in the SAME section, or have been explained in §〇 of README or a doc prerequisite. If you use "CodeBuffer" without explanation → add a 1-line sidebar defining it.
+
+---
+
+## 00-Interpreter-Overview.md (400 lines)
+
+Add after the existing overview content:
+
+### §生产场景：Agent 钉住解释器
+JDWP agent attaches → NotifyFramePop → JavaThread::_at_breakpoint = true → every method force-deoptimized → stays in interpreter forever → P99 from 200ms → 5s.
+
+Trace: agentlib:jdwp → `JvmtiEventController::set_event()` → `JvmtiThreadState::set_should_post_on_exceptions(true)` → `JavaThread::set_at_breakpoint()` → `CompileBroker::compilation_is_prohibited()` returns true.
+
+GDB verification:
+```
+(gdb) p JavaThread::_at_breakpoint
+$1 = true
+(gdb) p CompileBroker::compilation_is_prohibited(thread, method)
+$2 = true  ← 永远不走 JIT
+```
+
+### §第一性原理：为什么三道门？
+If you merged into 1 entry: every method call = check "is this normal entry?" + check "is this exception?" + check "is this return?" → 3 branches in the hottest code path → ~6 cycles extra per method call × 10^6 calls/sec = measurable overhead.
+
+Instead: 3 separate entry points → no branches → just execute the right code. `Method::_from_interpreted_entry` is the dispatch point — it's set at method creation time to the right template address.
+
+| Entry | What it does | Why separated |
+|-------|-------------|---------------|
+| normal_entry | push frame + allocate locals + init monitors | hot path — 99.9% of calls, must be zero-overhead |
+| exception_entry | stack = [exception_ref] + dispatch to handler | no frame allocation — exception is already "inside" the frame |
+| return_entry | pop frame + restore caller's bcp/locals + push return value | caller already has a frame — just swap stacks |
+
+### §GDB session: trace all 3 entries
+(Full session format with (gdb) prompts, breakpoints at each of the 3 entry functions, step-through with comments)
+
+### §面试回答模板
+"Q: 模板解释器怎么执行一个方法？"
+"Answer: 正常入口创建帧，异常入口跳到 handler，返回入口恢复调用者。分开三个是因为合并会增加热路径分支——每个方法调用多花 6 cycles。..."
+
+---
+
+## 01-TemplateInterpreter-Init.md (685 lines)
+
+Add production opener at document start:
+
+### §生产场景：TemplateInterpreter 占用 45% CPU
+`perf top`:
+```
+45.12%  libjvm.so  [.] TemplateInterpreter::_ ...
+12.34%  libc.so    [.] __GI___pthread_mutex_lock
+ 8.21%  [kernel]   [k] do_syscall_64
+```
+No JIT compilation log. `-XX:+PrintCompilation` shows zero output. Cause: `CICompilerCount=1` + compile queue backlog → methods wait in queue → stay in interpreter.
+
+### §第一性原理：为什么模板解释器用 StackObj 而不是堆分配？
+If you allocate on heap: TemplateInterpreterGenerator needs ~274KB of machine code. Heap allocation = mutex lock on CodeCache → contention when multiple threads create methods simultaneously → not a problem at startup (single-threaded in create_vm), but the design generalizes.
+
+StackObj choice: single-pass generation → `generate_all()` walks TemplateTable once → CodeBuffer streams into CodeCache → destruction is automatic (stack unwinding). No manual free. No leak risk.
+
+(Don't duplicate 01/18's Template struct analysis — reference it.)
+
+### §第一性原理：为什么是宏驱动而不是 C++ 模板/虚函数？
+If virtual functions: `virtual void generate()` in base class, 200+ overrides. Each override = separate vtable entry → 200+ indirect calls → branch predictor miss rate ~5% per call = ~20 cycles per bytecode that isn't "warm" enough. Macros: `DEF_ALL_INTERPRETER_TYPES` expands to 200+ concrete `generate_<bytecode>()` functions at compile time → direct calls → BTB warm.
+
+If C++ templates: each bytecode is a different type → `TemplateTable::generate<Bytecodes::_iload>()` → compiler generates 200+ independent instantiations → code bloat (each instantiation duplicates common prologue/epilogue code). Macros: explicit code reuse via helper macros (IRT_ENTRY, IRT_ENTRY_NO_ASCENT, etc).
+
+### §GDB session: trace bytecode generation
+Break at `TemplateInterpreterGenerator::generate_all()`. Step into `generate_normal_entry()`. Verify dispatch table entries. Print first 5 table entries to confirm machine code addresses.
+
+### §面试回答模板
+"Q: 模板解释器的模板是怎么生成的？"
+"Answer: 启动时 `generate_all()` 遍历 TemplateTable，每个条目通过 `_gen()` 函数指针调用指定的 generate 函数。用宏是因为 C++ 虚函数和模板各有利弊——..."
+
+### §回避声明
+"本文关注生成流程和设计决策。CPU 级 dispatch 和 Template/DispatchTable 数据结构详见 [01/18] 和 [12/02]。"
+
+---
+
+## 02-Stack-Frame.md (418 lines)
+
+Add after existing frame layout content:
+
+### §生产场景：类型不匹配导致解释器崩溃
+Method compiled with "returns int", bytecode later modified (agent rewrites bytecode) to expect float. Template::_tos_in expects int, caller has float in expression stack → interpreter reads wrong bits → SIGSEGV when dereferencing the mangled oop it "decoded" from float bits.
+
+### §第一性原理：TOS 状态机
+
+10 states: `tos_illegal→tos_byte→tos_short→tos_char→tos_int→tos_long→tos_float→tos_double→tos_oop`.
+
+If no TOS state machine: every bytecode at runtime checks "what type is on top of my operand stack?" → 3 instructions per bytecode × 10^8 bytecodes/sec = 300M instructions wasted on type checking.
+
+Instead: each Template has `_tos_in` and `_tos_out` fields. The template generator matches templates by TOS state — at COMPILE TIME (startup). At RUNTIME: no check — just execute. If you call `iadd` and your stack isn't `(int,int)` at the top → that's the bytecode verifier's fault, not the interpreter's.
+
+Transition table:
+| Bytecode | TOS in | TOS out | Why |
+|----------|--------|---------|-----|
+| iload_0 | tos_illegal | tos_int | pushes int onto empty stack |
+| iload_1 | tos_int | tos_int | pushes int (stack already has int, now 2 ints) |
+| iadd | tos_int | tos_int | pops 2 ints, pushes 1 int → same state |
+| istore_2 | tos_int | tos_illegal | pops int → stack empty |
+| i2f | tos_int | tos_float | pops int, pushes float → state changes |
+| return | tos_int | — | pops int, returns to caller → caller's TOS |
+
+### §为什么 is2f 之后是新状态而 iadd 之后还是 tos_int？
+iadd 操作数栈深度不变（-2+1=net -1？不——ival 是 2 个 int 变 1 个 int）。关键：TOS state 只关心 TOP 类型，不关心深度。
+i2f 改变顶部类型 → TOS state MUST change because the next bytecode sees float not int.
+
+### §Mermaid diagram
+TOS transition for simple method: `iload_0, iload_1, iadd, istore_2`. Show state changes at each step.
+
+### §GDB session
+Break at `TemplateInterpreterGenerator::set_entry_points()`. For 5 bytecodes: print `_table[i]._tos_in`, `_table[i]._tos_out`, `_table[i]._entry`. Verify TOS state machine mapping.
+
+### §回避声明
+"本文关注 TOS 状态机的运行时语义。栈帧的具体布局（sender_sp/unextended_sp/局部变量表/操作数栈）和 stride 大小已在 12-cpu-layer/01-Frames.md 中覆盖。"
+
+## Verification
+```bash
+codegraph query + callers → rg -n <function> <source>
+```

@@ -1,5 +1,8 @@
 # 第1章：Launcher Chain —— 从命令行到 libjvm.so
 
+> **前置依赖**：[vol-00 编译 JDK](openjdk/vol-00)：ch01 源码概况 / ch02 configure+make
+> → **后续**：[ch02 JavaMain](openjdk/vol-01/ch02.md)：InitializeJVM → ifn->CreateJavaVM() 创建 JVM 实例
+
 上一卷最后你亲手编译了一个 JDK。敲 `java -version` 的时候，从屏幕上看到三行输出，觉得挺自然——JDK 嘛，一个命令启动一个 JVM，很正常。
 
 但如果你稍微想一下：这个 `java` 可执行文件才 23KB，而 JVM 本体 `libjvm.so` 有 164MB。一个 23KB 的 C 程序，怎么启动一个 164MB 的 Java 虚拟机？
@@ -564,6 +567,10 @@ CreateExecutionEnvironment(int *pargc, char ***pargv,
 }
 ```
 
+`SETENV_REQUIRED` 在 Linux 上默认关闭——正常走 `return`。即使开启，`RequiresSetenv` 只在 `LD_LIBRARY_PATH` 指向了错误版本的 `libjvm.so` 时才触发 `execv()` 重新执行整个进程。之所以必须 `execv` 而不是 `setenv`+`dlopen`：动态链接器 `ld.so` 只在进程启动时读一次 `LD_LIBRARY_PATH`，运行时改环境变量不会影响后续 `dlopen` 的搜索路径。重启进程是唯一办法。
+
+注意这个函数的六个子步骤失败时都调 `exit(code)` 而不是 `return` 错误码——因为函数签名是 `void`，没有返回路径。为什么设计成 `void`？这个函数在 JVM 创建之前执行——调用方 `JLI_Launch` 没有异常处理机制，也没有上层调用者能处理"找不到 JRE"或"jvm.cfg 无效"的错误。`exit()` 直接告诉操作系统"启动失败"，操作系统回收进程——这是 C 程序最早的错误处理模式，JDK 1.0 就是这么写的。
+
 `requiresSetenv` 内部的核心判断：`LD_LIBRARY_PATH` 如果没设就返回 `JNI_FALSE`。`LD_LIBRARY_PATH` 是 Linux 动态链接器 `ld.so` 的环境变量，告诉它去哪些目录找 `.so` 文件。正常情况下没设——`libjvm.so` 的路径已经在编译期写入了 `java` 的 RPATH，不需要运行时指定。
 
 代码里反复出现的 `JLI_Snprintf` 就是标准 C 的 `snprintf`，写格式化字符串到缓冲区，不是日志：
@@ -982,6 +989,18 @@ pthread 要求线程函数签名为 `void* func(void*)`，但 `JavaMain` 返回 
 **为什么要开新线程？** 原始线程（调 `main()` 的那个）的栈大小由 OS 初始分配、信号处理器已绑定——这些都不可改。JVM 需要精确控制栈大小和 guard pages，这些只能在 `pthread_create` 时通过 `pthread_attr` 设定。JDK-6316197 记录了早期在主线程启动 JVM 导致的 StackGuardPages 冲突。
 
 `JVMInit` 不会返回——`ContinueInNewThread` 里的 `pthread_join` 等到 `JavaMain` 执行完毕后，最终调 `exit()`。控制权永远不会回到 `JLI_Launch` 的调用者。如果 `pthread_create` 失败，fallback 到当前线程直接调 `JavaMain`。
+
+## 设计思考
+
+**为什么不在编译时直接链接 libjvm.so？** 如果 `gcc -ljvm` 静态链接，`java` 可执行文件从 23KB 膨胀到 164MB+。动态链接看似可行——但需要编译时知道 libjvm.so 的路径，而 JDK 可以安装在任意目录。`dlopen` 让启动器在运行时从文件系统动态推导路径（`/proc/self/exe → TruncatePath → jvm.cfg → libjvm.so`），实现安装位置无关。
+
+**为什么在新线程中启动 JVM？** 原始线程的栈大小由 OS 分配、信号处理器已绑定——这些都不可改。JVM 需要精确控制栈大小（`-Xss`）和 StackGuardPages（`mprotect(PROT_NONE)`），这些只能在 `pthread_create` 时通过 `pthread_attr` 设定。JDK-6316197 记录了早期在主线程启动 JVM 导致的 StackGuardPages 与 pthread guard page 冲突。
+
+**为什么 `CreateExecutionEnvironment` 返回 void + exit 而不是返回错误码？** 这个函数在 JVM 创建之前执行——调用方没有异常处理机制，也没有上层调用者能优雅处理"找不到 JRE"的错误。`exit()` 直接告诉操作系统"启动失败"——C 程序最早的错误处理模式。
+
+**`execv()` 重新执行自己——为什么？** 如果 `LD_LIBRARY_PATH` 指向了错误版本的 libjvm.so，不能用 `setenv`+重 `dlopen`——`ld.so` 只在进程启动时读一次 `LD_LIBRARY_PATH`，运行时改环境变量不影响后续搜索路径。重启进程是唯一办法。
+
+**为什么 `jvm.cfg` 而不是硬编码 `server/libjvm.so`？** JDK 1.2 时代有 `-classic`/`-hotspot` 多种 VM 可选。JDK 11 只剩 `-server KNOWN` 一行，但框架保留——未来新 VM 可以直接加一行不改启动器代码。
 
 ---
 

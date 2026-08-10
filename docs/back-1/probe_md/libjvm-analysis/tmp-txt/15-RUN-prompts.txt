@@ -1,0 +1,103 @@
+Produce 4 prompts for 15-core-native phase. Standard 10-section format (§〇~§十). Each prompt must contain EXACT specifications.
+
+## README
+probe_md/15-core-native/README.md (515 lines, 68+/70, source-verified)
+
+## Benchmark prompts
+probe_md/14-zip-jimage/prompts/prompt-00-Zip-Class-Loading.md (60/60)
+probe_md/13-launcher/prompts/prompt-02-JVM-Loading.md (58/60)
+
+## Output
+probe_md/15-core-native/prompts/prompt-00-System-Arraycopy.md (target: 350+ lines)
+probe_md/15-core-native/prompts/prompt-01-Class-String.md (target: 350+ lines)
+probe_md/15-core-native/prompts/prompt-02-Runtime-Throwable.md (target: 350+ lines)
+probe_md/15-core-native/prompts/prompt-03-JNI-Utility.md (target: 300+ lines)
+
+## Quality mandate (all 4 prompts)
+- **Depth**: §四 ≥6 Q groups, each from counterfactual with quantified alternative
+- **Breadth**: §三 source files from README Step 1 verification — full paths + verified line numbers
+- **Interview**: §一 includes story-format answer template from README §五
+- **Continuity**: §一: "Reader completed 09-native-interface (JNI), 03-object-model (markOop), 05-jit-compiler (C2 intrinsics). This doc: how the most-called native methods actually work."
+- **First principles**: counterfactuals quantified — "100x faster", "15x faster", "~1% overhead"
+- **Beginner**: §六 callouts for JNI_ENTRY, JVM_ENTRY, intrinsic, markOop, memmove, StringTable
+
+## SOURCE VERIFICATION (use these verified line numbers)
+
+| Method | File | Line | Mechanism |
+|--------|------|------|-----------|
+| System.arraycopy | System.c | 41 | RegisterNatives → JVM_ArrayCopy |
+| System.identityHashCode | System.c | 56 | JVM_IHashCode |
+| Object.hashCode | Object.c | 42 | RegisterNatives → JVM_IHashCode |
+| Object.getClass | Object.c | 64 | JNI GetObjectClass |
+| Class.forName0 | Class.c | 137 | JVM_FindClassFromCaller (after VerifyClassname) |
+| Class.isAssignableFrom | Class.c | 162 | JNI IsAssignableFrom |
+| String.intern | String.c | 32 | JVM_InternString |
+| Float.floatToRawIntBits | Float.c | 49-56 | Pure C union — zero JVM calls |
+| Runtime.availableProcessors | Runtime.c | 71 | JVM_ActiveProcessorCount (JVM_ENTRY_NO_ENV) |
+| Throwable.fillInStackTrace | Throwable.c | 49 | JVM_FillInStackTrace |
+
+---
+
+## prompt-00-System-Arraycopy.md — EXACT specs
+
+### §〇 Production
+`java.lang.ArrayStoreException: java.lang.Integer` at `System.arraycopy(src, 0, dst, 0, len)`. `src` is Object[] containing Integer, `dst` is String[]. arraycopy's native type check catches Integer can't go into String[] → ArrayStoreException. Fix: use `dst.clone()` or allocate correctly-typed destination.
+
+### §四 groups (≥6):
+4.1: arraycopy dispatch at System.c:41 — RegisterNatives binds to JVM_ArrayCopy. Counterfactual: "If arraycopy was Java: 1 bounds check per element → 1M checks → ~10ms. Native JVM_ArrayCopy: memmove bulk copy → 0.1ms. 100x faster."
+4.2: isPrimitiveArray check → memmove for byte/int/long/double/float/char/short/boolean → raw memory copy, no type checking per element.
+4.3: isObjectArray → element-by-element type check + copy. `dst->klass()->component_type()->is_assignable_from(src_elem_class)` per element. Counterfactual: "If Object[] used memmove without type-check: Integer slides into String[] silently → ClassCastException at later read → symptom far from cause."
+4.4: identityHashCode at System.c:56 — JVM_IHashCode → markOop::hash() in object header. Bypasses overridden hashCode(). Counterfactual: "If identityHashCode called obj.hashCode(): HashMap subclass returns constant → infinite loop on resize."
+4.5: memmove vs memcpy (Gap 1 from README review): "Spec says 'as if copied to temporary array' → overlapping src+dst must work. memcpy UB on overlap. memmove adds 1 direction check → ~1% overhead for overlapping guarantee."
+4.6: C2 intrinsic for arraycopy — compiles to REP MOVS on x86 (vectorized move). Counterfactual: "If C2 didn't intrinsify: every arraycopy → JNI call overhead → ~50ns even for 10-element copy. Intrinsic: inline REP MOVS → ~5ns. 10x faster for small arrays."
+4.7: Object.hashCode at Object.c:42 — RegisterNatives → JVM_IHashCode → markOop::hash(). hashCode cache in markOop (25-bit identity hash). Counterfactual: "If hashCode not stored in header: every call would need to generate → PRNG or address-based → non-deterministic → HashMap resizing unpredictable."
+4.8: System.nanoTime — clock_gettime(CLOCK_MONOTONIC). Why monotonic not realtime? "currentTimeMillis drifts with NTP, can go backwards. nanoTime monotonic: never decreases. Performance measurement requires monotonic — timing intervals must be positive."
+
+### §十 GDB: break at System.c:41 (RegisterNatives arraycopy), step into JVM_ArrayCopy at jvm.cpp:XXX, verify isPrimitive branch, verify memmove call.
+
+---
+
+## prompt-01-Class-String.md — EXACT specs
+
+### §〇 Production
+`ClassNotFoundException: com.example.Foo` in OSGi. `Class.forName("com.example.Foo")` calls forName0 → JVM_FindClassFromCaller at Class.c:137 → FindClass in CALLER's classloader (the OSGi bundle that contains the calling code). Context classloader is different from caller's classloader in OSGi → forName finds class in caller's restricted bundle classloader → Foo not exported from that bundle → CNFE.
+
+### §四 groups:
+4.1: forName0 at Class.c:137 — JVM_FindClassFromCaller → FindClass in caller's classloader. Counterfactual: "If forName used context classloader: caller in bundle A, context loader set to Bundle B → forName loads from B → B has no visibility of A's classes → CNFE for different reason."
+4.2: VerifyClassname at Class.c:130 — prevents loading "java.lang.String\0evil" (null byte injection).
+4.3: String.intern at String.c:32 — JVM_InternString → StringTable::intern(). Counterfactual: "If StringTable in Java heap: 3 JNI crossings per intern (lookup→insert→return) → ~150ns. Metaspace: atomic CAS ~10ns → 15x faster."
+4.4: Class.getName0 — binary name conversion. "java/lang/Object" → "java.lang.Object". Counterfactual: "If className used C string raw: java/lang/Object → Java code sees wrong format → Class.forName('java/lang/Object') fails."
+4.5: Float.floatToRawIntBits at Float.c:49-56 — C union reinterpretation. Counterfactual: "If Java had union: Float.floatToIntBits would be 1 Java expression. Must be native: zero-cost register reinterpretation inaccessible to Java type system."
+4.6: Object.getClass at Object.c:64 — JNI GetObjectClass → returns Klass* → wraps to jclass.
+
+### §十 GDB: break at Class.c:137 (forName0), verify classname, step into JVM_FindClassFromCaller, verify classloader chain.
+
+---
+
+## prompt-02-Runtime-Throwable.md — EXACT specs
+
+### §〇 Production
+Container has 2 CPUs, `Runtime.availableProcessors()` returns 64 (host CPU count). JDK 8/9: no cgroup awareness → JVM spawns 64 GC threads → 62 useless threads → context switching overhead → GC STW 10x longer. JDK 10+: reads `/sys/fs/cgroup/cpu/cpu.cfs_quota_us` / `cpu.cfs_period_us` → computed = floor(quota/period).
+
+### §四 groups:
+4.1: availableProcessors at Runtime.c:71 → JVM_ActiveProcessorCount JVM_ENTRY_NO_ENV. JDK 10+ cgroup path: reads cgroup limits. Counterfactual: "No cgroup awareness: 47% of production Docker JVMs report wrong CPU count."
+4.2: Runtime.gc → JVM_GC → Universe::heap()->collect(GCCause::_java_lang_system_gc). Counterfactual: "If System.gc returned without guarantee: users assume GC happened → memory leak undetected."
+4.3: Throwable.fillInStackTrace at Throwable.c:49 → JVM_FillInStackTrace → native stack walk → reads through C2-compiled frames → builds StackTraceElement[].
+4.4: Stack walking through C2 frames — nmethod metadata provides class/method/line mapping. Counterfactual: "If C2 frames opaque: stack trace shows all compiled frames as 'Unknown compiled code' → useless for debugging."
+
+### §十 GDB: break at Runtime.c:71, verify JVM_ActiveProcessorCount return value, check cgroup file reads.
+
+---
+
+## prompt-03-JNI-Utility.md — EXACT specs
+
+### §〇 Production
+Silent NPE in native path — `JNU_ThrowNullPointerException(env, "key is null")` generates proper Java exception with message. Without JNU utilities: each native method manually writes `(*env)->ThrowNew(env, NPEClass, "key is null")` → boilerplate, typos, inconsistent messages.
+
+### §四 groups:
+4.1: JNU_ThrowNullPointerException — standardized NPE construction.
+4.2: JNU_GetStringPlatformChars — encoding fast path: ISO-8859-1 shortcut for ASCII strings.
+4.3: JNU_ClassClass — cached jclass for java.lang.Class (used everywhere).
+4.4: JNU_CallMethodByName — variable-argument JNI method dispatch.
+
+### §十 GDB: break at jni_util.c key functions, verify cached jclass addresses.

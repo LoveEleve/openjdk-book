@@ -1,0 +1,90 @@
+Analyze and plan phases 13+ for the OpenJDK JVM analysis series. We have completed 12 phases covering libjvm.so (125 docs, 89,721 lines).
+
+## Completed (12 phases, libjvm.so)
+01-jvm-startup → 02-class-loading → 03-object-model → 04-interpreter → 05-jit-compiler → 06-gc-memory → 07-thread-lock → 08-safepoint → 09-native-interface → 10-services-diag → 11-os-layer → 12-cpu-layer
+
+## Mission
+Analyze ALL remaining OpenJDK .so files and propose which ones deserve dedicated phases. Consider:
+- Production relevance: "will a production engineer at 3am need to understand this .so?"
+- Interview value: "will understanding this make someone a stronger JVM interview candidate?"
+- Arthas/async-profiler/APM ecosystem: "do diagnostic tools depend on this .so?"
+- Overlap with existing 12 phases: "is this already partially covered?"
+
+## All OpenJDK .so files (from build output)
+```
+libattach.so
+libawt_headless.so
+libawt.so
+libawt_xawt.so
+libdt_socket.so
+libextnet.so
+libfontmanager.so
+libinstrument.so
+libj2gss.so
+libj2pcsc.so
+libj2pkcs11.so
+libjaas.so
+libjavajpeg.so
+libjava.so
+libjawt.so
+libjdwp.so
+libjimage.so
+libjli.so
+libjsig.so
+libjsound.so
+liblcms.so
+libmanagement_agent.so
+libmanagement_ext.so
+libmanagement.so
+libmlib_image.so
+libnet.so
+libnio.so
+libprefs.so
+librmi.so
+libsaproc.so
+libsctp.so
+libsplashscreen.so
+libsunec.so
+libunpack.so
+libverify.so
+libzip.so
+```
+
+## For each .so, answer
+
+### Quick assessment
+| .so | Purpose (1 line) | Production relevant? | Interview relevant? | Arthas/APM related? | Already covered? |
+|-----|------------------|:---:|:---:|:---:|:---:|
+
+### Priority ranking (after analysis)
+| Priority | .so cluster | Why this matters at 3am / in interview | Proposed phase name | Estimated docs |
+|:---:|------|------|------|:---:|
+| P0 | | | | |
+| P1 | | | | |
+| P2 | | | | |
+| Skip | | | | — |
+
+### For P0/P1 clusters, propose
+1. Phase name and scope
+2. Which 01-12 phases does it connect to?
+3. Production scenario: "at 3am, the engineer experiences X — this phase teaches them Y"
+4. Interview question: "the most common interview question this phase answers is..."
+5. Key source files to cover (file + path + role)
+6. Estimated document count + lines
+
+### Specifically address
+- **Arthas ecosystem**: which .so files does Arthas depend on? (attach + instrument + management + saproc?) What's the full path from `java -jar arthas-boot.jar` to "actually injected into the JVM"?
+- **async-profiler ecosystem**: does async-profiler depend on any OpenJDK .so? Or only on perf_event_open + JVMTI? What's the path from `profiler.sh start` to "flame graph generated"?
+- **Production diagnostic tools**: jstack/jmap/jcmd/jhsdb/jstat — which .so files power them? What's the dependency chain?
+
+### Total series expansion
+How many additional phases? How many documents? How many lines? Timeline?
+
+## Phase quality standard (must match existing)
+- Every phase has: §〇 production scenario opener, interview question mapping, production fault diagnosis, first-principles deep questions, beginner sidebars
+- Format follows 01-12 standard: README with all 12+ sections
+
+## Verification
+```
+codegraph query → sverklo_investigate → rg -n
+```

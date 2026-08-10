@@ -1,0 +1,468 @@
+Produce 7 prompts for 05-jit-compiler phase. This is the MOST COMPLEX phase — Sea of Nodes IR, Chaitin coloring, escape analysis. Each prompt must produce a doc that a Java engineer with 04-interpreter knowledge but ZERO compiler background can learn from.
+
+## Phase plan
+probe_md/libjvm-analysis/05-jit-compiler/README.md (667 lines, ~56/60)
+
+## Templates
+- Benchmark prompt: probe_md/libjvm-analysis/09-native-interface/prompt-06-MethodHandles-invokedynamic.md (30/30)
+- Prohibited behaviors: probe_md/libjvm-analysis/09-native-interface/prompt-03-VM-RedefineClasses.md
+- Production opener style: probe_md/libjvm-analysis/12-cpu-layer/prompt-01-Frames.md
+
+## Verification SOP
+```
+sverklo_investigate(expand_graph=true) → codegraph query + callers → rg -n
+```
+
+## Quality mandate (applies to ALL 7 prompts)
+- **Depth**: every prompt §四 question starts from counterfactual. "If you designed this from scratch, would you..." Not "explain how X works."
+- **Breadth**: each prompt's §三 source files must cover the FULL file set for that subsystem. Don't list 3 files when 8 are relevant.
+- **Interview**: every prompt's §一 must include a story-format interview answer template that a reader could MEMORIZE and deliver in an interview.
+- **Continuity**: every prompt's §一 explicitly states: "Reader comes from 04-interpreter doc X and this-phase doc Y. They already know Z. This doc adds W."
+- **First principles**: every prompt §四 question group includes a counterfactual alternative and quantifies the cost of the alternative.
+- **Beginner**: every prompt §六 requires explicit "你需要知道的" callout boxes for compiler concepts. EVERY concept used in the prompt must either be defined in a callout or referenced from a prior doc.
+
+## Output files
+probe_md/libjvm-analysis/05-jit-compiler/prompt-01-C2-Pipeline.md
+probe_md/libjvm-analysis/05-jit-compiler/prompt-02-Inline-Decision.md
+probe_md/libjvm-analysis/05-jit-compiler/prompt-03-Chaitin-RegAlloc.md
+probe_md/libjvm-analysis/05-jit-compiler/prompt-04-CodeCache-Sweeper.md
+probe_md/libjvm-analysis/05-jit-compiler/prompt-05-Deoptimization.md
+probe_md/libjvm-analysis/05-jit-compiler/prompt-06-OopMap-GC-Roots.md
+probe_md/libjvm-analysis/05-jit-compiler/prompt-07-Profile-Data-Flow.md
+
+---
+
+## PROMPT-01: C2 Pipeline (P0 — foundation)
+
+### §〇 Production Scenario
+"凌晨 3 点线上 JVM 崩溃——hs_err 有 `V [libjvm.so+0x...] PhaseIdealLoop::build_and_optimize+0x...`。Native frames 全在 libjvm.so 的 opto/ 目录函数中。这是 C2 编译过程的 bug——用户代码触发了编译器的 corner case。如何在 10 分钟内定位到 C2 的哪个阶段？排除哪个方法可以让 JVM 继续运行？"
+
+Real hs_err output:
+```
+# J 16193 C2 java.util.HashMap::hash(I)I (40 bytes)
+# SIGSEGV (0xb) at pc=0x00007f8b1a3c4d21
+V [libjvm.so+0x8c4d21] PhaseIdealLoop::build_and_optimize+0x341
+V [libjvm.so+0x8c2a15] Compile::Optimize+0x25
+```
+
+### §一 Task + Narrative
+"This is NOT a C2 source code walkthrough. This is the STORY of how 100 bytecodes become 10 x86 instructions through 8 phases. Each phase is a character: Parse (builder), IGVN (simplifier), Inline (unifier), LoopOpt (reorganizer), EscapeAnalysis (object eliminator), MacroExpand (lock→CAS), Matcher (translator), RegAlloc (assigner), Output (serializer)."
+
+"Reader just finished 04-interpreter doc 05-InterpreterRuntime — they know InvocationCounter triggers CompileBroker. This doc answers: what happens AFTER CompileBroker calls C2Compiler::compile_method()."
+
+Beginner callouts needed: Sea of Nodes, Node, Ideal Graph, GVN, IGVN, ADL, HIR/LIR
+
+### §三 Source Files (12 key files+)
+| File | Path | Module | Role |
+|------|------|--------|------|
+| compile.cpp | hotspot/share/opto/compile.cpp | opto | C2 entry point — Compile::Compile() |
+| parse1.cpp | hotspot/share/opto/parse1.cpp | opto | Parse phase — bytecode→Node |
+| phaseX.cpp | hotspot/share/opto/phaseX.cpp | opto | IGVN — hash-consing + worklist |
+| loopnode.cpp | hotspot/share/opto/loopnode.cpp | opto | Loop optimization |
+| escape.cpp | hotspot/share/opto/escape.cpp | opto | Escape Analysis — ConnectionGraph |
+| macro.cpp | hotspot/share/opto/macro.cpp | opto | Macro Expansion — lock→CAS |
+| matcher.cpp | hotspot/share/opto/matcher.cpp | opto | Instruction selection |
+| output.cpp | hotspot/share/opto/output.cpp | opto | Code generation + OopMap |
+| chaitin.cpp | hotspot/share/opto/chaitin.cpp | opto | Register allocation (link to 03) |
+| doCall.cpp | hotspot/share/opto/doCall.cpp | opto | Inline decision (link to 02) |
+| compileBroker.cpp | hotspot/share/compiler/compileBroker.cpp | compiler | JIT trigger → enters C2 |
+| x86_64.ad | hotspot/cpu/x86/x86_64.ad | cpu/x86 | ADL — architecture description |
+
+### §四 Deep Dive (7 question groups)
+
+**4.1 Parse: bytecode → Node transformation**
+Counterfactual: "If you didn't use Parse→Node, you'd have to optimize bytecodes directly — but bytecodes have implicit operand stack & local variables, making optimization NP-hard. Nodes make data dependencies EXPLICIT."
+- `parse1.cpp:do_one_bytecode()` — how does iload_0 become a ParmNode?
+- `parse2.cpp:do_one_block()` — how does IF_ICMPNE become IfNode + BoolNode + CmpNode?
+- Why does Parse create a `new SafePointNode` at each basic block boundary?
+
+**4.2 IGVN: hash-consing + iterative optimization**
+Counterfactual: "If you did GVN in ONE pass: AddI(a,b) and AddI(b,a) wouldn't be unified because the commutation check is iterative."
+- `phaseX.cpp:transform()` — hash lookup: `_table.hash_find(opcode, in(1), in(2))`
+- How does `Node::Ideal(PhaseGVN*, bool)` return the optimized version? Example: AddI(0, x) → x
+- Why does IGVN iterate until no changes? Because one optimization (inline) can expose new opportunities (GVN) → cascade
+
+**4.3 Sea of Nodes design rationale**
+Counterfactual: "If you used a linear IR (like LLVM's) — instructions are in order, and optimizations move them around. With Sea of Nodes: there IS no order — Nodes float until pinned."
+- Why "sea"? No control flow ordering — edges are data+control dependencies, not sequential
+- `Node::is_CFG()` — control nodes (If, Start, Return) are the ONLY pinned nodes
+- Tradeoff: graph matching (instruction selection) is NP-hard on DAGs → HotSpot uses ADL patterns with manual Node selection, not automorphic matching
+
+**4.4 Loop Optimization: peeling + unrolling + range check elimination**
+- `PhaseIdealLoop::build_and_optimize()` — `loopnode.cpp:build_loop_tree()`
+- Peeling: `PhaseIdealLoop::do_peeling()` — why 1 iteration? (makes invariant code obvious to IGVN)
+- Range check elimination: `PhaseIdealLoop::rc_predicate()` — compare loop variable bounds
+
+**4.5 Escape Analysis: object allocation → scalar replacement**
+Counterfactual: "If you allocate on heap and don't EA: every `new Point(x,y)` = 40 cycles (TLAB bump) + GC overhead. EA: `x = 5; y = 7` — zero allocation."
+- `ConnectionGraph::compute_escape()` — stream analysis: follow object through method calls
+- When does EA FAIL: object stored to field → escapes; object argument to non-inlined call → escapes
+- `PhaseMacroExpand::scalar_replacement()` — allocation node removed, fields become local variables
+
+**4.6 Matching + Output: Ideal Node → x86 instruction**
+- `Matcher::match()` — ADL patterns: `match_rule_supported(Op_AddI)` → finds `addI_reg_reg` in x86_64.ad
+- `PhaseOutput::install_code()` → `CodeCache::allocate()` → `nmethod::nmethod()`
+- OopMap generation per safepoint: `OopMapSet::add_gc_map(pc_offset, oopmap)`
+
+**4.7 Full pipeline trace (the "100 bytecodes → 10 instructions" walk)**
+Pick a concrete method: `int hash(String s) { return s == null ? 0 : s.hashCode(); }`
+Show actual bytecodes, actual Nodes created, actual optimizations applied, actual x86 output.
+BEFORE/AFTER for each phase with Node counts.
+
+### §六 Writing Requirements
+- § 一 MUST include "你需要知道的" callouts for: Sea of Nodes, Node class hierarchy, Ideal Graph, GVN vs IGVN, ADL
+- § 一 MUST include: "This doc is part of 05-jit-compiler. Prerequisite: 04-interpreter (05-Runtime §counters). Companion docs in this phase: 02 (Inline), 03 (RegAlloc)."
+- Mermaid: C2 8-phase pipeline diagram with Phase names + file entry points
+- Every phase description: "before optimization" pseudocode → "after optimization" pseudocode → cycle count change
+- GDB: 8 breakpoints (1 per phase) — verify Compile object, verify Phase name, verify Node count
+- Production end: "方法排除" workflow — how to identify the crashing method from hs_err + use CompileCommand
+
+---
+
+## PROMPT-02: Inline Decision (P0 — biggest optimization lever)
+
+### §〇 Production Scenario
+"启动后前 2 分钟——CodeCache 从 0% 到 97% 满。`-XX:+PrintInlining` 显示 1 个方法内联了 2000+ 层——InlineTree 深度没有限制，生成单个 nmethod 2MB。CodeCache full → CompileBroker 停止 → 热方法卡在解释器 → QPS 跌 80%。"
+
+Real PrintInlining output:
+```
+@ 12 java.util.HashMap::hash (62 bytes)   inline (hot)
+  @ 4 java.util.Objects::hashCode (12 bytes)   inline (hot)
+    @ 4 java.lang.String::hashCode (49 bytes)   inline (hot)
+      @ 19 java.lang.String::value (5 bytes)   accessor
+    @ 8 java.lang.String::hashCode (49 bytes)   already compiled into a big method
+```
+
+### §一 Task + Narrative
+"内联是 C2 最重要的单一优化——不是因为内联本身快，而是因为内联让其他优化 '看见' 更多代码。没有内联 = GC 在隔壁房间观察你的程序，只能看到 'call 0x...'。有了内联 = GC 看到了 callee 的 load/add/cmp 指令——可以跨方法消除重复计算。"
+
+"Reader knows from 04 that CompileBroker triggers C2. This doc answers: C2's first optimization decision — should I inline this method call or not?"
+
+Beginner callouts: InlineTree, CHA, type profile, hot count, uncommon trap
+
+### §三 Source Files
+| File | Role |
+|------|------|
+| doCall.cpp | Inline decision logic — inline_limit + frequency + call site analysis |
+| inline.cpp | InlineTree construction — should_inline / should_not_inline |
+| ciMethod.cpp | Compiler Interface methods — get bytecodes, profiles, method size |
+| ciCallProfile.hpp | Call profile data from C1 |
+| parse1.cpp | Parses inline method's bytecodes into callee's Nodes |
+| ciKlass.hpp | Klass hierarchy used for CHA |
+
+### §四 Deep Dive (6 question groups)
+
+**4.1 InlineTree: the recursive decision engine**
+- `InlineTree::should_inline(ciMethod* callee)` — decision chain:
+  1. `callee->should_inline()` — is callee marked @ForceInline? force-inline?
+  2. `callee->should_not_inline()` — is callee marked @DontInline? too big? native method?
+  3. `inline_level() > MaxInlineLevel` — recursion limit (default 9)
+  4. `callee->code_size() > MaxInlineSize` — size limit (default 35 bytes)
+  5. `InlineTree::should_inline_always() || compute_freq()->_freq > InlineFrequencyRatio`
+- The frequency FILTER: why count calls, not method size? Small uncalled methods waste CodeCache.
+
+**4.2 CHA (Class Hierarchy Analysis): type-based inline**
+Counterfactual: "Without CHA: invokevirtual = virtual dispatch = cannot inline. With CHA: if only 1 subclass exists → inline as direct call."
+- `ciKlass::subklass_of(ciKlass* super)` — checks klass hierarchy
+- `ciKlass::is_leaf_type()` — only one concrete implementation → monomorphic virtual call → inline as static call
+- The guard: optimized virtual call → `cmp [recv+klass], expected_klass; jne uncommon_trap` → if guard fails: deopt
+- Risk: CHA caches the hierarchy at compile time. If a new subclass is loaded later → deopt → recompilation loop
+
+**4.3 Type profile from C1: the empirical data**
+- `ciCallProfile::count()` — how many times was this method called?
+- `ciCallProfile::receiver_count(i)` — how many times was the i-th receiver type observed?
+- "If 99% of calls are to HashMap → inline HashMap's hashCode() → guard check for other 1% → 99% time: 2% overhead from guard, 98% saved from inline → net +96%"
+- `ciCallProfile::argument_projected_type(i)` — type propagation through arguments
+
+**4.4 Late inline: after IGVN**
+Counterfactual: "If you inline everything before IGVN: large graph → slow IGVN → compile time explosion. Late inline: do IGVN first (reduces graph), then inline hot callees that survived."
+- `PhaseIdealLoop::do_call()` — registers late inline candidates
+- Why wait? After IGVN, some calls were optimized away (dead code). Remaining calls are the important ones.
+
+**4.5 Inline + downstream optimization: the cascade effect**
+Concrete example:
+```
+Before inline: process() calls hash() calls hashCode()
+  process(): 10 instructions
+  hash(): 8 instructions
+  hashCode(): 49 instructions
+  Total: 10 + 8 + 49 = 67 instructions + 2 call overheads
+
+After inline: all 67 instructions in process()
+  IGVN eliminates 3 redundant hashCode() calls → 49 → 16
+  Total: 10 + 8 + 16 - 3 = 31 instructions ← 54% reduction
+```
+This is WHY inline is the most important optimization — it's a multiplier on ALL other optimizations.
+
+**4.6 Production: inline log interpretation**
+- `(hot)` = called enough, being considered
+- `already compiled into a big method` = caller reached MaxInlineSize for THIS call site
+- `callee is too large` = callee > MaxInlineSize
+- `inline level too deep` = recursion depth > MaxInlineLevel
+- `no static binding` = virtual call with multiple subtypes, cannot CHA-guard efficiently
+
+### §六 Writing Requirements
+- "你需要知道的": InlineTree, CHA, type profile, hot count
+- Mermaid: InlineTree recursion showing decision tree with yes/no branches
+- GDB: break at `InlineTree::should_inline()`, print callee name + decision + reason
+- Production: `-XX:+PrintInlining` log interpretation workflow
+- Story-format interview answer at end
+
+---
+
+## PROMPT-03: Chaitin RegAlloc (P2 — deep but narrow)
+
+### §〇 Production Scenario
+"perf top 显示编译后的方法中 40% 指令是 `mov`——不是计算，而是寄存器→栈的 spill/fill 操作。方法在编译后被 spill 到栈上——每次 spill = ~5 周期 L1 访问 + store-forwarding 延迟。寄存器分配失败导致性能比预期慢 3 倍。"
+
+Real perf output:
+```
+Samples: 128K of event 'cycles', 4000 Hz
+  40.12%  [JIT compiled code]  mov %rax, -0x10(%rbp)  ← spill
+  15.23%  [JIT compiled code]  add %rdx, %rax
+   8.21%  [JIT compiled code]  mov -0x10(%rbp), %rcx  ← fill
+```
+
+### §一 Task + Narrative
+"x86_64 只有 16 个通用寄存器。C2 可能为 1 个方法生成 50+ 个虚拟寄存器。Chaitin 着色算法将这些虚拟寄存器映射到 16 个物理寄存器——把冲突的寄存器 spill 到栈上。这不是 1982 年论文的数学版本——这是 HotSpot 的具体实现。"
+
+"Reader knows from 01 that Matcher produces an Ideal Graph. This doc answers: how those graph nodes — each requiring a register — get assigned to real hardware registers."
+
+Beginner callouts: virtual register, physical register, live range, interference graph, spill, coalesce
+
+### §三 Source Files
+| File | Role |
+|------|------|
+| chaitin.cpp | Main allocator — Register_Allocate() at :336-583 |
+| ifg.cpp | Interference graph construction |
+| coalesce.cpp | Coalesce — eliminate moves by merging registers |
+| live.cpp | Live range computation |
+| output.cpp | Post-allocation code emission |
+
+### §四 Deep Dive (6 question groups)
+
+**4.1 Live ranges: "when is this value alive?"**
+- `PhaseLive::compute()` — for each Node: `_first_use` to `_last_use` = live range
+- WHY live ranges exist: if two values' ranges overlap → they need DIFFERENT registers → IFG edge between them
+- Example: `int x = a+b; int y = c+d; return x+y;` → x lives from `a+b` to `x+y`, y lives from `c+d` to `x+y`. Overlap at `x+y`. x and y need different registers.
+
+**4.2 IFG (Interference Graph) construction**
+- `PhaseIFG::PhaseIFG()` — for each virtual register pair: do their live ranges overlap? If yes → add edge
+- `PhaseChaitin::build_ifg_virtual()` → then `AggressiveCoalesce` (at line 425: `coalesce.coalesce_driver()`) — merge virtual registers that are connected by a `mov` but don't interfere
+- `PhaseChaitin::build_ifg_physical()` — NOW build the physical IFG with real 16 GPRs
+
+**4.3 The correct algorithm order (verified from chaitin.cpp:336-583)**
+```
+1. PhaseLive (compute live ranges)
+2. IFG_virtual (virtual register interference)
+3. AggressiveCoalesce (line 425) — merge vregs BEFORE physical IFG
+4. IFG_physical (real 16 GPR interference)
+5. Simplify (line 515) — iteratively remove low-degree nodes
+6. Select (line 519) — color: if degree < 16 → success; else → spill
+7. If spill: split + ConservativeCoalesce (line 546-575) → loop to step 1
+```
+CRITICAL: Coalesce happens BEFORE coloring, not after. This is the difference between HotSpot's implementation and standard textbook presentation.
+
+**4.4 Spill: when 16 registers aren't enough**
+Counterfactual: "If you had 32 GPRs: no spill needed for most methods. But x86_64 has 16 — and 7 are reserved: RSP, RBP, R12(heapbase), R15(thread), R10/R11(scratch), RAX(return). So only 9 are available for compiler use."
+- Spill cost: `Node::_cnt` — loop-nested Node has higher cost (don't spill it!)
+- Spill mechanism: `PhaseChaitin::Select()` → degree ≥ 16 → `PhaseChaitin::choose_color()` returns -1 → `PhaseChaitin::select_spill()` → marks Node for spill → `PhaseChaitin::Split()` creates new vreg
+- After spill: split Node's live range into pre-spill (write to stack) + post-spill (read from stack) → redo step 1 with new vreg
+- `PhaseChaitin::fixup_spills()` at line 680: insert actual `mov reg→[rsp+offset]` instructions
+
+**4.5 Coalesce: the art of removing `mov` instructions**
+Counterfactual: "If you don't coalesce: `mov r1, r2; add r2, r3` — WHY not just use r1 everywhere? Coalesce merges r1 and r2 → `add r1, r3` — saves 1 instruction + 1 cycle."
+- AggressiveCoalesce: `PhaseAggressiveCoalesce::coalesce_driver()` — iterates all `mov` instructions, attempts to merge
+- Why aggressive BEFORE physical IFG? Because merging vregs reduces IFG degree → easier coloring → fewer spills
+- ConservativeCoalesce (after spill): more conservative — only merge if it WON'T force a spill (check: `adjacent.num_of_elements() + degree < 16`)
+
+**4.6 Production: spill storm diagnostics**
+- perf top shows `mov %rax, disp(%rbp)` followed by `mov disp(%rbp), %rcx` — spill + fill pair
+- Spill frequency: >5% of total instructions = problematic → reduce inline depth → fewer live ranges
+- `-XX:+PrintOptoAssembly` shows post-regalloc assembly — spots spills
+- Chaitin's algorithm is FAST in common case: 5ms for 50 Node method. Spill-only case: 350ms for 800 Node method.
+
+### §六 Writing Requirements
+- "你需要知道的": virtual register, live range, IFG, spill, coalesce, simplify, select
+- Mermaid: live ranges timeline → IFG graph → coloring process with spill
+- GDB: break at `Register_Allocate()`, step through AggressiveCoalesce, verify vreg count before/after
+- Production: spill storm diagnosis → perf + PrintOptoAssembly workflow
+- CRITICAL: correct algorithm order as verified from chaitin.cpp
+
+---
+
+## PROMPT-04: CodeCache + NMethodSweeper (P2)
+
+### §〇 Production Scenario
+"CodeCache is full. Compiler has been disabled." — 每条 JVM 日志都是这个。CodeCache 从 240MB 的 97% 涨到 100% 时，CompileBroker 拒绝接收新编译——热方法 forever 解释执行。3 分钟后 CodeCache → 85%（Sweeper 清理了 zombie nmethods），但 QPS 已经掉了 80%。"
+
+### §一 Task + Narrative
+"nmethod 是 JVM 中最复杂的生命周期对象——从'编译器分配 CodeCache 空间'到'GC 回收 zombie nmethod'共 5 个阶段。CodeCache 是 JVM 的'第二个堆'——和 Java 堆一样管理空间。"
+
+Beginner callouts: nmethod, CodeBlob, CodeCache, zombie, not_entrant, sweeper
+
+### §三 Source Files
+nmethod.cpp, codeCache.cpp, nmethodSweeper.cpp, codeBlob.cpp, compiledMethod.cpp, compileBroker.cpp
+
+### §四 Deep Dive (6 groups)
+
+**4.1 nmethod lifecycle (5 states)**
+- `alive`: compiled and in use — can be entered by any thread
+- `not_entrant`: new version compiled (C2 recompiled this method) — existing threads can finish, no NEW threads enter
+- `zombie`: all threads have exited not_entrant nmethod — ready for sweeper to reclaim
+- `unloaded`: class unloaded → nmethod's metadata invalid → must be reclaimed
+- `freed`: CodeCache space reclaimed
+
+**4.2 CodeCache 3-segment layout**
+- Non-profiled (no nmethods): compile level < 4
+- Profiled (nmethods with profile data): C1 L2/L3
+- Non-method: adapters, stubs, buffered blobs
+Each segment has independent free list.
+
+**4.3 NMethodSweeper: background cleanup**
+Counterfactual: "Without sweeper: CodeCache never shrinks → full → dead. Stop-the-world CodeCache cleanup = stop-the-world JVM."
+- Sweep cycle: every NmethodSweepFraction safepoints (default 16)
+- Zombie detection: `nmethod::can_be_zombie()` — is not_entrant AND no stack references?
+- Flush: `NMethodSweeper::sweep_code_cache()` → mark zombie → flush queue → `CodeCache::free(nmethod)`
+
+**4.4 Emergency flush**
+Counterfactual: "If CodeCache is 99% full: emergency flush. Sweeper aggressively marks ALL zombie nmethods → immediate CodeCache::free → no patience for normal cycle."
+- 3 situations: (1) allocation fails → trigger emergency, (2) CodeCache approaching limit, (3) explicit `-XX:StartAggressiveSweepingAt=80`
+
+**4.5 Speculative disconnect (frequent deopt → zombie)**
+If nmethod is deoptimized within first N invocations (SpecTrapLimit) → mark as "unstable" → never recompile. Saves CodeCache from recompilation loop.
+
+### §六 Writing Requirements
+- "你需要知道的": nmethod states, CodeCache segments, sweeper cycle
+- Mermaid: nmethod lifecycle state diagram with transitions
+- GDB: break at `NMethodSweeper::sweep_code_cache()`, print zombie count, verify flush
+- Production: `jcmd <PID> Compiler.CodeHeap_Analytics` → CodeCache usage
+
+---
+
+## PROMPT-05: Deoptimization (P1 — JIT→Interpreter escape hatch)
+
+### §〇 Production Scenario
+"200 deopt/s — GC 日志显示每 20ms 一个 deopt event。因为反射式框架每次使用不同子类——CHA 失效 → uncommon trap → deopt → 重编译 → 再次 uncommon trap → deopt。CPU 50% 在 deopt blob 中。"
+
+### §一 Task + Narrative
+"Deopt = 从 C2 优化过的高效代码跳回解释器。JVM 必须在栈上完整'重建'解释器帧——从 16 个 x86 寄存器中的随机值重建 Java 局部变量和操作数栈。OopMap 是关键的蓝图。"
+
+Beginner callouts: deopt, uncommon trap, frame rebuild, OopMap linkage
+
+### §三 Source Files
+deoptimization.cpp, sharedRuntime.cpp, frame_x86.cpp, oopMap.cpp, compile.cpp (uncommon trap insertion)
+
+### §四 Deep Dive (6 groups)
+
+**4.1 Deopt trigger types**
+- Uncommon trap: C2's assumption fails (CHA, type profile, null check)
+- OSR deopt: OSR-compiled loop no longer valid
+- Method deopt: JVMTI forces deopt (PopFrame, ForceEarlyReturn)
+
+**4.2 Frame rebuild: the core mechanism**
+Counterfactual: "Without OopMap: GC can't traverse compiled frames. Without Deopt: C2 must generate PESSIMISTIC code for all edge cases."
+- Read OopMap at deopt PC → decode bitmask → each bit: 1=oop, 0=non-oop
+- For each live value: read from register/stack → write to interpreter frame
+- Unpack scheme: `Deoptimization::UnrollBlock` describes what to unpack
+
+**4.3 DeoptimizationBlob execution**
+- unpack_uncommon_trap → unpack_reexecute → interpreter re-entry
+- Why unpack_uncommon_trap doesn't re-execute: trap happened, don't repeat
+
+### §六 Writing Requirements
+- "你需要知道的": deopt, uncommon trap, frame rebuild, OopMap consumption
+- Mermaid: frame rebuild from compiled to interpreter
+- GDB: break at `Deoptimization::fetch_unroll_info()`, print deopt reason + PC
+- Production: `-XX:+PrintDeoptimizationDetails` → deopt counter
+
+---
+
+## PROMPT-06: OopMap + GC Roots (P1 — JIT↔GC bridge)
+
+### §〇 Production Scenario
+"GC crash in G1ParScanThreadState::copy_to_survivor — bad oop reference in compiled method. OopMap said 'register r10 has an oop at PC 0x...' but r10 contained 0x7f8b... (a valid pointer but to a dead object). OopMap was generated for the wrong safepoint — GC traversed compiled code with wrong root set."
+
+### §一 Task + Narrative
+"GC 怎么找到 JIT 编译代码中的 live object pointers？编译后没有'局部变量表'了——值分散在 16 个寄存器和栈槽中。OopMap = 每个 safepoint 的位掩码——一行一行告诉 GC：'在 PC 0x... 处，R10 有 oop，RDI 有 oop，[RSP+0x18] 有 oop'。"
+
+Beginner callouts: OopMap, OopMapSet, safepoint, GC root, bitmask, debug info
+
+### §三 Source Files
+oopMap.cpp, oopMap.hpp, debugInfoRec.cpp, output.cpp, nmethod.cpp
+
+### §四 Deep Dive (6 groups)
+
+**4.1 OopMap generation at compile time**
+- `PhaseOutput::install_code()` → `DebugInformationRecorder::describe_scope()` → `OopMapSet::add_gc_map()`
+- Each safepoint generates 1 OopMap. OopMap = `OopMapValue` stream → compressed bitmask
+- Size: ~10 bytes per safepoint (typical: 2-3 oop values)
+
+**4.2 OopMap consumption at GC time**
+- GC thread calls `frame::oops_do(OopClosure*)` on compiled frame
+- `OopMapSet::find_map_at_offset(pc_offset)` → find OopMap for this PC
+- `OopMap::oops_do(frame* fr, OopClosure* f)` → iterate mask, call `f->do_oop()` for each oop register/stack slot
+
+### §六 Writing Requirements
+- "你需要知道的": OopMap bitmask, OopMapSet, safepoint correspondence
+- Mermaid: OopMap bit layout + GC consumption flow
+- GDB: break at `OopMapSet::add_gc_map()`, print PC offset + oop count
+
+---
+
+## PROMPT-07: Profile Data Flow (P1 — C1→C2 bridge)
+
+### §〇 Production Scenario
+"C2 内联了 HashMap::hash() 所有 6 个 callee——CodeCache 爆满。因为 C1 的 type profile 说 '99% calls receiver is HashMap'。但 profile 是在 WARMUP 期间收集的——生产稳态的 receiver mix 完全不同。Profile 污染 → C2 做出错误的内联决策 → 2MB nmethod → CodeCache full。"
+
+### §一 Task + Narrative
+"C2 不是瞎子——它透过 ci/ 目录读取 C1 编译器收集的 profile 数据。每次 invokevirtual 调用：C1 记录 '这个方法被调用了 N 次，receiver klass 是 X Y% 时间'。ciMethod/ciKlass/ciCallProfile = C2 的'市场调研'。"
+
+Beginner callouts: ciMethod, ciKlass, ciCallProfile, type profile, receiver count, maturity
+
+### §三 Source Files
+ci/ (74 files), ciMethod.cpp, ciKlass.cpp, ciCallProfile.hpp, ciTypeFlow.cpp, methodData.cpp, methodData.hpp
+
+### §四 Deep Dive (6 groups)
+
+**4.1 MethodData: the raw profile storage**
+- `Method::method_data()` — returns `MethodData*`, the raw C1-collected data
+- `MethodData::DataLayout` — compact storage: invocation counter, backedge counter, call site profiles
+- Each interpreter invocation: `MethodData::invocation_counter_inc()` → JIT trigger
+
+**4.2 ciMethod: C2's view of a method**
+- `ciMethod::Method* + MethodData* + bytecodes + exception handlers`
+- `ciMethod::instructions_size()` — C2 uses this for inline decision
+- `ciMethod::has_compiled_code()` — is there already a compiled version?
+
+**4.3 ciCallProfile: how C2 reads call counts**
+- `ciCallProfile::ciCallProfile(ciMethod* callee, int bci)` — reads MethodData for call site at bci
+- `ciCallProfile::count()` — total invocations = `counter_count + data_count` (counter decay + raw data)
+- `ciCallProfile::receiver_count(i)` — how many times was Klass i the receiver?
+
+**4.4 ciTypeFlow: type propagation**
+- `ciTypeFlow::flow_types()` — SEAF analysis (C1-style) on the CI side → compute types at each bci
+- Why C2 needs types BEFORE Parse: Parse uses types to determine Node::bottom_type() → affects GVN/IGVN
+
+**4.5 Profile maturity**
+Counterfactual: "If you use immature profile: 10 calls to HashMap (all warmup) → C2 decides '100% HashMap' → real traffic = 50% TreeMap → deopt loop."
+- `MethodData::profile_maturity()` — MDO is mature when: invocation_count >= MatureInvocationLimit (500) OR backedge_count >= MatureInvocationLimit AND all call sites have sufficient data
+- MDO immaturity → C1-only compilation → no C2 → no bad inline decisions
+
+### §六 Writing Requirements
+- "你需要知道的": ciMethod, ciKlass, ciCallProfile, profile maturity
+- Mermaid: C1→MethodData→ci→C2 data flow
+- GDB: break at `ciCallProfile::ciCallProfile()`, print receiver counts + call count
+
+---
+
+## Cross-reference rules (verified by prompt writer)
+- 02 §一: "Reader has read 01-Pipeline §二(Parse) + §三(IGVN). This doc expands the Inline phase."
+- 03 §一: "Reader has read 01-Pipeline §八(Matching). This doc expands the RegAlloc phase."
+- 07 §一: "Reader has read 02-Inline §二(CHA) + §三(type profile). This doc explains WHERE the profile data originates."
+- ALL: §一 references 04-interpreter (JIT trigger from counters)
+- 05 §一: References 01-Pipeline (compilation) + 06-OopMap (consumed by deopt)
+- 06 §一: References 01-Pipeline (OopMap generation during Output) + 05-Deopt (OopMap consumption)
+
+## Verification
+For EACH prompt: `rg -n` verify every source file path + codegraph verify every function name. Report: per-prompt line count, section completeness, verification status.

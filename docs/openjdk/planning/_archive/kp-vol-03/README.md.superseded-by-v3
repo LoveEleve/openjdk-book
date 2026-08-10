@@ -1,0 +1,19 @@
+# vol-03 内存卷 — 知识规划
+
+> 9 域：GC Framework / Reference / Heap / Metaspace / SymbolTable / CodeCache / StubRoutines / G1 / CDS
+
+| # | 域 | 源码路径 | 方案 | 源码量 |
+|:--:|-----|------|:--:|:--:|
+| 13 | GC Framework | `gc/shared/` (~150文件) | 🔴A | 大 |
+| 14 | Reference Processing | `gc/shared/referenceProcessor.*` | 🟡B | 小 |
+| 15 | Heap/Universe | `memory/universe.*` | 🔴A | 中 |
+| 16 | Metaspace | `memory/metaspace.*` | 🔴A | 中 |
+| 17 | SymbolTable | `classfile/symbolTable.*` | 🟡B | 小 |
+| 18 | CodeCache | `code/codeCache.*` | 🔴A | 中 |
+| 19 | StubRoutines | `runtime/stubRoutines.*` | 🟡B | 小 |
+| 20 | G1 GC | `gc/g1/` (195文件) | 🔴A | **巨型域** |
+| 21 | CDS | `memory/filemap.*` | 🟡B | 小 |
+
+## 优先级
+
+**G1 GC（域 20）是第一优先**——45692 行源码 / 195 文件，巨型域。必须逐源提取后拆分为 8-10 篇独立知识规划。

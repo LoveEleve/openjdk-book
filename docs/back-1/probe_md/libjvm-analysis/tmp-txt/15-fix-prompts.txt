@@ -1,0 +1,11 @@
+Fix 3 review gaps in 15-core-native prompts (231/245). Edit existing prompt files only.
+
+## Gap 1: P01 — add intrinsic beginner callout
+In prompt-01-Class-String.md, add a standalone Beginner Callout box for "intrinsic" near the Float.floatToRawIntBits section:
+
+"**intrinsic (JIT 内联化)**: C2 compiler replaces certain native method calls with direct CPU instructions at compile time — bypassing JNI overhead entirely. Float.floatToRawIntBits → native JNI call (~50ns) OR C2 intrinsic → register move (~0.5ns). 100x faster. System.arraycopy → native memmove OR C2 intrinsic → REP MOVS (vectorized x86 copy). C2 recognizes ~200 intrinsic methods. If a method is NOT intrinsified (e.g., on a cold path), the native JNI fallback is used."
+
+## Gap 2: P01/P02/P03 — add explicit 00 prerequisites to §一
+- P01 §一: add "前置: [00-System-Arraycopy] (arraycopy dispatch mechanism), [02-class-loading] (FindClass chain), [14-zip-jimage] (ClassLoader bridge)"
+- P02 §一: add "前置: [00-System-Arraycopy] (native call patterns and JNI_ENTRY/JVM_ENTRY entry types)"
+- P03 §一: add "前置: [00-System-Arraycopy], [01-Class-String], [02-Runtime-Throwable] (the methods this utility layer serves before them)"

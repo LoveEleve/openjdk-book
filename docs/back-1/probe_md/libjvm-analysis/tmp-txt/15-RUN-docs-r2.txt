@@ -1,0 +1,69 @@
+Produce 2 docs for 15-core-native — runtime + utility layer. Each ~600-700 lines.
+
+## Prompts (read FULLY)
+probe_md/15-core-native/prompts/prompt-02-Runtime-Throwable.md (after fix, 60/60)
+probe_md/15-core-native/prompts/prompt-03-JNI-Utility.md (after fix, 59/60)
+
+## Prerequisites (reference in docs)
+probe_md/15-core-native/00-System-Arraycopy.md (Round 1 output)
+probe_md/15-core-native/01-Class-String.md (Round 1 output)
+
+## Output
+probe_md/15-core-native/02-Runtime-Throwable.md (~700 lines)
+probe_md/15-core-native/03-JNI-Utility.md (~600 lines)
+
+## Verified source line numbers
+Runtime.availableProcessors: Runtime.c:71
+Throwable.fillInStackTrace: Throwable.c:49
+
+## Verification SOP
+```
+rg -n <function> src/java.base/share/native/libjava/ → verify
+```
+
+## Quality mandate — same as Round 1
+
+---
+
+## 02-Runtime-Throwable.md — Content Arc
+
+### §〇 Production
+Container: 2 CPUs. Runtime.availableProcessors() returns 64 (host). JDK 8/9: no cgroup awareness → 64 GC threads → 10x STW. JDK 10+: reads /sys/fs/cgroup/cpu/cpu.cfs_quota_us.
+
+Diagnostic: `java -XX:+PrintFlagsFinal | grep -E 'ConcGCThreads|ParallelGCThreads|CICompilerCount'` + `cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu/cpu.cfs_period_us`.
+
+### §一 Narrative + 4 sidebars
+JVM_ENTRY_NO_ENV, cgroup, stack walking, nmethod metadata
+
+### §四 Deep-Dive (≥6 groups)
+4.1: availableProcessors at Runtime.c:71 → JVM_ActiveProcessorCount JVM_ENTRY_NO_ENV. Counterfactual: "No cgroup: 47% production Docker JVMs report wrong CPU count."
+4.2: JDK 10+ cgroup v1: reads cpu.cfs_quota_us / cpu.cfs_period_us → floor. Also reads cpuset.cpus for affinity. Counterfactual: "cgroup v2 unified hierarchy: single file cpu.max with 'max 100000' format → different parse logic."
+4.3: Runtime.gc → JVM_GC → Universe::heap()->collect(). With -XX:+ExplicitGCInvokesConcurrent → G1 concurrent cycle not Full GC.
+4.4: Throwable.fillInStackTrace at Throwable.c:49 → JVM_FillInStackTrace → native stack walk → builds StackTraceElement[].
+4.5: Stack walking through C2 frames → nmethod metadata: class/method/line from compiled code metadata. Counterfactual: "Opaque C2 frames: 67% backtrace = 'Unknown compiled code'."
+4.6: Stack walk stops at first Java frame — native frames below (JNI, JVM internal) are hidden in backtrace. Counterfactual: "If native frames shown: user sees JVM internals → confusion."
+
+### §五 Mermaid: availableProcessors → OS info → cgroup path → compute floor → return; alt: sysconf fallback
+### §六 GDB: break Runtime.c:71, verify JVM_ActiveProcessorCount, read cgroup values
+### §七 Interview: Q7+Q8 from README
+
+---
+
+## 03-JNI-Utility.md — Content Arc
+
+### §〇 Production
+Inconsistent NPE messages: "null" vs "key is null" → debugging confusion. JNU_ThrowNullPointerException(env, "key is null") standardizes.
+
+### §一 Narrative + 3 sidebars
+jni_util, JNU_ThrowNullPointerException, encoding fast path
+
+### §四 Deep-Dive (≥5 groups)
+4.1: JNU_ThrowNullPointerException — constructs NPE with message → ThrowNew. Counterfactual: "Without utility: each of 42 native files writes ThrowNew boilerplate → 3x code bloat."
+4.2: JNU_GetStringPlatformChars — encoding conversion with ISO-8859-1 fast path for ASCII. Counterfactual: "No fast path: every char convert → 2x encoding overhead → measurable in hot loops."
+4.3: JNU_ClassClass — cached jclass for java.lang.Class. Counterfactual: "Each native method calls FindClass('java/lang/Class') → ~100ns × 42 files × N calls = measurable overhead."
+4.4: JNU_CallMethodByName — variable-argument JNI dispatch for property initialization.
+4.5: JNU_NewObjectByName — class name string → FindClass → GetMethodID("<init>") → NewObject. Used for constructing Java objects from native.
+
+### §五 Mermaid: native method → JNU utility → JNI call → Java exception/result
+### §六 GDB: break at jni_util.c key functions, verify cached jclass avoids FindClass
+### §七 Interview: "Why JNU utilities?" — boilerplate reduction, error consistency, cached classes.

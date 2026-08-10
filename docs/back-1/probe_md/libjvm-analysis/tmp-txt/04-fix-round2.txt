@@ -1,0 +1,178 @@
+Enhance remaining 3 docs in 04-interpreter. Read each fully, then ADD content. ⛔ No new files. No deletions.
+
+## Quality mandate: depth + breadth + interview + first principles + beginner
+
+---
+
+## 03-MethodEntry.md (330 lines)
+
+### §生产场景：Safepoint 超时 8000ms
+
+GC log: `[816.420s] Safepoint "G1CollectForAllocation" took 8.2 seconds.` jstack: all application threads at `TemplateInterpreter::_`.
+
+Root cause: `for(;;)` infinite loop with ZERO safepoint poll instructions. Bytecode: `{0: goto 0}`. goto=backward branch → safepoint polluted. But JIT used `-XX:CompileCommand=exclude,MyClass::loop` → method ALWAYS runs in interpreter → interpreter's goto must include safepoint poll.
+
+This is why JVM ONLY inserts safepoint polls at backward branches: forward-only code (no loops) will eventually return → naturally hits safepoint. Backward branches (loops) might NEVER return → MUST poll.
+
+### §第一性原理：为什么不在每字节码都做 poll？
+
+If every bytecode did `testl (%polling_page), %eax`:
+- L1 cache miss = ~200 cycles (polling page is a separate page, not in same cache line)
+- 10^8 bytecodes/sec × (200/1000) % = 20M cycles/sec wasted on polling ALONE
+- Even with thread-local polling (JDK 14+), you'd still waste instruction slots
+
+Design choice: only poll at "safe points" — points where all live state is in the frame (not in registers mid-computation). In the interpreter, every bytecode boundary IS a "safe point" (all values are in the operand stack, which is in the frame), but polling cost prohibits per-bytecode checking.
+
+So: poll at natural boundaries — backward jumps. A method WITHOUT backward jumps will return → return is a safepoint point → no missed safepoint.
+
+### §为什么 for(;;) 需要 poll？
+
+Without backward-branch poll: `goto 0` → `goto 0` → `goto 0` → ... thread never leaves interpreter → never hits return → never reaches safepoint → all other threads wait forever.
+
+With poll: `goto 0` → `testl (...) → jz 0` → if page readable, loop continues → if page disarmed (SIGSEGV), thread enters safepoint → GC proceeds → page re-armed → thread returns to loop.
+
+### §GDB session
+
+```
+(gdb) break TemplateTable::safepoint_poll_at
+(gdb) run -XX:+SafepointTimeout -XX:SafepointTimeoutDelay=100 ...  -- wait for safepoint
+(gdb) x/i $pc
+=> testl %eax, (%r15)     ← r15 = polling page address
+(gdb) p/x $r15
+$1 = 0x7f... (polling page — readable → JVM NOT at safepoint)
+
+# Now: force safepoint via jcmd GC.run in another terminal
+(gdb) x/i $pc
+=> testl %eax, (%r15)     ← r15 STILL = polling page but page now mprotect'd
+(gdb) p *(int*)$r15
+SIGSEGV → signal handler → safepoint entry
+```
+
+### §面试回答模板
+"Q: 解释器怎么处理 safepoint？"
+"Answer: 不在每字节码做——只插在向后跳转点。向前代码天然到 return → return 是安全的。不带循环的方法自动暴露给 safepoint，带循环的方法在跳转时暴露。thread-local polling page 使得多线程的 testl 不需要 cache line ping-pong。"
+
+---
+
+## 04-Bytecode-Dispatch.md (396 lines)
+
+### §生产场景：反射 50x 慢
+
+`Method.invoke()` trace: reflection call → `MethodAccessorGenerator::generate_method()` → `NativeMethodAccessorImpl::invoke0()` → JNI call → `JVM_InvokeMethod()` in jvm.cpp → `Method::invoke()` → find method in vtable → `Method::_from_compiled_entry` → actually execute.
+
+Vs direct call: `invokevirtual #index` → CP cache says "already resolved → Method* 0x7f... → `_from_compiled_entry` → execute." 6 layers skipped.
+
+### §第一性原理：CP cache 三层加速
+
+If no cache: every invokevirtual = `LinkResolver::resolve()` → search system dictionary → search hierarchy for method → compute vtable index → expensive (~500 cycles).
+
+With cache: CP entries are NOT used as-is. They pass through 3 states:
+
+1. **Uninitialized**: first time this CP entry is hit → `LinkResolver::resolve_invokevirtual()` → resolves symbol to Method* → writes to CP cache.
+
+2. **Resolved**: cache now has `_f2` = Method* pointer. Future calls: read Method* from cache → read `_from_compiled_entry` → jump. ~10 cycles.
+
+3. **Virtual**: if this specific receiver klass was monotonic (same every time) → JIT compounds: `cmp [recv+klass_offset], expected_klass; jne slow; jmp Method::_from_compiled_entry`. ~2 cycles (branch prediction chained).
+
+### §为什么三层而不是一层？
+
+One cache would store just Method*. With only Method*: still need to compute vtable index → O(n) search through vtable. With 3 layers: Uninitialized→Resolved stores Method*, Virtual adds "predict this klass" → monotonic receiver → ched_prediction eliminates vtable walk.
+
+For invokeinterface (itable): Uninitialized→Resolved stores `itable_index` + `Klass*` → next call: compute itable slot → compare cached Klass → if matches, jump to cached method. Still O(1), no linear search.
+
+### §异常处理 dispatch
+
+When bytecode throws: `InterpreterRuntime::exception_handler_for_exception(THREAD, h_exception, h_method, bci)`.
+- `Method::fast_exception_handler_bci_for(h_exception, bci)` → walk exception_table linearly
+- Each entry: `ExceptionTableElement {start_pc, end_pc, handler_pc, catch_type_index}`
+- First match (correct catch type + bci in range) → return handler_pc
+- No match → pop frame → re-throw to caller's exception handler
+
+Why linear search not hash? Exception tables are small (average 5-10 entries per method, 90% of methods have 0-1). Hash table overhead > linear walk for <20 entries.
+
+### §GDB session
+```
+(gdb) break LinkResolver::resolve_invokevirtual
+(gdb) p method->name_and_sig_as_C_string()
+$1 = "main([Ljava/lang/String;)V"
+(gdb) step  ← into resolve
+(gdb) p _resolved_klass
+$2 = HelloWorld
+(gdb) p _resolved_method
+$3 = Method* for HelloWorld::main
+```
+
+### §面试回答模板
+"Q: invokevirtual 怎么找到目标方法？"
+"Answer: 第一次走 LinkResolver 解析 → 写入 CP cache。后续直接读 cache → cached Method* → vtable_index 预计算 → O(1)。如果是单态接收者 → JIT 可直接削检查、直接跳。invokeinterface 用 itable，但有 cache 也是 O(1)。"
+
+---
+
+## 05-InterpreterRuntime.md (328 lines)
+
+### §生产场景：TieredStopAtLevel=0 → 100x 延迟
+
+`-XX:TieredStopAtLevel=0` disables C1 AND C2 JIT. Every method runs in interpreter forever. Loop body: 100 iterations, each iteration ~200 bytecodes → 20000 bytecodes. Interpreter ~10ns/bytecode → 200µs per loop body. C2 compiled version: ~10 cycles per iteration → 3ns → 70× faster.
+
+Application with 1000 QPS, 50µs → 5000µs per request → P99 explodes.
+
+Trace: `-XX:+PrintCompilation` shows zero output. `-XX:+PrintFlagsFinal | grep TieredStopAtLevel` confirms L0.
+
+### §第一性原理：双计数器
+
+If one counter: InvocationCounter counts method invocations. Hit 0 → full JIT compilation. But what about:
+
+```java
+void process() {
+    for (int i = 0; i < 1000000; i++) { work(); }
+}
+```
+
+1000000 iterations inside 1 method invocation. InvocationCounter only decremented once per CALL. Loop runs 1M times in interpreter → JIT never triggered → 100x slow.
+
+With BackEdgeCounter: every loop back-edge decrements. 1000000 iterations → 1000000 decrements → hits 0 quickly → OSR compilation (compile the loop body, not the whole method). Result: after ~10000 iterations, loop starts running compiled code.
+
+### §为什么需要两个计数器？
+
+| Counter | Decrement point | Trigger | What it compiles |
+|---------|----------------|---------|------------------|
+| InvocationCounter | method entry | whole method | full method → C1 then C2 |
+| BackEdgeCounter | loop back-edge | hot loop | OSR (loop body only) |
+
+Without BackEdgeCounter: hot loop inside cold method → never compiles. Without InvocationCounter: hot method → compiled as OSR (loop body only, rest stays in interpreter) → sub-optimal.
+
+### §Counter 衰减
+
+`InterpreterInvocationLimit` = 5000 (C1 compile threshold in tiered mode). But this isn't a one-shot: after hitting 0, counter resets. On safepoint: `MethodCounters::decay_counters()` → `_invocation_counter = _invocation_counter >> 1` → bitshift (not reset) → method that was hot 10 minutes ago decays → JIT doesn't waste compilation on transient workload.
+
+### §JIT transition chain
+
+`frequency_counter_overflow(method, InvocationCounter::count_limit)` → checks if JIT compilation pending → if not: `CompileBroker::compile_method(method, ...)` → enqueues CompileTask → compiler thread wakes → C1/C2 compiles → generates nmethod → `Method::set_code(nmethod*)` → `Method::_from_compiled_entry = nmethod->verified_entry_point()` → next invocation enters compiled code directly.
+
+### §GDB session: trace JIT trigger
+```
+(gdb) break InterpreterRuntime::frequency_counter_overflow
+(gdb) p counter->_invocation_counter
+$1 = 1          ← about to overflow
+(gdb) continue
+(gdb) p counter->_invocation_counter
+$2 = 5000       ← reset to InterpreterInvocationLimit
+(gdb) break CompileBroker::compile_method
+(gdb) p method->name_and_sig_as_C_string()
+$3 = "process()V"   ← JIT compiling this
+(gdb) p nmethod->entry_point()
+$4 = 0x7f8b...      ← compiled code entry
+```
+
+### §面试回答模板
+"Q: 解释器怎么决定应该 JIT？"
+"Answer: 双计数器。InvocationCounter 在方法入口做完整编译，BackEdgeCounter 在循环尾做 OSR。safepoint 的时候计数器位右移——衰减。设置 TieredStopAtLevel=0 关闭 JIT 可以看到解释器比 JIT 慢 100 倍。这证明了 JIT 的必要性。"
+
+---
+
+## Verification
+```bash
+codegraph query + callers → rg -n <function> <source>
+```
+
+## Report: old→new lines, what was added, GDB sessions present?

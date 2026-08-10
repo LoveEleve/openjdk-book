@@ -1,0 +1,20 @@
+# vol-04 执行卷 — 知识规划
+
+> 10 域：ClassFile → Interpreter → VTable → ci → JIT Framework → SharedRuntime → C1 → C2 → Deopt → MethodHandles
+
+| # | 域 | 方案 | 源码量 |
+|:--:|-----|:--:|:--:|
+| 22 | ClassFile/ClassLoader | 🔴A | 75文件 |
+| 23 | Interpreter | 🔴A | 40文件 |
+| 24 | VTable/InlineCache | 🟡B | 小 |
+| 25 | ci | 🟡B | 74文件 |
+| 26 | JIT Framework | 🔴A | 24文件 |
+| 27 | SharedRuntime | 🟡B | 中 |
+| 28 | C1 | 🔴A | 49文件/41074行 |
+| 29 | C2 | 🔴A | 129文件/139595行 — **巨型域** |
+| 30 | Deoptimization | 🟡B | 中 |
+| 31 | MethodHandles | 🔴A | 中 |
+
+## 优先级
+
+C2（域 29）是巨型域——139595 行源码 / 129 文件，需逐源提取后拆分为 8-10 篇。

@@ -1,0 +1,162 @@
+Produce 3 core docs for 14-zip-jimage. Each ~800-900 lines. These are the HEART of the phase — they explain how .class bytes physically travel from disk to ClassFileParser.
+
+## Prompts (read FULLY)
+probe_md/14-zip-jimage/prompts/prompt-00-Zip-Class-Loading.md (470 lines, 60/60)
+probe_md/14-zip-jimage/prompts/prompt-01-Jimage-Format.md (477 lines, 60/60)
+probe_md/14-zip-jimage/prompts/prompt-02-Compression-Zlib.md (479 lines, 59/60)
+
+## Output
+probe_md/14-zip-jimage/00-Zip-Class-Loading.md (~900 lines)
+probe_md/14-zip-jimage/01-Jimage-Format.md (~900 lines)
+probe_md/14-zip-jimage/02-Compression-Zlib.md (~800 lines)
+
+## Quality mandate
+- **Depth**: every §四 Q group becomes a concrete section with source code excerpts, not paraphrases
+- **Breadth**: cover ZIP_Open → readCEN → ZIP_GetEntry2 → inflate → bytes returned (00), JIMAGE_Open → perfect hash → location table → imageDecompressor (01), inflateInit2→inflate→inflateEnd + CRC32/Adler-32 (02)
+- **Interview**: story-format answer at doc end from README §五
+- **Continuity**: §一: "13-launcher resolved classpath → JAR file. 02-class-loading parses bytes. This doc: how bytes get from JAR to parser."
+- **First principles**: ≥5 counterfactuals per doc, quantified
+- **Beginner**: all prompt §六 callouts appear as real sidebars
+
+## Source corrections (MUST reflect in ALL docs)
+- ZIP hash O(1) at zip_util.c:568/1172, NOT binary search
+- No ZipEntry.c — all in zip_util.c
+- CRC32 in Java ZipFile layer, NOT native class loading
+- Jimage: perfect hashing HASH_MULTIPLIER=0x01000193, magic 0xCAFEDADA, dlopen libzip at imageDecompressor.cpp:83
+- zlib 1.2.11 bundled at zlib.h:26, NOT system
+
+## Verification SOP
+```
+rg -n <function> src/java.base/share/native/libzip/ → verify line numbers → report discrepancies
+```
+
+---
+
+## 00-Zip-Class-Loading.md — Content Arc
+
+### §〇 — Production: "Corrupted app.jar at 3am"
+`java.util.zip.ZipException: invalid entry CRC (expected 0xabcd1234 but got 0xdeadbeef)` — ZipFile first reads the class, CRC32 check fails in Java layer, ClassNotFoundException. The JAR was corrupted during network transfer or disk write.
+
+Diagnostic: `jar tvf app.jar > /dev/null` — validates all CRC32s. Re-download JAR. `sha256sum app.jar` to verify integrity.
+
+### §一 — Narrative + Beginner sidebars
+"This is NOT the JAR file format specification. We won't explain Phil Katz's PKZIP history. This is ENGINEERING documentation: how HotSpot's libzip.so reads .class bytes from JAR files."
+
+Sidebars: ZIP Central Directory (the index at end-of-file listing all entries with offsets), chained hash table (new addition: key=entry name, hash=h=31*h+c, probe with h%tablelen then chain walk), ZIP_GetFromCache (JVM caches JAR handles → avoids re-reading 200KB CEN per class), Inflater bridge (zlib inflate called from native Inflater.c — details in 02).
+
+### §二 — Environment
+OpenJDK 11 slowdebug, Linux x86_64. Source: src/java.base/share/native/libzip/. GDB: `gdb --args java -cp app.jar Main`.
+
+### §三 — Source Files
+zip_util.c (1697 lines, ALL ZIP logic), Inflater.c (native inflate bridge), CRC32.c (CRC32 native), zip_util.h (ZIP handle structs)
+
+### §四 — ZIP Read Path Deep-Dive
+
+**4.1: ZIP_Open — opening a JAR** (zip_util.c:760+)
+`ZIP_Open(const char *name, char **pmsg)` — opens JAR file, reads END header to find CEN offset. Counterfactual: "If JAR was mmap'd: instant access to CEN, but JAR must be valid throughout JVM lifetime. File descriptor: JAR can be deleted on disk and JVM still reads it. Tradeoff: mmap = speed, fd = reliability."
+
+**4.2: readCEN — building the hash table** (zip_util.c:568)
+Reads Central Directory entries → builds `total` entry slots → `tablelen = ((total/2) | 1)` (75% load factor) → hash table of ZIP_Entry* → for each entry: `h = 0; for each byte of name: h = 31*h + c` → `h % tablelen` → insert or chain. Counterfactual: "If binary search over sorted CEN: O(log n) = 12 comparisons. Hash: O(1) = 1-2 probes for 75% load factor. 10x faster per lookup. Cost: ~20% memory overhead for hash table."
+
+**4.3: ZIP_GetEntry2 — the lookup** (zip_util.c:1172)
+`hash("com/example/Foo.class")%tablelen` → follow chain → compare entry name → found: return offset + compressed size + method. Not found: return NULL → ZipFile throws exception. Counterfactual: "If linear scan: average 1500 comparisons for 3000 entries → 750x slower."
+
+**4.4: ZIP_GetFromCache — handle reuse** (zip_util.c)
+JAR handles cached: first class → ZIP_Open + readCEN (~0.5ms). Subsequent classes from same JAR → cache hit → ~0ms (just hash lookup + inflate). Counterfactual: "Without cache: 3000 classes × 0.5ms CEN read = 1.5s wasted class loading."
+
+**4.5: DEFLATE decompression — inflate class bytes**
+ZIP_GetEntry2 returns offset → seek to LOC header → skip LOC (already have metadata from CEN) → read compressed data → Inflater.c → zlib inflate() → decompressed bytes. (Details in 02.)
+
+**4.6: ZIP_Lock/ZIP_Unlock — concurrency**
+Multiple threads loading classes from same JAR → ZIP_Lock on JAR handle → read entry → ZIP_Unlock. Each entry read is serialized on the JAR handle. Performance: 10 threads all reading from rt.jar → only 1 inflating at a time. Fix: Java ZipFile creates separate InputStream per thread.
+
+### §五 — Mermaid: ZIP read path
+ClassLoader → ZipFile.getInputStream → ZIP_GetFromCache → ZIP_GetEntry2 (hash) → seek + read → Inflater.inflate → bytes → ClassLoader.defineClass1
+
+### §六 — GDB: break at zip_util.c:760 (ZIP_Open), zip_util.c:568 (readCEN), zip_util.c:1172 (ZIP_GetEntry2). Show hash table structure, entry offset, compressed size.
+
+### §七 — Interview: Q1 + Q5 + Q6 from README §五
+
+---
+
+## 01-Jimage-Format.md — Content Arc
+
+### §〇 — Production: "JDK upgrade partial → modules file corrupted"
+`java.lang.module.FindException: Module java.base not found` — jimage magic 0xCAFEDADA check failed. JDK upgrade: new java binary installed but /lib/modules file is from old version → version MAJOR/MINOR mismatch.
+
+Diagnostic: `jimage info $JAVA_HOME/lib/modules` → `Major Version: 1, Minor Version: 0`. If fails to open → corrupted file. Re-install JDK.
+
+### §一 — Narrative + Sidebars
+"JDK 8: rt.jar (60MB ZIP, 200KB CEN, 12-step binary search per class). JDK 9+: modules (jimage, perfect hashing, 1-step lookup). 12x faster class lookup. 20-30% better compression via pre-processing."
+
+Sidebars: perfect hashing (hash designed for known set of keys → 0 collisions by construction), location table (array: index = hash, value = offset+size → direct O(1) lookup), magic number (0xCAFEDADA at file start → validates this IS a jimage file), Redirect table (handles the rare collision case where "java/lang/Object" and "java/util/List" hash to same slot → redirect entry instead of chain), String table (all class names + shared constant pool strings → stored once → entries reference by offset).
+
+### §二 — Environment
+Same as 00.
+
+### §三 — Source Files
+jimage.cpp, imageFile.cpp, imageFile.hpp (HASH_MULTIPLIER), imageDecompressor.cpp, osSupport_unix.cpp (mmap)
+
+### §四 — Jimage Deep-Dive
+
+**4.1: JIMAGE_Open** (jimage.cpp:95+)
+mmap entire modules file → check magic (4 bytes: 0xCAFEDADA) → check version (MAJOR=1, MINOR=0) → parse header: redirect_table_offset, location_table_offset, string_table_offset. Counterfactual: "If not mmap'd: each class lookup = 2 disk seeks (read header, then read data at offset). mmap: 1 page fault for header on first access → cached in page cache → subsequent lookups = pure memory reads."
+
+**4.2: Perfect hashing — HASH_MULTIPLIER = 0x01000193** (imageFile.hpp:162)
+`hash = 1; for each character c: hash = hash * 0x01000193 + c`. The multiplier 0x01000193 is chosen to produce NO collisions for ALL JDK module class names (known set at build time). Counterfactual: "If standard hash: occasional collisions → pointer chasing in chained hash table → 1.2-1.5x slower. Perfect hash: 0 collisions → exactly 1 probe → guaranteed O(1)."
+
+**4.3: Location table — direct offset** (imageFile.cpp)
+`location_table[name_hash]` = struct {offset: u8, uncompressed_size: u4, flags: u4}. No chain. No collision handling (Redirect table handles the pre-computed collisions). Counterfactual: "If ZIP-style hash: collision → up to 3 chain hops → 3x memory accesses. Location table: exactly 1 memory access."
+
+**4.4: Redirect table — handling the rare collision** (imageFile.cpp)
+When "java/lang/Object" and "java/util/List" hash to the SAME slot at build time: the slot gets a redirect entry pointing to an overflow area. At runtime: check if slot is redirect → follow redirect → find entry. "This is different from hash collision handling: it's pre-computed at JDK build time. All redirects are KNOWN. Runtime is always 2 steps (redirect check + final lookup)."
+
+**4.5: String table + pre-processing — better compression** (imageDecompressor.cpp)
+Before compression: shared constant pool strings extracted → stored once in string table → class entries reference by offset. "This is like JVM interned strings but for class files. Result: 20-30% better compression than raw DEFLATE on class data."
+
+**4.6: dlopen libzip.so — shared inflate** (imageDecompressor.cpp:83)
+`dlopen("libzip.so", RTLD_NOW)` → `dlsym(handle, "ZIP_InflateFully")` → reuse libzip's inflate. Counterfactual: "If jimage had its own inflate: code duplication + separate zlib instance → 2 zlib copies in memory. dlopen libzip: single zlib, single inflate."
+
+### §五 — Mermaid: jimage lookup vs ZIP lookup timing comparison
+
+### §六 — GDB: break at jimage.cpp:95 (JIMAGE_Open), verify magic 0xCAFEDADA, step through location table lookup
+
+### §七 — Interview: Q2 + Q3 from README §五
+
+---
+
+## 02-Compression-Zlib.md — Content Arc
+
+### §〇 — Production: "Corrupt compressed block — ZipException"
+`java.util.zip.ZipException: invalid stored block lengths` — zlib inflate() encountered malformed DEFLATE data. The JAR entry was compressed with a different encoder or truncated during copy.
+
+### §一 — Narrative + Sidebars
+"DEFLATE = LZ77 (find repeated strings) + Huffman coding (encode frequent bytes shorter). zlib = the most widely deployed compression library on Earth. Every JAR entry is DEFLATEd → every class load inflates."
+
+Sidebars: DEFLATE algorithm (find repeated strings → back-reference + Huffman encode), zlib (C library implementing DEFLATE, RFC 1950 wrapper), inflateInit2_/inflate/inflateEnd (3-step life cycle), -MAX_WBITS vs MAX_WBITS (raw DEFLATE vs zlib wrapper — HotSpot uses raw for ZIP entries), CRC32 vs Adler-32 (Adler-32 in zlib stream catches decompression errors; CRC32 in ZIP entry catches disk corruption).
+
+### §二 — Environment
+Same.
+
+### §三 — Source Files
+Inflater.c, zlib/inflate.c (bundled), zlib/zlib.h:26 (version 1.2.11), zlib/adler32.c, CRC32.c
+
+### §四 — Compression Deep-Dive
+
+**4.1: Inflater.c bridge** — Java_java_util_zip_Inflater_inflateBytes → get inflater state → inflate(state, Z_SYNC_FLUSH). State cached across calls.
+
+**4.2: zlib bundled, not system** (zlib.h:26) — version 1.2.11. Counterfactual: "If system zlib: Ubuntu 16.04 → zlib 1.2.8, Ubuntu 20.04 → zlib 1.2.11. Same JVM → different decompression → 1 byte diff → wrong class → VerifyError. Bundled: deterministic."
+
+**4.3: inflateInit2_(-MAX_WBITS) — raw DEFLATE** — ZIP entries use raw DEFLATE (no zlib header). -MAX_WBITS tells zlib "no header." Counterfactual: "If MAX_WBITS (with header): zlib expects 2-byte header → first 2 bytes skipped → misaligned stream → inflate fails → ZipException."
+
+**4.4: CRC32 vs Adler-32 — dual verification** — Adler-32 in zlib stream (inflate returns Z_DATA_ERROR if mismatch → catch during decompression). CRC32 in ZIP entry (Java ZipFile checks post-inflate → catch after decompression). "Catch disk corruption AND decompression errors. Neither alone covers both."
+
+**4.5: Inflater cache — state reuse** — inflateInit2_ called once → state struct allocated → inflate many entries → inflateEnd called on ZipFile close. Counterfactual: "If no cache: inflateInit2_ + inflateEnd per entry → 2x syscalls → 3000 classes × 2 × 0.1ms = 600ms overhead."
+
+**4.6: Compression ratio — class files** — Average .class file: 50% compressible. "Why? Constant pool (UTF8 strings, ints, floats) is ~70% of class file → highly compressible. Bytecodes (variable-length) → moderate compression. Attributes → poor compression." JAR with 15,000 classes: uncompressed ~100MB, compressed ~50MB.
+
+### §五 — Mermaid: inflate pipeline — ZipFile.getInputStream → Inflater.c → zlib inflate → CRC32 check → bytes
+
+### §六 — GDB: break at Inflater.c:inflateBytes, verify zlib state, check compressed/uncompressed sizes
+
+### §七 — Interview: Q4 + Q7 from README §五

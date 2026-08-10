@@ -1,5 +1,8 @@
 # 3.5 Stage 3：OS 后初始化
 
+> **前置依赖**：[3.4 参数解析](04-args-parse.md)：200+ flag 确定 / [3.2 9 阶段骨架](02-threads-create-vm.md)
+> → **后续**：[3.6 主线程登记](06-main-thread-create.md)：第一个 JavaThread 创建
+
 Stage 2 结束时，200+ 个 flag 已经全部确定——GC 选好了、堆大小算好了、栈守卫区大小算好了。但这些东西还只是"数值"，真正依赖它们的 OS 级基础设施还没建——信号处理器还没注册、安全点轮询页面还没分配、NUMA 库还没加载。
 
 Stage 3 就是做这件事：依赖 Stage 2 的 flag 值，完成 OS 层最后的基础设施初始化。
@@ -1273,6 +1276,14 @@ static bool init_agents_at_startup()     { return !_agentList.is_empty(); }
 2. `create_vm_init_agents()` —— 遍历 `_agentList`。对每个 agent，`dlopen` 加载 `.so` → `dlsym` 找 `Agent_OnLoad` → 调 `Agent_OnLoad(&main_vm, agent->options(), NULL)`。agent 拿到 `JavaVM*` 指针注册 JVMTI capabilities。找不到或返回非 `JNI_OK` 即 `vm_exit_during_initialization`。
 
 > agent 的完整体系——`dlopen` 查找路径、`Agent_OnLoad` 的 JVMTI capabilities 注册、`-javaagent` 的 premain 机制、以及 JVMTI 生命周期的各个 phase——将在后续 JVMTI 和 agent 专题文章中详细讲解。这里只需知道 Stage 3 在启动流程中是 agent 最早被加载的位置。
+
+## 设计权衡
+
+**为什么 `os::init_2()` 不和 `os::init()` 合并？** `os::init()`（在 Stage 1）负责与 Flag 无关的基础设施——页大小、信号处理器、线程调度器。`os::init_2()`（在 Stage 3）负责依赖 Flag 的 OS 配置——NUMA 拓扑探测（需要 `UseNUMA` flag）、大页配置（需要 `UseLargePages` flag）、cgroup 容器感知（需要 `UseContainerSupport` flag）。这些 Flag 在 Stage 2 的 `Arguments::parse()` + `Arguments::apply_ergo()` 中才确定。如果 Stage 1 就调用 `os::init_2()`，`UseNUMA` 还不知道用户设了 `-XX:-UseNUMA` 还是硬件自查应该启用。
+
+**为什么 `SafepointMechanism::initialize()` 在 `os::init_2()` 之后？** 安全点轮询页（polling page）是一块特殊的内存页——`SafepointMechanism::initialize()` 需要调用 `os::reserve_memory()` 分配它。`os::reserve_memory()` 的行为受大页配置和 NUMA 策略影响——这些正是 `os::init_2()` 设置的。如果顺序反了，安全点页可能分配在错误的内存区域（如小页而不是大页、远端 NUMA 节点而不是本地）。
+
+**为什么 agent 加载放在 Stage 3 而不是更早或更晚？** JVMTI agent（通过 `-agentlib:-agentpath:` 指定的 .so）和 Java agent（通过 `-javaagent:` 指定的 .jar）都通过系统属性传递配置——这些属性在 Stage 2 的 `Arguments::parse()` 中被提取和校验。Stage 1 还没有系统属性，Stage 4+ JVM 已经进入业务初始化（JavaThread、堆、Metaspace），agent 需要在这些结构创建之前就被加载——这样 agent 的 `VMInit` 回调能在业务初始化开始之前触发。
 
 ---
 

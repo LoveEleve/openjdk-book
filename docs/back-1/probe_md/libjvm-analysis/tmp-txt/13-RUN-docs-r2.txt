@@ -1,0 +1,126 @@
+Produce 2 docs from their prompts (02 and 03). Each ~800-1000 lines. Same quality standard as Round 1 docs.
+
+## Prompts (read FULLY)
+probe_md/13-launcher/prompt-02-JVM-Loading.md (37K, ~600 lines, 58/60)
+probe_md/13-launcher/prompt-03-Main-Class-Loading.md (40K, ~660 lines, 57/60)
+
+## Prerequisites (reference in docs)
+probe_md/13-launcher/00-Libjli-Overview.md (Round 1 output — 02/03 expand steps 4 and 7 of JLI_Launch)
+
+## Output
+probe_md/13-launcher/02-JVM-Loading.md (~900 lines)
+probe_md/13-launcher/03-Main-Class-Loading.md (~900 lines)
+
+## Verification SOP
+```
+rg -n <function> <source>
+```
+
+---
+
+## 02-JVM-Loading.md — Content Arc
+
+### §〇 — Production: "Multi-version JDK — JRE_ERROR8 at 3am"
+`/etc/alternatives/java` → JDK 11. `$JAVA_HOME` → JDK 8 (legacy, never updated). `java -jar app.jar` → `Error: could not find libjava.so` (emessages.h:98, JRE_ERROR8). java_md_solinux.c:543 checks `$JAVA_HOME` FIRST as a performance shortcut (saves 5-10 syscalls). JAVA_HOME=JDK8 → lib/libjava.so doesn't exist in JDK 8 layout → error.
+
+Counterfactual: "If libjli NEVER checked JAVA_HOME: elimination of ~60% of 'could not find libjava.so' production faults. But cost: 5-10 extra syscalls per `java` invocation → measurable in CI/CD pipelines with 1000s of JVM bootstraps."
+
+Diagnostic:
+```
+readlink -f /proc/self/exe           → actual java binary path
+echo $JAVA_HOME                      → what libjli uses FIRST
+ls $JAVA_HOME/lib/libjava.so         → does the anchor file exist?
+stat $JAVA_HOME/lib/amd64/server/libjvm.so → does libjvm.so exist?
+unset JAVA_HOME && java -version     → bypass JAVA_HOME → use /proc/self/exe only
+```
+
+### §二 — Standard Environment: Same as 00 §二
+
+### §三 — Source Files (from prompt §三)
+
+### §四 — JVM Loading Deep-Dive (8 steps)
+
+**4.1: /proc/self/exe — the zero-config bootstrap** (java_md_solinux.c:687-689)
+readlink("/proc/self/exe", buf, MAXPATHLEN). Kernel-guaranteed → always returns the ACTUAL running binary. Even if java is a symlink → /proc/self/exe points to the TARGET. Counterfactual: "If libjli used argv[0] instead: `java` (not absolute path) → argv[0]=="java" → can't resolve → must use PATH search → fragile (which java in PATH?)."
+
+**4.2: TruncatePath + GetApplicationHome — walking up** (java_md_common.c:87)
+Given /opt/jdk11/bin/java → TruncatePath finds last '/' → /opt/jdk11/bin/ → replace with lib/ → /opt/jdk11/lib/ → stat(libjava.so). If found → JRE confirmed. If not → walk UP one more directory → /opt/jdk11/ → try again → /opt/lib/. Maximum 5 iterations.
+
+**4.3: JAVA_HOME shortcut — the double-edged sword** (java_md_solinux.c:535-543)
+getenv("JAVA_HOME") → if set → DIRECTLY use that path → skip /proc/self/exe. Save 5-10 syscalls. But: JAVA_HOME=JDK8, /proc/self/exe=JDK11 → loads wrong JRE → ClassFormatError at FindClass. Production impact: "unset JAVA_HOME in systemd unit files → eliminate #1 cause of JRE_ERROR8."
+
+**4.4: jvm.cfg + ReadKnownVMs — version variant selection** (java.c:2039-2083)
+jvm.cfg format: "-server KNOWN\n-client ALIASED_TO -server\n". ReadKnownVMs parses into linked list of jvmtype entries. Each: type string (server/client/minimal), isKnown flag, aliasTo pointer. CheckJvmType: resolve aliases → if alias chain > knownVMsCount → CFG_ERROR1: cycle detected. Counterfactual: "If jvm.cfg was a binary format: parsing logic in libjli → JUnmarshal → version skew between JRE and launcher. Plain text: always readable."
+
+**4.5: GetJVMPath — constructing the .so path** (java_md_solinux.c:490-511)
+Format: "%s/lib/%s/%s/libjvm.so" = jrepath + arch (amd64) + jvmtype (server→aliased to server) + filename. Example: /opt/jdk11/lib/amd64/server/libjvm.so. Verifies with stat(). If stat fails: JRE_ERROR3 "Error: missing 'server' JVM at..."
+
+**4.6: dlopen — the GATEKEEPER** (java_md_solinux.c:571)
+dlopen(libjvm.so, RTLD_NOW | RTLD_GLOBAL). RTLD_NOW: resolve ALL symbols immediately — libjvm.so has ~30 dependencies (libc, libm, libpthread, libdl) — any missing → dlopen returns NULL NOW. RTLD_GLOBAL: JVM symbols visible to all future dlopen (needed for -agentlib). Counterfactual: "RTLD_LAZY: saves ~200ms symbol resolution at dlopen time → crash LATER with 'undefined symbol: JVM_FindSignal' at JIT compilation → 2s wasted startup → crash → restart → crash again. RTLD_NOW: fail fast, fail once."
+
+**4.7: dlsym three JNI function pointers** (java_md_solinux.c:624-637)
+dlsym(handle, "JNI_CreateJavaVM") → void* → cast to CreateJavaVM_t. Same for JNI_GetDefaultJavaVMInitArgs, JNI_GetCreatedJavaVMs. If ANY dlsym fails → dlclose(libjvm.so) → DLL_ERROR1: "Could not find JNI_CreateJavaVM symbol in libjvm.so." Counterfactual: "If libjli STATICALLY linked libjvm's JNI functions: symbol binding at compile time → survives libjvm.so changes → but libjvm.so internal ABI changes → SIGSEGV at JNI_CreateJavaVM call → no error message, just crash."
+
+**4.8: libjsig preloading — signal chain bootstrap** (java_md_solinux.c:1027-1038)
+Check LD_PRELOAD for libjsig.so → if present → dlsym(RTLD_DEFAULT, "JVM_begin_signal_chain_for_JVM") → call BEFORE JVM starts → signal chaining initialized. Counterfactual: "If signal chain setup AFTER JVM starts: JVM's signal handlers installed in Threads::create_vm → profiler SIGPROF delivered to raw JVM handler → JVM thinks it's a crash → unexpected shutdown."
+
+### §五 — Mermaid: /proc/self/exe → JRE path resolution tree
+Show the 3-path resolution: JAVA_HOME check → /proc/self/exe walk → stat verification → jvm.cfg parse → GetJVMPath → dlopen.
+
+### §六 — GDB: break at readlink, GetApplicationHome, dlopen, dlsym, JNI_CreateJavaVM call
+
+### §七 — Interview: Q2 + Q5 from README §五
+"Q: How does java find libjvm.so without JAVA_HOME?"
+Story: /proc/self/exe → walk up directory tree → anchor on lib/libjava.so → construct path → stat verify → dlopen. "It's zero-config — no env vars needed. That's why Docker containers without JAVA_HOME still work."
+
+---
+
+## 03-Main-Class-Loading.md — Content Arc
+
+### §〇 — Production: "Spring Boot fat JAR — CLS_ERROR1"
+`java -jar app.jar` → `Error: Could not find the main class org.springframework.boot.loader.JarLauncher. Program will exit.` (emessages.h:68, CLS_ERROR1). JAR's META-INF/MANIFEST.MF says Main-Class: org.springframework.boot.loader.JarLauncher. But JarLauncher.class is INSIDE a NESTED JAR (BOOT-INF/lib/spring-boot-loader.jar). Standard JVM classpath only sees the OUTER JAR → FindClass fails → CLS_ERROR1.
+
+Diagnostic:
+```
+jar xf app.jar META-INF/MANIFEST.MF && cat META-INF/MANIFEST.MF   → Main-Class present?
+unzip -l app.jar | grep JarLauncher                                 → WHERE is JarLauncher?
+unzip -p app.jar BOOT-INF/lib/spring-boot-loader.jar > loader.jar   → extract nested JAR
+jar tf loader.jar | grep JarLauncher                                → verify exists
+```
+
+### §四 — Deep-Dive (8 steps)
+
+**4.1: JLI_ParseManifest — reading META-INF/MANIFEST.MF** (parse_manifest.c:577)
+4-step flow: open JAR (fopen) → find_file("META-INF/MANIFEST.MF" in ZIP directory) → inflate_file (unzip DEFLATE→raw text) → parse_nv_pair (line-by-line "Key: Value" parsing). Extract: Main-Class, Class-Path, Created-By, JRE-Version.
+
+**4.2: SelectVersion — JRE version from manifest** (java.c:1056)
+Reads Created-By or JRE-Version from manifest → determines required JRE version. Counterfactual: "If SelectVersion didn't check manifest: JAR compiled with JDK 17 → JVM 11 starts normally → ClassFormatError at first JDK 17 class load → wasted 2s startup."
+
+**4.3: SetClassPath for JAR mode — the OVERWRITE** (java.c:338-340)
+`if (mode == LM_JAR) SetClassPath(jarfile_name)` — ALL classpath cleared, ONLY jarfile set. User -cp IGNORED silently. This is BY DESIGN: JAR mode = self-contained, all deps from manifest Class-Path. Counterfactual: "If -cp supplemented JAR classpath: same class in JAR and external dir → which loads? order-dependent → non-deterministic."
+
+**4.4: LoadMainClass → LauncherHelper indirection** (java.c:523, LauncherHelper.java)
+LoadMainClass calls LauncherHelper.checkAndLoadMain(mode, what) via JNI. LauncherHelper in Java layer: if mode=JAR → read Main-Class from manifest → Class.forName(mainClassName) → find main(String[]) method. Why the indirection? Counterfactual: "If loaded directly with FindClass: FindClass returns null → must check ExceptionCheck → ExceptionDescribe → ExceptionClear. 4-step JNI exception dance. LauncherHelper wraps it in Java try-catch → 1-step error handling with clear error messages."
+
+**4.5: GetStaticMethodID("main", "([Ljava/lang/String;)V")** (java.c:560)
+JNI signature string. `([Ljava/lang/String;)V` = takes String[] (L = object type, [L = array of), returns void (V). If no main(String[]) → GetStaticMethodID fails → CLS_ERROR2: "Main method not found in class %s." Common: main(String args) instead of main(String[] args) — JNI is CASE-SENSITIVE.
+
+**4.6: CallStaticVoidMethod — the IRREVERSIBLE transition** (java.c:566)
+libjli's C stack FREEZES here. JVM's Java stack takes over. main() returns → CallStaticVoidMethod returns → cleanup → exit. main() throws → ExceptionOccurred → ExceptionDescribe → exit(1). "libjli never RETURNS from this call — either JVM runs forever or the process exits."
+
+**4.7: Class-Path manifest attribute vs wildcard** (manifest parsing)
+Class-Path: relative to JAR location. All entries appended to java.class.path AFTER JVM startup. Wildcard: expanded at ParseArguments, BEFORE JVM. Timing difference: Class-Path JARs load AFTER system classes → can't override java.lang.*. Counterfactual: "If Class-Path and wildcard expanded in same step: order ambiguity → class loading non-determinism."
+
+**4.8: JavaMain exit path — what if DestroyJavaVM hangs?** (java.c:405)
+main() returns → DestroyJavaVM() → wait for ALL non-daemon threads to exit. If @Async task blocks forever → DestroyJavaVM hangs → SIGTERM timeout → kill -9. Counterfactual: "If DestroyJavaVM FORCED shutdown: Thread.stop() → kills thread mid-synchronized block → monitor left locked → next thread to acquire → infinite wait → production deadlock. Clean shutdown: wait for threads to complete naturally."
+
+### §五 — Mermaid: manifest → FindClass → GetStaticMethodID → CallStaticVoidMethod
+
+### §六 — GDB: break at parse_manifest.c:577, java.c:523, java.c:560, java.c:566
+
+### §七 — Interview: Q6 from README §五
+
+---
+
+## Fix review gap during writing
+- 03 4.8: add "Spring Boot @Async task → DestroyJavaVM hangs → SIGTERM timeout → kill -9" counterfactual as specified above

@@ -1,5 +1,8 @@
 # 第3章：JNI_CreateJavaVM —— HotSpot 的入口
 
+> **前置依赖**：[ch01 Launcher Chain](openjdk/vol-01/ch01)：dlopen+dlsym / [ch02 JavaMain](openjdk/vol-01/ch02.md)：InitializeJVM → ifn->CreateJavaVM()
+> → **后续**：[ch04 init_globals](openjdk/vol-01/ch04)：Threads::create_vm → 30 步初始化序列
+
 上一章结束在 `InitializeJVM` 的这行：
 
 ```c
@@ -245,7 +248,7 @@ JavaThread *thread = JavaThread::current();          // 获取当前线程的 Th
 *(JNIEnv**)penv = thread->jni_environment();         // 输出 JNIEnv 指针
 ```
 
-`main_vm` 是一个全局的 `JavaVM_` 结构体实例，内嵌 `jni_InvokeInterface` 函数表——通过它可以调用 `DestroyJavaVM`、`AttachCurrentThread` 等 JNI Invocation API。
+`main_vm` 是 `jni.cpp:3918` 定义的全局 `JavaVM_` 结构体实例。`JavaVM_` 内部只有一个 `const JNIInvokeInterface_ *functions` 指针字段（`jni.h:1917`），指向真正的函数表——通过它可以调用 `DestroyJavaVM`、`AttachCurrentThread` 等 JNI Invocation API。
 
 `thread->jni_environment()` 返回当前线程的 `JNIEnv*`，后续 JavaMain 中所有的 `GetStaticMethodID`、`CallStaticVoidMethod` 等都通过这个指针调用。
 
@@ -290,6 +293,18 @@ return result;
 ```
 
 刷新标准输出和标准错误缓冲区——确保所有日志在返回前写出。防止 `printf` 输出丢失在缓冲区里。
+
+---
+
+## 设计权衡
+
+**为什么 `JNI_CreateJavaVM` 要拆成外层包装器和 `_inner`？** 外层包装器只有 6 行（调 `_inner` + 返回），看起来多余，但它有两个作用：(1) 给 DTrace/HotSpot tracing 框架一个标准的入口钩子——`HOTSPOT_JNI_CREATEJAVAVM_ENTRY` 和 `DT_RETURN_MARK` 在外层包装器内部生效，不需要侵入 `_inner`；(2) Windows 构建会在 `_inner` 调用外包裹 `__try/__except`（SEH 异常保护），Linux/macOS 不走这段——用 `#ifdef _WIN32` 控制编译，而不是两套完全不同的函数。
+
+**为什么用两把原子锁（`vm_created` + `safe_to_recreate_vm`）而不是一把？** 如果只用一把锁，创建失败时无法区分"不可重试"和"已完成"两种状态。`vm_created = 1` 只表明"JVM 存在或正在创建"，但创建失败后需要把锁重置为 0 让其他线程重试——而有些失败是不可重试的（如参数错误）。`safe_to_recreate_vm` 作为第二把锁，专门控制"是否可以重试"这个维度——两个独立的原子变量分开管理两个独立的状态，比一个变量编码两种语义更容易理解也不容易出 bug。
+
+**为什么失败路径用 `OrderAccess::release_store` 而不是普通赋值来重置 `vm_created`？** `vm_created` 是 `volatile` 变量，C++ `volatile` 的语义是"编译器不优化读/写"，但它不保证多核之间的内存排序。`release_store` 是 memory barrier——保证在 `vm_created = 0` 对其他线程可见之前，`*vm = 0` 和 `*penv = 0` 的写入已经完成。没有这个保证，另一个线程可能在看到 `vm_created = 0` 的同时读到 `*vm` 的旧值（非 NULL），误判 JVM 已创建。
+
+**为什么线程状态要从 `_thread_in_vm` 切换到 `_thread_in_native`？** `JNI_CreateJavaVM` 是 JNI 调用——调用方（`InitializeJVM`）是 C 代码，它认为自己在"本地代码"中。但 `JNI_CreateJavaVM_inner` 内部调用了 HotSpot 的 VM 代码（`Threads::create_vm`），后者的 30 步初始化（`init_globals`）全在 `_thread_in_vm` 状态中执行。函数返回前必须把状态切回 `_thread_in_native`——否则返回后 `JavaMain` 的后续 JNI 调用（`GetStaticMethodID` 等）会触发断言（JNI 调用必须在 `_thread_in_native` 或 `_thread_in_Java` 状态下执行，不能在 `_thread_in_vm` 下执行）。
 
 ---
 

@@ -1,0 +1,17 @@
+# vol-05 可观测卷 — 知识规划
+
+> 7 域：JVMTI / JMX / NMT / Attach / HeapDumper / ServiceThread / JFR
+
+| # | 域 | 方案 | 说明 |
+|:--:|-----|:--:|------|
+| 32 | JVMTI | 🟡B | 46文件/26462行 |
+| 33 | JMX | 🟡B | 轻量 |
+| 34 | NMT | 🟡B | 轻量 |
+| 35 | Attach API | 🟡B | 轻量 |
+| 36 | HeapDumper | 🟡B | 轻量 |
+| 37 | ServiceThread | 🟡C | 最轻 |
+| 38 | JFR | 🟡B | 215文件 — **巨型域** |
+
+## 优先级
+
+JFR（域 38）是巨型域——215 文件，需逐源提取后拆分为 6-8 篇。

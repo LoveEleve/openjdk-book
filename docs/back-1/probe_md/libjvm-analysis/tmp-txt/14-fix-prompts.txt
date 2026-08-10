@@ -1,0 +1,18 @@
+Fix 3 review gaps in 14-zip-jimage prompts (288/305). Edit existing prompt files only.
+
+## Gap 1: P04 §十 — add 2 GDB assertions (currently 6, need ≥8)
+In prompt-04-Jar-URL-Nesting.md §十, add:
+
+7. Break at JarURLConnection.connect() → verify nested URL parsing: `new URL("jar:file:///app.jar!/BOOT-INF/lib/spring-core.jar!/META-INF/MANIFEST.MF")` → check handler selection → JarURLConnection handler recognizes "jar:" scheme → strips outer URL → opens app.jar as ZipFile → seeks to nested entry offset.
+
+8. Break at ZipFile.<init>(File) on nested extraction path → verify: Spring Boot LaunchedURLClassLoader opens nested JAR → creates temporary file or in-memory ZipFile → new ZipFile instance → new ZIP_Open → separate CEN read → "2x decompression per nested class" visible: first inflate to extract nested JAR from outer, second inflate to extract .class from inner.
+
+## Gap 2: P04 §一 — add JarURLConnection beginner callout
+In prompt-04-Jar-URL-Nesting.md §一/§六, add callout box:
+
+"**JarURLConnection**: java.net.JarURLConnection extends URLConnection. Handles URLs with 'jar:' scheme: `jar:<url>!/{entry}`. When opened, it opens the <url> as a ZipFile → locates the {entry} inside the ZIP → returns an InputStream for that entry. For nested JARs (jar:file:///outer.jar!/inner.jar!/), this requires recursive resolution — open outer JAR → locate inner.jar entry → open inner JAR → locate target entry."
+
+## Gap 3: P03 §四 — strengthen counterfactual quantification
+In prompt-03-ClassLoader-Bridge.md §四, for 4.1 (defineClass1 architecture), add quantified counterfactual:
+
+"Counterfactual: If defineClass1 called ZIP_GetEntry instead of receiving pre-read bytes — 2 problems. (1) Error handling: zlib inflate failure in native code → SIGABRT or return NULL → no Java IOException → no ClassNotFoundException → JVM continues with missing class → NoClassDefFoundError 5 minutes later at first use → symptom far from cause. (2) Concurrency: 10 threads loading classes from same JAR → 10 concurrent ZIP_GetEntry calls → single ZIP handle mutex → serialized reads → 10x slower class loading. Java ZipFile: InputStream per thread → concurrent inflate → parallel class loading."

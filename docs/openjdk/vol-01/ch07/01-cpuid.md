@@ -1,5 +1,8 @@
 # 8.1 VM_Version_init -- CPU 特性检测
 
+> **前置依赖**：[ch06 codeCache_init](openjdk/vol-01/ch06/01-heap-layout.md)：CodeCache 就绪，stub 可在 NonNMethod 堆分配
+> → **后续**：[ch08 stubRoutines_init1](openjdk/vol-01/ch08)：StubRoutines 第一轮注册
+
 > **本文定位**：JVM 初始化序列中的第 5 个步骤。你要理解的是 HotSpot 如何通过动态生成的汇编桩执行 `CPUID` 指令，从 x86_64 CPU 中读出 42 个特性位和虚拟化信息，并把它们转换成 JVM 运行时 flag -- 整个 JIT 编译器的指令选择都依赖这些检测结果。
 >
 > 本机是 96 核 x86_64，标准 Tiered 模式。`ICache::stub_size` 由 `ICache::line_size`（64 字节）和 `ICache::log2_line_size`（6）确定。
@@ -822,3 +825,12 @@ for (int leaf = 0x40000000; leaf < 0x40010000; leaf += 0x100) {
 ## 7. 之后
 
 `VM_Version_init()` 返回后，`_features` 和约 30 个 JVM flag 就已确定。后续 `os::init_globals()` 会根据 `_logical_processors_per_package` 和 `supports_atomic_*` 设置线程相关参数。JIT 编译器（C1/C2）在编译 Java 方法时，通过 `VM_Version::supports_avx()` / `VM_Version::supports_sse4_2()` 等接口决定哪些指令序列可用 -- 整条编译流水线的指令选择都取决于此时 `_cpuid_info` 中读到的数据。
+
+
+## 设计权衡
+
+**为什么用汇编桩而不是内联汇编？** GCC 和 Clang 支持 `__asm__("cpuid")`，但 MSVC 的 `__cpuid()` 内在函数在不同版本中签名不一致。HotSpot 需要支持 Linux（GCC）、macOS（Clang）、Windows（MSVC）三个平台——写一个 C 函数包装三个平台的内联汇编/内在函数，不如生成一个汇编桩直接执行 `CPUID` 指令。汇编桩的另一个优势是精确控制：`get_cpu_info_stub` 里 480 行汇编不只是 `cpuid` 指令——它包含了 CPU 年代检测（386/486 不支持 CPUID）、条件分支（根据 `std_max_function` 决定执行哪些查询）、信号测试（故意触发 SEGV 验证 OS 对 YMM/ZMM 寄存器的保存）。这些逻辑在内联汇编里写需要每个平台的寄存器约束语法，可读性和可维护性极差。
+
+**为什么需要信号测试来验证 YMM/ZMM 保存？** CPU 支持 AVX 不等于 OS 在信号处理时会保存 YMM/ZMM 寄存器。Linux kernel 2.6.30+ 通过 `xsave/xrstor` 保存扩展状态，但早期内核和某些 Hypervisor 配置可能不保存——信号处理返回后 YMM 高 128 位变随机值。HotSpot 的 JIT 编译器生成的 AVX 代码依赖精确的 YMM/ZMM 值——如果信号处理器破坏了这些值，正在执行的向量化循环会死循环或产生错误结果。信号测试是唯一能在运行时验证这一点的方案——没法在编译期知道运行环境的 OS/Hypervisor 组合。
+
+**为什么 UseSSE/UseAVX 用级联屏蔽而不是各自独立的 flag？** SSE/AVX 指令集有严格的向上兼容关系——SSE4.2 依赖 SSE4.1 依赖 SSE3 依赖 SSE2 依赖 SSE。如果不级联，用户设 `-XX:UseSSE=2` 可能只关了 SSE2 而 SSE4.1 仍然启用——导致 JIT 生成的 SSE4.1 指令在 SSE2 被禁止的上下文中执行（HotSpot 内部假设 SSE2 开启时 SSE4.1 自动可用）。级联屏蔽 `UseSSE < 3 → 同时清除 SSE3/SSSE3/SSE4A` 保证了原子性——要么一套指令全开，要么全关。

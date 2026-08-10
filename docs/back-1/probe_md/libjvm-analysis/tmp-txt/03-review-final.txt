@@ -1,0 +1,24 @@
+Final review of 03-object-model after all fixes. 7 docs. Focus: did the 3 gaps get properly closed?
+
+## Previous gaps to verify
+
+1. Synchronization (was 6/10) → Is inflate() walkthrough solid? ObjectMonitor _cxq/_EntryList/_WaitSet explained? BasicLock CAS code path shown? epoch/BulkRebias covered?
+
+2. CompressedOops assembly (was 8/10) → Are shl/lea instruction sequences present? narrowKlass's 3 encoding modes explained?
+
+3. Allocation edge cases (was 8/10) → Is Eden CAS contention analyzed? GC safepoint collision covered?
+
+## Quick check across all 7 docs
+
+| Doc | Production opener? | ≥5 why? | GDB session? | Mermaid? | Prereq header? |
+|-----|:---:|:---:|:---:|:---:|:---:|
+| 00 | | | | | |
+| 01 | | | | | |
+| 02 | | | | | |
+| 03 | | | | | |
+| 04 | | | | | |
+| 05 | | | | | |
+| 06 | | | | | |
+
+## Output
+Phase score /60. Any remaining gaps? Ready to graduate to 04-interpreter?

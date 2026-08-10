@@ -1,5 +1,8 @@
 # 4.3 bytecodes_init — JVM 字节码表的初始化
 
+> **前置依赖**：[ch04/02 management_init](02-management.md) → [ch04/01 init_globals 总览](01-overview.md)
+> → **后续**：[ch04/04 classLoader边界](04-classloader-boundary.md)
+
 4.2 节讲了 `management_init`——注册 JMX 管理的 C++ 侧地基。本节讲 `init_globals()` 的第二项 `bytecodes_init()`——初始化 JVM 字节码表。
 
 ---
@@ -422,6 +425,13 @@ _fmt_not_simple   = 1<<11,   // 非简单（wide 或变长）
 > - **Rewriter 改写**（类加载时把 CP 索引改成 CP cache 索引 + native 字节序）——在类加载章节展开
 > - **fast/nofast 变体**（36 个 JVM 内部字节码，Rewriter/模板表改写的产物）——跟着 Rewriter 走
 >
+## 设计权衡
+
+**为什么 `bytecodes_init()` 只有 3 行代码？** `Bytecodes::initialize()` 只做两件事：(1) 为 202 条字节码指令填充名称数组，供调试输出和 `jcmd` 使用；(2) 通过 assert 验证字节码表大小不溢出（`number_of_codes <= 2*BitsPerByte`）。真正的字节码语义（操作数栈行为、Verifier 状态转换、Rewriter 改写规则）在 `Bytecodes` 类的静态方法中硬编码——不需要初始化。这是一个"纯静态数据，无运行时状态"的子系统——用 `initialize()` 而不是构造函数，因为 `Bytecodes` 是一个全静态方法的工具类，没有实例。
+
+**为什么字节码表用数组而不是 `std::map`？** 字节码指令编号是 0-201 的连续整数——这是数组索引的理想场景，`O(1)` 的指针偏移。如果换成 `std::map`，每次都走红黑树查找（`O(log n)`），对于解释器取指的热路径不可接受。
+
+**为什么 `number_of_codes <= 2*BitsPerByte` 是唯一的安全检查？** JVM 规范定义了 202 条字节码指令——这已经接近单字节编码上限（0-255）。这个 assert 是"编译期哨兵"——任何人添加第 257 条字节码都会触发断言，在开发阶段暴露编码溢出问题。
 > 本节聚焦 bytecodes_init 做的事：启动时填 6 张静态表。
 ## 小结
 

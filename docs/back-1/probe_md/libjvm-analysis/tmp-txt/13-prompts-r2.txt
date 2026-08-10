@@ -1,0 +1,161 @@
+Produce 2 prompts for 13-launcher. Same 10-section detailed format as Round 1 prompts (§〇~§十 with EXACT specifications).
+
+## Prerequisites
+probe_md/13-launcher/prompt-00-Libjli-Overview.md (Round 1 output)
+probe_md/13-launcher/prompt-01-Argument-Parsing.md (Round 1 output)
+probe_md/13-launcher/README.md
+
+## Output
+probe_md/13-launcher/prompt-02-JVM-Loading.md (target: 300+ lines)
+probe_md/13-launcher/prompt-03-Main-Class-Loading.md (target: 300+ lines)
+
+## Quality: Depth + Breadth + Interview + Continuity + First-principles + Beginner (same as Round 1)
+
+---
+
+## prompt-02-JVM-Loading.md — EXACT specifications
+
+### §〇 Production Scenario
+"生产环境多版本 JDK 共存。`/etc/alternatives/java` 指向 JDK 11 但 `$JAVA_HOME` 还在 JDK 8。运行 `java -jar app.jar` → 'Error: could not find libjava.so' (emessages.h:98)。libjli 用 /proc/self/exe 找到的是 JDK 11 的 java，但搜索 JRE 时被 JAVA_HOME 的 JDK 8 路径干扰——因为 java_md_solinux.c:543 先用 $JAVA_HOME，不成功后回退到 /proc/self/exe。JAVA_HOME 的 JDK 8 没有 libjava.so → 默认错误消息。但真正的 root cause 不是'缺少文件'——是 JAVA_HOME 指向错误版本。"
+
+### §一 Task + Narrative
+"dlopen 不是 '加载一个 .so'。它是 JVM 的入口门——RTLD_NOW + RTLD_GLOBAL 两个标志定义了整个 JVM 的符号可见性。libjli 的 LoadJavaVM 做了比 '打开文件' 多得多的事情：查找 JRE、读 jvm.cfg、解析别名、验证 jvm.dll 存在、dlopen、dlsym 三个 JNI 函数指针——所有在调用 JNI_CreateJavaVM 之前。"
+
+Beginner callouts:
+1. **dlopen(dl, RTLD_NOW|RTLD_GLOBAL)**: "RTLD_NOW=立即解析所有符号→缺失则立即失败。RTLD_GLOBAL=libjvm.so 的符号对所有后续 dlopen 的库可见（-agentlib 加载需要）。"
+2. **dlsym(handle, "JNI_CreateJavaVM")**: "从已加载的 libjvm.so 中找函数地址。返回 void* → 转换为 JNI_CreateJavaVM 函数指针类型。"
+3. **jvm.cfg**: "JRE 配置文件，列出可用的 JVM 变种（-server, -client, -minimal）。格式：'-server KNOWN' 或 '-client ALIASED_TO -server'。"
+4. **InvocationFunctions**: "java.h:83-87: struct { CreateJavaVM_t* CreateJavaVM; GetDefaultJavaVMInitArgs_t* GetDefaultJavaVMInitArgs; GetCreatedJavaVMs_t* GetCreatedJavaVMs; }。dlsym 填充这三个函数指针。"
+5. **stat()**: "POSIX 系统调用——验证文件是否存在，不打开它。比 access() 更精确（access 只检查权限，不检查是否是目录、设备文件等）。"
+
+### §二 Environment
+Same as prompt-00 §二.
+
+### §三 Source Files Table
+| File | Full Path | Lines | Core Functions | Role |
+
+| java_md_solinux.c | src/java.base/unix/native/libjli/java_md_solinux.c | ~1100 | SetExecname, CreateExecutionEnvironment, LoadJavaVM(local), GetJREPath, GetJVMPath | Linux JVM loading implementation |
+| java_md_common.c | src/java.base/unix/native/libjli/java_md_common.c | ~250 | GetExecName, TruncatePath, GetApplicationHome | Cross-Unix helpers for path resolution |
+| java.c | src/java.base/share/native/libjli/java.c | ~1400 | LoadJavaVM (caller), ReadKnownVMs, CheckJvmType | jvm.cfg processing + dispatch |
+| java.h | src/java.base/share/native/libjli/java.h | ~350 | InvocationFunctions, jvmtype, jvmpath | Data structures |
+| emessages.h | src/java.base/share/native/libjli/emessages.h | ~100 | JRE_ERROR1, CFG_ERROR1-5 | JVM loading error messages |
+
+### §四 Deep Dive (≥8 groups)
+
+**4.1: /proc/self/exe — the zero-config bootstrap** (java_md_solinux.c:687-689)
+"Linux 内核在每个进程的 /proc/<pid>/exe 创建一个符号链接→指向可执行文件的绝对路径。readlink('/proc/self/exe', buf, PATH_MAX) 返回路径。成本：1 次 readlink 系统调用（~100ns）。Counterfactual: 用 argv[0] → 如果 java 在 $PATH 中（只写了 'java' 而非绝对路径）→ argv[0] 只包含 'java' → 无法解析完整路径。"
+
+**4.2: TruncatePath + GetApplicationHome — walking up from /bin/java** (java_md_common.c:87)
+"已知 /path/to/jdk/bin/java → 找 /path/to/jdk/lib/libjava.so 作为 JRE 锚点文件。TruncatePath: 从右向左找到最后一个 '/' → 截断到 'bin/' → 替换为 'lib/' → 检查 libjava.so。GetApplicationHome: 如果 libjava.so 存在 → JRE 确认成功。如果不存在 → 向上目录继续搜索。最多搜索 5 层（hardcoded limit）。"
+
+**4.3: $JAVA_HOME preference — the conflict vector** (java_md_solinux.c:535-543)
+"GetApplicationHome 先用 getenv('JAVA_HOME')。如果设置了 → 直接用。这是生产中最常见的故障点：JAVA_HOME 指向旧版本 JDK。为什么先检查 JAVA_HOME？性能优化——跳过 readlink('/proc/self/exe') + 向上遍历目录，节省 5-10 个系统调用。代价：JAVA_HOME 不正确时 → JRE 找不到 → 沉默或错误消息不明确。"
+
+**4.4: jvm.cfg + ReadKnownVMs — version selection** (java.c:2039-2083)
+"jvm.cfg 格式: '-server KNOWN\n-client ALIASED_TO -server\n'. ReadKnownVMs 解析 → builds jvmtype linked list。每个 entry: type (server/client)、isKnown (KNOWN)、isAlias、aliasTo。CheckJvmType: 如果是别名 → 跟随别名链 → 如果链太长（>=knownVMsCount）→ 检测到循环 → CFG_ERROR1。Counterfactual: if jvm.cfg parsed once and cached → stale if JRE switches mid-execution."
+
+**4.5: GetJVMPath — constructing the libjvm.so path** (java_md_solinux.c:490-511)
+"Format string: '%s/lib/%s/%s/libjvm.so' = jrepath + arch + jvmtype (aliased) + 'libjvm.so'。Example: /opt/jdk11/lib/amd64/server/libjvm.so。Then stat() 验证文件存在。如果 stat 失败 → check JRE_ERROR1-5: 'Error: missing server JVM at...' or 'Error: could not find libjava.so'."
+
+**4.6: dlopen(libjvm.so, RTLD_NOW|RTLD_GLOBAL) — the big moment** (java_md_solinux.c:571)
+"This is THE gatekeeper. RTLD_NOW: 解析所有未定义符号 → libjvm.so 依赖 ~30 个系统库（libc, libm, libpthread, libdl）→ 任何一个缺失 → dlopen 立即返回 NULL。RTLD_GLOBAL: libjvm.so 的符号添加到全局符号表 → 所有后续 dlopen 的库（-agentlib instrument）可以找到 JVM 函数。为什么不是 RTLD_LOCAL？-agentlib 需要通过 dlsym(RTLD_DEFAULT, 'JNI_GetCreatedJavaVMs') 找到 JVM 函数——需要全局可见性。"
+
+**4.7: dlsym 三个 JNI 函数指针 — InvocationFunctions 填充** (java_md_solinux.c:623-637)
+"dlsym 3 个: 'JNI_CreateJavaVM', 'JNI_GetDefaultJavaVMInitArgs', 'JNI_GetCreatedJavaVMs'。每个返回 void* → 转换为 InvocationFunctions 结构体中的函数指针。如果任何一个 dlsym 失败 → dlclose(libjvm.so) → JRE_ERROR1。为什么需要 dlsym 而不是直接链接？因为 libjli.so 不知道 libjvm.so 在哪个路径——直到运行时 dlinfo(libjvm.so, RTLD_DI_ORIGIN, ...) 才能知道。"
+
+**4.8: libjsig preloading — signal chain bootstrap**
+"java_md_solinux.c 在 java_md_solinux.c:1027-1038 检查 LD_PRELOAD 中的 libjsig.so → 如果存在 → dlsym 找到 JVM_begin_signal_chain_for_JVM → 调用 → 在 JVM 自己的信号处理器之前建立 JSIG 链。这确保 signal chaining 在 JVM 热身前正确初始化——否则 async-profiler 的 SIGPROF 可能和 JVM 的 SIGSEGV handler 冲突。"
+
+### §五 Article Structure
+```
+production opener (multi-version JDK conflict)
+  → JVM loading concept (5 beginner callouts)
+    → /proc/self/exe → GetApplicationHome trace
+      → jvm.cfg + ReadKnownVMs
+        → dlopen + dlsym + InvocationFunctions
+          → Mermaid: JRE path resolution tree
+            → GDB: dlopen, dlsym, stat breakpoints
+              → interview story answer
+```
+
+### §六 Writing Requirements
+- Mermaid: /proc/self/exe → TruncatePath → GetApplicationHome → stat(/lib/libjava.so) → GetJVMPath → dlopen
+- GDB: break at java_md_solinux.c:687 (readlink), java_md_solinux.c:571 (dlopen), java_md_solinux.c:623 (dlsym), java.c:1545 (JNI_CreateJavaVM call)
+- Beginner callouts: 5 from §一
+- Cross-reference: 01 §一 (JNI_CreateJavaVM handoff), 19-signal-chaining (libjsig interaction)
+
+---
+
+## prompt-03-Main-Class-Loading.md — EXACT specifications
+
+### §〇 Production Scenario
+"Spring Boot fat JAR: java -jar app.jar → 'Error: Could not find the main class org.springframework.boot.loader.JarLauncher. Program will exit.' (emessages.h:68, CLS_ERROR1)。JAR 的 META-INF/MANIFEST.MF 明确写着 Main-Class: org.springframework.boot.loader.JarLauncher，但加载失败。Root cause: Spring Boot fat JAR 的嵌套 JAR 布局——lib/ 目录下的 JAR 由 Spring Boot Launcher 加载，不在 Java classpath 中。LoadMainClass 找不到 JarLauncher 因为它在嵌套 JAR 里。但 libjli 的 FindClass 只检查 JVM 的标准 classpath——而不检查 Spring Boot 的自定义 Launcher classpath。"
+
+### §一 Task + Narrative
+"LoadMainClass 不是 '调用 FindClass'。它是 5 个阶段的序列：1) 读 JAR manifest 找 Main-Class 属性 → 2) 启动 JVM → 3) 通过 LauncherHelper 间接调 FindClass → 4) 验证 main(String[]) 存在 → 5) 调用它。每个阶段都可能失败——manifest 损坏、ClassNotFoundException、没有 main 方法——错误消息的质量递减（'没有 main 方法' 是最模糊的）。"
+
+Beginner callouts:
+1. **JAR manifest**: META-INF/MANIFEST.MF。键值对文本。Main-Class: com.example.Main。libjli 在 JNI_CreateJavaVM 之前解析它来决定加载哪个类。
+2. **LauncherHelper.checkAndLoadMain()**: Java 层 helper。调用 Class.forName(mainClassName) → 检查 main(String[]) 方法存在 → 返回 Method 对象。libjli 不直接调用 Java 方法——通过 JNI CallStaticVoidMethod 执行 main()。
+3. **FindClass vs Class.forName**: FindClass 是 JNI 函数——在系统类加载器中搜索。Class.forName 使用当前线程的上下文类加载器。LauncherHelper 用 Class.forName 因为它能更好地处理错误消息。
+4. **JNI exception handling**: FindClass 返回 null → 必须调用 ExceptionCheck() → ExceptionDescribe() → ExceptionClear()。遗漏任何一步 → JVM 处于不一致状态 → 后续 JNI 调用崩溃。
+
+### §二 Environment
+Same as prompt-00 §二.
+
+### §三 Source Files Table
+| File | Full Path | Lines | Core Functions | Role |
+
+| java.c | src/java.base/share/native/libjli/java.c | ~1400 | LoadMainClass, JavaMain, SelectVersion | Orchestration of main class loading |
+| parse_manifest.c | src/java.base/share/native/libjli/parse_manifest.c | ~600 | JLI_ParseManifest, parse_nv_pair, inflate_file | JAR manifest parsing |
+| manifest_info.h | src/java.base/share/native/libjli/manifest_info.h | ~200 | manifest_info struct, manifest_attribute | Manifest data structures |
+| LauncherHelper.java | src/java.base/share/classes/sun/launcher/LauncherHelper.java | ~800 | checkAndLoadMain | Java-side helper |
+| emessages.h | src/java.base/share/native/libjli/emessages.h | ~100 | CLS_ERROR1, JAR_ERROR2/3, CLS_ERROR2 | Error messages |
+
+### §四 Deep Dive (≥8 groups)
+
+**4.1: JLI_ParseManifest — reading META-INF/MANIFEST.MF** (parse_manifest.c:577)
+"Step 1: open JAR file → fopen(jarfile, 'rb') → find ZIP directory → locate 'META-INF/MANIFEST.MF' entry → inflate_file 解压 → parse_nv_pair 逐行解析。每个键值对是 'Name: Value'。提取的属性存储在 manifest_info struct 中：Main-Class, Class-Path, Created-By。Counterfactual: 如果 JAR 没有 manifest → Main-Class 不存在 → SelectVersion 返回 null → JLI_Launch 报 'no main manifest attribute' (JAR_ERROR4, emessages.h:67)."
+
+**4.2: SelectVersion — manifest-based JRE version selection** (java.c:1056)
+"Main-Class 不是 manifest 唯一重要的属性。'Created-By: 11 (Oracle Corporation)' 或专门的 'JRE-Version' 属性告诉 libjli 需要哪个 JRE 版本来运行这个 JAR。如果 JAR 需要 JDK 17 但系统只有 JDK 11 → SelectVersion 尝试找到 JDK 17 的 java → 如果失败 → JNI_CreateJavaVM 用 JDK 11 创建 JVM → ClassLoader 在运行时遇到 JDK 17 字节码 → ClassFormatError。"
+
+**4.3: SetClassPath for JAR — the overwrite** (java.c:338-340)
+"当 mode=LM_JAR → SetClassPath(jarfile_name)。这会**覆盖**整个 classpath——只包含 JAR 文件本身。用户的 -cp 参数**被忽略**。然后 JAR manifest 中的 Class-Path 属性 → 进入java.class.path 系统属性的末尾。这只是 JAR 中额外的 JAR——主 JAR 仍然必须是 classpath 中唯一的东西。"
+
+**4.4: LauncherHelper.checkAndLoadMain() — the Java-side helper** (LauncherHelper.java)
+"不直接调用 FindClass()。Java 层 LauncherHelper 接收: (boolean useStderr, int mode, String what)。mode: 1=CLASS(类名), 2=JAR(文件), 3=MODULE(模块), 4=SOURCE(源文件)。如果是 JAR: 读 manifest 的 Main-Class 属性 → Class.forName(mainClassName) → 获取 mainMethod → 返回 Method 对象。为什么用 Class.forName 而非 FindClass? Class.forName 会抛出描述性异常——LauncherHelper 可以捕获并格式化为自然的错误消息('Can't find main(String[]) method in class: com.example.Main'). JNI 的 FindClass 返回 null ——只有模糊的异常消息。"
+
+**4.5: GetStaticMethodID("main", "([Ljava/lang/String;)V") — signature verification** (java.c:560)
+"JNI 用签名字符串描述方法类型。'([Ljava/lang/String;)V' = takes String[]、returns void。如果类没有 main(String[]) → GetStaticMethodID 失败 → JNI_ERROR → 'Error: Main method not found in class %s' (CLS_ERROR2, emessages.h:69)。这不同于 ClassNotFoundException——类被找到了，但 main 方法签名错误（例如 main() 无参数或 main(String args) 不在参数列表中）。"
+
+**4.6: CallStaticVoidMethod — the irreversible transition** (java.c:566)
+"从这一行之后，libjli 不再控制。CallStaticVoidMethod(jclass mainClass, jmethodID mainMethod, jobjectArray args) 进入 Java 的 main() 方法。C 调用栈在此暂停——JVM 栈接管。如果 main() 返回 → CallStaticVoidMethod 返回 → JavaMain → cleanup → exit。如果 main() 抛出 → ExceptionOccurred() → ExceptionDescribe() → exit(1)。libjli 永远不会 '返回'——JVM 退出 = 进程退出。"
+
+**4.7: Class-Path manifest attribute — the second-class classpath** (manifest parsing)
+"JAR manifest 中的 Class-Path 属性和 lib/* 通配符不同——通配符在启动时展开（ParseArguments），Class-Path 在 JVM 内设置（java.class.path 系统属性附加）。这产生时序差异：libjli 通用符在 JNI_CreateJavaVM 之前展开——类加载器在 JVM 启动时已经拥有完整 classpath。Class-Path 属性附加在后面——可能在启动中引起类加载顺序问题。"
+
+**4.8: JavaMain exit path — what happens after main() returns** (java.c:405)
+"main() 返回后: JavaMain → LEAVE() 宏（释放 JNI 局部引用）→ DestroyJavaVM() → 主线程退出。但如果还有其他非守护线程运行 → JVM 继续存活直到所有非守护线程退出 → DestroyJavaVM 会阻塞。这就是为什么 jetty/tomcat/spring-boot-web 的主线程 main() 返回但 JVM 不退出——HTTP 请求处理线程仍在运行。"
+
+### §五 Article Structure
+```
+production opener (Spring Boot fat JAR)
+  → main class loading concept (4 beginner callouts)
+    → JLI_ParseManifest trace
+      → SelectVersion → SetClassPath
+        → LauncherHelper.checkAndLoadMain
+          → GetStaticMethodID → CallStaticVoidMethod
+            → Mermaid: manifest→FindClass→main() chain
+              → GDB: manifest parse, LoadMainClass, CallStaticVoidMethod
+                → interview story answer
+```
+
+### §六 Writing Requirements
+- Mermaid: manifest→ParseManifest→SelectVersion→SetClassPath→JNI_CreateJavaVM→LauncherHelper→CallStaticVoidMethod sequence
+- GDB: break at parse_manifest.c:577 (JLI_ParseManifest), java.c:523 (LoadMainClass), java.c:560 (GetStaticMethodID), java.c:566 (CallStaticVoidMethod)
+- Beginner callouts: 4 from §一
+- Cross-reference: 02-class-loading (FindClass, SystemDictionary), 14-zip-jimage (ZIP/JAR parsing)
+
+### §7-§10
+Same standard template from benchmark.

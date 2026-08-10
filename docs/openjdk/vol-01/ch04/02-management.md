@@ -1,5 +1,8 @@
 # 4.2 management_init — JVM 管理 API 的 C++ 侧地基
 
+> **前置依赖**：[ch03/06 主线程登记](openjdk/vol-01/ch03/06-main-thread-create.md) → [ch04/01 init_globals 总览](01-overview.md)：30 项时序 + 5 Block 分组
+> → **后续**：[ch04/03 bytecodes_init](03-bytecodes.md)：init_globals 第 2 步
+
 4.1 节给出了 `init_globals()` 的 30 项全貌。本节展开第一项 `management_init()`——它是 `HandleMark hm` 之后的第一行，为 JVM 的"管理 API"铺 C++ 侧地基。
 
 `management_init()` 本身只有 10 行，但它背后是一整个"JVM 管理"子系统。在进入源码之前，必须先搞清楚一个根本问题：**"management" 这个词在 HotSpot 里到底是什么意思？**
@@ -1431,6 +1434,12 @@ jlong 值在 0x1F0：`00 00 00 00 00 00 00 00` = 0。此刻还没被 `record_vm_
 | **合计** | **29** | ✓ 和 Prologue 的 `num_entries = 29` 对上 |
 
 22 个 management_init 计数器全部找到，结构完全符合本节讲的源码。
+## 设计权衡
+
+**为什么 `management_init()` 是 `init_globals()` 的第一行？** `management_init()` 注册了 JMX 管理的基础设施——PerfData 内存区域（`PerfMemory::create_memory_region()`）和内存池管理器（`MemoryService::set_universe_heap()`）。后续每一个子系统（解释器、编译器、GC）的初始化都会向这些基础设施注册自己的 PerfData 计数器——如果 `management_init()` 不在第一行，后续子系统初始化时 PerfData 的注册目标还不存在。HotSpot 通过把 management_init 放在最前面，保证了"计数器框架先就位，业务系统后注册"的顺序。
+
+**为什么把 JMX 管理做成独立子系统而不是嵌入每个模块？** 如果每个子系统自己实现一套计数器暴露机制（解释器一套 API、GC 一套 API、编译器一套 API），外部工具（`jconsole`、`VisualVM`、Prometheus JMX exporter）需要适配 N 套不同的接口。JMX 标准（`javax.management.*`）提供了一套统一的 MBean 注册/查询/通知模型——HotSpot 的 `management_init()` 是这套模型在 C++ 侧的根基。`jcmd` 能一行命令拿到堆大小（`VM.native_memory`）、GC 统计（`GarbageCollectorMXBean`）、线程信息（`ThreadMXBean`），全靠统一接口。
+
 
 ---
 

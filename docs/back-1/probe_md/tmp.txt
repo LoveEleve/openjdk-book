@@ -1,0 +1,356 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## 🚀 高效工具优先原则（必须遵守）
+
+在处理 VPC 相关任务时，**必须优先使用以下现代 CLI 工具**，替代低效的传统工具：
+
+| 现代工具 | 替换的低效工具 | 用途 | 使用示例 |
+|---------|--------------|------|----------|
+| **rg** (ripgrep) | grep | 代码搜索 | `rg "login" --type py` |
+| **fd** | find | 文件查找 | `fd -e py -x stat` |
+| **bat** | cat/less | 文件查看（带语法高亮） | `bat src/auth.py` |
+| **tokei** | wc/cloc | 代码统计 | `tokei /data/workspace/vpc-cgw` |
+| **delta** | git diff (普通) | Git diff 美化 | `git diff \| delta` |
+| **sd** | sed | 简单文本替换 | `sd "foo" "bar" file.txt` |
+
+### 使用原则
+
+1. **搜索代码** → 用 `rg` 而不是 `grep`
+   - ✅ `rg "CreateVpc" --type py -n`
+   - ❌ `grep -r "CreateVpc" .`
+
+2. **查找文件** → 用 `fd` 而不是 `find`
+   - ✅ `fd -e py CreateVpc`
+   - ❌ `find . -name "*CreateVpc*.py"`
+
+3. **查看文件** → 用 `bat` 而不是 `cat/less`
+   - ✅ `bat src/auth/login.py`
+   - ❌ `cat src/auth/login.py`
+
+4. **统计代码** → 用 `tokei` 而不是 `wc -l`
+   - ✅ `tokei /data/workspace/vpc-cgw`
+   - ❌ `find . -name "*.py" | xargs wc -l`
+
+5. **查看 diff** → 用 `delta` 而不是普通 `git diff`
+   - ✅ 先配置：`git config --global core.pager "delta"`
+   - ✅ 然后使用：`git diff`
+
+6. **替换文本** → 用 `sd` 而不是 `sed`
+   - ✅ `sd "old_function" "new_function" file.py`
+   - ❌ `sed -i 's/old_function/new_function/g' file.py`
+
+### 工具已安装验证
+
+```bash
+# 验证工具是否已安装
+which rg fd bat tokei delta sd
+```
+
+**输出示例**：
+```
+/usr/local/bin/rg
+/usr/local/bin/fd
+/usr/local/bin/bat
+/usr/local/bin/tokei
+/usr/local/bin/delta
+/usr/local/bin/sd
+```
+
+### 配置 Git 使用 delta
+
+```bash
+# 配置 Git 使用 delta 作为 pager
+git config --global core.pager "delta"
+
+# 可选：配置 delta 主题和样式
+git config --global delta.side-by-side true
+git config --global delta.line-numbers true
+git config --global delta.syntax-theme "Monokai Extended"
+```
+
+配置后，所有 `git diff`、`git log -p` 等命令都会自动使用 delta 美化输出。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## 任务: $ARGUMENTS
+
+你同时拥有 **CodeGraph（8工具）** 和 **Sverklo（6工具）** 两套 MCP 代码智能系统。根据用户意图自动选择最优工具组合。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## 零、核心原则（每次必须遵守）
+
+1. **CodeGraph 的"探索优先"法则**：
+   - 第一选择永远是 `codegraph_explore`（它一次返回完整源码，无需再 Read 文件）
+   - `codegraph_search` 只返回位置坐标（无代码），仅用于快速定位
+   - `codegraph_node` 是二级工具，仅在 explore 截断了你需要的代码体时才用
+   - 流程：`codegraph_search` → 找到符号名 → `codegraph_explore` 获取源码
+
+2. **Sverklo 的"语义优先"法则**：
+   - `sverklo_search` 用于自然语言描述 / 探索性搜索 / 不知确切符号名
+   - `sverklo_overview` 是陌生项目的入口工具，用它获取架构图
+   - `sverklo_lookup` 用于精确符号查找（类似 codegraph_search 但返回完整定义）
+
+3. **两个工具不是互斥的，是互补的**：
+   - 问影响面 → codegraph_impact（静态） + sverklo_impact（运行时+跨仓库）
+   - 问引用 → codegraph_callers（调用者） + sverklo_refs（引用+隐式依赖）
+   - 问架构 → sverklo_overview（高层） + codegraph_files（文件结构）
+
+4. **跨项目支持**：大部分工具支持 `projectPath` 参数，指定另一个项目的路径即可切换上下文。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## 一、CodeGraph 完整工具手册
+
+### 1.1 `codegraph_explore` ★★★ 主工具
+**描述**：回答"X 是怎么工作的？""架构怎样？""Bug在哪？"。一次性返回相关符号的完整源码（分组按文件），等价于 Read 文件但更快、更精准。
+**参数**：
+- `query` (必填)：符号名、文件名、或短词组合，如 `"AuthService loginUser session-manager"`
+- `maxFiles`：最多返回多少个文件的源码（默认12，可调大）
+- `projectPath`：跨项目查询路径
+**何时用**：几乎任何问题的首选。从搜索结果拿到符号名后，就喂给 explore 看源码。
+**何时不用**：仅需位置列表不关心源码 → 用 search；只要一个符号的完整细节 → 用 node。
+
+### 1.2 `codegraph_search`
+**描述**：按符号名快速搜索，只返回位置（文件+行号），不含源代码。
+**参数**：
+- `query` (必填)：符号全名或部分名，如 `"auth"`, `"signIn"`, `"UserService"`
+- `kind`：过滤类型，可选：function / method / class / interface / type / variable / route / component
+- `limit`：最大返回数（默认10）
+- `projectPath`：跨项目查询
+**何时用**：定位阶段——你不知道符号全名或想知道某个名字出现在哪些文件里。搜完马上喂给 explore。
+
+### 1.3 `codegraph_node`
+**描述**：二级工具——获取**一个**符号的完整信息：位置、签名、调用者/被调用者追踪链、完整代码体。
+**参数**：
+- `symbol` (必填)：符号名
+- `includeCode`：是否返回完整源码（默认false以节省上下文）
+- `file`：当符号名有歧义（同名重载）时，用此参数指定文件路径来精确匹配
+- `line`：配合 file 参数，进一步按行号定位
+- `projectPath`：跨项目查询
+**何时用**：explore 返回的结果里某个函数体被截断了，用 node 获取完整代码。或者当符号有多个同名重载时。
+
+### 1.4 `codegraph_callers`
+**描述**：列出调用 `<symbol>` 的所有函数。完整调用链请用 explore。
+**参数**：
+- `symbol` (必填)：函数/方法/类名
+- `limit`：最多返回多少调用者（默认20）
+- `projectPath`：跨项目查询
+**何时用**：问"谁调用了 X"时用。和 sverklo_refs 互补——它走静态AST调用边，sverklo走引用边。
+
+### 1.5 `codegraph_callees`
+**描述**：列出 `<symbol>` 调用的所有函数。
+**参数**：
+- `symbol` (必填)：函数/方法/类名
+- `limit`：最多返回多少被调用者（默认20）
+- `projectPath`：跨项目查询
+**何时用**：问"X 调用了什么"时用。适合做依赖分析。
+
+### 1.6 `codegraph_impact`
+**描述**：分析修改 `<symbol>` 会影响哪些符号。重构前必跑。
+**参数**：
+- `symbol` (必填)：要分析的符号名
+- `depth`：遍历多少层依赖（默认2层）
+- `projectPath`：跨项目查询
+**何时用**：问"改了 X 会怎样"时用。和 sverklo_impact 互补——它走静态依赖图，sverklo 走运行时爆炸半径+跨仓库。
+
+### 1.7 `codegraph_status`
+**描述**：索引健康检查——文件数、节点数、边数。除非排查索引用问题，否则跳过。
+**参数**：
+- `projectPath`：跨项目查询
+
+### 1.8 `codegraph_files`
+**描述**：返回已索引的文件树，含语言类型和符号数统计。比 Glob 更快理解项目布局。
+**参数**：
+- `path`：限定到某子目录
+- `pattern`：glob 过滤，如 `"*.py"`, `"**/*.test.ts"`
+- `format`：输出格式 — tree（树形，默认）/ flat（平铺）/ grouped（按语言分组）
+- `includeMetadata`：是否含语言和符号数（默认true）
+- `maxDepth`：最大目录深度
+- `projectPath`：跨项目查询
+**何时用**：问"项目结构" "有哪些模块" "目录分布"时用。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## 二、Sverklo 完整工具手册
+
+### 2.1 `sverklo_search` ★★★ 语义搜索
+**描述**：混合语义+文本搜索，带 PageRank 排序。适合探索性问题、反模式发现、跨文件语义匹配。
+**擅长**："鉴权怎么做的""找和计费相关的所有代码""吞异常的地方""静默返回null的地方"
+**不擅长**："X 怎么被注册为 Bean 的" 这种框架注册问题——直接用 grep 搜注解
+**参数**：
+- `query` (必填)：自然语言查询或代码模式
+- `token_budget`：返回最大 token 数（默认4000）
+- `scope`：限定到某路径前缀，如 `"src/api/"`
+- `language`：按语言过滤，如 `"python"`, `"cpp"`
+- `type`：按符号类型过滤，可选 function / class / type / interface / method / any
+- `current_file`：当前编辑的文件路径，同目录结果获得排名加成
+- `format`：compact（默认，省略长代码体、合并同类结果）/ full（完整返回）
+- `bundle_tokens`：>0 时附加上下文：同文件相邻块 + 1-hop 导入邻居，适合新人上手
+- `mode`：refs（只返回文件:行号+分数+名称，token少）/ full（默认，含代码体）
+**何时用**：自然语言描述性搜索、不知道确切符号名。先用 refs 模式快速筛选，再用 full 看详情。
+
+### 2.2 `sverklo_overview` ★★ 架构入口
+**描述**：获取代码库结构地图。按 PageRank 依赖重要性排序，展示核心文件和关键符号。**陌生项目的第一个调用**。
+**参数**：
+- `path`：限定到某子目录（默认项目根）
+- `token_budget`：最大 token（默认3000）
+- `depth`：1=仅目录 / 2=目录+文件名 / 3(默认)=目录+文件+顶级符号 / 4=含所有导出
+**何时用**：问"这个项目做什么的""整体架构""有哪些核心模块"
+
+### 2.3 `sverklo_lookup`
+**描述**：按名称查找特定符号，返回完整定义、签名和位置。
+**参数**：
+- `symbol` (必填)：符号名（精确或前缀匹配）
+- `type`：过滤类型 — function / class / type / interface / method / variable / any
+- `token_budget`：最大 token（默认2000）
+**何时用**：知道符号名，想看完整定义。和 codegraph_node 功能类似但走语义向量。
+
+### 2.4 `sverklo_refs`
+**描述**：查找一个符号在代码库中所有引用——import、调用、使用。默认按标识符词边界匹配，`embed` 不会命中 `embeddingStore`。
+**参数**：
+- `symbol` (必填)：符号名
+- `exact`：true（默认，词边界匹配）/ false（子串匹配，旧行为）
+- `token_budget`：最大 token（默认2000）
+**何时用**：和 codegraph_callers 互补。callers 走静态调用边，refs 走引用边（含 import/使用）。
+
+### 2.5 `sverklo_impact` ★★ 爆炸半径
+**描述**：重构前使用——找出某符号的所有调用者，带置信度评分。支持跨仓库爆炸半径分析。
+**参数**：
+- `symbol` (必填)：函数/类/类型名
+- `limit`：最多返回多少引用（默认50）
+- `cross_repo`：是否包含工作区跨项目影响（默认false）
+- `partition_threshold`：调用者超过此数量时返回分区计划而非原始列表（默认80）
+**何时用**：和 codegraph_impact 互补。它偏向运行时影响面+跨仓库，带置信度。
+
+### 2.6 `sverklo_status`
+**描述**：项目状态 + 工具使用指南。返回索引健康（文件数、分块数、语言）、记忆总结、针对当前代码库的推荐工具列表。
+**参数**：无
+**何时用**：新会话刚开始时，了解 Sverklo 对这个项目知道什么。
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## 三、意图 → 工具路由表（全覆盖）
+
+### A. 搜索/查找类
+| 用户意图 | 第一工具 | 第二工具 | 说明 |
+|----------|---------|---------|------|
+| "XXX 在哪"（精确符号名） | `codegraph_search` | `codegraph_explore` | 先定位再取源码 |
+| "XXX 的完整代码是什么" | `codegraph_explore` | `codegraph_node` | explore截断了才用node |
+| "处理鉴权的代码在哪"（自然语言） | `sverklo_search` | `codegraph_explore` | 语义搜→拿符号名→explore看源码 |
+| "找一下吞异常的地方"（反模式） | `sverklo_search` | `codegraph_explore` | 语义搜反模式最擅长 |
+| "这个符号的详细定义" | `sverklo_lookup` | `codegraph_node` | 两个都能拿完整定义，互补 |
+
+### B. 调用关系类
+| 用户意图 | 第一工具 | 第二工具 | 说明 |
+|----------|---------|---------|------|
+| "谁调用了 XXX" | `codegraph_callers` | `sverklo_refs` | callers走调用边，refs走引用边 |
+| "XXX 调用了什么" | `codegraph_callees` | — | 单纯的依赖分析 |
+| "XXX 被哪些地方引用" | `sverklo_refs` | `codegraph_callers` | refs更全面（含import/使用） |
+| "XXX 为什么不生效" | `codegraph_callers` | `sverklo_search` | 先看谁调它→再搜相关逻辑 |
+| "XXX 的完整调用链" | `codegraph_explore` | — | explore一次返回调用链 |
+
+### C. 影响面/风险类
+| 用户意图 | 第一工具 | 第二工具 | 第三工具 | 说明 |
+|----------|---------|---------|---------|------|
+| "改了 XXX 会影响啥" | `codegraph_impact` | `sverklo_impact` | — | 静态+运行时双重分析 |
+| "XXX 影响其他项目吗" | `sverklo_impact`(cross_repo=true) | `codegraph_impact` | — | cross_repo 看工作区全局 |
+| "这次 PR 有什么风险" | `sverklo_search` | `codegraph_impact`(逐文件) | — | 先理解改动上下文 |
+
+### D. 架构/概览类
+| 用户意图 | 第一工具 | 第二工具 | 第三工具 | 说明 |
+|----------|---------|---------|---------|------|
+| "这个项目做什么的" | `sverklo_overview` | `codegraph_files` | `sverklo_status` | overview给架构地图 |
+| "项目结构/目录分布" | `codegraph_files` | `sverklo_overview` | — | files更快展示布局 |
+| "有哪些核心模块" | `sverklo_overview`(depth=2) | `codegraph_files`(path=...) | — | 逐层深入 |
+| "代码量统计" | `codegraph_status` | `codegraph_files`(grouped) | — | status给总览数字 |
+| "技术栈分析" | `codegraph_files`(grouped) | `sverklo_status` | — | 按语言分组看分布 |
+
+### E. 调试/问题定位类
+| 用户意图 | 第一工具 | 第二工具 | 第三工具 | 说明 |
+|----------|---------|---------|---------|------|
+| "XXX 这个 bug 可能在哪" | `sverklo_search` | `codegraph_explore` | — | 语义搜相关→看源码 |
+| "XXX 返回了错误值" | `sverklo_search` | `codegraph_callers` | `codegraph_explore` | 搜错误处理→看调用方 |
+| "性能瓶颈可能是哪个函数" | `codegraph_callers` | `sverklo_search`("慢" "性能") | — | 找高频调用+性能相关 |
+
+### F. 跨项目分析类
+| 用户意图 | 第一工具 | 说明 |
+|----------|---------|------|
+| "这个函数在另一个项目里怎么实现的" | `codegraph_search`(projectPath="/data/workspace/其他项目") | 指定 projectPath 切换上下文 |
+| "改了 vpc-cgw 的 XXX 影响 sdn_oss 吗" | `sverklo_impact`(cross_repo=true) | cross_repo 一键看全局 |
+| "两个项目中这个函数实现有什么不同" | 分别调 `codegraph_node` 两次指定不同 projectPath | 对比分析 |
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## 四、工具选择决策树（流程图）
+
+```
+用户意图
+  │
+  ├─ 不知道这个项目是啥？→ skv_overview → cg_files → 综合输出
+  │
+  ├─ 想搜东西但不知道确切符号名？→ skv_search（自然语言）
+  │   └─ 找到符号名后 → cg_explore 看源码
+  │
+  ├─ 知道符号名，要看源码？→ cg_explore（首选）
+  │   └─ 源码被截断 → cg_node(includeCode=true)
+  │
+  ├─ 知道符号名，只要位置列表？→ cg_search
+  │
+  ├─ 谁调用了 X？→ cg_callers + skv_refs（双验证）
+  │
+  ├─ X调用了什么？→ cg_callees
+  │
+  ├─ 改X会影响啥？→ cg_impact(depth=2) + skv_impact(cross_repo=true)
+  │
+  └─ 跨项目？→ 所有工具加 projectPath 参数
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## 五、输出格式规范
+
+1. **标注工具来源**：每段结果标注 `[cg_explore]` / `[skv_search]` 等
+2. **文件路径 + 行号**：尽可能精确
+3. **分层输出**：结论摘要（1-3句）→ 分类详情 → 建议操作
+4. **风险分级**（影响面相关）：🔴致命 🟠高危 🟡中危 🟢低危
+5. **置信度**：Sverklo 返回的结果含置信度，低置信度结果加 "⚠低置信" 标注
+6. **Token 预算意识**：skv_search 默认 token_budget=4000，大搜索可调至 8000；explore 默认 maxFiles=12
+7. **不要啰嗦**：直接给干货，工程师不需要废话
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## 六、经典组合拳示例
+
+```
+用户: "帮我理解这个项目"
+  → sverklo_overview(depth=3)     [架构地图]
+  → codegraph_files(format=grouped) [语言/模块分布]
+  → sverklo_status()               [索引状态+推荐工具]
+  → 综合输出架构总结
+
+用户: "CreateVm 在哪些地方被调用了"
+  → codegraph_callers("CreateVm")    [静态调用者]
+  → sverklo_refs("CreateVm")          [所有引用]
+  → 合并去重按文件分组输出
+
+用户: "改了 ipam_handler 会影响什么"
+  → codegraph_impact("ipam_handler", depth=2) [静态2层依赖]
+  → sverklo_impact("ipam_handler", cross_repo=true) [跨仓库爆炸半径]
+  → 合并按风险排序
+
+用户: "鉴权的逻辑怎么实现的"
+  → sverklo_search("鉴权 认证 权限")     [语义搜]
+  → 从结果提取关键符号名
+  → codegraph_explore("auth authenticate check_permission") [看完整源码]
+  → 解读流程
+
+用户: "找一下静默吞异常的代码"
+  → sverklo_search("except: pass", type="function")    [搜索模式]
+  → sverklo_search("try except 没有 raise", type="any")  [换种说法再搜]
+  → 列出所有匹配项
+
+用户: "vpc-cgw 的这个函数在 sdn_oss 里是怎么做的"
+  → codegraph_search("functionName", projectPath="/data/workspace/vpc-cgw")  [本项目]
+  → codegraph_search("functionName", projectPath="/data/workspace/sdn_oss")  [目标项目]
+  → codegraph_explore 获取两边源码 → 对比
+```

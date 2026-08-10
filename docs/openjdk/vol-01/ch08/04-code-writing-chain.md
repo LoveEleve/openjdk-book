@@ -656,3 +656,8 @@ BufferBlob payload (30000 bytes, 从 start+128 开始)
 ---
 
 **接下来**：下一篇文章（`05-stubgenerator.md`）会解释 `StubGenerator_generate(&buffer, false)` 做了什么——`generate_initial()` 如何生成 17+ 个桩并把入口地址填回 `StubRoutines` 表。
+
+
+## 设计权衡
+
+**为什么机器码生成需要三层抽象（`MacroAssembler` → `Assembler` → `AbstractAssembler`）？** `Assembler` 负责将汇编指令一对一映射为机器码（如 `mov(rax, rbx)` → `0x48 0x89 0xD8`），这是平台相关的底层。`MacroAssembler` 在 `Assembler` 上加了"伪指令"——比如 `push_CPU_state()` 一条伪指令展开为 push 所有 caller-saved 寄存器的多行 `Assembler` 调用。如果这两层合并，每个子系统的 stub 生成器（`InterpreterGenerator`、`StubGenerator`、`SharedRuntime`）需要自己管理"保存哪些寄存器、什么时候恢复"——重复代码、容易出错。`MacroAssembler` 把这些跨子系统的公用模式抽象为伪指令，每个 stub 生成器只写"语义"不写"寄存器操作"。

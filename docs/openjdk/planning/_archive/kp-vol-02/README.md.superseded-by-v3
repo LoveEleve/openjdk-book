@@ -1,0 +1,12 @@
+# vol-02 并发卷 — 知识规划
+
+> 4 域：Threads / Safepoint / VM Operations / Synchronization
+
+| # | 域 | 源码路径 | 方案 |
+|:--:|-----|------|:--:|
+| 9 | Threads | `runtime/thread.*` | 🔴A |
+| 10 | Safepoint | `runtime/safepoint.*` | 🔴A |
+| 11 | VM Operations | `runtime/vmOperations.*` | 🟡B |
+| 12 | Synchronization | `runtime/objectMonitor.*` + `runtime/synchronizer.*` | 🔴A |
+
+全部 4 域缺少知识规划。

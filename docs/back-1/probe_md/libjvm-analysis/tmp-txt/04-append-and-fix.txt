@@ -1,0 +1,185 @@
+Enhance then fix 04-interpreter to 01/02/03 standard.
+
+## ⛔ HARD RULE: ENHANCE EXISTING DOCS, DO NOT CREATE NEW ONES
+The directory already has 6 documents. You MUST read each existing doc and ADD content to it. NEVER create a new file with the same name pattern. The existing docs are:
+- 00-Interpreter-Overview.md (400 lines)
+- 01-TemplateInterpreter-Init.md (685 lines)
+- 02-Stack-Frame.md (418 lines)
+- 03-MethodEntry.md (330 lines)
+- 04-Bytecode-Dispatch.md (396 lines)
+- 05-InterpreterRuntime.md (328 lines)
+
+## Critical: avoid overlap with existing docs
+- 01-jvm-startup/18-Interpreter-Template-Dispatch.md (595 lines, ✅) — covers Template/DispatchTable internals from startup perspective
+- 12-cpu-layer/02-Interpreter.md (567 lines, 44/45) — covers x86 assembly-level dispatch, safepoint poll at CPU level
+- 04-interpreter is DIFFERENT: it focuses on the INTERPRETER RUNTIME — bytecode execution semantics, TOS state machine, method entry/exit protocol, invocation logic, counter-based JIT triggers. It's the "why" and "how" of bytecode interpretation, not the CPU-level templates.
+
+When writing, reference but DON'T duplicate 01/18 or 12/02. Link to them for details.
+
+---
+
+## Step 1: Append to README (don't touch §〇~§六)
+
+After existing §六 (6 docs), ADD:
+
+### §七 面试高频问题 × 文档直接对应
+| 面试问题 | 文档 | 为什么 |
+|----------|------|--------|
+| "JVM 怎么执行字节码？JIT 之前发生了什么？" | 01-Overview | 三道入口 + 执行模型 |
+| "模板解释器为什么比 switch-case 快？" | 02-Template §二 | dispatch O(1) vs O(n) |
+| "TOS 状态机是什么？为什么需要 10 个状态？" | 03-TOS | 栈缓存避免内存读写 |
+| "解释器怎么检测 safepoint？" | 04-Safepoint | polling page + testl |
+| "invokevirtual 怎么找到目标方法？" | 05-Invoke | CP cache + vtable dispatch |
+| "解释器怎么决定'该 JIT 了'？" | 06-Counters | InvocationCounter + BackEdgeCounter |
+| "finally 块怎么保证执行？异常表怎么走？" | 05 §exception | exception_table dispatch |
+| "synchronized 方法在解释器中怎么处理？" | 05 §monitor | monitorenter/exit + special entry |
+
+### §八 生产故障 × 文档诊断指引
+| 生产场景 | 症状 | 文档 | 诊断 |
+|---------|------|------|------|
+| 热方法一直跑在解释器 | perf 显示 TemplateInterpreter 时间 >80%, 无 JIT | 06 | 检查 -XX:TieredStopAtLevel |
+| 异常链路 P99 飙升 | 异常多的应用, Perf 显示大量 Runtime1 | 05 §exception | TraceExceptions + handler dispatch 分析 |
+| 解释器 safepoint 超时 | GC 日志 "Safepoint took 8000ms" | 04 | 检查循环内是否有 safepoint poll |
+| 同步方法性能退化 | jstack 大量 BLOCKED in monitorenter | 05 §monitor | 检查偏向锁延迟 + fat lock bypass |
+| 递归调用栈溢出 | StackOverflowError 丢失栈帧信息 | 01 §method entry | 检查 yellow/red zone |
+| at-breakpoint agent 导致 JIT 不触发 | -agentlib 后方法永远解释执行 | 06 | NotifyFramePop 永久锁定解释模式 |
+| 启动期间解释器编译慢 | 前 2 秒所有方法跑在解释器, CPU 100% | 02 + 06 | OSR vs full compilation 区别 |
+
+### §九 深度评审检查点（自检 6 篇）
+| # | 文档 | 生产故障可直接参考？ | 面试题可直接回答？ | 解释了"为什么这样设计"？ | sizeof / GDB 实测？ | 评级 |
+|---|------|:---:|:---:|:---:|:---:|:---:|
+| 00 | 00-Interpreter-Overview.md | ✅ (三板门) | ✅ (三道入口) | ⚠️ 常规描述为主 | ⚠️ | 🟡 |
+| 01 | 01-TemplateInterpreter-Init.md | ⚠️ | ✅ (dispatch) | ⚠️ 需补 why | ⚠️ | 🟡 |
+| 02 | 02-Stack-Frame.md | ⚠️ | ✅ (10 状态) | ⚠️ 需补 TOS + why per-TOS | ⚠️ | 🟡 |
+| 03 | 03-MethodEntry.md | ✅ (safepoint) | ✅ (poll) | ⚠️ safepoint poll | ✅ | 🟡 |
+| 04 | 04-Bytecode-Dispatch.md | ✅ (invoke) | ✅ (dispatch) | ⚠️ CP cache + exception | ⚠️ | 🟡 |
+| 05 | 05-InterpreterRuntime.md | ✅ (JIT trigger) | ✅ (counters) | ⚠️ 双计数器 | ✅ | 🟡 |
+
+### §十 深度审计问题 (≥12)
+Tier 1 入口模型 / Tier 2 模板 dispatch / Tier 3 TOS 状态机 / Tier 4 safepoint + invoke / Tier 5 计数器 + JIT 触发
+
+### §十一 和前后阶段的连接
+01(启动)→02(类加载)→03(对象)→04(解释器执行)→05(JIT)→06(GC)
+特别标注：04 和 01/18(启动期解释器) + 12/02(CPU 层 dispatch) 的边界
+
+---
+
+## Step 2: Fix ALL 6 🟡 docs
+
+### 00-Interpreter-Overview.md — add (existing 400 lines, enhance)
+- Production opener: agent pins VM to interpreter
+- Three entry doors + why 3 not 1
+- GDB breakpoints at each entry
+- Cross-ref to 01/18 and 12/02 for CPU-level details
+
+### 01-TemplateInterpreter-Init.md — add (existing 685 lines, enhance)
+- Production opener: TemplateInterpreter 45% CPU because CICompilerCount=1
+- Why StackObj (already may be in current doc — verify and expand if thin)
+- Bytecode→machine code GENERATION flow (not execution dispatch)
+
+### 02-Stack-Frame.md — add (existing 418 lines, enhance)
+- TOS state machine: 10 states + transition rules + why per-TOS not runtime check
+- TOS state transition Mermaid diagram
+- GDB: print _tos_in/_tos_out for 5 bytecodes
+
+### 03-MethodEntry.md — add (existing 330 lines, enhance)
+- Safepoint poll: where the poll lives (goto/if*/tableswitch/return), not every bytecode
+- Why not every bytecode (polling cache miss cost)
+- GDB: break at safepoint_poll_at()
+
+### 04-Bytecode-Dispatch.md — add (existing 396 lines, enhance)
+- invokevirtual resolution chain (Uninitialized→Resolved→Virtual)
+- invokeinterface vs invokevirtual vs invokestatic vs invokespecial
+- Exception handler dispatch: exception_table linear search
+- GDB: resolve_invokevirtual step-through
+
+### 05-InterpreterRuntime.md — add (existing 328 lines, enhance)
+- InvocationCounter + BackEdgeCounter: why two counters, decay on safepoint
+- JIT transition: frequency_counter_overflow → CompileBroker::compile_method
+- Production: TieredStopAtLevel=0 → 100x latency
+- GDB: break at frequency_counter_overflow()
+
+1. **Production opener**: "You attach an agent with `-agentlib:jdwp`. App latency spikes 3x — every method runs in interpreter because `NotifyFramePop` pinned it. The `at-breakpoint` flag in JavaThread says 'don't compile me, I'm being debugged.'"
+
+2. **Three entry doors**: normal (fresh method call) / exception (handler dispatch) / return (frame pop + re-enter caller). Show EACH entry path with file:line from templateInterpreter.cpp.
+
+3. **Why 3 entries, not 1**: normal=fast allocation+frame init. exception=no allocation, just dispatch to handler. return=no allocation, pop frame, restore caller's stack. Separating them avoids conditional branches in the hot code.
+
+4. **GDB**: break at each of the 3 entry points, step through frame creation/restoration.
+
+### 02-Template-Interpreter.md — add
+
+1. **Production opener**: "`perf top` shows TemplateInterpreter consuming 45% CPU. No JIT log. Because CICompilerCount=1 and queue backlog."
+
+2. **Why TemplateInterpreter is StackObj**: single-pass generation, allocates in CodeBuffer (CodeCache), destructor hooks for cleanup. All 6 bytecodes generate machine code during startup. Don't duplicate 01/18's struct analysis — reference it.
+
+3. **Bytecode → machine code generation flow**: `generate_normal_entry()` → `dispatch_next()` → `TemplateTable::template_for(opcode)` → `template->_gen()`. Show the GENERATION loop, not the EXECUTION dispatch (that's 01/18).
+
+4. **Why macro-driven** (DEF_ALL_INTERPRETER_TYPES, IRT_ENTRY macros): each bytecode → separate `generate_<bytecode>()` function with type-correct TOS allocation. Without macros: 200+ duplicate function signatures.
+
+5. **GDB**: break at generate_normal_entry(), step through dispatch table creation, verify table entries.
+
+### 03-TOS-State-Machine.md — add
+
+1. **Production opener**: "Method returns int but caller expects float — interpreter crashes with wrong stack format."
+
+2. **10 TOS states**: tos_illegal/tos_byte/tos_short/tos_char/tos_int/tos_long/tos_float/tos_double/tos_oop — each with exact `TosState` enum values.
+
+3. **Why per-TOS not runtime check**: Template::_tos_in/_tos_out pair is compile-time type safety. The template generator picks the right template variant statically — no runtime type tag checking. Compare: runtime check = 3 extra instructions per bytecode × 10^8 bytecodes/sec = massive overhead.
+
+4. **Transition rules**: `iload_0` → pushes int → tos changes from tos_illegal → tos_int. `iadd` → pops int+int → pushes int → stays tos_int. `i2f` → pops int → pushes float → tos changes tos_int → tos_float.
+
+5. **Mermaid**: TOS state transition diagram for a short bytecode sequence (iload_0, iload_1, iadd, istore_2).
+
+6. **GDB**: print Template::_tos_in/tos_out for 5 bytecodes, verify state machine.
+
+### 04-Interpreter-Safepoint.md — add
+
+1. **Production opener**: "GC log shows 'To suppress the safepoint wait, add -XX:+SafepointTimeout'. Stack shows all threads in TemplateInterpreter — because a tight loop `for(;;)` has no safepoint poll."
+
+2. **Where the poll lives**: NOT in every bytecode — only on `goto`/`if*`/`tableswitch`/`lookupswitch`/`return` bytecodes. Show the `testl` instruction injected by TemplateTable::safepoint_poll_at() (don't duplicate 12/02's CPU-level analysis).
+
+3. **Why not every bytecode**: polling page read = cache miss (~200 cycles). 10^8 bytecodes/sec × 200 cycles = 20M cycles/sec wasted on polling alone. Only poll at backward branches (loop back-edges).
+
+4. **`!SafepointSynchronize::is_synchronizing()`**: the fast-path check that skips the safepoint transition when no safepoint is pending.
+
+5. **GDB**: break at safepoint_poll_at(), step through testl, verify SIGSEGV on disarmed page.
+
+### 05-Interpreter-Invoke.md — add
+
+1. **Production opener**: "Reflection-based framework: `Method.invoke()` → methodOop dispatch → 6 layers of indirection → 50x slower than direct call."
+
+2. **invokevirtual resolution chain**: Uninitialized (needs resolution) → `LinkResolver::resolve_invokevirtual()` → Resolved (CP cache update) → cached Method* + entry point.
+
+3. **invokeinterface**: itable search → `InstanceKlass::itable_offset_slow()` (not in 12/02, this is runtime semantic). show the slot-level search.
+
+4. **invokestatic**: simplest — single target, no receiver check. `invokespecial`: direct superclass call, no vtable.
+
+5. **Exception handler dispatch**: `InterpreterRuntime::exception_handler_for_exception()` → `Method::fast_exception_handler_bci_for()` → exception table linear search → found: set bcp=handler_bci, push exception ref → not found: pop frame, re-throw to caller.
+
+6. **GDB**: break at resolve_invokevirtual, step through CP cache update. Break at exception dispatch, step through handler search.
+
+### 06-Counters-Tier.md — add
+
+1. **Production opener**: "`-XX:TieredStopAtLevel=0` makes every method interpreter-only. Production app latency spikes 100x."
+
+2. **InvocationCounter**: `MethodCounters::_invocation_counter` — starts at `InvocationCounter::count_limit`, decremented on each method entry. Hit 0 → method "warm" → `InterpreterRuntime::frequency_counter_overflow()` → `CompileBroker::compile_method()`. Carry = 0 at both TIERED and non-TIERED.
+
+3. **BackEdgeCounter**: `MethodCounters::_backedge_counter` — decremented on loop back-edges. Hit 0 → OSR compilation (compile the loop without waiting for full method). Carry = InvocationCounter threshold.
+
+4. **Why TWO counters**: invocation triggers JIT for the whole method (no wasted work). backedge triggers OSR for hot loops (don't wait 100,000 invocations). Without backedge: single hot method with a cold loop blocks JIT. Without invocation: OSR-compiled loop body doesn't help the rest of the method.
+
+5. **InvocationCounter decay**: `interpreter_invocation_count()` decrements on safepoint — keeps JIT from compiling methods that were hot 10 minutes ago. Decay rate = `InvocationCounter::count_limit / warmup_decay_factor` per safepoint.
+
+6. **JIT transition**: `frequency_counter_overflow()` → `CompileBroker::compile_method()` → method compiled → `Method::set_code(nmethod*)` → next invocation enters compiled code directly.
+
+7. **GDB**: break at frequency_counter_overflow(), print counter values before overflow. Break at CompileBroker::compile_method(), verify nmethod entry point.
+
+---
+
+## Step 3: Verify
+```
+sverklo_investigate(expand_graph=true) → codegraph query + callers → rg -n
+```
+
+## Report: per-doc old→new lines, what changed, audit rating change

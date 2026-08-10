@@ -1,0 +1,94 @@
+Produce 4 prompts for 13-launcher phase from README.md §四. Standard 10-section prompt format, matching 05-jit-compiler prompt quality.
+
+## README
+probe_md/13-launcher/README.md (~520 lines, all source claims verified)
+
+## Benchmark prompts
+probe_md/libjvm-analysis/05-jit-compiler/prompt-03-Chaitin-RegAlloc.md (360 lines, 50/60)
+probe_md/libjvm-analysis/09-native-interface/prompt-06-MethodHandles-invokedynamic.md (30/30)
+
+## Output files
+probe_md/13-launcher/prompt-00-Libjli-Overview.md
+probe_md/13-launcher/prompt-01-Argument-Parsing.md
+probe_md/13-launcher/prompt-02-JVM-Loading.md
+probe_md/13-launcher/prompt-03-Main-Class-Loading.md
+
+## Each prompt must contain (10-section structure):
+
+### §〇 Background & Production Scenarios
+Read from README §六. Use the EXACT error strings from emessages.h verified in README. REAL output: the exact error message the engineer sees at 3am.
+
+### §一 Task + Core Narrative + De-glamorization
+"This is NOT a C programming tutorial. We won't explain `argc`/`argv` or POSIX semantics. This is ENGINEERING documentation: how the `java` command works, in source-code-specific detail."
+"Reader completed 01-jvm-startup. They know JNI_CreateJavaVM. This document answers: what happens BEFORE JNI_CreateJavaVM is called."
+
+### §二 Standard Environment
+OpenJDK 11 slowdebug, 64-bit Linux. Source root: `src/java.base/share/native/libjli/` and `src/java.base/unix/native/libjli/`.
+
+### §三 Focus Source Files
+Table from README §四 per-doc sources. MUST use full repo paths (not bare filenames).
+
+### §四 Must-Deep-Dive Core Concepts (≥6 question groups)
+Each group: (a) what to look for, (b) exact file:line from README verification, (c) "why" counterfactual, (d) "what if X instead of Y".
+Must cover ≥2 of README §八 deep questions.
+
+### §五 Article Structure
+ASCII dependency diagram showing the doc's narrative arc: production opener → concept → source walkthrough → GDB → interview.
+
+### §六 Writing Requirements
+- Every paragraph opens with WHY, not WHAT
+- 3-5 lines source code evidence per major claim
+- Mermaid for: JLI_Launch flow (00), ParseArguments classification (01), dlopen/dlsym path (02), manifest→FindClass chain (03)
+- GDB session format throughout (real (gdb) prompts)
+- Beginner concept callout boxes matching README terminology table
+- Cross-reference to 01-jvm-startup §一 + 02-class-loading where relevant
+
+### §七 Output Format
+Narrative doc, not reference manual. Target: production scenario → concept → source → GDB → interview answer.
+
+### §八 Prohibited Behaviors (≥8)
+❌ Don't re-explain JNI_CreateJavaVM internals (01 covers) ⏤ only reference it
+❌ Don't explain C language basics (argc, argv, pointers)
+❌ Don't explain POSIX dlopen/dlsym semantics in depth (11-os-layer covers)
+❌ Don't explain JAR/ZIP file format internals (14-zip-jimage covers)
+❌ Don't make claims without source line numbers
+❌ Don't present libjli as a "simple launcher" — it's the gateway to the JVM
+❌ Don't skip counterfactuals
+❌ Don't write a man page for the `java` command
+
+### §九 Required Behaviors (≥8)
+✅ Every production scenario has: symptom → diagnostic command → fix
+✅ Every code path has source file:line
+✅ Every GDB session shows: (gdb) prompt → actual output
+✅ Beginner sidebars for: dlopen, dlsym, /proc/self/exe, JNI, manifest, classpath wildcard
+✅ Cross-reference to 01 §一 where libjli hands off to libjvm
+✅ Story-format interview answer at document end (from README §五)
+✅ Mermaid diagrams for key flows
+✅ Concrete numbers: bytes, milliseconds, cycles where applicable
+
+### §十 GDB Falsifiable Assertions (≥8)
+Format: stimulus (breakpoint @line), expected observation, GDB commands to verify.
+
+## Specific content per prompt
+
+### prompt-00-Libjli-Overview
+Focus: JLI_Launch full trace. Production: "Error: Could not create the Java Virtual Machine."
+Deep dives: (1) thread creation for JVM, (2) two-segment timing (libjli 0.05s vs libjvm 2s), (3) exit handling.
+Mermaid: 13/01 responsibility split.
+
+### prompt-01-Argument-Parsing
+Focus: ParseArguments classification. Production: "-XX:+UseZGC on JDK 11".
+Deep dives: (1) LaunchMode selection, (2) wildcard expansion mechanism, (3) -Xms dual parsing.
+
+### prompt-02-JVM-Loading
+Focus: dlopen/dlsym path. Production: "Could not find libjvm.so" / "wrong JVM version".
+Deep dives: (1) /proc/self/exe → JRE path, (2) jvm.cfg processing, (3) dlopen + dlsym + JNI function table binding.
+
+### prompt-03-Main-Class-Loading
+Focus: JAR manifest + FindClass. Production: "Could not find or load main class".
+Deep dives: (1) parse_manifest.c flow, (2) LauncherHelper indirection, (3) main() method signature verification.
+
+## Cross-reference rules
+- 02 references 00 (JVM loading is a step in JLI_Launch)
+- 03 references 00 (main class loading is the final step)
+- ALL reference 01-jvm-startup §一 (JNI_CreateJavaVM)

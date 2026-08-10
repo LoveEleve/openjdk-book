@@ -1,0 +1,31 @@
+# vol-01 地基卷 — 知识规划
+
+> 8 域：OS 抽象层 / Assembler / OOPs / Arguments / Logging / PerfData / JavaClasses / JNI
+
+## 域清单
+
+| # | 域 | 源码路径 | 方案 |
+|:--:|-----|------|:--:|
+| 1 | OS 抽象层 | `runtime/os.*` + `os/{linux,posix}/` | 🔴A |
+| 2 | Assembler | `asm/` + `cpu/x86/assembler_x86.*` | 🔴A |
+| 3 | OOPs | `oops/` (87文件) | 🔴A |
+| 4 | Arguments | `runtime/arguments.*` | 🟡B |
+| 5 | Logging | `logging/` | 🟡B |
+| 6 | PerfData | `runtime/perfData.*` | 🟡B |
+| 7 | JavaClasses | `classfile/javaClasses.*` | 🟡B |
+| 8 | JNI | `prims/jni.*` | 🟡B |
+
+## 当前状态
+
+全部 8 域缺少知识规划。现有大纲（outlines/vol-01/）为方法论早期的薄大纲，需先做知识规划后重写。
+
+## 待产出文件
+
+- `01-os-abstraction.md`
+- `02-assembler.md`
+- `03-oops.md`
+- `04-arguments.md`
+- `05-logging.md`
+- `06-perfdata.md`
+- `07-java-class-mirrors.md`
+- `08-jni.md`

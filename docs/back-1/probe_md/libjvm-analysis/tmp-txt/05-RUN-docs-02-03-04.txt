@@ -1,0 +1,257 @@
+Produce 02-Inline-Decision.md, 03-Chaitin-RegAlloc.md, 04-CodeCache-Sweeper.md from their prompts.
+
+## Prompts (read fully)
+prompt-02-Inline-Decision.md (366 lines)
+prompt-03-Chaitin-RegAlloc.md (360 lines)
+prompt-04-CodeCache-Sweeper.md (298 lines)
+
+## Prerequisite (already written)
+probe_md/libjvm-analysis/05-jit-compiler/01-C2-Pipeline.md
+
+## Verification SOP
+```
+sverklo_investigate(expand_graph=true) → codegraph query + callers → rg -n
+```
+
+---
+
+## 02-Inline-Decision.md — Content Arc
+
+### §〇 Production: "CodeCache 100% — inline depth unlimited"
+Real PrintInlining output:
+```
+@ 12 java.util.HashMap::hash (62 bytes)   inline (hot)
+  @ 4 java.util.Objects::hashCode (12 bytes)   inline (hot)
+    @ 4 java.lang.String::hashCode (49 bytes)   inline (hot)
+      @ 19 java.lang.String::value (5 bytes)   accessor
+    @ 8 java.lang.String::hashCode (49 bytes)   already compiled into a big method
+  @ 9 java.lang.Integer::hashCode (10 bytes)   inline (hot)
+```
+1 method → 2000+ inlined callees → single nmethod 2MB → CodeCache full → CompileBroker disabled → QPS -80%.
+Root cause: `MaxInlineLevel=9` default too deep for this call chain.
+
+### §一 Narrative + Beginner sidebars
+"内联不是优化——内联是优化器。把 callee 的代码搬到 caller 内 → C2 '看到'更多细节 → 消除跨方法冗余 → 发现常量传播 → 折叠整个分支。"
+
+Prerequisites: [01-Pipeline §三 IGVN + §四 Inline]. "本文展开 01 的 Phase 3."
+
+Sidebars: InlineTree, CHA, Type Profile, Hot Count, PrintInlining
+
+### §二 Standard Environment
+Same as 01 §二.
+
+### §三 Source files (6)
+doCall.cpp, inline.cpp, ciMethod.cpp, ciCallProfile.hpp, parse1.cpp, ciKlass.hpp
+Table with file + full path + role.
+
+### §四 — InlineTree: the recursive decision engine
+
+**4.1 The 5-step decision**
+`InlineTree::should_inline(ciMethod* callee, int bci)`:
+1. Force-inline? `callee->force_inline()` — @ForceInline annotation → YES
+2. Force-don't? `callee->should_not_inline()` — @DontInline, native method, synchronized (C2 can inline sync), abstract → NO
+3. Depth? `inline_level() > MaxInlineLevel(9)` → NO. Counterfactual: "Why 9? Because each call site is a tree node → depth 9 = 2^9 possible callees if each calls 2 others → 512 methods in 1 nmethod. Depth 10 = 1024 methods → 4x compile time. 9 is where compile time crosses compilation benefit."
+4. Size? `callee->code_size() > MaxInlineSize(35)` → NO unless frequency overrides. Counterfactual: "If no size limit: inline everything → CodeCache 10x bigger → sweeper overwhelmed → emergency flush storms."
+5. Frequency? `callee->call_count() / total_calls > InlineFrequencyRatio` → YES if called enough.
+
+**4.2 CHA (Class Hierarchy Analysis)**
+"When C2 sees `invokevirtual hashCode()`, it doesn't know which class's hashCode. CHA checks: how many concrete subclasses of the receiver's declared type exist?"
+
+- `ciKlass::is_leaf_type()` → 1 concrete class → monomorphic → inline as direct call + CHA guard.
+  Compiled code: `cmp [recv+klass_offset], expected_klass; jne uncommon_trap; call hashCode_direct`.
+  If guard passes (99.9% of calls): direct call, 1 cycle. If guard fails: deopt, ~5000 cycles.
+  Counterfactual: "Without CHA: every invokevirtual = vtable dispatch = 4 memory reads (klass→vtable→itable→entry) = ~20 cycles. With CHA: 1 cmp + direct call = 2 cycles. 10x faster for monomorphic calls."
+
+- `ciKlass::has_subklass()` → multiple subclasses → bimorphic → inline BOTH as guards.
+  `cmp [recv+klass], HashMap; je hashMap_code; cmp ArrayList; je arrayList_code; jmp vtable_dispatch`
+  Counterfactual: "Without bimorphic: monomorphic + deopt for TreeMap. TreeMap freq < 0.01% → deopt rate negligible. But if TreeMap freq = 40% → 40% deopt rate → recompile loop. Bimorphic handles 2 common cases without deopt."
+
+**4.3 Type Profile from C1 (ciCallProfile)**
+"CHA is blind to empirical frequencies. CHA says 'subclass X exists' → possible. Profile says 'subclass X was NEVER seen in 100000 calls' → don't guard for it."
+
+- `ciCallProfile::count()`: total invocations = counter_count + data_count
+- `ciCallProfile::receiver_count(i)`: how many times was Klass_i the receiver?
+- `ciCallProfile::receiver_projected_type(i)`: type of the i-th argument (not just receiver)
+
+Counterfactual: "If no profiling: C2 must guard for ALL possible subclasses. 5 subclasses → 5-way guard → 25 cycles per call. With profiling: 99.9% = HashMap → 1-way guard + slow path = 3 cycles + rare deopt."
+
+**4.4 Late Inline (post-IGVN)**
+After IGVN: some calls were optimized away (dead code). Remaining calls are the IMPORTANT ones.
+`PhaseIdealLoop::do_call()` registers late inline candidates → `Compile::inline_incrementally()`.
+
+Counterfactual: "If you inline BEFORE IGVN: you inline into a graph with redundant computations → 2x Nodes → slower IGVN. After IGVN: graph is clean → inline adds fewer Nodes → faster."
+
+**4.5 Downstream Cascade Effect**
+```
+process() { hash(a); hash(b); hash(c); hash(d); }
+```
+Before inline: 4 × `call hash()` = 4 × 40 cycles overhead = 160 cycles
+After inline: 4 × hashCode() code VISIBLE to IGVN. But hashCode() computes the SAME value 4 times → IGVN eliminates 3 of them → 1 × hashCode() = 40 cycles total.
+"That's 4x speedup from inline + IGVN together — not inline alone. Inline is a MULTIPLIER."
+
+**4.6 Production: PrintInlining log interpretation**
+Full guide: what each message means, what flags to change, what the consequences are.
+- `(hot)`: candidate, being considered
+- `already compiled into a big method`: inline elsewhere → won't inline again → prevents CodeCache explosion
+- `callee is too large`: size > MaxInlineSize → `-XX:MaxInlineSize=500`
+- `inline level too deep`: depth > MaxInlineLevel → `-XX:MaxInlineLevel=12`
+- `no static binding`: virtual call with multiple subtypes, CHA cannot monomorphize
+
+### §五 Mermaid: InlineTree recursion
+Decision tree showing each level: force-inline? → dont-inline? → depth check → size check → frequency check.
+
+### §六 GDB: 4 breakpoints
+Full (gdb) session: break at `InlineTree::should_inline()`, print callee + decision + reason.
+
+### §七 Story-format interview answer
+"内联为什么是 JIT 最重要的优化？"
+Answer with before/after instruction counts + cascade explanation. 90-second deliverable.
+
+---
+
+## 03-Chaitin-RegAlloc.md — Content Arc
+
+### §〇 Production: "perf top shows 48.67% spills"
+```
+Samples: 128K of event 'cycles', 4000 Hz
+  22.12%  [JIT compiled code]    mov %rax, -0x10(%rbp)    ← spill
+  18.34%  [JIT compiled code]    mov -0x10(%rbp), %rcx    ← fill
+   8.21%  [JIT compiled code]    mov %rsi, -0x18(%rbp)    ← spill
+```
+Method spends half its time moving data between registers and stack. Root cause: too many live ranges → register pressure > 16 → Chaitin spills → mov instructions dominate.
+
+### §一 Narrative + Beginner sidebars
+"x86_64 只有 16 个通用寄存器。C2 为每个临时值创建一个虚拟寄存器——可能 50+ 个。Chaitin 着色把虚拟寄存器映射到物理寄存器。能映射的：1 cycle。不能映射的：spill 到栈上，5 cycles + store-forwarding 延迟。"
+
+Sidebars: Virtual Register, Physical Register, Live Range, IFG, Spill, Coalesce, Simplify, Select
+
+### §二 Standard Environment
+
+### §三 Source files (6)
+chaitin.cpp, ifg.cpp, coalesce.cpp, live.cpp, output.cpp, reg_split.cpp
+
+### §四 — The CORRECT algorithm sequence
+
+**CRITICAL: This is HotSpot's ACTUAL order from chaitin.cpp:336-583, which differs from Chaitin 1982.**
+
+**Step 1: Live Ranges (line 418)**
+`PhaseLive::compute()` — for each Node: `_first_use` to `_last_use` = live range.
+Example: `int x = a+b; int y = c+d; return x+y;`
+x lives from `a+b` to `x+y`. y lives from `c+d` to `x+y`. Overlap at `x+y` → x and y need DIFFERENT registers.
+
+**Step 2: Virtual IFG (build_ifg_virtual)**
+For each vreg pair: do their live ranges overlap? If yes → IFG edge → cannot share a register.
+At this point: IFG uses VIRTUAL registers (50+). Many edges.
+
+**Step 3: AggressiveCoalesce (line 425)**
+`PhaseAggressiveCoalesce::coalesce_driver()` — for each `mov v1, v2` instruction: if v1 and v2 DON'T interfere → merge into one vreg → eliminate the mov.
+Example: `mov v1, v2; add v2, v3` → if v1+ v2 don't interfere → merge → `add v1, v3`. Saved: 1 instruction + 1 cycle.
+Counterfactual: "If you coalesce AFTER coloring: the `mov v1, v2` instruction was COUNTED as a register use in IFG → v1 and v2 each took up a GPR → 2 registers for what should be 1 → extra spill that didn't need to exist."
+Why AGGRESSIVE? At this stage, IFG is on VIRTUAL registers — less strict than physical IFG. Merge as many as possible before "hardening" to physical IFG.
+
+**Step 4: Physical IFG (build_ifg_physical)**
+NOW build IFG with real 16 GPR constraints. Virtual regs that survived coalesce → mapped to physical IFG nodes.
+
+**Step 5: Simplify (line 515)**
+Iteratively remove low-degree nodes from IFG. If a node has degree < 16 → push onto "simplified" stack → can ALWAYS color (guaranteed by Chaitin's theorem).
+
+**Step 6: Select (line 519)**
+Pop from simplified stack → assign first available color (GPR) not used by neighbors.
+If stack is empty AND uncolored nodes remain → all remaining nodes have degree ≥ 16 → CANNOT color → must spill.
+
+**Step 7: Spill + Split + ConservativeCoalesce (line 546-575)**
+Choose lowest-cost Node (not in a loop, not frequently used) → `PhaseChaitin::Split()` cuts its live range → creates new vreg → insert `mov reg→stack` (spill) + `mov stack→reg` (fill) instructions.
+ConservativeCoalesce: after spill → same idea but CONSERVATIVE: only merge if it WON'T force another spill.
+
+**Step 8: Loop back to Step 1**
+With new vregs from spill → recompute live ranges → rebuild IFG → retry.
+
+**Step 9: fixup_spills (line 680)**
+Insert actual x86 spill instructions into the compiled code.
+
+**Why THIS order, not textbook order?**
+Textbook Chaitin 1982: Build → Coalesce → Spill Cost → Simplify → Select. No physical IFG, no AggressiveCoalesce.
+HotSpot: Build virtual → AggressiveCoalesce → Build physical → Simplify → Select → Spill + ConservativeCoalesce.
+Key differences: (1) AggressiveCoalesce BEFORE physical IFG — eliminates movs at virtual stage when IFG is looser. (2) Separate physical IFG — maps vregs to real 16 GPR constraints. (3) ConservativeCoalesce AFTER spill — avoids inflaming the spill cycle.
+
+### §五 — Spill Cost Calculation
+`Node::_cnt` = estimated execution frequency. Loop-nested Node → _cnt higher → more expensive to spill.
+"If a Node lives entirely in a loop body: spilling it means 1 store + 1 load PER ITERATION. 10^6 iterations → 2M extra memory ops. Don't spill this Node."
+
+### §六 Mermaid: IFG with example live ranges
+Timeline of live ranges → IFG construction → coloring → spill.
+
+### §七 GDB: break at Register_Allocate()
+Step through AggressiveCoalesce → print vreg count before/after. Verify Simplify stack.
+
+### §八 Story-format interview answer
+"Chaitin 着色算法的核心思想？"
+Correct sequence + Coalesce-before-Coloring key insight.
+
+---
+
+## 04-CodeCache-Sweeper.md — Content Arc
+
+### §〇 Production: "CodeCache is full. Compiler has been disabled."
+EXACT log line. Cascade: 2min after startup → CodeCache 97% → Sweeper too slow → 100% → CompileBroker stops → QPS -80%.
+
+### §一 Narrative + Beginner sidebars
+"nmethod 是 JVM 中最复杂的对象生命周期——5 个状态，3 次 safepoint 同步。CodeCache = JVM 的'第二个堆'。"
+
+Sidebars: nmethod, CodeBlob, CodeCache segments, Sweeper, Zombie, Emergency Flush
+
+### §二 Standard Environment
+
+### §三 Source files (6)
+nmethod.cpp, codeCache.cpp, sweeper.cpp (NOT nmethodSweeper.cpp!), codeBlob.cpp, compiledMethod.cpp, compileBroker.cpp
+
+### §四 — nmethod Lifecycle + CodeCache Architecture
+
+**4.1 nmethod 5-state lifecycle**
+```
+alive → not_entrant → zombie → unloaded → freed
+```
+
+**alive**: Compiled and in use. Can be entered by any thread. Has `_state == alive`.
+
+**alive → not_entrant**: C2 recompiled this method (e.g., better profile data → different inline decisions → need nmethod v2).
+New version: `Method::set_code(nmethod_v2)` — swaps entry point atomically.
+Old version: `nmethod::make_not_entrant()` — sets `_state = not_entrant`. Existing threads CAN finish. New threads CANNOT enter.
+Counterfactual: "If you freed the old nmethod immediately: thread A is inside `getfield` in the old nmethod when CodeCache frees it → SIGSEGV. Two-stage shutdown (not_entrant→zombie) prevents use-after-free."
+
+**not_entrant → zombie**: All threads have exited. `nmethod::can_be_zombie()` returns true → `NMethodSweeper::possibly_flush()` marks `_state = zombie`.
+
+**zombie → freed**: `NMethodSweeper::sweep_code_cache()` at safepoint → `nmethod::flush()` → `CodeCache::free(nmethod)` → space reclaimed.
+
+**freed → ...**: Space reused for new compilation.
+
+**4.2 CodeCache 3-segment layout**
+```
+Segment 1: non-profiled (C1 L1 + C2 without profile data)
+Segment 2: profiled (C1 L2/L3 with profile data)
+Segment 3: non-method (adapters, stubs, BufferBlob)
+```
+Each segment has independent free list. Why 3 segments? C2 nmethod uses more space than C1 → separate allocation prevents C2 from starving C1.
+
+**4.3 NMethodSweeper: background cleanup**
+Sweep cycle: every `NmethodSweepFraction` (16) safepoints.
+At each cycle: check `_traversals` → `sweep_code_cache()` if threshold reached.
+sweep_code_cache(): iterate all nmethods → zombie? → `nmethod::flush()` → free.
+Why safepoint-based? Deferred cleanup: mark now, free later. "Concurrent free while threads might still hold references → ABA problem in free list."
+
+**4.4 Emergency flush**
+Trigger: `CodeCache::allocate()` fails → `CodeCache::needs_flushing()` → `NMethodSweeper::handle_full_code_cache()`.
+Aggressive sweep: skip normal traversal → sweep ALL → free more aggressively.
+Threshold: `-XX:StartAggressiveSweepingAt=80` (start at 80% CodeCache usage).
+
+**4.5 Speculative disconnect**
+`nmethod::speculative_disconnect()`: if deoptimized within first `SpecTrapLimit` invocations → mark as "unstable" → never recompile → saves CodeCache from recompilation loop.
+
+### §五 Mermaid: nmethod lifecycle diagram
+
+### §六 GDB: break at NMethodSweeper::sweep_code_cache()
+Print zombie count, verify flush.
+
+### §七 Story-format interview answer
+"CodeCache 满了怎么办？"
+Emergency flush → zombie → free → CompileBroker resumes.

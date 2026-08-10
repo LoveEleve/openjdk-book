@@ -1,5 +1,8 @@
 # 4.4 classLoader_init1 边界 + os_init_globals 空实现
 
+> **前置依赖**：[ch04/03 bytecodes_init](03-bytecodes.md) → [ch04/01 init_globals 总览](01-overview.md)
+> → **后续**：[ch04/05 trivial 函数合并](05-trivial-merged.md)
+
 4.3 节讲了 `bytecodes_init`——初始化 JVM 字节码表。`init_globals()` 接下来是 `classLoader_init1()` 和 `os_init_globals()`。
 
 `classLoader_init1` 只有 3 行，`os_init_globals` 只有 1 行。但 `classLoader_init1` 要用 `dlsym` 加载 zip 库，`os_init_globals` 是个空壳——真正的 OS 初始化在更早就做完了。
@@ -314,3 +317,10 @@ Threads::create_vm() [thread.cpp:3702]
 `os::init()` 获取时钟频率、页大小、CPU 数、内存信息等（`os_linux.cpp:5529`）。`os::init_2()` 初始化信号处理器、suspend/resume 支持、最小栈大小、libpthread、NUMA 等（`os_linux.cpp:5588`）。这些在 ch03/05 已经讲过。
 
 `os_init_globals()` 在 `init_globals()` 里只是个占位符——真正的 OS 初始化在更早就做完了。
+
+
+## 设计权衡
+
+**为什么 `classLoader_init1()` 只有 3 行？** 这三行用 `dlsym` 加载了 `libzip.so` 中的 `ZIP_Open/ZIP_Close` 等函数指针——这是 JVM 在运行时访问 zip 文件（jar/class 内部的压缩数据）的唯一通道。不直接连接 `libzip.so` 的原因和 ch01 的 `libjvm.so` 一样：安装位置不定。把 zip 库放在独立 .so 中允许系统升级 zlib 而不重新编译 JDK——HotSpot 只需要找到 `dlsym` 返回的函数指针即可。
+
+**为什么 `os_init_globals()` 是空函数？** 在 Linux 上，`os_init_globals()` 的声明是空的——真正的 OS 初始化（信号处理器、线程调度、页大小）在更早的 `os::init()`（Stage 1）和 `os::init_2()`（Stage 3）中已经完成。这个函数的存在是为了平台兼容——某些嵌入式或实时操作系统（RTOS）在 JVM 的业务系统（堆/解释器）初始化前需要额外的 OS 级设置。Linux 不需要，所以是空壳。

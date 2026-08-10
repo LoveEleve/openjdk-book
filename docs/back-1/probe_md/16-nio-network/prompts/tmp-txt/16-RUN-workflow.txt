@@ -1,0 +1,43 @@
+# 16-nio-network — Prompt 执行清单
+
+## 工作流程
+
+每批 2 篇 prompt → 逐篇 ran prompt 生成文档 → review 文档 → 通过后下一批。
+
+## 批次 1 (ready)
+
+```bash
+/jvm @probe_md/16-nio-network/prompts/prompt-00-Epoll-Selector.md
+```
+
+review 通过后:
+
+```bash
+/jvm @probe_md/16-nio-network/prompts/prompt-01-SocketChannel-Native.md
+```
+
+## 批次 2 (待生成 2 prompts)
+
+```
+prompt-02-DirectByteBuffer-IO.md (待创建)
+prompt-03-FileChannel-sendfile.md (待创建)
+```
+
+## 批次 3 (待生成 2 prompts)
+
+```
+prompt-04-Selector-Thread-Model.md (待创建)
+prompt-05-Socket-Options-Native.md (待创建)
+```
+
+## Review 标准
+
+- 每篇文档写完立即 review，不留欠债
+- 检查项: Mermaid 序列图、源码片段(file:line)、GDB/strace 验证、Interview 回答
+- 不符合标准 → 修复 → 再次 review → 通过后才继续
+
+## 参考
+
+- Phase 15 格式锚点: `probe_md/15-core-native/prompts/prompt-00-System-Arraycopy.md`
+- README 源数据: `probe_md/16-nio-network/README.md`
+- Memory: `/root/.codebuddy/projects/data-workspace-openjdk-cut-new/memory/MEMORY.md`

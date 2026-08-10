@@ -1,0 +1,85 @@
+Fix ALL gaps from 03-object-model deep review (48/60 → target 54+).
+
+## Verification SOP
+```
+sverklo_investigate(expand_graph=true) → codegraph query + callers → rg -n
+```
+
+---
+
+## 🔴 GAP 1: Synchronization Primitives — major expansion in 01-markOop or new doc 07
+
+Current: ObjectMonitor fields are names in a mermaid diagram only. No inflate() walkthrough. No epoch/BulkRebias. No BasicLock code path.
+
+### Expand 01-markOop.md §二 (or add §六) with:
+
+1. **ObjectMonitor internals** (objectMonitor.hpp + .cpp):
+   - `_owner`: current thread holding the lock (NULL if free)
+   - `_EntryList`: queue of threads waiting to acquire (OS-level park/unpark)
+   - `_WaitSet`: queue of threads in `wait()` — notified → moved to EntryList
+   - `_cxq` (contention queue): CAS-insert queue for first-time contenders
+   - Flow: CAS _owner(NULL, Self) → success (fast path) / fail → push Self to _cxq → park
+
+2. **ObjectSynchronizer::inflate() walkthrough** (synchronizer.cpp file:line):
+   - Check if markWord is already inflated → return existing monitor
+   - Allocate ObjectMonitor from global free list (`omAlloc()`)
+   - CAS `set_displaced_markword` with the original lightweight header
+   - CAS object's markWord to `(ObjectMonitor* | markOop::monitor_value)`
+   - If CAS fails (another thread inflated first) → return that thread's monitor, free mine
+
+3. **BasicLock code path** (basicLock.hpp + synchronizer.cpp):
+   - `BasicLock::displaced_header()`: reads `_displaced_header` field
+   - Lock: `ObjectSynchronizer::fast_enter(oop, BasicLock*)` → read obj's markWord → save as displaced → CAS obj's markWord = BasicLock ptr
+   - Unlock: read displaced header from BasicLock → CAS obj's markWord = displaced
+   - Recursive lock detection: displaced == 0 → already own this lock (recursion count)
+
+4. **Biased locking epoch + BulkRebias/BulkRevoke** (biasedLocking.cpp):
+   - Epoch: per-Klass counter, incremented on safepoint → all biased oops invalidated
+   - BulkRebias: epoch changed → all biased locks in this class become "waiting for rebias" → CAS to new thread's bias on next access, no STW needed
+   - BulkRevoke: rebias not possible → safepoint → all biased oops set to unbiased → objects revert to lightweight lock path
+   - Revocation of single biased lock: safepoint → walk stack to find BasicLock's displaced → restore markWord → epoch check fails → rebias or revoke
+
+5. **GDB**: break at `ObjectSynchronizer::inflate()`, step through CAS, verify markWord before/after. Break at `fast_enter()`, step through CAS, show displaced header value.
+
+---
+
+## 🟡 GAP 2: CompressedOops Assembly Depth — expand 05-CompressedOops
+
+### Add §三 assembly-level encoding:
+- Zero-based decode: `mov %rax, %r10; shl $3, %r10` (1 cycle per instruction)
+- Base-offset decode: `lea (%r12, %r10, 8), %rax` (1 cycle, but adds dependency on heapbase register)
+- Why zero-based saves the `lea` register dependency → better ILP (Instruction Level Parallelism)
+
+### Add §四 narrowKlass independent encoding:
+- `_narrow_klass._base` and `_narrow_klass._shift` are INDEPENDENT from narrowOop's
+- narrowKlass compact header: object's _klass field is 4 bytes (not 8) → `CompressedKlassPointers::decode()` → `(Klass*)(base + (narrow << shift))`
+- Why narrowOop can be zero-based but narrowKlass can't: Klass objects in Metaspace (outside heap) → base register must point to Metaspace start
+- The 3 actual encoding modes (not 2): zero-based, disjoint-base, heap-based — with concrete decision logic from `Universe::set_narrow_klass_range()`
+
+---
+
+## 🟡 GAP 3: Allocation Edge Cases — expand 02-oop-layout or 06-allocation
+
+### Add to 02 or 06:
+
+1. **Eden CAS contention**: `G1CollectedHeap::mem_allocate()` → `attempt_allocation()` → `par_allocate_during_gc()` with CAS on `HeapRegion::_top`. Show the CAS instruction and the retry loop. What happens with 128 threads CAS-ing the same Eden top pointer?
+
+2. **GC safepoint collision**: Thread mid-`MemAllocator::allocate()` when GC safepoint fires → `SafepointSynchronize::block()` → thread parks at safepoint → GC moves objects → TLAB pointers invalidated → after GC, thread resumes but TLAB is gone → `allocate_inside_tlab_slow` detects retired TLAB → refill new TLAB
+
+---
+
+## 🟡 Minor Fixes (from -1pt items)
+
+### 01-markOop.md: low-32-bit semantics
+Add §1.2 footnote: "低 32 位用于分代 GC（_gc_age 4 bits）、偏向锁 epoch、锁状态。在 CompressedOops 启用时，markOop 的高 32 位可能为 0。markOop 的大小永远是 sizeof(void*) = 8 bytes。"
+
+### 02-oop-layout.md: instanceOop in hierarchy
+Add instanceOopDesc to the mermaid diagram alongside arrayOopDesc (parallel branches from oopDesc)
+
+### ALL DOCS: add prerequisite header
+Add to each doc's header: "前置阅读: 01-markOop → 02-oop-layout → 03-Klass-Family" dependency chain
+
+---
+
+## Report
+Per-gap: what changed, new lines, score impact estimate.

@@ -1,0 +1,285 @@
+Produce 05-Deoptimization.md, 06-OopMap-GC-Roots.md, 07-Profile-Data-Flow.md — the 3 BRIDGE docs connecting JIT to interpreter, GC, and C1.
+
+## Prompts (read fully)
+prompt-05-Deoptimization.md (308 lines)
+prompt-06-OopMap-GC-Roots.md (291 lines)
+prompt-07-Profile-Data-Flow.md (322 lines)
+
+## Prerequisites (already written)
+probe_md/libjvm-analysis/05-jit-compiler/01-C2-Pipeline.md
+probe_md/libjvm-analysis/05-jit-compiler/02-Inline-Decision.md
+probe_md/libjvm-analysis/05-jit-compiler/03-Chaitin-RegAlloc.md
+probe_md/libjvm-analysis/05-jit-compiler/04-CodeCache-Sweeper.md
+
+## Verification SOP
+```
+sverklo_investigate(expand_graph=true) → codegraph query + callers → rg -n
+```
+
+---
+
+## 05-Deoptimization.md — Content Arc
+
+### §〇 Production: "200 deopt/s — CPU 50% in deopt blob"
+Real PrintDeoptimizationDetails:
+```
+Uncommon trap happened in java.util.HashMap::putVal
+  @ 42 java.util.HashMap::hashCode (5 bytes)
+  reason: class_check
+  action: maybe_recompile
+  trap_request: 5
+```
+200/s deopt → 50% CPU in deopt blob → recompile loop → CodeCache thrashing. Root cause: unstable class hierarchy — CHA guard keeps breaking.
+
+### §一 Narrative + Beginner sidebars
+"去优化是 C2 的'逃生舱'——C2 做了一个乐观假设（'receiver 总是 HashMap'），运行时被打破 → 跳回解释器 → 从 16 个 x86 寄存器中重建完整的 Java 栈帧。"
+
+Prerequisites: [01-Pipeline], [06-OopMap] (consumed during frame rebuild). "如果读者还没读过 06，先读 06——OopMap 是去优化的蓝图。"
+
+Sidebars: Deopt, Uncommon Trap, Frame Rebuild, ScopeDesc, DeoptimizationBlob
+
+### §二 Standard Environment
+
+### §三 Source files (6)
+deoptimization.cpp, sharedRuntime.cpp, frame_x86.cpp, compile.cpp (uncommon trap insertion), oopMap.cpp (consumed during rebuild), scopeDesc.cpp
+
+### §四 — The Full Deopt Journey
+
+**4.1 Deopt triggers (3 types)**
+1. **Uncommon trap**: C2's assumption fails at runtime.
+   - `class_check`: CHA guard — expected HashMap, got TreeMap
+   - `null_check`: never-null assumption — got null
+   - `range_check`: loop range eliminated — index out of bounds
+   - `unstable_if`: branch prediction failure
+   Counterfactual: "Without uncommon traps: C2 must generate SLOW code for every edge case — even the 0.01% case. With traps: common case gets FAST code. Rare case → deopt → interpreter → no crash, just slow."
+
+2. **OSR deopt**: OSR-compiled loop no longer valid (class loaded a new subclass → CHA invalidates).
+
+3. **JVMTI force-deopt**: Agent calls PopFrame or ForceEarlyReturn → all compiled frames for that method must deopt.
+
+**4.2 Frame rebuild: the CORE mechanism**
+Deoptimization::fetch_unroll_info() reads ScopeDesc + OopMap → creates UnrollBlock.
+
+Compiled frame before deopt:
+```
+R10 = oop reference to HashMap    (from OopMap: bit 0 = 1 → oop)
+RDI = int value 42                 (from OopMap: bit 1 = 0 → non-oop)
+RSI = float 3.14                   (from OopMap: bit 2 = 0 → non-oop)
+[RSP+0x10] = oop String "hello"   (from OopMap: stack slot 0 = oop)
+```
+
+Deopt reads OopMap for this PC:
+- `OopMapSet::find_map_at_offset(deopt_pc_offset)` → OopMap*
+- Bitmask: 0b00001... (bit 0=1 → R10 oop, bit 1=0 → RDI non-oop, stack slot 0=1 → oop)
+
+Deopt reads **ScopeDesc** for TYPE info:
+- OopMap only says WHICH registers have oops. ScopeDesc says what TYPE the non-oop registers hold.
+- `ScopeDesc::locals()` → [0]=oop(java.util.HashMap), [1]=int, [2]=float, [3]=oop(java.lang.String)
+
+Deopt writes interpreter frame:
+```
+locals[0] = oop(HashMap)    ← from R10 (OopMap says oop)
+locals[1] = int(42)          ← from RDI (ScopeDesc says int)
+locals[2] = float(3.14)     ← from RSI (ScopeDesc says float)
+locals[3] = oop("hello")     ← from [RSP+0x10] (OopMap says oop)
+```
+
+Counterfactual: "Without ScopeDesc: deopt can reconstruct GC roots (OopMap) but CANNOT reconstruct the expression stack or locals. The interpreter needs exact types to continue execution — ScopeDesc provides the type map."
+
+**4.3 DeoptimizationBlob execution**
+3 unpack variants:
+1. `unpack_uncommon_trap`: trap happened at call site — do NOT re-execute the trapping instruction → jump to interpreter at handler bci
+2. `unpack_reexecute`: deopt happened mid-instruction → re-execute the entire bytecode
+3. `unpack_UncommonTrap_and_Reexecute`: compound — trap AND re-execute
+
+Why 3 variants? "If CHA guard fails at `invokevirtua hash()`: trap triggered INSIDE the callee's compiled code. Don't re-execute the invoke — jump to interpreter handler. If deopt during `getfield #value`: the field was optimized away (scalar replaced) → need to re-execute the getfield in interpreter."
+
+**4.4 Recompilation decision**
+After deopt: C2 may recompile.
+- `action: maybe_recompile` → update profile data → recompile if SpecTrapLimit not exceeded
+- `action: none` → deopt was "normal" (e.g., class loading), no recompile needed
+- `action: make_not_entrant` → nmethod permanently deoptimized → never recompile
+
+**4.5 SpecTrapLimit: preventing recompile loops**
+If deopt count for a method exceeds `SpecTrapLimit` (default: method entry + 1) → mark method as "never compile again" → `Method::set_not_compilable()`.
+Counterfactual: "Without SpecTrapLimit: CHA guard breaks 200 times/s → 200 recompiles/s → CompileBroker queue grows unbounded → compile threads starve → JIT effectively disabled."
+
+### §五 Mermaid: Frame rebuild from compiled to interpreter
+
+### §六 GDB: break at Deoptimization::fetch_unroll_info()
+Print deopt reason + PC + OopMap bitmask.
+
+### §七 Story-format interview answer
+"去优化是什么？"
+"Code compilation with optimistic assumption → assumption breaks → frame rebuild → interpreter re-entry."
+2 parts: WHY C2 makes assumptions, HOW JVM recovers when they break.
+
+---
+
+## 06-OopMap-GC-Roots.md — Content Arc
+
+### §〇 Production: "GC crash — bad oop in compiled method"
+hs_err: `G1ParScanThreadState::copy_to_survivor` — bad oop 0x000000007f8b2a10.
+GC uses OopMap from compiled frame → OopMap says "R10 = oop" → GC reads R10 → invalid pointer → crash.
+
+### §一 Narrative + Beginner sidebars
+"编译后的代码没有'局部变量表'了——值分散在 16 个寄存器和栈槽中。GC 怎么找到哪些是对象引用？OopMap。一个每个 safepoint 的压缩位掩码——'在这个 PC 偏移处，R10 存的是 oop，RDI 存的是 oop，[RSP+0x18] 存的是 oop'。每个比特 = 1 个 oop。没有列表，没有遍历，没有扫描——GC 解码位掩码在每次 safepoint 找到所有 live oop。"
+
+**CRITICAL: OopMap is a COMPILER artifact, not a deopt artifact.** OopMaps are generated during C2's Output phase (PhaseOutput::install_code()). Deopt CONSUMES OopMaps — but OopMaps exist for GC, not for deopt. This is why [06-OopMap] is logically BEFORE [05-Deopt] in the reading order.
+
+Prerequisites: [01-Pipeline §九(Output)], [12-cpu-layer/01-Frames] (register convention).
+
+Sidebars: OopMap, Bitmask Encoding, GC Root, OopMapSet, OopMapValue, DebugInfoRecorder
+
+### §二 Standard Environment
+
+### §三 Source files (5)
+oopMap.cpp (compiler/, NOT code/), oopMap.hpp (compiler/), debugInfoRec.cpp, output.cpp, nmethod.cpp
+
+### §四 — OopMap Generation + Consumption
+
+**4.1 OopMap generation at compile time**
+`PhaseOutput::install_code()` calls → `DebugInformationRecorder::describe_scope()` → `MachNode::fill_new_mach_node()` → `OopMapSet::add_gc_map()`.
+
+Each safepoint generates 1 OopMap. A safepoint occurs at:
+- Every method call (MC-safe: all registers are stable at call point)
+- Every backward branch (loop back-edge — for long-running loops)
+
+Contents of 1 OopMap:
+```
+OopMap for pc_offset=0x2a:
+  [0] derived_oop_base(R10), oop_loc(R10)  → R10 = Object* AND R10 = base for interior pointer
+  [1] oop_loc(RDI)                           → RDI = Object*
+  [2] stack(0x18)                             → [RSP+0x18] = Object*
+```
+
+Encoding format: OopMapValue stream → delta-compressed → ~2 bytes per oop value.
+Why compressed? "List: 5 oops × 8B pointer each = 40B. Bitmask: 5 oops × 2B compressed = 10B. With 1M nmethods × avg 5 safepoints = 5M OopMaps × 30B saved = 150MB CodeCache savings."
+
+**4.2 OopMapValue types**
+- `oop_loc`: register/stack slot holds a regular oop
+- `derived_oop_loc`: register holds derived pointer (base = another register's oop + offset). Generated when C2 optimizes `array[i]` → pointer arithmetic on oop → interior pointer. GC must update BOTH the derived and the base.
+- `narow_oop_loc`: narrow oop slot (compressed oop). 4 bytes not 8.
+- `callee_saved_reg`: callee-saved register that was saved BEFORE compilation → holds oop across calls
+- `stack_slot`: value on Java operand stack (not in local variable table)
+
+**4.3 OopMap consumption by GC**
+GC thread walks compiled frame: `frame::oops_do(OopClosure*)`.
+```
+compiled_frame::oops_do(OopClosure* f):
+  1. nmethod = compiled_frame::cb()->as_nmethod()
+  2. pc_offset = compiled_frame::pc() - nmethod::code_begin()
+  3. OopMap* map = nmethod::oop_map_set()->find_map_at_offset(pc_offset)
+  4. for each OopMapValue in map:
+       reg = OopMapValue::reg()
+       stack_slot = OopMapValue::stack_slot()
+       if reg != VMRegImpl::Bad():
+         oop = compiled_frame::register_addr(reg)
+         f->do_oop(&oop)
+       if stack_slot != -1:
+         oop = compiled_frame::stack_addr(stack_slot)
+         f->do_oop(&oop)
+```
+
+**4.4 OopMap consumption by Deopt (cross-reference)**
+Deopt uses OopMap differently: reads oop locations + uses ScopeDesc for TYPE info. See [05-Deopt §4.2].
+
+**4.5 Derived OopMap: interior pointer tracking**
+When C2 generates `lea (R10, 12), R11` (interior pointer = array[3] = base + 12):
+- OopMap says: R10 = oop_loc (base), R11 = derived_oop_loc(R10, 12)
+- GC moves R10's object → computes new R11 = new_base + 12
+- GC updates BOTH R10 and R11 in the frame
+
+Counterfactual: "Without derived_oop: GC moves object → R11 (interior pointer) points into freed memory → SIGSEGV on next array access."
+
+**4.6 Production: bad oop diagnosis**
+hs_err with bad oop in compiled method → `-XX:+VerifyOops` → `-XX:CompileCommand=exclude,<crashing method>` → restart → if still crashes: OopMap generation bug → report to OpenJDK.
+
+### §五 Mermaid: OopMap bitmask encoding + GC consumption flow
+
+### §六 GDB: break at OopMapSet::add_gc_map()
+Print pc_offset + number of oop values + verify bitmask encoding.
+
+### §七 Story-format interview answer
+"GC 怎么找到 JIT 代码中的对象引用？"
+"GC 解码 OopMap 位掩码——在编译时每个 safepoint 生成。每个比特位 = 1 个 oop 位置。没有扫描，没有猜测——精确到寄存器级别。"
+
+---
+
+## 07-Profile-Data-Flow.md — Content Arc
+
+### §〇 Production: "Profile pollution → wrong inline → CodeCache explosion"
+C1 collected profile during WARMUP: receiver = HashMap 100%. Production steady-state: receiver = TreeMap 40%, HashMap 60%. But MDO reached maturity (500+ calls) during warmup → profile says "100% HashMap" → C2 generates monomorphic guard → production: 40% deopt rate → recompile → deopt → recompile.
+
+### §一 Narrative + Beginner sidebars
+"C2 不是瞎子——透过 ci/ 目录它能看到 C1 在解释器中收集的 profile 数据。ciMethod、ciKlass、ciCallProfile——C2 的'市场调研部门'。"
+
+Prerequisites: [01-Pipeline], [02-Inline §三/CType Profile]. "本文是 02 的前传——profile 从何而来。"
+
+Sidebars: MethodData, ciMethod, ciKlass, ciCallProfile, Profile Maturity, ciTypeFlow
+
+### §二 Standard Environment
+
+### §三 Source files (9)
+ciMethod.cpp, ciKlass.cpp, ciCallProfile.hpp, ciTypeFlow.cpp, ciObjectFactory.cpp, ciMethodData.cpp, methodData.cpp, methodData.hpp, ciEnv.cpp
+
+### §四 — The 4-Layer Pipeline
+
+**4.1 Layer 1: C1/Interpreter — Counter Accumulation**
+Each method has a `Method::_method_data` pointer → `MethodData*` (MDO).
+
+Data collected per invocation:
+- `invocation_counter`: total times this method was called
+- `backedge_counter`: total times any loop back-edge was hit
+- `call_site_data[i]`: for each call site (bci): call count + receiver type distribution
+- `branch_data[i]`: for each branch: taken count + not_taken count
+- `type_profile_data[i]`: for each checkcast/instanceof: Klass* distribution
+
+Storage: compact `MethodData::DataLayout` — variable-length records, ~1-5 bytes each.
+
+**4.2 Layer 2: MethodData — MDO Storage + Maturity**
+MDO lifecycle: `create_mdo()` at first invocation → allocate from C-Heap (shared space) → grow as more data collected → `set_mdo()` → used by CI.
+
+Maturity: `MethodData::profile_maturity()`:
+- `_invocation_counter >= MatureInvocationLimit (500)` → mature
+- OR `_backedge_counter >= MatureInvocationLimit` AND all call sites have ≥1 data → mature
+- NOT mature → C2 ignores the MDO → compiles without profile (only CHA + heuristics)
+
+Counterfactual: "Without maturity: 10 warmup calls → HashMap 100% → C2 assumes HashMap always → production sees TreeMap → deopt loop. With maturity: MDO stays immature until 500+ calls → real traffic → 60% HashMap 40% TreeMap → C2 uses bimorphic guard OR doesn't inline."
+
+**4.3 Layer 3: ci/ Directory — Compiler Interface Bridge**
+`ciObjectFactory::create_ciObject()` wraps VM objects for C2:
+- `Method*` → `ciMethod*` — method metadata, bytecodes, exception handlers
+- `Klass*` → `ciKlass*` — class hierarchy, vtable, subtype checks
+- `MethodData*` → `ciMethodData*` — profile data, counter decay
+- `ciCallProfile::ciCallProfile(ciMethod* callee, int bci)` — wraps MethodData at specific call site
+
+Key: ci objects are SNAPSHOTS — created at compile time, immutable for the duration of compilation. Even if the VM loads a new class mid-compilation, ciKlass won't change. (Handled by uncommon trap if CI snapshot is stale.)
+
+**4.4 Layer 4: C2 Parse + Inline — Profile Consumption**
+`Parse::Parse(JVMState* caller, ciMethod* callee)` → reads ciMethod → reads ciMethodData → uses for:
+- InlineDecision: `ciCallProfile::receiver_count(0)` = 150000 calls to HashMap
+- TypeFlow: `ciTypeFlow::flow_types()` → uses type profile to narrow `bottom_type()` for GVN/IGVN
+- BranchFreq: `branch_data[i].taken_count` / `branch_data[i].total` → C2 reorders blocks
+
+**4.5 Profile Maturity + GC Interaction**
+MDO is in Java heap (C-Heap in JDK 11). GC compacts → MDO pointer is stable.
+`Method::cleanup_inline_caches()` at class unloading: removes MDO entries for unloaded classes → prevents stale data.
+But MDO is NOT freed (only on Method release from metaspace).
+
+**4.6 Production: profile pollution diagnosis**
+```
+-XX:+PrintCompilation -XX:+PrintInlining -XX:+PrintDeoptimizationDetails
+```
+Find methods with: many deopts + recompile_count > 3 → profile pollution.
+Fix: `-XX:CompileCommand=dontinline,<call site>` OR increase `MatureInvocationLimit` OR use `-XX:TieredStopAtLevel=0` to prevent C2 from reading bad profile.
+
+### §五 Mermaid: 4-layer pipeline
+C1/Intepreter → MethodData → ci → C2 Parse+Inline
+
+### §六 GDB: break at ciCallProfile::ciCallProfile()
+Print receiver counts + call count + maturity.
+
+### §七 Story-format interview answer
+"C1 的 profile 怎么到 C2？"
+"4 层：C1 解释器计数器累加 → 写入 MethodData → ci/ 目录包装 MDO 为 ciCallProfile → C2 Parse 和 InlineTree 读取。关键是 Maturity：500+ 调用后才被认为是'成熟的' profile——不成熟的 profile C2 直接忽略，防止基于不足数据做错误内联决策。"

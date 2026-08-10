@@ -1,0 +1,40 @@
+Deep-review all 02-class-loading documents. Phase 02 is the bridge: 01 created the JVM, 02 loads the first class into it.
+
+## Benchmark
+probe_md/libjvm-analysis/01-jvm-startup/ (when fresh from fix — 26 docs, 11569 lines, ~48/55)
+
+## Review dimensions
+
+### 1. Reading experience (10 pts)
+As a reader who finished 01 and starts 02: does it feel like a natural continuation? Can they follow the beginner path without getting lost in ClassFileParser internals?
+
+### 2. Production grounding (10 pts)
+- 8 production scenarios in README §七 — does each mapped doc actually contain diagnostic steps?
+- Is Metaspace OOM the most common production class-loading failure? Is the trace complete?
+- Class leak (redeploy in app server) — does the doc show actual detection (jcmd + GC log + heap dump)?
+
+### 3. Interview readiness (10 pts)
+12 questions in §六 — each mapped to a doc that actually answers it? Any classic class-loading interview question missing?
+
+### 4. Beginner-friendliness (10 pts)
+- ClassFileParser is inherently complex (byte reading, u2/u4 parsing, ConstantPool building). Where does a Java engineer get lost?
+- Terminology: verifier/linker/resolver often confused — does the phase maintain clear distinctions?
+
+### 5. Design rationale density (10 pts)
+- ≥5 "why" per doc? Or are docs "what" heavy?
+- Classic questions: why two-phase ConstantPool/Cache? why verifier before linker? why SystemDictionary (HashMap) not just pointer?
+
+### 6. Against 01 benchmark (5 pts)
+- GDB session density, Mermaid density, source evidence density
+- Container/K8s awareness — since we added it to 01, did 02 learn from that?
+
+### 7. Missing topics (5 pts)
+- Is there a doc for SystemDictionary initialization?
+- Is CDS (Class Data Sharing) covered enough to explain -Xshare:dump?
+- JVMTI class load/unload hooks — mentioned?
+
+### Phase-wide diagnosis
+- Total score /60
+- Top 3 gaps
+- "If only 5 docs" recommendation
+- Best single paragraph in the entire phase

@@ -1,0 +1,147 @@
+Fix ALL gaps from 02-class-loading deep review (41.5/60 → target 50+). Priority: Verifier > JVMTI > Container > missing why-sections.
+
+## Verification SOP
+```
+codegraph query + callers → rg -n → verify every claim
+```
+
+---
+
+## 🔴 GAP 1: 13-Verifier.md — full rewrite (297 lines → 600+)
+
+Current: 297 lines, 0 GDB sessions, ~1 "why", no production scenario opener, C++ struct dump without field explanations.
+
+### Rewrite with:
+
+1. **Production opener**: "You upgrade Guava jar. App starts, crashes with `VerifyError: Expecting a stackmap frame at branch target 12`. The new jar was compiled with Java 17, your JVM is Java 11 — the verifier rejected frames your old verifier didn't require."
+
+2. **The problem the verifier solves**: "Without verifier, a malicious .class could: jump past array bounds check, bypass private access, corrupt operand stack and overwrite the interpreter frame, leak memory from stale references." Concrete exploit examples.
+
+3. **4-check chain** (file:line from verifier.cpp):
+   - Check 1: Magic number + version numbers (`ClassFileParser::verify_class_name` at parse time)
+   - Check 2: Structural (array bounds, constant pool indices, access flags) — `Verifier::verify()` entry
+   - Check 3: Bytecode (operand stack depth, type consistency, jump targets) — `Verifier::verify_method()`
+   - Check 4: StackMapTable (verify stack frames at branch targets) — `ClassVerifier::verify_stackmap_table()`
+
+4. **Split verifier vs StackMapTable verifier**: Why JVM has TWO verifiers (split verifier for <= JDK 6 classfiles, stackmap-based for >= JDK 7) — the inference algorithm limitation, the performance trade-off.
+
+5. **StackMapTable internals**: How `StackMapTable_attribute` stores verification_type_info, how `same_frame`/`same_locals_1_stack_item_frame`/`full_frame` compress state, why 7 type tags exist (ITEM_Object takes ConstantPool index).
+
+6. **Type inference in the split verifier**: Worklist algorithm — seed with (frame, program counter) pairs, infer types from opcode semantics, propagate through branches, detect contradictions → VerifyError.
+
+7. **Class hierarchy verification**: `is_assignable_from()` check — when the verifier proves `invokevirtual` receiver IS the expected type or subtype.
+
+8. **≥6 design rationales**:
+   - Why StackMapTable instead of inference everywhere (JSR 202: faster verification — check, don't infer)
+   - Why keep split verifier for old classfiles (backward compatibility, no stackmaps available)
+   - Why verification happens at load time not runtime (fail fast, attacker can't defer the attack)
+   - Why `jsr`/`ret` prohibited in >=51.0 (stack map merge is NP-hard with subroutines)
+   - Why `athrow` requires stack to be empty except for the exception reference
+   - Why final fields can't be written outside `<init>` (verifier enforces this)
+
+9. **15 GDB sessions** (not just breakpoints — full `(gdb)` output):
+   - Break at `ClassFileParser::verify_legal_class_name()`, verify magic number
+   - Break at `ClassVerifier::verify_class()`, step into verify_method
+   - Break at `Verifier::is_eligible_for_verification()`, check `should_verify_for()`
+   - Break at `ClassVerifier::verify_stackmap_table()`, dump `_stackmap_frames` array
+   - Break at type mismatch detection, show error message construction
+
+10. **Mermaid**: 4-check pipeline → split vs stackmap decision tree → type inference worklist
+
+---
+
+## 🔴 GAP 2: JVMTI Hooks — NEW doc or major expansion in 04/12
+
+JVMTI's ClassFileLoadHook is the entry point for 100% of APM (NewRelic/Datadog/AppDynamics) + AOP (AspectJ) + diagnostic agents. Completely absent from all 14 docs.
+
+### Add new § or new short doc (30-JVMTI-Class-Hooks.md):
+
+1. **Production opener**: "Your APM agent uses `ClassFileLoadHook` to inject timing bytecode. Upgrade agent — app crashes with `VerifyError` on every class. The agent's bytecode transformation broke stack maps."
+
+2. **3 hooks + 1 callback**:
+   - `ClassFileLoadHook`: agent receives raw byte[] BEFORE ClassFileParser — can transform or return null. `jvmtiClassFileLoadHookPoster::post_all_hooks()` at `prims/jvmtiClassFileLoadHook.cpp:167`
+   - `ClassLoad`: JVM fires AFTER successful load → `post_class_load()` at `prims/jvmtiEventController.cpp`
+   - `ClassPrepare`: JVM fires AFTER ClassFileLoadHook + ClassLoad + linking — class ready for instrumentation. `post_class_prepare()` 
+   - `ClassLoadCallbackHandler`: agent registers all 3 hooks at `JvmtiEnv::SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK)`
+
+3. **ClassFileLoadHook protocol**: agent receives `(jvmtiEnv*, class_being_redefined, loader, name, protection_domain, class_data_len, class_data, new_class_data_len, new_class_data)`. Transform by: allocate `unsigned char*`, copy modified bytecode, set `*new_class_data_len`, set `*new_class_data`. Return `JVMTI_ERROR_NONE`.
+
+4. **Production trap**: Agent replaces byte[] with invalid classfile (e.g., corrupts StackMapTable) → Verifier rejects → VerifyError with NO hint it came from agent. Diagnosis: `-XX:+TraceClassLoading` + check agent jar version + disable agent to isolate.
+
+5. **ClassLoad/ClassUnload for diagnostics**: jcmd `VM.classloader_stats` → reads `ClassLoaderDataGraph` → reports per-CLD count, dead classes tracked by `ClassLoaderData::_keep_alive` flag. JFR `jdk.ClassLoad`/`jdk.ClassUnload` events → tracking class churn.
+
+---
+
+## 🟡 GAP 3: Container/K8s Class Loading
+
+01 has dedicated 581-line container doc. 02 only mentions container in 10-CLD §七. Metaspace × cgroup interaction is unexplored.
+
+### Expand 10-ClassLoaderData.md §七 (Container section):
+
+1. **Metaspace vs cgroup limit**: When `MaxMetaspaceSize` is unset (default: unlimited), JVM sees cgroup memory limit. The decision chain:
+   - `os::physical_memory()` → returns cgroup `memory.limit_in_bytes`
+   - `Metaspace::_reserve_alignment` based on GC policy
+   - Metaspace grows until: limit hit → `MetaspaceArena::allocate()` fails → `report_metadata_oof()` → exit
+   - If cgroup limit < Metaspace current usage + GC overhead → OOMKilled (exit 137) BEFORE Metaspace OOM (exit 1)
+
+2. **Budget formula**: `MaxMetaspaceSize = limit - Heap - other_native - safety_margin`
+   - Heap = MaxHeapSize or InitialHeapSize from cgroup-aware ergo
+   - other_native = ThreadStackSize × thread_count + CodeCache + GC overhead (~10-20% of heap)
+   - safety_margin = 10% of limit (kernel memory, glibc structs, agent overhead)
+
+3. **K8s diagnostic**: `kubectl top pod` shows memory near limit → check `jcmd VM.metaspace` → if Usage+Committed climbing → class leak → `jcmd VM.classloader_stats` → find CLD with high _class_count
+
+4. **Production check**: `-XX:MaxMetaspaceSize` MUST be set in containers — default unlimited is dangerous
+
+---
+
+## 🟡 GAP 4: Missing "why-sections" (11-Clinit, 03-Parser, 08-LinkResolver, 13-Verifier)
+
+### 11-Clinit-Deep-Dive.md: add 3 design rationales
+- Why 6-state machine (allocated→loaded→linked→being_initialized→fully_initialized→initialization_error) instead of 4 states
+- Why `<clinit>` uses `init_lock` separate from `SystemDictionary_lock` — deadlock avoidance: clinit can trigger loading of other classes, which need SystemDictionary_lock. If clinit held SystemDictionary_lock → instant deadlock
+- Why ThreadBlockInVM during slow `wait()` in clinit — allows safepoint during class init, prevents STW hanging
+
+### 03-ClassFileParser.md: add
+- Answer: "Why ClassFileParser is a stack object" — parsing is single-pass, single-thread, no need for heap lifetime; stack allocation avoids Metaspace pressure during parsing; ~50 fields exist because it must accumulate ALL class metadata before creating InstanceKlass atomically
+
+### 08-LinkResolver.md: add
+- "Why resolve vtable before itable" — vtable is contiguous, resolved indices are direct; itable requires itableOffsetEntry search → vtable is always faster, so try it first
+- "Why LinkResolver::resolve_invokevirtual handles miranda methods" — interface default methods inherited by abstract classes get vtable entry, not itable — historical JVM behavior for JDK 1.0 compatibility
+
+### 13-Verifier.md: already covered in GAP 1 rewrite
+
+---
+
+## 🟡 GAP 5: 01→02 transition + CDS + missing topics
+
+### Add to README §十 (transition doc):
+"从 01 到 02：01 创建了 Universe::genesis 中的基础 Klass(Object/Class/String)，02 解释系统如何加载所有其他类。你继承了 01 的 InstanceKlass/Method/ConstantPool/Symbol/ClassLoaderData 结构知识。"
+
+### Add to 02-Parent-Delegation.md §2.3.1: CDS expansion
+- `-Xshare:dump` writes: ClassListGenerator produces list of loaded classes → DumpAllocStats writes to .jsa file
+- on `-Xshare:on`: CDS Runtime reads .jsa → maps to shared memory → `MetaspaceShared::initialize_shared_spaces()` (file:line) → Klass restored from archive without parsing
+- Verifier interaction: classes from CDS skip verify (already verified at dump time)
+- 5 staleness failure modes already covered — add archive version mismatch detection
+
+### Add to 02-Parent-Delegation.md: "How to break parent delegation"
+- Tomcat/OSGi: override `loadClass()` → try loading from local repo first, fallback to parent
+- SPI/ThreadContextClassLoader: `ServiceLoader.load()` calls `Thread.getContextClassLoader()` to flip delegation
+- Java 9 ModuleLayer: creates isolated module worlds with their own classloaders
+- Interview classic: "Why break parent delegation? When would you do it?"
+
+---
+
+## 🟡 GAP 6: Fix doc metadata
+
+### 01-ClassLoading-Triggers.md: u2/u4 never defined
+Before first use of `u2`/`u4`, add sidebar: "u2 = unsigned 16-bit integer (2 bytes, range 0-65535). u4 = unsigned 32-bit integer (4 bytes, range 0-2^32-1). Class file format uses big-endian byte order. These are NOT Java int/long — they're raw byte-level types from the JVM Specification."
+
+### 13-Verifier.md: C++ struct dump without field explanations (fixed in GAP 1)
+
+### 10-ClassLoaderData.md: fix section numbering (四→七→五)
+
+---
+
+## Report
+Per-gap: what was changed, new lines, tools used. Phase state: old→new score estimate.

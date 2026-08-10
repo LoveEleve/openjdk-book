@@ -485,3 +485,8 @@ static address _fence_entry;
 | 8 | `CodeBuffer buffer(_code1)` | 把 payload 包装为 CodeSection，_end 指向 payload 起始 |
 | 9 | `StubGenerator_generate(...)` | 创建 StubGenerator，构造时运行 generate_initial()，生成 17+ 个 x86 桩，填满 StubRoutines 表 |
 | 10 | `assert(remaining() > 200)` | 验证 30000 字节够用，不够则增加 code_size1 |
+
+
+## 设计权衡
+
+**为什么 `stubRoutines_init1()` 只做部分注册，剩下的留给 `stubRoutines_init2()`？** StubRoutines 的两阶段初始化对应 `init_globals()` 的两个阶段——Phase 1 在 `universe_init` 之前（stubRoutines_init1），Phase 2 在 `universe_post_init` 之后（stubRoutines_init2）。Phase 1 只注册不依赖 Java 堆和类型系统的 stub——`call_stub`（C++ → Java 的入口）、`forward_exception_entry`（异常转发）、`atomic_*` 例程。这些 stub 在解释器初始化时就需要（解释器通过 `call_stub` 调用 Java 方法）。Phase 2 注册依赖 Java 类型系统的 stub——`arrayof_oop_copy`（需要知道 oop 大小）、`checkcast_arraycopy`（需要知道 Klass 的布局）。如果合在一个 phase，JVM 要么在 Java 类型系统就绪前就尝试生成依赖它的 stub（会崩溃），要么在所有 stub 就绪后才启动解释器（启动时间延长）。

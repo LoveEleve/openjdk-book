@@ -1,0 +1,326 @@
+Deep-review 13-launcher phase — 4 docs + README, ~3418 lines. This is the first extension phase outside libjvm.so. It sets the quality bar for phases 14-20. If this phase fails, the entire extension series is at risk.
+
+## Documents
+probe_md/13-launcher/README.md (~540 lines)
+probe_md/13-launcher/00-Libjli-Overview.md (765 lines — JLI_Launch full trace)
+probe_md/13-launcher/01-Argument-Parsing.md (710 lines — ParseArguments state machine)
+probe_md/13-launcher/02-JVM-Loading.md (694 lines — dlopen/dlsym path)
+probe_md/13-launcher/03-Main-Class-Loading.md (729 lines — manifest → FindClass → main())
+
+## Benchmark phases
+05-jit-compiler (7 docs, ~420/425) — the strongest phase overall
+01-jvm-startup (26 docs, ~56/55) — the entry point, retrofitted
+
+## Phase context
+13 is the PREQUEL to 01. The reader finished 01-jvm-startup (starting at JNI_CreateJavaVM) and now goes BACK to the `java` command itself. The transition must be clean: "Phase 01 starts at JNI_CreateJavaVM(). Phase 13 starts earlier — at `bash$ java`. Together they form the COMPLETE startup story."
+
+---
+
+## 1. JLI_Launch Trace Completeness — 15 pts (00 §四)
+
+This is THE core section of the entire phase. If the 8-step trace in 00 §四 fails, nothing else in 13 matters.
+
+### What "perfection" looks like:
+The reader can follow `bash$ java -jar app.jar` through 8 steps, each with:
+1. **Source evidence**: exact file:line, actual C code snippet (2-5 lines, not paraphrased)
+2. **What happens**: concrete description of what the code DOES at this step
+3. **Why this way**: counterfactual with quantified alternative. "If JLI_Launch only got 2 params (argc, argv) instead of 12: every platform's main() would need to extract version strings / flags / product name differently → 3× code duplication across Windows/Unix/Mac."
+4. **Transition**: clear handoff to next step. "Step 4 returns control to Step 5 with the ifn.CreateJavaVM function pointer populated."
+
+### Detailed verification checklist (1.5 pts per step, 8 steps, max 12 + 3 bonus for Mermaid/timing):
+
+**Step 1: JLI_Launch entry (java.c:220)**:
+- 12-parameter signature shown? YES/NO
+- Each parameter EXPLAINED (not just listed)? "jargc/jargv = JVM-specific args from platform launcher" — yes, explained. "cpwildcard = whether CLI parser already expanded wildcards" — yes, explained.
+- Counterfactual: "Why 12 not 2?" — must be present with specific rationale (platform pre-processing).
+- Off-by-one check: line 220 confirmed correct (was 219, fixed in review)?
+
+**Step 2: SelectVersion (java.c:1056)**:
+- JAR manifest reading for JRE version explained? "Created-By: 11" → SelectVersion knows JAR needs JDK 11.
+- Counterfactual present? "Without SelectVersion: JVM 11 starts, encounters JDK 17 bytecodes → ClassFormatError → 2s wasted."
+- Line 1056 verified?
+
+**Step 3: CreateExecutionEnvironment (java_md_solinux.c:284)**:
+- JAVA_HOME preference explained? "checked FIRST as performance shortcut, saving 5-10 syscalls."
+- /proc/self/exe fallback explained?
+- stat(lib/libjava.so) as JRE anchor explained?
+- Counterfactual present?
+
+**Step 4: LoadJavaVM → dlopen (java_md_solinux.c:571)**:
+- RTLD_NOW vs RTLD_LAZY tradeoff quantified? "RTLD_LAZY saves ~200ms but risks runtime undefined symbol crash."
+- RTLD_GLOBAL rationale? "Required for -agentlib dlsym(RTLD_DEFAULT, ...) calls."
+- Line 571 verified?
+
+**Step 5: JVMInit → JavaMain → thread creation (java_md_solinux.c:786)**:
+- 3 reasons for separate thread cited? (primordial thread problems, custom stack size, guard page disable)
+- java.c:202-204 comment quoted? "Running Java code in primordial thread caused many problems."
+- Counterfactual: "If JVM ran in main thread: stack overflow corrupts launcher data structures."
+
+**Step 6: ParseArguments (java.c:1296)**:
+- Overview (details in doc 01). Mode detection: LM_JAR/LM_CLASS/LM_MODULE/LM_SOURCE.
+- "-jar overrides -cp" at java.c:338-340 mentioned?
+- Transition: "→ details in [01-Argument-Parsing] §四"
+
+**Step 7: LoadMainClass → JNI CreateJavaVM call (java.c:1545 + java.c:523)**:
+- This is the 13→01 handoff. MUST be clearly marked: "→ enters 01-jvm-startup territory"
+- JNI_CreateJavaVM called at java.c:1545. What happens AFTER it returns? LoadMainClass at java.c:523.
+- Counterfactual: "If JNI_CreateJavaVM fails (returns != JNI_OK): JVM_ERROR1 at emessages.h:60 → fprintf + exit(1). libjli NEVER enters Java."
+
+**Step 8: CallStaticVoidMethod (java.c:566)**:
+- The IRREVERSIBLE transition. "libjli's C stack freezes. JVM's Java stack takes over."
+- Exception handling: ExceptionOccurred → ExceptionDescribe → exit(1).
+- "libjli never RETURNS from this call" — emphasized?
+
+**Bonus 3 pts**:
+- Timing analysis: libjli 0.05s vs libjvm 2s. Percentage breakdown.
+- Mermaid diagram: 4-lane sequence (Shell, libjli, libjvm, Java). From `bash$ java` to `main()`.
+- The 13/01 responsibility split is CLEARLY visualized.
+
+### Scoring:
+13-15: all 8 steps have source + counterfactual + transition, Mermaid + timing
+10-12: 6-7 steps complete, minor gaps in 1-2
+7-9: 4-5 steps solid, others thin
+4-6: mostly "what" not "why", missing counterfactuals
+1-3: trace incomplete or wrong
+
+---
+
+## 2. Production Authenticity — 10 pts
+
+### Per-doc opener verification:
+
+**00 §〇 — JVM_ERROR1 at 3am** (2.5 pts):
+- Exact error string from emessages.h:60? "Error: Could not create the Java Virtual Machine. Error: A fatal exception has occurred. Program will exit."
+- 3-branch diagnosis present? DLL_ERROR1 / JVM_ERROR1 / CLS_ERROR1 with exact line triggers?
+- Diagnostic commands: stat, ldd, ulimit -v, strace — ALL 4 present?
+- Fix: which branch → which command → which resolution path?
+
+**01 §〇 — ZGC on JDK 11** (2.5 pts):
+- Exact crash signature? ZBarrierSetC2::emit_barrier_stub → NullPointerException → SIGSEGV. The SIGSEGV address appears in hs_err.
+- Root cause explanation: experimental flag, forwarded by libjli, dangerous but not blocked.
+- Diagnostic: PrintFlagsFinal | grep zgc → confirmed flag was set.
+- Exclusion verification (Gap 1 fix): -XX:-UseZGC exclusion confirmation step present? 3 resolution paths (UnlockExperimentalVMOptions / upgrade JDK / remove flag)?
+- Counterfactual: "If libjli BLOCKED experimental flags: false positives — many production JVMs use experimental flags. If libjli ALLOWED everything: ZGC crash. The middle ground is: forward all flags, let JVM validate."
+
+**02 §〇 — JAVA_HOME conflict** (2.5 pts):
+- Exact error? JRE_ERROR8 from emessages.h:98. "Error: could not find libjava.so"
+- Scenario: JAVA_HOME=JDK8, /proc/self/exe=JDK11 → JDK8 has no libjava.so → error.
+- Diagnostic: readlink -f, echo JAVA_HOME, stat, unset JAVA_HOME bypass — ALL 4 commands?
+- Quantified: "unset JAVA_HOME in systemd → eliminates ~60% of JRE_ERROR8 faults."
+
+**03 §〇 — Spring Boot fat JAR** (2.5 pts):
+- Exact error? CLS_ERROR1 from emessages.h:68. Full class name in error.
+- Root cause: nested JAR layout. Standard JVM classpath sees outer JAR only → FindClass fails for JarLauncher inside BOOT-INF/lib/.
+- Diagnostic: jar xf manifest, unzip -l, unzip -p extract nested JAR, jar tf verify — ALL 4 steps?
+
+### Scoring:
+9-10: all 4 openers have exact strings + specific diagnostics + fix path
+7-8: 3/4 solid
+5-6: 2/4 solid
+3-4: scenarios exist but lack diagnostic commands
+1-2: generic or missing
+
+---
+
+## 3. First-Principles Depth — 10 pts
+
+### Per-doc counterfactual density check:
+
+For EACH of the 4 docs, count "如果/Without/Counterfactual/Alternative" patterns in core sections. The question is: does the doc DERIVE designs, or DESCRIBE them?
+
+**00 overview**: Should have ≥5 counterfactuals across 8 steps.
+- "Why 12 params?" → 3× code duplication across platforms
+- "Why SelectVersion?" → ClassFormatError scenario
+- "Why RTLD_NOW not RTLD_LAZY?" → 200ms vs runtime crash
+- "Why separate thread for JVM?" → stack corruption
+- Check: are ALL 5 present? Quantified?
+
+**01 ParseArguments**: Should have ≥5 counterfactuals.
+- "Why mode detection ORDER matters?" → non-deterministic class loading
+- "Why classify JVM options?" → JVM would reject app.jar as unrecognized option
+- "Why wildcard at startup not class load?" → 1000x difference (2ms vs 2s)
+- "Why -jar OVERWRITES -cp?" → class loading ambiguity
+- "Why -version BEFORE JNI_CreateJavaVM?" → saves 2s
+- Check: quantified? "1000x" "2s" "3×"?
+
+**02 JVM Loading**: Should have ≥5 counterfactuals.
+- "Why /proc/self/exe not argv[0]?" → PATH ambiguity
+- "Why JAVA_HOME FIRST despite risk?" → performance shortcut quantified (5-10 syscalls)
+- "Why jvm.cfg plain text?" → version skew, binary parsing complexity
+- "Why RTLD_GLOBAL not RTLD_LOCAL?" → -agentlib dlsym requirement
+- "Why signal chain BEFORE JVM starts?" → SIGPROF conflict
+- Check: signal chain counterfactual mentions async-profiler?
+
+**03 Main Class**: Should have ≥5 counterfactuals.
+- "Why LauncherHelper not direct FindClass?" → JNI exception dance (4 vs 1 step)
+- "Why manifest parsed before JVM starts?" → SelectVersion needs JRE version first
+- "Why Class-Path after JVM startup?" → prevents overriding java.lang.*
+- "Why DestroyJavaVM waits for threads?" → Thread.stop() deadlock (Gap 2 fix)
+- "Why CallStaticVoidMethod is irreversible?" → no recovery path after JVM owns process
+- Check: Gap 2 fix present? Spring Boot @Async → timeout → kill -9?
+
+### Scoring:
+9-10: 18+ genuine counterfactuals across 4 docs, all quantified
+7-8: 14-17 counterfactuals
+5-6: 10-13 counterfactuals
+3-4: mostly descriptions, few counterfactuals
+1-2: no first-principles reasoning
+
+---
+
+## 4. Interview Readiness — 10 pts
+
+### Verify README §五 answers are BACKED by actual doc content:
+
+**Q1: "java MyClass 到 main()?"** → 00 should have §八 story-format answer. Check:
+- Two-segment structure: libjli (0.05s) + libjvm (2s)?
+- 13/01 handoff explicitly marked?
+- Mermaid diagram referenced?
+- Can be DELIVERED in 60 seconds by someone who read doc 00?
+
+**Q2: "java 如何找 libjvm.so?"** → 02 should have §七 answer. Check:
+- /proc/self/exe → walk up → stat(libjava.so) → construct path → dlopen chain?
+- WHY narrative present? "Without JAVA_HOME, zero config needed."
+- Source line numbers included as evidence?
+
+**Q3: "-jar vs -cp?"** → 01 should have §七 answer. Check:
+- LM_JAR vs LM_CLASS distinction?
+- Classpath OVERWRITE at java.c:338-340 mentioned?
+- LaunchMode enum values used?
+
+**Q4: "wildcard 何时展开?"** → 01 should have §七 answer. Check:
+- opendir/readdir mechanism?
+- Performance quantified? (1000 JARs = ~2ms)
+- Java 9+ module motivation mentioned as context?
+
+**Q5: "why new thread for JVM?"** → 00 or 02 should have answer. Check:
+- 3 reasons cited? (primordial thread, stack size, guard page)
+- java.c:202 comment quoted?
+
+**Q6: "LoadMainClass 怎么加载?"** → 03 should have §七 answer. Check:
+- LauncherHelper indirection explained?
+- FindClass vs Class.forName distinction?
+- 4-mode branching (CLASS/JAR/MODULE/SOURCE)?
+
+### Scoring:
+9-10: all 6 questions have verifiable answers in docs, all story-format
+7-8: 5/6 solid
+5-6: 3-4 solid
+3-4: answers exist but are fact-dumps
+1-2: interview content thin or missing
+
+---
+
+## 5. Beginner-Friendliness — 10 pts
+
+### Callout verification:
+From prompt specifications, each doc should have callout boxes:
+
+**00**: dlopen, dlsym, /proc/self/exe, JNI, LaunchMode (5 expected)
+- Each 2-3 sentences, defined before use?
+- "proc" concept explained? "proc/self/exe: Linux内核为EACH进程创建的符号链接 → 指向实际可执行文件的绝对路径"
+- JNI defined? "09-native-interface已分析。libjli用JNI调用JNI_CreateJavaVM和CallStaticVoidMethod。" — reference is good, but is self-contained explanation present too?
+
+**01**: LaunchMode, wildcard expansion, JVM option vs app arg (3 expected)
+- LaunchMode enum values shown? LM_CLASS=1, LM_JAR=2, LM_MODULE=3, LM_SOURCE=4
+- Wildcard: opendir/readdir conceptually explained without Unix jargon?
+
+**02**: dlopen/RTLD flags, dlsym, jvm.cfg, InvocationFunctions, stat() (5 expected)
+- RTLD_NOW/RTLD_GLOBAL flags explained individually? Not just "RTLD_NOW|RTLD_GLOBAL" as a blob
+- stat(): "POSIX系统调用—验证文件是否存在而不打开它。比access()更精确" — explained?
+
+**03**: JAR manifest, LauncherHelper, FindClass vs Class.forName, JNI exception handling (4 expected)
+- JNI exception handling: 4-step dance (ExceptionCheck→Describe→Clear→return) explained?
+- LauncherHelper as "Java helper avoiding JNI complexity" — the WHY clear?
+
+### Concept leap check:
+Find the FIRST paragraph in each doc where a Java engineer with zero C/Linux knowledge would stop understanding. Quote it.
+
+- "readlink('/proc/self/exe', buf, MAXPATHLEN)" → is readlink explained?
+- "pthread_create(&tid, &attr, ThreadJavaMain, args)" → is pthread_create explained?
+- "CallStaticVoidMethod(jclass, jmethodID, jobjectArray)" → JNI types explained?
+
+### Scoring:
+9-10: all callouts present + clear, no undefined concepts
+7-8: all callouts present, 1-2 minor clarity issues
+5-6: 1-2 callouts missing or unclear
+3-4: multiple missing, Java engineer would get lost
+1-2: no beginner scaffolding
+
+---
+
+## 6. Cross-Document Coherence — 10 pts
+
+### Reading order verification:
+
+**00 → 01**: 00 §四 Step 6 (ParseArguments) should reference "→ 详见 [01-Argument-Parsing] §四". 01 §一 should state "本文展开 [00-Libjli-Overview] §四 Step 6." Verify.
+
+**00 → 02**: 00 §四 Step 4 (LoadJavaVM) should reference "→ 详见 [02-JVM-Loading] §四". 02 §一 should state "本文展开 [00-Libjli-Overview] §四 Step 4." Verify.
+
+**00 → 03**: 00 §四 Step 7 (LoadMainClass) should reference "→ 详见 [03-Main-Class-Loading] §四". 03 §一 should state "本文展开 [00-Libjli-Overview] §四 Step 7-8." Verify.
+
+**02 ↔ 03**: No direct dependency, but both depend on 00. Order doesn't matter.
+
+### Cross-phase references:
+- 00: reference 01-jvm-startup §一 at JNI_CreateJavaVM handoff? "→ 进入 [01-jvm-startup] §一 的 Threads::create_vm()"
+- 02: reference 19-signal-chaining (libjsig) at signal chain preloading?
+- 03: reference 02-class-loading (FindClass, SystemDictionary)?
+
+### Terminology consistency:
+- "JLI_Launch" vs "JLI_Launch()" — consistent across 4 docs?
+- "LM_JAR" vs "LaunchMode.LM_JAR" — consistent?
+- "LoadMainClass" vs "load main class" — consistent?
+
+### Scoring:
+9-10: all cross-references present + bidirectional + terminology consistent
+7-8: most references present, 1-2 missing
+5-6: only weak references
+3-4: broken reading order
+1-2: contradictory or missing
+
+---
+
+## 7. Line Number Accuracy — 5 pts
+
+### Spot-check 3 critical lines per doc (12 total):
+
+From 13-fix-readme corrected lines (already verified in source):
+- JLI_Launch at java.c:220 → spot-check in 00 §四 Step 1
+- dlsym at java_md_solinux.c:624 → spot-check in 02 §四 Step 7
+- SelectVersion at java.c:1056 → spot-check in 00 §四 Step 2
+- ParseArguments at java.c:1296 → spot-check in 00 §四 Step 6 + 01 §四
+
+Additional spot-checks:
+- dlopen at java_md_solinux.c:571 → 00 §四 Step 4 + 02 §四 Step 6
+- LoadMainClass at java.c:523 → 00 §四 Step 7 + 03 §四
+- GetStaticMethodID at java.c:560 → 03 §四
+- AddOption at java.c:552 → 01 §四 (if claimed)
+- JLI_ParseManifest at parse_manifest.c:577 → 03 §四
+
+### Scoring:
+5: all 12 spot-checks match
+4: 10-11 match
+3: 8-9 match
+2: 6-7 match
+1: <6 match
+
+---
+
+## Output
+
+### Per-document quick matrix
+| Doc | Trace | Production | First-principles | Interview | Beginner | Coherence | Line# | /70 |
+|-----|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| README | — | 10 | 10 | 10 | 10 | 10 | — | 50/50 |
+| 00-Overview | /15 | | | | | | | |
+| 01-Arguments | — | | | | | | | /55 |
+| 02-JVM-Load | — | | | | | | | /55 |
+| 03-MainClass | — | | | | | | | /55 |
+
+### Phase total: /215 (or /270 with README)
+
+### Top 3 gaps (exact doc:section references)
+
+### Best paragraph in the entire phase
+
+### Ready for 14-zip-jimage?

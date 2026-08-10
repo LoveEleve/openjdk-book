@@ -1,0 +1,164 @@
+Deep-review 4 prompts for 15-core-native. Each 456-521 lines. Source line numbers MUST be correct — these are the most called native methods in Java.
+
+## Prompts
+probe_md/15-core-native/prompts/prompt-00-System-Arraycopy.md (521 lines)
+probe_md/15-core-native/prompts/prompt-01-Class-String.md (456 lines)
+probe_md/15-core-native/prompts/prompt-02-Runtime-Throwable.md (486 lines)
+probe_md/15-core-native/prompts/prompt-03-JNI-Utility.md (472 lines)
+
+## Benchmark
+14-zip-jimage prompt-00 (60/60)
+
+---
+
+## 1. Source Line Accuracy — 15 pts (pass/fail per prompt)
+
+### CRITICAL: These verified line numbers MUST be correct in EVERY prompt that references them:
+
+| Claim | Verified | P00 | P01 | P02 | P03 |
+|-------|:---:|:--:|:--:|:--:|:--:|
+| System.arraycopy RegisterNatives | System.c:41 | ✓/✗ | — | — | — |
+| System.identityHashCode → JVM_IHashCode | System.c:56 | ✓/✗ | — | — | — |
+| Object.hashCode → JVM_IHashCode | Object.c:42 | ✓/✗ | — | — | — |
+| Class.forName0 → JVM_FindClassFromCaller | Class.c:137 | — | ✓/✗ | — | — |
+| String.intern → JVM_InternString | String.c:32 | — | ✓/✗ | — | — |
+| Float.floatToRawIntBits (union) | Float.c:49-56 | — | ✓/✗ | — | — |
+| Runtime.availableProcessors | Runtime.c:71 | — | — | ✓/✗ | — |
+| Throwable.fillInStackTrace | Throwable.c:49 | — | — | ✓/✗ | — |
+| memmove vs memcpy argument | §四.5 | ✓/✗ | — | — | — |
+
+**FAIL if any prompt uses wrong line number or references wrong file.**
+
+### Scoring per prompt:
+15: all referenced lines verified correct
+12: 1 off-by-one
+9: 2-3 off
+6: ≥4 off
+3: wrong files referenced
+
+---
+
+## 2. Counterfactual Density — 10 pts/prompt
+
+### Count explicit "反事实/Without/Counterfactual/If X then Y" patterns per prompt:
+
+P00 expected: ≥5 quantified counterfactuals
+- "Java loop: 1M bounds checks (~10ms) vs native memmove (0.1ms) → 100x"
+- "Object[] memmove without type-check: Integer slides into String[] → later ClassCastException"
+- "identityHashCode calling obj.hashCode(): HashMap infinite loop"
+- "memcpy vs memmove: UB on overlap vs correctness guarantee (~1% overhead)"
+- "C2 intrinsic vs JNI call: ~50ns vs ~5ns for 10 elements"
+- "nanoTime monotonic vs currentTimeMillis wall: timing must not go negative"
+
+P01 expected: ≥4
+- "forName with context classloader: security boundary broken"
+- "StringTable in Java heap: 3 JNI crossings (~150ns) vs metaspace CAS (~10ns) → 15x"
+- "VerifyClassname check: null byte injection prevented"
+- "Float union: Java has no bit-level reinterpretation"
+
+P02 expected: ≥4
+- "no cgroup awareness: 47% Docker JVMs report wrong CPU"
+- "System.gc without guarantee: user assumes completed"
+- "C2 frames opaque: all compiled frames = 'Unknown compiled code'"
+
+P03 expected: ≥3
+- "no JNU utilities: each native method writes ThrowNew boilerplate → 3x code"
+- "JNU_GetStringPlatformChars encoding fast path: ASCII shortcut"
+
+### Scoring per prompt:
+10: all expected counterfactuals present and quantified
+8: 1-2 missing or unquantified
+6: ≥3 missing
+4: mostly descriptions
+2: no counterfactuals
+
+---
+
+## 3. Beginner Callout Completeness — 10 pts/prompt
+
+### Expected callouts per prompt from README terminology table:
+
+P00: JNI_ENTRY, JVM_ENTRY, intrinsic, memmove, markOop (5)
+P01: JNI_ENTRY, intrinsic, StringTable, JVM_FindClassFromCaller (4)
+P02: JVM_ENTRY_NO_ENV, cgroup, stack walking, nmethod metadata (4)
+P03: jni_util, JNU_ThrowNullPointerException, encoding fast path (3)
+
+### Check: term defined in 2-3 sentences? Example given? Before first code use?
+
+### Scoring per prompt:
+10: all expected callouts present + clearly defined
+8: all present, 1 unclear
+6: 1-2 missing
+4: >2 missing
+2: no callouts
+
+---
+
+## 4. Cross-Reference Coherence — 10 pts/prompt
+
+### §一 prerequisites per prompt:
+P00: "Reader completed 09-native-interface (JNI), 03-object-model (markOop). This doc: the #1 native method."
+P01: "Reader completed 00 (arraycopy dispatch), 02-class-loading (FindClass), 14-zip-jimage (ClassLoader bridge). This doc: reflection + interning."
+P02: "Reader completed 00 (native call patterns). This doc: runtime + stack walking."
+P03: "Reader completed 00-02. This doc: shared utility layer beneath all libjava natives."
+
+### Cross-phase references:
+- ALL: reference 09-native-interface for JNI_ENTRY/JVM_ENTRY macros
+- P00: reference 05-jit-compiler for C2 intrinsic of arraycopy
+- P01: reference 02-class-loading for FindClass chain
+- P02: reference 06-gc-memory for System.gc → G1GC
+
+### Scoring per prompt:
+10: all prerequisites + cross-phase references present
+8: 1 missing
+6: 2-3 missing
+4: vague prerequisites
+2: no continuity
+
+---
+
+## 5. Section Completeness — 10 pts/prompt
+
+### 10 sections (〇-十/十一) all present?
+§〇 production: real error + diagnostic?
+§四 ≥6 Q groups?
+§八 ≥8 prohibitions?
+§九 ≥8 requirements?
+§十 ≥8 GDB assertions with file:line?
+
+### Scoring per prompt:
+10: all 10 sections present and substantive
+8: 1 section thin
+6: 2 sections thin or missing
+4: ≥3 sections thin
+2: missing major sections
+
+---
+
+## 6. Against Benchmark — 5 pts/prompt
+
+### Compare to 14 prompt-00 (60/60):
+Same depth? Same counterfactual density? Same beginner scaffolding? Same source accuracy?
+
+### Scoring:
+5: matches or exceeds benchmark
+4: slightly behind
+3: noticeably less depth
+2: significantly less depth
+1: doesn't approach quality
+
+---
+
+## Output
+
+| Prompt | Source | Counterfactual | Beginners | Cross-ref | Sections | Benchmark | /60 |
+|--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 00-Arraycopy | | | | | | | |
+| 01-ClassString | | | | | | | |
+| 02-Runtime | | | | | | | |
+| 03-JNI-Utility | | | | | | | |
+
+Phase coherence: /5
+Total: /245
+
+Top gaps. Best/worst. Ready for docs?

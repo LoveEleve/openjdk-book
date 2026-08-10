@@ -503,3 +503,8 @@ _code1 → BufferBlob at 0x7fdc00000000
 ```
 
 **接下来**：`04-code-writing-chain.md` 解释怎么往这 30000 字节的代码区里写 x86 指令——CodeSection 的三指针模型、Assembler 的指令编码、`__ push(rbp)` 变成 `*_end = 0x55` 的完整链路。
+
+
+## 设计权衡
+
+**为什么 stub 用 `BufferBlob` 而不是直接 `mmap`？** `BufferBlob` 是 `CodeBlob` 的子类——它自带 header（magic number + size + name），在 CodeCache 中分配，受 CodeCache 的容量管理和 GC 保护。如果直接用 `mmap` 分配可执行内存，这些内存块无法被 JVM 的 `jcmd` 工具发现、无法参与 CodeCache 的 full/eviction 决策、无法在 `jcmd VM.codecache` 的输出中追踪。`BufferBlob` 还提供了 `CodeBuffer` 包装，使 `MacroAssembler` 能像写普通 CodeBuffer 一样生成机器码——不需要手动管理可执行内存的页权限（rw- → r-x 的 `mprotect` 切换由 `CodeBuffer::flush()` 自动完成）。

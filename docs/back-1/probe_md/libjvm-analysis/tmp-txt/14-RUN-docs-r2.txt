@@ -1,0 +1,105 @@
+Produce 2 bridge docs for 14. Each ~700-800 lines. These connect the ZIP/jimage reading (00-02) to the JVM internals (ClassLoader.defineClass1) and cover edge cases (nested JAR).
+
+## Prompts (read FULLY)
+probe_md/14-zip-jimage/prompts/prompt-03-ClassLoader-Bridge.md (424→after fix, 57/60)
+probe_md/14-zip-jimage/prompts/prompt-04-Jar-URL-Nesting.md (419→after fix, 52→55/60)
+
+## Prerequisites (reference in docs)
+probe_md/14-zip-jimage/00-Zip-Class-Loading.md (Round 1 output — bridge doc connects ZIP → ClassLoader)
+probe_md/14-zip-jimage/01-Jimage-Format.md (Round 1 output — jimage alternative path)
+probe_md/14-zip-jimage/02-Compression-Zlib.md (Round 1 output — inflate pipeline)
+
+## Output
+probe_md/14-zip-jimage/03-ClassLoader-Bridge.md (~800 lines)
+probe_md/14-zip-jimage/04-Jar-URL-Nesting.md (~700 lines)
+
+## Quality mandate — same as Round 1
+
+---
+
+## 03-ClassLoader-Bridge.md — Content Arc
+
+### §〇 — Production: "NoClassDefFoundError but entry EXISTS in JAR"
+`java.lang.NoClassDefFoundError: com/example/Foo`. JAR on -cp, `unzip -l app.jar | grep Foo` shows "com/example/Foo.class", but defineClass1 returns null. Root cause: ZIP entry is a DIRECTORY stub (size=0, name="com/example/Foo.class/" → trailing slash → isDirectory=true). ClassLoader skips directory entries. Fix: rebuild JAR without directory entries.
+
+Diagnostic: `unzip -l app.jar | grep "Foo.class"` → check entry size. If size=0 → directory entry. `zip -d app.jar "com/example/Foo.class/"` to remove stub.
+
+### §一 — Narrative + Sidebars
+"ClassLoader.defineClass1 是 Java 类加载的**物理终点**——在此之前，字节从磁盘出发（ZIP/jimage），在此之后，字节进入 JVM（ClassFileParser）。defineClass1 本身**不读 I/O**——它接收已读入的 byte[]，只负责调用 JVM 内部的 define_class。"
+
+Sidebars: defineClass1 (JNI native, receives byte[], calls SystemDictionary::define_class), JNI SetByteArrayRegion (copies bytes from native C buffer to Java heap byte[] — the physical data transfer), ZipFile.getInputStream (Java layer: reads ZIP entry, inflates, returns InputStream → bytes → defineClass1(bytes)), JNI exception handling (if define_class fails: ClassFormatError or NoClassDefFoundError thrown via JNI ThrowNew).
+
+### §二 — Environment
+Same as 00 §二.
+
+### §三 — Source Files
+ClassLoader.c (Java_java_lang_ClassLoader_defineClass1), jni_util.h, SystemDictionary.cpp (define_class → 02 territory), jvm.cpp (JVM_DefineClass entry)
+
+### §四 — Bridge Deep-Dive
+
+**4.1: The architecture — Java reads, JVM defines** (ClassLoader.c + Java ZipFile)
+Step 1: Java layer: `ZipFile zf = new ZipFile("app.jar"); InputStream is = zf.getInputStream("com/example/Foo.class"); byte[] buf = readAllBytes(is);` → inflate happens INSIDE getInputStream via native Inflater.c → bytes are in Java heap.
+Step 2: `ClassLoader.defineClass1(name, buf, 0, buf.length)` → JNI → ClassLoader.c → extracts name + bytes → `SystemDictionary::define_class(...)` → parses bytes into InstanceKlass.
+
+Counterfactual (from Gap 3 fix): "If defineClass1 called ZIP_GetEntry directly instead of receiving pre-read bytes — 2 problems. (1) Error handling: zlib inflate failure in native code → SIGABRT or return NULL → no Java IOException → no ClassNotFoundException → JVM continues with missing class → NoClassDefFoundError 5 minutes later at first use → symptom far from cause. (2) Concurrency: 10 threads loading classes from same JAR → 10 concurrent ZIP_GetEntry calls → single ZIP handle mutex → serialized reads → 10x slower class loading. Java ZipFile: InputStream per thread → concurrent inflate → parallel class loading."
+
+**4.2: ClassLoader.c — the native entry** (ClassLoader.c:XXX)
+`JNIEXPORT jclass JNICALL Java_java_lang_ClassLoader_defineClass1(JNIEnv *env, jclass cls, jstring name, jbyteArray data, jint offset, jint length, jobject pd, jstring source)`.
+- GetStringUTFChars(name) → "com/example/Foo" → replace '.' with '/' → "com/example/Foo"
+- GetByteArrayRegion(data) → copy bytes from Java heap to native buffer
+- JVM_DefineClass(env, name, loader, buf, length, pd, source) → jvm.cpp → SystemDictionary::define_class → ClassFileParser (02 territory)
+
+**4.3: JVM_DefineClass — the native bridge** (jvm.cpp)
+JVM_DefineClass → SystemDictionary::resolve_from_stream → ClassFileParser::parseClassFile → InstanceKlass → SystemDictionary::add_to_hierarchy → return jclass.
+
+**4.4: JNI_SetByteArrayRegion — the data transfer**
+GetByteArrayRegion copies from Java heap byte[] → native char* buffer. Performance: memcpy of ~500-5000 bytes (typical .class file) → ~0.5μs. Counterfactual: "If defineClass1 used DirectByteBuffer (no copy): pointer directly to Java heap → avoids memcpy → saves 0.5μs per class → 3000 classes × 0.5μs = 1.5ms. Not worth the JNI complexity."
+
+**4.5: Error handling — why NoClassDefFoundError, not IOException**
+If bytes are invalid → ClassFileParser throws ClassFormatError (inside JVM). If class not found → ZipFile.getInputStream throws IOException → ClassLoader catches → throws ClassNotFoundException. If defineClass1 itself fails → NoClassDefFoundError. "Three different exceptions for three different failure stages — each tells you WHERE in the chain the failure occurred."
+
+### §五 — Mermaid: Full chain from disk to InstanceKlass
+ZipFile.getInputStream → Inflater.inflate (zlib) → byte[] → ClassLoader.defineClass1 → JVM_DefineClass → ClassFileParser → InstanceKlass
+
+### §六 — GDB: break at ClassLoader.c:defineClass1, verify bytes received, step into JVM_DefineClass
+
+### §七 — Interview: Q5 + Q8 from README §五
+
+---
+
+## 04-Jar-URL-Nesting.md — Content Arc
+
+### §〇 — Production: "Spring Boot fat JAR — ZipException on nested JAR"
+`java.util.zip.ZipException: error in opening zip file` accessing `BOOT-INF/lib/spring-core.jar` inside `app.jar`. Standard ZipFile → ZIP_Open expects real filesystem path → nested entries aren't real files.
+
+Diagnostic: `unzip -l app.jar | grep spring-core.jar` → confirm entry exists. Solution: Spring Boot LaunchedURLClassLoader (auto-detected) or JDK 13+ zipfs (automatic with module path).
+
+### §一 — Narrative + Sidebars
+"Fat JAR = JAR that contains other JARs as entries. Spring Boot single JAR deployment. Problem: Java's ZipFile only works on real files — nested entries are invisible. Solution has evolved: Spring Boot custom classloader → JDK 13+ zipfs provider."
+
+Sidebars: fat JAR structure (BOOT-INF/lib/*.jar inside main JAR → Spring Boot layout), LaunchedURLClassLoader (Spring Boot classloader: overrides findClass → intercepts "BOOT-INF/lib/" path → creates ZipFile for nested JAR → reads nested entries), JarURLConnection (handles "jar:file:///app.jar!/BOOT-INF/lib/spring.jar!/META-INF/MANIFEST.MF" → recursive resolution), zipfs (JDK 13+ ZipFileSystemProvider: treats nested JAR as a virtual filesystem → standard java.nio.file.Path API → transparent access).
+
+### §二 — Environment
+
+### §三 — Source Files
+java/net/JarURLConnection.java, jdk/nio/zipfs/ZipFileSystem.java, Spring Boot: org.springframework.boot.loader.LaunchedURLClassLoader, org.springframework.boot.loader.jar.Handler
+
+### §四 — Nesting Deep-Dive
+
+**4.1: Standard ZipFile limitation** — ZipFile constructor → native open → ZIP_Open(path) → path must be real file. `path = "BOOT-INF/lib/spring-core.jar"` → ZIP_Open fails because it's not a filesystem path.
+
+**4.2: JarURLConnection protocol** — `new URL("jar:file:///app.jar!/BOOT-INF/lib/spring-core.jar!/META-INF/MANIFEST.MF")` → JarURLConnection strips "jar:" → opens outer JAR as ZipFile → locates "BOOT-INF/lib/spring-core.jar" entry in outer ZIP → reads entry bytes → treats as new JAR → opens as ZipFile from byte buffer → locates "META-INF/MANIFEST.MF" in inner JAR.
+
+**4.3: Spring Boot LaunchedURLClassLoader** — custom Handler for "jar:" URLs → creates JarFile instances for nested JARs → caches them → subsequent class loads use cached inner JarFile. Counterfactual: "If Spring Boot didn't cache inner JarFile: 200 classes × inflate outer entry (extract spring-core.jar bytes) = 200 × 0.5ms = 100ms waste. With cache: inflate outer entry ONCE → cached inner JarFile → 200 × 0ms = 0ms."
+
+**4.4: JDK 13+ zipfs** — ZipFileSystemProvider → `FileSystems.newFileSystem(URI.create("jar:file:///app.jar!/BOOT-INF/lib"))` → returns FileSystem → `fs.getPath("spring-core.jar")` → transparent access → same API as real filesystem.
+
+**4.5: Performance — 2x decompression** — Nested JAR = inflate outer entry (extract inner JAR bytes) → inflate inner entry (extract .class bytes). "Each nested class load: 2 inflate operations vs 1 for flat JAR. Mitigation: cache inner JAR → first class: 2x, subsequent classes: 1x."
+
+### §五 — Mermaid: nested JAR resolution — request class → intercept "BOOT-INF/lib/" → extract inner JAR → cache → read class
+
+### §六 — GDB (from Gap 1 fix):
+7. Break at JarURLConnection.connect() → verify URL parsing: scheme detection, outer JAR open, inner entry location.
+8. Break at ZipFile.<init>(File) on nested extraction → verify 2x inflate: first for outer entry, second for inner class.
+
+### §七 — Interview: "How does Spring Boot load classes from nested JARs?" → LaunchedURLClassLoader + caching + 2x decompression analysis

@@ -1,0 +1,27 @@
+Fix 3 review gaps in 13-launcher prompts before writing docs.
+
+## Gap 1: P01 §〇 — add -XX:-UseZGC exclusion confirmation
+In prompt-01-Argument-Parsing.md §〇, find the ZGC diagnostic section. Add after existing diagnostic:
+
+"And the definitive verification: `-XX:-UseZGC` → exclude ZGC → retry. If crash stops → ZGC confirmed as root cause → either: (a) add `-XX:+UnlockExperimentalVMOptions` (but this is risky in production), (b) upgrade to JDK 15+ where ZGC is production-ready, or (c) remove ZGC flag entirely."
+
+## Gap 2: P03 §4.8 — add quantified JavaMain exit counterfactual
+In prompt-03-Main-Class-Loading.md §四 4.8, find the JavaMain exit path question group. Add:
+
+"Counterfactual: If DestroyJavaVM didn't wait for non-daemon threads: Thread.stop() kills thread mid-synchronized block → monitor left locked → next thread to acquire → infinite wait → production deadlock. Real scenario: Spring Boot app with @Async task that writes to DB → transaction never commits → connection pool leaks → app becomes unresponsive → SIGTERM → DestroyJavaVM hangs → Docker container timeout → kill -9 → data loss. The 10s Docker timeout is frequently shorter than DestroyJavaVM's graceful shutdown → killed threads leak file descriptors and DB connections."
+
+## Gap 3: All four §八 — add missing generic prohibitions
+
+### prompt-00 §八: add
+"❌ Don't explain C language basics (argc, argv, pointer arithmetic) — this is JVM documentation, not a C tutorial"
+"❌ Don't explain POSIX dlopen/dlsym semantics in depth (11-os-layer covers)"
+
+### prompt-01 §八: add
+"❌ Don't explain C language basics (argc parsing, string comparison)"
+
+### prompt-02 §八: add
+"❌ Don't explain C language basics"
+
+### prompt-03 §八: add
+"❌ Don't explain C language basics"
+"❌ Don't explain JAR/ZIP file format internals (14-zip-jimage covers)"

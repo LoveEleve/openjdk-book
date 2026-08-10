@@ -1,0 +1,71 @@
+Produce 3 prompts for 16-nio-network — sendfile + Reactor + Socket options. Same 10-section standard as Round 1.
+
+## Prerequisites (Round 1 output)
+probe_md/16-nio-network/prompts/prompt-00-Epoll-Selector.md
+probe_md/16-nio-network/prompts/prompt-01-SocketChannel-Native.md
+probe_md/16-nio-network/prompts/prompt-02-DirectByteBuffer-IO.md
+
+## Output
+probe_md/16-nio-network/prompts/prompt-03-FileChannel-sendfile.md (target: 400+ lines)
+probe_md/16-nio-network/prompts/prompt-04-Selector-Thread-Model.md (target: 400+ lines)
+probe_md/16-nio-network/prompts/prompt-05-Socket-Options.md (target: 350+ lines)
+
+## Quality mandate — same as Round 1 + 00/01/02 references in §一
+
+## Verified source line numbers
+sendfile64: FileChannelImpl.c:135
+wakeup pipe: EPollSelectorImpl.java:181-204/254
+epoll bug version: Linux <2.6.27, JDK 6-8, RecycledSelector trigger
+setsockopt: Net.c, PlainSocketImpl.c
+
+## Level-triggered correction: same as Round 1 — MUST be reflected
+
+---
+
+## prompt-03-FileChannel-sendfile.md — EXACT specs
+
+### §〇 Production
+`FileChannel.transferTo(0, size, socketChannel)` returns 0 or EINVAL. Linux sendfile64 fails on non-socket output fd → Java fallback chain: transferToDirectly → transferToTrustedChannel → transferToArbitraryChannel (mmap+writes). Kafka relies on sendfile for 1GB/s topic serving → sendfile failure → byte[] copy fallback → 10x CPU spike.
+
+### §四 groups:
+4.1: sendfile64 at FileChannelImpl.c:135 — `sendfile64(dstFD, srcFD, &offset, count)`. Counterfactual: "If no sendfile: disk→kernel→user→kernel→NIC = 4 copies + 2 context switches. sendfile: disk→kernel→socket→NIC = 2 copies IN KERNEL + 1 switch → 2x throughput, 50% CPU."
+4.2: Fallback chain — transferToDirectly (sendfile → EINVAL → fallback), transferToTrustedChannel (mmap + write), transferToArbitraryChannel (byte[] copy).
+4.3: Kafka use case — topic partition file → sendfile → socket → consumer. Counterfactual: "If DirectBuffer read+write: 2 syscalls (read from disk into DirectBuffer, write to socket) + 1 Java heap copy if no DirectBuffer pool. sendfile: 1 syscall, 0 Java memory touched."
+4.4: mmap vs sendfile — mmap: map file→process address space → write to socket = 4 copies. sendfile: kernel-only → 2 copies. When sendfile not supported: mmap fallback.
+4.5: sendfile partial write — returns <count → Java retries from new offset. Counterfactual: "If no retry: partial transfer → truncated data → consumer sees incomplete message."
+
+### §十 GDB: break FileChannelImpl.c:135, verify sendfile64 parameters, step through fallback chain.
+
+---
+
+## prompt-04-Selector-Thread-Model.md — EXACT specs
+
+### §〇 Production
+Selector.select() hangs — another thread modifies key.interestOps() but doesn't call selector.wakeup(). Selector continues waiting on old interest set → new OP_WRITE interest not detected → socket write hangs. Netty's NioEventLoop handles this by calling wakeup() after every interestOps() change.
+
+### §〇 Production #2
+JDK epoll spin bug: Linux <2.6.27 kernel bug in ep_remove → epoll_wait returns 0 instead of blocking → 100% CPU spin. Triggered by RecycledSelector pattern in JDK 6-8 (temporarily unregister+reregister keys). JDK 9+ fixed at EPollArrayWrapper level.
+
+### §四 groups:
+4.1: Reactor pattern — single-threaded selector loop: select → iterate selectedKeys → dispatch to handler. Counterfactual: "BIO: 1 thread per connection → 10K threads → 10GB stack memory. Reactor: 1 thread + epoll → ~100MB with DirectBuffers."
+4.2: Wakeup pipe at EPollSelectorImpl.java:181-204 — pipe created at selector open → pipe fd registered with epoll. wakeup() writes 1 byte to pipe → epoll sees EPOLLIN → select() returns. After wakeup: read pipe to clear.
+4.3: interestOps change requires wakeup — key.interestOps(OP_WRITE) changes interest set in Java → BUT epoll kernel interest set not updated until epollCtl(MOD) → need wakeup to trigger reprocessing.
+4.4: Selector contention — multiple threads calling select() on same selector → only 1 thread proceeds (synchronized lock). Others block.
+4.5: Netty NioEventLoop — single thread per EventLoop → owns its own Selector → Boss EventLoopGroup accepts → Worker EventLoopGroup processes I/O → no Selector sharing.
+4.6: JDK epoll spin bug (Gap 1 fix) — Linux <2.6.27, JDK 6-8, RecycledSelector trigger. Resolution: JDK 9+ EPollArrayWrapper clears epoll event before DEL.
+
+### §十 GDB: break EPollSelectorImpl.java:254 (wakeup write), verify pipe read, trace select() return after wakeup.
+
+---
+
+## prompt-05-Socket-Options.md — EXACT specs
+
+### §〇 Production
+TIME_WAIT flood: 30000 connections in TIME_WAIT → can't accept new connections. Each active close sends FIN, receives FIN-ACK → TIME_WAIT for 2*MSL (typically 60s). SO_LINGER with l_onoff=-1 forces RST instead of FIN → skips TIME_WAIT but risks data loss if socket buffer has unacked data.
+
+### §四 groups:
+4.1: SO_LINGER at Net.c — setsockopt(fd, SOL_SOCKET, SO_LINGER). linger{onoff, seconds}. l_onoff=0, l_linger=-1 → special Linux behavior: pending close sends RST → skip TIME_WAIT.
+4.2: TCP_NODELAY — disable Nagle's algorithm. Nagle: coalesce small writes → wait for ACK before sending next. TCP_NODELAY: send immediately → lower latency for interactive apps (100μs vs 200ms). Counterfactual: "Nagle on: small writes aggregated → 1 TCP segment per RTT → 90% fewer packets. NODELAY on: 1 TCP segment per write call → more packets → better latency."
+4.3: SO_REUSEADDR — allow bind to TIME_WAIT port. Without: bind fails EADDRINUSE for 60s after crash. With: immediate rebind.
+4.4: SO_KEEPALIVE — TCP keepalive probes. Detect dead connections after idle period (default 2hrs). Application-level keepalive preferred (Netty IdleStateHandler).
+4.5: SO_RCVBUF/SO_SNDBUF — kernel socket buffer sizes. Default: ~128KB. For 10GbE: need ≥ 1MB for full throughput. Counterfactual: "Small buffer → TCP window small → bandwidth limited to buf/RTT → 128KB/50ms = 2.5MB/s on 10GbE link → 40x underutilized."

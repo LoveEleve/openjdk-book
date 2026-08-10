@@ -1,0 +1,36 @@
+Audit 5 🔴-flagged docs in 01-jvm-startup against 07-12 phase quality standard. For each doc, read it, then answer:
+
+### Required standard (from 07-12 docs, avg 700-900 lines, 48-50/50)
+- Production scenario opens the doc (real crash/output fault the reader has experienced)
+- Every major claim backed by 3-5 lines of source code with file:line
+- ≥5 "why X instead of Y" design rationale sections
+- GDB assertions with exact breakpoints
+- Beginner concepts explained before used (不假设 x86 知识)
+- Interview-ready: could a reader answer a JVM interview question after reading?
+
+## Docs to audit
+probe_md/libjvm-analysis/01-jvm-startup/11-universe2_init-Deep-Dive.md
+probe_md/libjvm-analysis/01-jvm-startup/12-javaClasses_init-Deep-Dive.md
+probe_md/libjvm-analysis/01-jvm-startup/13a-universe_post_init-Deep-Dive.md
+probe_md/libjvm-analysis/01-jvm-startup/13b-Compiler-Stubs-MH-Deep-Dive.md
+probe_md/libjvm-analysis/01-jvm-startup/18-Interpreter-Template-Dispatch-Deep-Dive.md
+
+## Already-covered context (can reference)
+probe_md/libjvm-analysis/01-jvm-startup/01-JVM-Startup-Structure-Init.md (✅ green, good template)
+probe_md/libjvm-analysis/01-jvm-startup/07-G1CollectedHeap-Initialize-Deep-Dive.md (✅ green, deep reference)
+
+## Output for each doc
+**XX-XXX.md** (current: XXX lines)
+| Dimension | Score | Issue |
+|-----------|:---:|-------|
+| Production scenario | /10 | missing / weak / ... |
+| Design rationale | /10 | ... |
+| Source density | /10 | ... |
+| GDB verification | /10 | ... |
+| Interview readiness | /10 | ... |
+| **Total** | **/50** | |
+
+Fix priority: MUST (rewrite), SHOULD (major additions), NICE (minor)
+List exact sections to add/rewrite per doc.
+
+Then: which 2 red docs to fix FIRST (highest impact)?

@@ -1,0 +1,162 @@
+Produce 01-C2-Pipeline.md from prompt-01-C2-Pipeline.md (463 lines). This is the FOUNDATION of the entire 05-jit-compiler phase — all 6 other docs depend on it. It must be the single best document about C2's architecture that exists anywhere.
+
+## Prompt
+probe_md/libjvm-analysis/05-jit-compiler/prompt-01-C2-Pipeline.md (463 lines)
+Read EVERY word of the prompt — especially §〇 (hs_err opener), §四 (deep dive questions), §六 (writing requirements).
+
+## Why this doc matters (quality impact)
+
+**Depth**: This is the document where a reader discovers that C2 isn't "a compiler that reads bytecodes" — it's a GRAPH OPTIMIZER that transforms a Sea of Nodes through 9 phases. If this doc fails, the reader thinks "C2 is just a better C1" instead of "C2 is a fundamentally different approach to compilation."
+
+**Breadth**: All 9 phases must be covered. Skipping Escape Analysis or Macro Expansion because they're "complex" → the reader has holes in their understanding → they can't trace a full `new Object()` through C2.
+
+**Interview**: After reading this doc, the reader should be able to answer: "Walk me through C2's pipeline from bytecode to machine code." This is THE most-asked JVM compiler interview question. The answer requires: Parse → IGVN → Inline → LoopOpt → EA → Macro → Match → RegAlloc → Output — in order, with WHAT changes each phase makes and WHY the order matters.
+
+**Continuity**: The reader comes from 04-interpreter (knows InvocationCounter triggers CompileBroker). This doc answers: "What happens AFTER compile_method() is called?" It connects 04's "trigger" to 02's "inline", 03's "regalloc", 04's "codecache", etc.
+
+**First principles**: Every phase must start from "if you built a simple compiler, you'd X. C2 does Y because Z." Not "C2 does Y." Example: "If you built a simple compiler, you'd put instructions in order (linear IR). C2 uses NO ORDER — Nodes float freely until pinned by control dependencies. This is Sea of Nodes — and it's WHY C2 can do optimizations that LLVM cannot."
+
+**Beginner**: 5 "你需要知道的" sidebars from prompt §六 must appear in the final doc: Sea of Nodes, Ideal Graph, GVN, IGVN, ADL. Each must be a self-contained sidebar that a reader can understand WITHOUT leaving the doc.
+
+## Verification SOP
+```
+sverklo_investigate(expand_graph=true) → codegraph query + callers → rg -n <function> <source>
+```
+
+## Style references (study these before writing)
+- Production opener excellence: probe_md/libjvm-analysis/10-services-diag/04-VMError-hs_err.md
+- Assembly-level annotation: probe_md/libjvm-analysis/09-native-interface/07-Unsafe-Implementation.md
+- Beginner sidebar integration: probe_md/libjvm-analysis/04-interpreter/02-Stack-Frame.md
+- Phase pipeline exposition: probe_md/libjvm-analysis/12-cpu-layer/03-Stubs.md
+
+## Output
+probe_md/libjvm-analysis/05-jit-compiler/01-C2-Pipeline.md
+
+## Content arc (the STORY the doc tells)
+
+### §〇 — Production crash opens the door
+hs_err output: `V [libjvm.so+0x8c4d21] PhaseIdealLoop::build_and_optimize+0x341`
+The reader was paged at 3am. Their JVM crashed during C2 compilation. This doc will teach them: WHAT phase crashed, WHY it crashed, HOW to exclude the method so production restores. The reader is MOTIVATED before any concept appears.
+
+### §一 — De-glamorization + narrative
+"本文不是 C2 源码导读。不讲每个 Node 子类的实现。本文是 C2 的 ARCHITECTURE STORY：100 条字节码如何经过 9 个 Phase 变成 10 条 x86 指令。"
+
+Prerequisites stated: 04-interpreter (JIT trigger), 02-class-loading (InstanceKlass/Method/CP). Within 05: "本文是 05 的基础——02(Inlide)/03(RegAlloc)/04(CodeCache)/05(Deopt)/06(OopMap)/07(Profile) 都依赖本文的理解。"
+
+5 Beginner sidebars inserted here:
+- **Sea of Nodes**: "没有控制流顺序的中间表示。每个 Node 代表一个操作，Node 之间的边表示数据依赖和控制依赖。因为 Node 可以'浮动'到下一条指令前或后——C2 可以重新排序计算来减少 live ranges，但指令选择的匹配是 NP-hard。"
+- **Ideal Graph**: "C2 的优化 IR。Node::Ideal(PhaseGVN*, bool) 是每个 Node 的'优化自己'方法——AddI(0, x) 返回 x，AndI(x, -1) 返回 x。"
+- **GVN**: "Global Value Numbering。哈希表：如果两个 AddI Node 有相同的操作码和相同的输入 → 合并为一个。消除冗余计算。"
+- **IGVN**: "Iterative GVN。GVN 一次不够——因为一次优化会暴露新机会。反复应用直到收敛。AddI(0, x) 被 GVN 消掉后，可能暴露出 x+y 和 y+x 的冗余。"
+- **ADL**: "Architecture Description Language。C2 用 x86_64.ad 文件描述 x86_64 的指令集——每个指令对应一个模式。Matcher 阶段读取 ADL 将 Ideal Node 匹配到具体 x86 指令。"
+
+### §二 — Standard environment
+OpenJDK 11 slowdebug, -Xms8g -Xmx8g -XX:+UseG1GC, 64-bit Linux x86_64.
+Build: `bash configure --with-debug-level=slowdebug`
+
+### §三 — Source file ecosystem (12 files in table)
+compile.cpp → parse1.cpp → phaseX.cpp → loopnode.cpp → escape.cpp → macro.cpp → matcher.cpp → chaitin.cpp → output.cpp → doCall.cpp → compileBroker.cpp → x86_64.ad
+Each: file + full path + module + core functions + role in the 9-phase pipeline.
+
+### §四 — "100 bytecodes → 10 x86 instructions" — the complete trace
+
+Choose a concrete method: `int hashCode(String s) { return s == null ? 0 : s.value.hashCode(); }`
+
+**Phase 0: CompileBroker → C2 entry**
+`CompileBroker::compile_method()` → `C2Compiler::compile_method()` → `Compile::Compile(ciMethod*)`.
+Node 0: StartNode. Method has 1 parameter (String s).
+
+**Phase 1: Parse — bytecodes → Nodes**
+`GraphKit::gen_straight()` → `Parse::do_one_bytecode()` loop.
+- `aload_0` (@bci 0: load "this") → ParmNode(0) — the `this` reference
+- `aload_0` (@bci 1: load "this" again) → ParmNode(0) — SAME Node (hash-consed)
+- `ifnonnull 10` (@bci 2: null check) → IfNode(BoolNode(CmpNode(ParmNode, null)), true_bci=10, false_bci=3)
+- `iconst_0` (@bci 5: push 0, the "?" branch returns 0) → ConINode(0)
+- `ireturn` (@bci 6) → ReturnNode(ConINode(0))
+- `aload_0` (@bci 10: load "this", the non-null path) → ParmNode(0) — ALREADY exists
+- `getfield #value` (@bci 10: s.value) → LoadINode(ParmNode, offset=12)
+- `invokevirtual #hashCode` (@bci 12) → CallStaticJavaNode(...) ← will be inlined in Phase 2
+- `ireturn` (@bci 15) → ReturnNode(...)
+
+After Parse: ~20 Nodes. 1 StartNode + 1 ParmNode + control flow (If/Catch/Return/Region/Phi).
+
+**Phase 2: IGVN — eliminate redundancy**
+- `ParmNode(0)` loaded at bci 0 and bci 1 → hash-consed to same Node → 1 load eliminated
+- `ConINode(0)` created at bci 5 → GVN hash lookup: no duplicate → keep
+- Iterate until no more changes.
+
+After IGVN: ~18 Nodes (saved 2 from hash-consing).
+
+**Phase 3: Inline — bring callee into caller**
+`InlineTree::should_inline(hashCode)` → callee is 49 bytes, MaxInlineSize=35...
+BUT hashCode is FREQUENTLY called (>InlineFrequencyRatio threshold) → SHOULD inline.
+`Parse::do_call()` → parses hashCode()'s bytecodes → injects Nodes into caller's graph.
+
+hashCode's bytecodes: `aload_0, getfield #value, aload_0, getfield #hash, ifne...` 
+Now INLINE in hashCode(String s). Nodes from hashCode are floated into the Sea.
+
+After Inline: ~45 Nodes (hashCode added ~27 Nodes, minus callee overhead).
+
+**Phase 4: IGVN (again) — eliminate across inline boundary**
+After inline: `hashCode`'s `hash` field read is visible to IGVN.
+- If `hash` was already loaded elsewhere → merge loads → 2 loads → 1
+- `hash != 0 ? hash : compute_hash()` — if `hash` always 0 in this context → eliminate the `!= 0` branch → `compute_hash()` always executed
+
+After IGVN round 2: ~40 Nodes.
+
+**Phase 5: Loop Optimization**
+This method has no loops (it's a straight-line method after null check).
+`PhaseIdealLoop::build_and_optimize()` runs but finds no loops → passes through.
+After LoopOpt: still ~40 Nodes.
+
+**Phase 6: Escape Analysis**
+`ConnectionGraph::compute_escape()` — stream analysis through method.
+No object allocation in this method (String parameter is from caller).
+After EA: no change.
+
+**Phase 7: Macro Expansion**
+No locks, no allocations in this method.
+After Macro: no change.
+
+**Phase 8: Matching — Nodes → x86 instructions**
+`Matcher::match()` reads `x86_64.ad`:
+- `LoadINode(ParmNode, offset=12)` → `movl 0xc(%rdi), %eax` (x86_64.ad: loadI)
+- `AddINode(LoadI, LoadI)` → `addl %ecx, %eax` (addI_reg_reg)
+- `CmpNode(LoadI, ConI(0))` → `testl %eax, %eax`
+- `IfNode(BoolNode(CmpNode, EQ))` → `jne target`
+
+After Matching: ~15 x86 instructions (each Node → 0-2 x86 instructions).
+
+**Phase 9: RegAlloc + Output**
+Chaitin coloring: ~40 virtual registers → 16 physical GPRs. This method needs ~8 registers → no spill needed.
+`PhaseOutput::install_code()` → `CodeCache::allocate()` → nmethod created.
+`Method::set_code(nmethod)` → next call enters compiled code directly.
+
+After Output: ~15 x86 instructions, 1 nmethod, ~200 bytes CodeCache.
+
+### §五 — "Why this order?" (design rationale)
+
+Why Parse BEFORE IGVN? Must create Nodes before you can optimize them.
+Why IGVN BEFORE Inline? Smaller graph to inline into → faster inline decision.
+Why Inline BEFORE LoopOpt? Inlined loops expose more optimization opportunities.
+Why LoopOpt BEFORE EA? Loop optimizations (unrolling) create more allocation sites → more EA opportunities.
+Why EA BEFORE Macro? EA may scalar-replace allocations → Macros never needed.
+Why Macro BEFORE Matching? Locks (Macro Expand) need graph-level expansion, not instruction-level.
+Why Matching BEFORE RegAlloc? Must know WHICH x86 instructions needed before assigning registers.
+
+### §六 — Mermaid: 9-phase pipeline
+ASCII Mermaid with Node counts at each phase:
+Parse(20)→IGVN(18)→Inline(45)→IGVN(40)→LoopOpt(40)→EA(40)→Macro(40)→Match(15)→RegAlloc+Output(15 instructions, 200 bytes)
+
+### §七 — GDB: 8 breakpoints, 1 per phase
+Full GDB session format with (gdb) prompts, showing Phase name, Node count, time.
+
+### §八 — Production: method exclusion workflow
+Step-by-step: find crashing method in hs_err → CompileCommand=exclude → restart → verify.
+
+### §九 — Story-format interview answer
+"Walk me through C2's pipeline."
+Story that a reader can MEMORIZE and DELIVER in 90 seconds in a JVM interview.
+
+## Cross-reference
+At document start: "继 04-interpreter 后，本文解释 CompileBroker 之后发生什么。在 05 中，02(Inlide) 和 03(RegAlloc) 将扩展本文的 Phase 3 和 Phase 8。"

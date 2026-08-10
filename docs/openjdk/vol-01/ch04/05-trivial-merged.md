@@ -1,5 +1,8 @@
 # 4.5 四个 trivial 函数合并
 
+> **前置依赖**：[ch04/04 classLoader 边界](04-classloader-boundary.md) → [ch04/01 init_globals 总览](01-overview.md)
+> → **后续**：[ch05 compilationPolicy_init](openjdk/vol-01/ch05)
+
 4.4 讲了 `classLoader_init1` 和 `os_init_globals`。接下来 init_globals 里的代码涉及编译策略、代码缓存、CPU 检测等重量级子系统，那些放到后续章节。本节合并讲 4 个 trivial 函数——它们在 init_globals 里散布在不同位置，每个只有几行，但背后各有小机制。
 
 ---
@@ -352,3 +355,10 @@ JIT 编译器把 Java 方法编译成机器码时，要用 CPU 寄存器。但 J
 ### 为什么源码在 cpu/x86 不在 share
 
 这个函数在 `cpu/x86/vmreg_x86.cpp` 而不是 `share/`——因为不同 CPU 架构的寄存器完全不一样。x86 有 RAX/RBX/XMM0，ARM 有 R0-R14/VFP/NEON 寄存器。但调用在 `share/` 的 `init.cpp:122`——`init_globals()` 调 `VMRegImpl::set_regName()`，编译时链接到当前平台的实现。
+
+
+## 设计权衡
+
+**为什么要单独写一篇"trivial 函数合并"而不是跳过它们？** 这 4 个函数的代码量极小——`compilationPolicy_init` 选策略、`codeCache_init` 分配内存、`VM_Version_init` 检测 CPU、`stubRoutines_init1` 注册 stub 入口。但它们是被 `init_globals()` 调用的——如果跳过不讲，读者会在 `universe_init` 的依赖链中看到"依赖 codeCache_init 和 stubRoutines_init1"的注释但不知道这两个函数做了什么。本文的目的不是详解它们（后续 ch05-ch08 各有一整章），而是给读者一个"概念锚点"——知道它们存在、知道它们大概做了什么、知道为什么必须在这里执行——然后放心进入 `universe_init` 的深入分析。
+
+**为什么 trivival 函数不合并成一个 "pre_init()" 大函数？** 如果把 compilationPolicy_init、codeCache_init、VM_Version_init、stubRoutines_init1 合并成一个函数，它们的失败处理会绑定在一起——codeCache 分配失败意味着 compilationPolicy 也得"回滚"（选好的策略基于不再存在的 codeCache 大小），但 compilationPolicy 根本没有回滚机制（它只是 `set_policy(new XxxCompPolicy())`）。拆成 4 个独立函数，每个函数的失败语义独立——codeCache_init 失败只影响后续需要 codeCache 的子系统，不影响已经完成的 VM_Version_init 的 CPU 特性检测结果。

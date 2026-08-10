@@ -1,0 +1,59 @@
+Enhance 02-class-loading/README.md following the same retrofit pattern as 01-jvm-startup. Do NOT restructure — only APPEND these 5 sections after the existing chapters.
+
+## Existing chapters (must preserve all, don't touch):
+§〇 上手指南, §一 完整文件索引, §二 类加载全流程, §三 关键数据结构, §四 探针覆盖, §五 计划文档(13篇)
+
+## Only ADD these at the END:
+
+### §六 面试高频问题 × 文档直接对应
+| 面试问题 | 直接看这篇 | 为什么 |
+|----------|-----------|--------|
+| "Class.forName() 和 new 的区别？具体到 JVM 层" | ... | ... |
+| "双亲委派模型怎么实现的？为什么不能打破？" | ... | ... |
+| ".class 文件怎么变成 InstanceKlass 的？" | ... | ... |
+| "为什么数组加载很快？TypeArrayKlass 不用解析" | ... | ... |
+| "ClassFileParser::parseClassFile() 的 6 个阶段是什么？" | ... | ... |
+| "ConstantPoolCache 为什么比 ConstantPool 快？" | ... | ... |
+| "resolve 阶段做了什么？符号引用→直接引用" | ... | ... |
+| "verifier 怎么保证字节码安全？哪 4 层检查？" | ... | ... |
+| "类初始化 <clinit> 怎么保证线程安全？" | ... | ... |
+| "Metaspace OOM 和类加载什么关系？" | ... | ... |
+| "系统类（Object/String）怎么加载的？和用户类区别" | ... | ... |
+| "CDS (Class Data Sharing) 怎么加速类加载？" | ... | ... |
+
+### §七 生产故障 × 文档诊断指引
+| 生产场景 | 症状 | 看这篇 | 怎么诊断 |
+|---------|------|--------|---------|
+| Metaspace OOM | Caused by: java.lang.OutOfMemoryError: Metaspace | ... | ... |
+| 类加载慢 (>500ms/class) | 启动日志显示类加载耗时 | ... | ... |
+| ClassNotFoundException | 线上找不到类，classpath 正常 | ... | ... |
+| 类加载死锁 | 两个 ClassLoader 互相等对方加载 | ... | ... |
+| VerifyError | 字节码版本不兼容 | ... | ... |
+| NoClassDefFoundError | 类在编译期存在，运行期找不到 | ... | ... |
+| 类重复加载 | 同一个类被加载两次 | ... | ... |
+| CDS 归档不生效 | -Xshare:dump 后启动没变快 | ... | ... |
+
+### §八 深度评审检查点（自检 14 篇已写文档是否达标）
+| # | 文档 | 生产故障可直接参考？ | 面试题可直接回答？ | 解释了"为什么这样设计"？ | sizeof/源码验证？ | 评级 |
+|---|------|:---:|:---:|:---:|:---:|:---:|
+(Matrix with all 14 docs, rating each ✅=green / 🟡=yellow / 🔴=red)
+
+### §九 深度审计问题（≥12 个）
+Format: `❓ 为什么 X 而不是 Y → 应出现于: XX 文档 §X`
+Cover: ClassFileParser design/SystemDictionary/ConstantPool/KlassFactory/LinkResolver/Verifier/CDS
+
+### §十 和前后阶段的连接
+| 阶段 | 依赖 02 的 |
+|------|-----------|
+| 01-jvm-startup | 01 的 Universe::genesis 创建基础 Klass — 02 解释怎么加载普通类 |
+| 03-object-model | InstanceKlass/Method/ConstantPool 结构 — 02 解释怎么创建 |
+| 04-interpreter | 解释器执行字节码 — 02 提供解析后的 Class |
+| 06-gc-memory | Metaspace 大小和类加载量的关系 |
+| 12-cpu-layer | 字节码→模板表中，符号引用的解析来自 02 |
+
+## Operating instruction
+1. Read current README fully
+2. Fill in ALL tables with actual document references from existing §五 (14 docs)
+3. Audit existing docs to populate §八 honestly (some docs WILL be red/yellow — that's OK, we'll fix later)
+4. Append §六~§十 after existing chapters
+5. Do NOT modify, delete, or reorder any existing content

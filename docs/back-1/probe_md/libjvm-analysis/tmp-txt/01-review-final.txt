@@ -1,0 +1,46 @@
+Deep-review all 01-jvm-startup documents (24 docs, ~9400 lines). This is phase 01 — the ENTRY POINT to the entire 12-phase JVM analysis series. It must be the most beginner-friendly, most production-grounded, most interview-rich phase of all.
+
+## Documents
+All .md files under probe_md/libjvm-analysis/01-jvm-startup/
+Start with README.md (452 lines — 14 sections including interview table, production fault map, quality audit matrix).
+
+## Review focus — content quality, not line numbers
+
+### 1. Reading experience (10 pts)
+As a Java engineer who has never read JVM source, following the 3 reading paths in README §〇:
+- Can the beginner path (5 docs) build "JVM startup mental model"?
+- Does the intermediate path have any "jump into deep water" moments?
+- Do 24 docs feel like a cohesive course, or 24 disconnected articles?
+
+### 2. Production grounding (10 pts)
+- For each production scenario in README §十一, does the mapped document actually contain diagnostic steps?
+- Are 2025 container/K8s realities covered? (cgroup-aware startup, pod resource limits, multi-tenant JVM)
+- If a reader hits a production crash at 3am, can they find the answer in this phase?
+
+### 3. Interview readiness (10 pts)
+- For each of the 12 interview questions in README §十, does the mapped document contain a direct, concrete answer?
+- Missing classic interview questions? (e.g., "How does JVM decide compressedOops width at startup?", "How much Metaspace is pre-allocated?", "What threads exist before main() runs?")
+
+### 4. Beginner-friendliness (10 pts)
+- README §〇 lists prerequisites (C++ basics, Linux commands, GDB) — but do documents themselves assume unstated knowledge?
+- Terminology consistency: same concept called the same thing across 24 docs?
+- Hardest paragraph for a beginner to parse — quote it.
+
+### 5. Against 07-12 benchmark (10 pts)
+- Compared to 10-services-diag/04-VMError-hs_err.md (45/45) and 12-cpu-layer/03-Stubs.md (49/50):
+  - Mermaid diagram density
+  - GDB session output (not just breakpoint descriptions, actual `(gdb)` output)
+  - "3-5 lines of source code evidence per claim"
+  - Production scenario as document opener
+
+### 6. Missing topics (5 pts)
+- Anything in the create_vm() 15-stage flow that has no dedicated document?
+- README promises that aren't delivered?
+- What would a Senior JVM engineer expect to find in phase 01 that's missing?
+
+## Output
+- Phase-wide score /55
+- Top 3 gaps (what matters most, not cosmetic)
+- Bottom 3 quality docs (with fix priority)
+- "If only 5 docs to read, which 5?" (and why)
+- Does this phase deserve to be the entry point of 12 phases?

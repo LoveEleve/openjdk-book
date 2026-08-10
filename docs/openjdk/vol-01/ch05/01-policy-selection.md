@@ -1,5 +1,8 @@
 # 6.1 编译策略选择 + CICompilerCount ergonomics
 
+> **前置依赖**：[ch04/05 trivial 函数合并](openjdk/vol-01/ch04/05-trivial-merged.md)：invocationCounter_init 设置编译阈值 → compilationPolicy_init 选策略
+> → **后续**：[ch06 codeCache_init](openjdk/vol-01/ch06)：codeCache 内存管理初始化
+
 上一章 [4.5](#/openjdk/vol-01/ch04/05-trivial-merged.md) 讲完了 `invocationCounter_init()`——初始化了每个 `JavaThread` 的调用计数器和回边计数器，设置了 `CompileThreshold`（x86 C2 = 10000）等阈值。计数器溢出时会触发编译请求，但用 C1 还是 C2、用多少个编译线程、如何调度——这些取决于编译策略。
 
 `init_globals()` 第 106 行的 `compilationPolicy_init()` 就是选择这个策略并设置 CICompilerCount：
@@ -272,7 +275,7 @@ code cache 是 JVM 里一段预留的本地内存区域，专门存放 JIT 编�
 
 每个编译线程编译时要先拿一块 CodeBuffer——一块临时的内存缓冲区，在里面生成机器码，编译完成后把内容拷贝到 code cache 并释放 CodeBuffer。所以同时运行的编译线程数不能超过 "code cache 剩余空间 / 每个编译器的 CodeBuffer 大小"——不然所有线程同时拿 CodeBuffer 会撑爆 code cache。
 
-ch05 会详细展开 code cache 的三段堆结构、flag 组合和扩容机制。这里只需要理解为什么编译线程数要受它约束。
+ch06 会详细展开 code cache 的三段堆结构、flag 组合和扩容机制。这里只需要理解为什么编译线程数要受它约束。
 
 公式算出的 `count` 还要经过 code cache 容量检查：
 
@@ -333,4 +336,14 @@ C2 线程占比约 2/3——C2 编译一个方法需要几秒到几十秒，C1 �
 
 `compilationPolicy_init()` 到此结束。`_in_vm_startup = true`（启动期间抑制编译），`_policy` 指向 `TieredThresholdPolicy` 对象，`_c1_count = 6`、`_c2_count = 12`，编译策略就绪。
 
-策略选好了、编译线程数定了。下一节 [6.2](#/openjdk/vol-01/ch05/02-thresholds)<!-- 404: target not found, 请作者补正文 --> 展开 Tiered 模式的 5 级阈值体系——方法从解释器到 C2 的逐级升级条件、编译器队列反馈如何动态调整阈值、code cache 满时的指数级抑制。
+策略选好了、编译线程数定了——Tiered 模式的 5 级阈值体系（方法从解释器到 C2 的逐级升级条件、code cache 满时的指数级抑制）是 JIT 运行时行为，在 Vol 2 的编译器运行时章节展开。
+
+---
+
+## 设计权衡
+
+**为什么编译器线程数用 `log2(n) * log2(log2(n))` 而不是线性增长？** 如果每个 CPU 核分一个编译线程，96 核机器就有 96 个编译线程——CodeCache 只有 48MB（x86_64 C2 默认），每个编译线程需要自己的 CodeBuffer，96 个同时分配会把 CodeCache 撑爆。公式的亚线性增长在 96 核时只产生 18 个线程（vs 线性 96 个），既不浪费 CodeCache 也不过度抢占 CPU。源码注释也说 `Simple log n seems to grow too slowly for tiered`——纯 log 在 16 核时只给 3 个线程，不够 C1 和 C2 并行。
+
+**为什么 C1:C2 线程比是 1:2 而不是对半分？** C2 编译一个方法需要几秒到几十秒（逃逸分析、内联、寄存器分配），C1 只需要几十到几百毫秒。如果 C1 和 C2 各占一半——C2 队列会积压（每个方法编译慢），C1 队列会空闲（每个方法编译快）。1:2 的比例让更多线程处理 C2 的慢编译，C1 的少数线程足够快速清空队列。
+
+**为什么 `compilationPolicy_init()` 要把策略设为"启动期间抑制编译"？** JVM 启动时要加载几千个 JDK 核心类（`java.lang.Object`、`String`、`Class` 等），每个类的 `<clinit>` 静态初始化也会触发方法调用。如果这些调用立即触发 C1/C2 编译，编译线程和类加载器争夺 CPU——启动时间反而翻倍。`_in_vm_startup = true` 让所有编译请求排队但不执行，等到 `compileBroker_init` 末尾的 `compilationPolicy_completed_vm_startup()` 一次性释放队列——编译线程从"无所事事"变为"批量处理"，CPU 利用更高效。

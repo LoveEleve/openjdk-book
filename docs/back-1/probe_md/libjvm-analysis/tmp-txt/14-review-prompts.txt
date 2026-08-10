@@ -1,0 +1,200 @@
+Deep-review 5 prompts for 14-zip-jimage. Each 419-479 lines. Source corrections #1-7 from README verification MUST be reflected.
+
+## Prompts
+probe_md/14-zip-jimage/prompts/prompt-00-Zip-Class-Loading.md (470 lines)
+probe_md/14-zip-jimage/prompts/prompt-01-Jimage-Format.md (477 lines)
+probe_md/14-zip-jimage/prompts/prompt-02-Compression-Zlib.md (479 lines)
+probe_md/14-zip-jimage/prompts/prompt-03-ClassLoader-Bridge.md (424 lines)
+probe_md/14-zip-jimage/prompts/prompt-04-Jar-URL-Nesting.md (419 lines)
+
+## Benchmark
+13-launcher prompt-02-JVM-Loading (567 lines, 58/60)
+
+---
+
+## 0. Source Correction Verification (pass/fail per prompt)
+
+### The 7 corrections from README source verification — check EACH prompt:
+
+| # | Correction | P00 | P01 | P02 | P03 | P04 |
+|---|-----------|:---:|:---:|:---:|:---:|:---:|
+| 1 | No ZipEntry.c — all ZIP in zip_util.c | ✓/✗ | — | — | ✓/✗ | — |
+| 2 | Hash O(1) not binary search at zip_util.c:568/1172 | ✓/✗ | — | — | — | — |
+| 3 | defineClass1 receives pre-read bytes from Java ZipFile | — | — | — | ✓/✗ | — |
+| 4 | zlib 1.2.11 source-bundled at zlib.h:26 | — | — | ✓/✗ | — | — |
+| 5 | jimage perfect hashing HASH_MULTIPLIER=0x01000193, magic 0xCAFEDADA | — | ✓/✗ | — | — | — |
+| 6 | jimage decompressor dlopens libzip.so at imageDecompressor.cpp:83 | — | ✓/✗ | ✓/✗ | — | — |
+| 7 | CRC32 in Java ZipFile layer, not native class loading | ✓/✗ | — | — | ✓/✗ | — |
+
+**FAIL if**: any prompt uses "binary search" for ZIP, claims "defineClass1 calls ZIP_GetEntry", says "system zlib", or references "ZipEntry.c".
+
+---
+
+## 1. Production Authenticity — 10 pts/prompt
+
+### Per-prompt §〇 verification:
+
+**P00**: `java.util.zip.ZipException: invalid entry CRC (expected 0x... but got 0x...)` — exact error format from Java ZipFile, correctly attributed to CRC32 in Java layer (correction #7). Diagnostic: `jar tvf app.jar` validates all CRC32s. Actionable: re-download/re-build JAR.
+
+**P01**: `java.lang.module.FindException: Module java.base not found` — JIMAGE_Open magic check fails. Correctly attributed to version MAJOR/MINOR mismatch (correction #5). Diagnostic: `jimage info $JAVA_HOME/lib/modules` checks format version.
+
+**P02**: `java.util.zip.ZipException: invalid stored block lengths` — zlib inflate() encountered malformed DEFLATE stream. Correctly attributed to zlib bundled version (correction #4). Diagnostic: verify JAR was built with compatible compressor.
+
+**P03**: `java.lang.NoClassDefFoundError: com/example/Foo` — JAR on classpath, entry exists in CEN, but defineClass1 returns null. Correctly explains PRE-READ bytes architecture (correction #3). Diagnostic: directory entry in ZIP (size=0, name ends with '/'). Fix: rebuild JAR without directory entries.
+
+**P04**: ZipException accessing nested JAR. Correctly identifies standard ZipFile limitation vs nested entry.
+
+### Scoring per prompt:
+9-10: exact error + specific diagnostic + correction-aware
+7-8: good but minor attribution vague
+5-6: error present but diagnostic generic
+
+---
+
+## 2. First-Principles Depth — 10 pts/prompt
+
+### Check §四 groups — count counterfactuals per prompt:
+
+**What "good" looks like**: "ZIP hash table at zip_util.c:1172 — O(1) average with 75% load factor. Counterfactual: 'If binary search over sorted CEN: 12 comparisons for 3000 entries but no hash overhead. Hash: 1-2 probes average but 20% memory overhead for table. Tradeoff: memory for speed — jimage takes this further with perfect hashing (0 collisions).'" Quantified, alternative explored, connects to next concept.
+
+**Per-prompt checks**:
+
+P00 (≥4/6 groups counterfactual):
+- "Why hash table over binary search?" → 10x faster, 20% memory overhead
+- "Why ZIP_GetFromCache?" → avoids re-reading CEN (0.5ms per class × 3000 = 1.5s)
+- "Why ZIP_Lock if only reading?" → Central Directory is shared memory → concurrent read is safe but no write
+- Check: "Why mmap vs buffered read?" ZIP_Open mechanism quantified?
+
+P01 (≥4/6):
+- "Why perfect hashing over standard hash?" → 0 collisions guaranteed vs 1.2x probes average
+- "Why dlopen libzip.so for inflate?" → shared zlib, zero code duplication
+- "Why pre-process shared strings?" → 20-30% better compression
+- Check: "Why separate string table from location table?" → deduplication
+
+P02 (≥4/6):
+- "Why bundled zlib not system?" → version mismatch → inflate fails → all classes fail
+- "Why cache Inflater state?" → avoid inflateInit2_/inflateEnd per entry
+- "Why CRC32 + Adler-32 both?" → catch different failure modes
+- Check: "Why DEFLATE not LZ4?" → compression ratio tradeoff quantified?
+
+P03 (≥4/6):
+- "Why Java ZipFile reads bytes, not defineClass1?" → separation of concerns: I/O in Java, class definition in JVM
+- "Why JNI_SetByteArrayRegion?" → copy inflated bytes from native to Java heap
+- Check: architecture rationale clear?
+
+### Scoring per prompt:
+9-10: 4+ genuine counterfactuals with quantified tradeoffs
+7-8: 3 counterfactuals solid
+5-6: mostly descriptions
+3-4: thin
+1-2: no first-principles
+
+---
+
+## 3. Beginner Callout Completeness — 10 pts/prompt
+
+### Expected callouts from README + prompt specs:
+
+P00: ZIP Central Directory, CEN header/hash table, ZIP_GetFromCache, Inflater bridge (4)
+P01: perfect hashing, HASH_MULTIPLIER, location table, magic number 0xCAFEDADA, Redirect table (5)
+P02: DEFLATE/inflate, zlib, inflateInit2_, -MAX_WBITS/MAX_WBITS, CRC32 vs Adler-32 (5)
+P03: defineClass1, JNI SetByteArrayRegion, ZipFile.getInputStream, bridge architecture (4)
+P04: nested ZIP, zipfs, LaunchedURLClassLoader, JarURLConnection (4)
+
+### Check each: term defined in 2-3 sentences? example given? before first code use?
+
+### Scoring:
+9-10: all expected callouts present + clearly defined
+7-8: all present, 1-2 unclear
+5-6: 1-2 missing
+3-4: >2 missing
+1-2: no callouts
+
+---
+
+## 4. Source File Accuracy — 10 pts/prompt
+
+### Verify §三 tables:
+- All paths full repo paths? Not bare filenames?
+- Correction #1: zip_util.c not ZipEntry.c?
+- Correction #2: zip_util.c:568 (readCEN), zip_util.c:1172 (ZIP_GetEntry2)
+- Correction #4: zlib source bundled path? src/java.base/share/native/libzip/zlib/
+- Correction #5: imageFile.hpp with HASH_MULTIPLIER?
+- Correction #6: imageDecompressor.cpp:83?
+
+### Scoring:
+9-10: all paths correct + all 7 corrections reflected
+7-8: mostly correct, 1 path vague
+5-6: missing key files from corrections
+3-4: old (pre-correction) paths
+1-2: wrong paths
+
+---
+
+## 5. Cross-Reference Coherence — 10 pts/prompt
+
+### §一 per prompt:
+P00: "Reader completed 13-launcher (classpath→JAR path). Reader knows 02-class-loading (ClassFileParser parses bytes). This doc answers: how bytes go from JAR to memory."
+P01: "Reader completed 00 (ZIP read path). This doc explains JDK 9+'s Faster alternative."
+P02: "Reader completed 00 (ZIP read triggers inflate). This doc dives into the inflate engine."
+P03: "Reader completed 00+01 (ZIP + jimage I/O). This doc explains the Java↔native bridge."
+P04: "Reader completed 00+03 (ZIP + bridge). This doc explains nested JAR edge case."
+
+### Prohibitions (§八): 
+- P00: "❌ Don't say defineClass1 calls ZIP_GetEntry — it receives pre-read bytes"?
+- P01: "❌ Don't say jimage uses standard hash — it uses perfect hashing"?
+- P02: "❌ Don't say system zlib — it's source-bundled"?
+- P03: "❌ Don't explain ZIP internals (00 covers)"?
+- ALL: "❌ Don't explain ClassFileParser internals (02-class-loading covers)"?
+
+### Scoring:
+9-10: all §一 correct, prohibitions reflect corrections
+7-8: mostly correct, 1-2 missing
+5-6: vague prerequisites
+3-4: wrong or missing
+
+---
+
+## 6. Against Benchmark — 10 pts/prompt
+
+### Compare to 13 prompt-02 (58/60):
+- 10 sections (〇-十) all present?
+- §八 ≥8 prohibitions?
+- §九 ≥8 required behaviors?
+- §十 ≥8 GDB assertions?
+
+### Per-prompt line counts: 419-479 → healthy (benchmark: 567 but C2 prompt was longer due to more phases)
+
+### Scoring:
+9-10: matches or exceeds benchmark in all dimensions
+7-8: solid, minor shortfall
+5-6: noticeably thinner
+3-4: missing major sections
+1-2: doesn't approach quality
+
+---
+
+## Output
+
+### Correction pass/fail (pass = all corrections reflected, fail = any missed)
+| P00 | P01 | P02 | P03 | P04 |
+|:---:|:---:|:---:|:---:|:---:|
+
+### Per-prompt scores
+| Prompt | Production | First-principles | Beginners | Source files | Cross-refs | Benchmark | /60 |
+|--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 00-Zip | | | | | | | |
+| 01-Jimage | | | | | | | |
+| 02-Zlib | | | | | | | |
+| 03-Bridge | | | | | | | |
+| 04-Nesting | | | | | | | |
+
+### Phase coherence: /5
+
+### Total: /305
+
+### Top 3 gaps (exact prompt:section)
+
+### Best/worst prompt
+
+### Ready for docs?

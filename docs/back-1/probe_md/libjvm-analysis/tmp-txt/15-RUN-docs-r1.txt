@@ -1,0 +1,78 @@
+Produce 2 docs for 15-core-native — the HOT path methods. Each ~800 lines.
+
+## Prompts (read FULLY)
+probe_md/15-core-native/prompts/prompt-00-System-Arraycopy.md (521 lines, 60/60)
+probe_md/15-core-native/prompts/prompt-01-Class-String.md (after fix, 58/60)
+
+## Output
+probe_md/15-core-native/00-System-Arraycopy.md (~800 lines)
+probe_md/15-core-native/01-Class-String.md (~750 lines)
+
+## Verified source line numbers
+System.arraycopy RegisterNatives: System.c:41
+identityHashCode: System.c:56
+Object.hashCode: Object.c:43
+Class.forName0: Class.c:137
+String.intern: String.c:32
+Float.floatToRawIntBits: Float.c:49-56
+
+## Verification SOP
+```
+rg -n <function> src/java.base/share/native/libjava/ → verify line numbers
+```
+
+## Quality mandate
+- Depth: every §四 Q group → concrete section with source snippets, quantified counterfactuals
+- Breadth: 00 covers arraycopy dispatch + hashCode + nanoTime + memmove + C2 intrinsic. 01 covers forName + intern + getClass + Float union + isAssignableFrom
+- Interview: story-format answer at doc end
+- Continuity: §一 cross-refs to 09-native-interface, 03-object-model, 05-jit-compiler
+- First principles: every major claim from counterfactual with quantified alternative
+- Beginner: all prompt §六 callouts as real sidebars
+
+## 00-System-Arraycopy.md — Content Arc
+
+### §〇 Production
+`java.lang.ArrayStoreException: java.lang.Integer` — Object[] source has Integer, destination is String[]. Native arraycopy does element-by-element type check → Integer can't go into String[].
+
+Diagnostic: check src.getClass().getComponentType() vs dst.getClass().getComponentType().
+
+### §一 Narrative + 5 sidebars
+JNI_ENTRY, JVM_ENTRY, intrinsic, memmove, markOop — each 2-3 sentences, defined before first code use.
+
+### §四 Deep-Dive (8 groups)
+4.1: RegisterNatives at System.c:41 — direct function pointer binding. Counterfactual: "If named JNI: ~10ns overhead per call. RegisterNatives: 0ns."
+4.2: isPrimitiveArray → memmove fast path. Counterfactual: "1M ints element-by-element: 4ms. memmove: 0.1ms. 40x faster."
+4.3: isObjectArray → element-by-element type check. Counterfactual: "memmove without type-check: Integer slides into String[] → ClassCastException later."
+4.4: memmove vs memcpy — Java spec overlap guarantee. Counterfactual: "memcpy on overlap: UB → implementation-dependent behavior."
+4.5: C2 intrinsic → REP MOVS on x86. Counterfactual: "If no intrinsic: every call pays JNI overhead (~50ns) even for 4-byte copy."
+4.6: Object.hashCode at Object.c:43 → JVM_IHashCode → markOop. Counterfactual: "If hashCode not in header: generate each time → non-deterministic."
+4.7: identityHashCode vs hashCode — virtual dispatch bypass. Counterfactual: "Without identityHashCode: HashMap infinite loop with mutable keys."
+4.8: nanoTime → clock_gettime(CLOCK_MONOTONIC). Counterfactual: "CLOCK_REALTIME: NTP adjustment → negative duration."
+
+### §五 Mermaid: arraycopy dispatch table — isTypeArray→YES:memmove / NO:Object[]→type-check→assignable?→YES:copy / NO:ArrayStoreException
+### §六 GDB: break System.c:41, step JVM_ArrayCopy, verify isTypeArray branch
+### §七 Interview: Q1+Q2+Q3 from README
+
+---
+
+## 01-Class-String.md — Content Arc
+
+### §〇 Production
+`ClassNotFoundException: com.example.Foo` in OSGi. forName0 uses CALLER's classloader, not context classloader → wrong classloader in bundle system.
+
+Diagnostic: `Thread.currentThread().getStackTrace()[1].getClassLoader()` → identify which bundle.
+
+### §一 Narrative + 6 sidebars
+JNI_ENTRY, intrinsic, StringTable, JVM_FindClassFromCaller, VerifyClassname, C union
+
+### §四 Deep-Dive (6 groups)
+4.1: forName0 at Class.c:137 → VerifyClassname check (null byte injection prevention) → JVM_FindClassFromCaller. Counterfactual: "Context classloader: RPC loads attacker class → sandbox broken."
+4.2: String.intern at String.c:32 → StringTable::intern(). Counterfactual: "Java heap StringTable: 3 JNI crossings → 150ns. Metaspace: CAS 10ns → 15x faster."
+4.3: Float.floatToRawIntBits at Float.c:49-56 → C union reinterpretation. Counterfactual: "Java has no union type → must be native. C2 intrinsic: register move → 0.5ns."
+4.4: Object.getClass at Object.c:64 → JNI GetObjectClass. Counterfactual: "Java can't read raw object layout."
+4.5: Class.isAssignableFrom at Class.c:162 → JNI IsAssignableFrom. Counterfactual: "Java implementation: O(depth) class hierarchy traversal. Native: O(1) Klass* comparison."
+4.6: Class.getName0 → binary name conversion ("java/lang/Object" → "java.lang.Object").
+
+### §五 Mermaid: forName → VerifyClassname → JVM_FindClassFromCaller → caller's classloader → FindClass
+### §六 GDB: break Class.c:137, verify classname, step JVM_FindClassFromCaller
+### §七 Interview: Q4+Q5+Q6 from README

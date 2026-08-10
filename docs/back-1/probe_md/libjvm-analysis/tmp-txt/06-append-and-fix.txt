@@ -1,0 +1,137 @@
+Enhance 06-gc-memory to 01-05 standard. This is the FINAL phase of the 12-phase series.
+
+## Phase context (continuity MUST be explicit)
+The reader has completed 01→05 (startup, classloading, objects, interpreter, JIT). They know: how objects are allocated (03-object-model → TLAB, MemAllocator), how compiled code allocates objects (05-JIT → C2 generates TLAB bump code), how CPUs execute (12-cpu-layer → x86 card-mark assembly). 06 answers: "All those allocated objects — how does the JVM RECLAIM them? How does G1 balance throughput and latency?"
+
+## Verification SOP
+```
+sverklo_investigate(expand_graph=true) → codegraph query + callers → rg -n
+```
+
+## Existing docs (12 docs)
+00-G1GC-Overview → 01-HeapRegion → 02-ObjectAllocation → 03-YoungGC → 04-CardTable-RSet → 05-SATB-Barrier → 06-ConcurrentMark-Core → 07-ConcurrentMark-Phases → 08-MixedGC-Policy → 09-FullGC → 10-PLAB → 11-Reference-Processing
+
+---
+
+## Step 1: Append to README (§十二~§十六, after §十一)
+
+### §十二 面试高频问题 (12 questions)
+
+| 面试问题 | 文档 | 核心洞察 |
+|----------|------|----------|
+| "G1 和 CMS/Parallel 的核心区别？" | 00-Overview §regions | G1 把堆分成 2048 个 Region——不再是连续的年轻代/老年代。这让 G1 可以'局部回收'——只回收最'值得回收'的 Region。CMS 必须回收整个老年代 → 碎片化。Parallel 只能 STW Full GC → 延迟不可控。Region 模型是 G1 的最根本创新。 |
+| "Region 怎么划分？为什么 2048 个？" | 01-HeapRegion §sizing | 堆大小 / 2048 = Region 大小。2^N 方便位运算对齐。最小 1MB，最大 32MB。2048 = 2^11，对应 2^11 个分配位图，每个 bit = 1 个 Region 的分配状态 → 一次读写读取完整的机器字对齐。 |
+| "Young GC 怎么做到 ~1ms？" | 03-YoungGC §evacuation | 只扫描 Eden + Survivor Region（~20-50 个），不碰老年代。每个线程一个 PLAB（Promotion Local Allocation Buffer）→ 无锁晋升到 Survivor/Old。需要卡表 + RSet 记住跨 Region 引用——但 Young GC 只读 RSet，不扫描老年代。 |
+| "RSet 是什么？为什么需要？G1 怎么维护的？" | 04-CardTable-RSet §why-rset | 没有 RSet：Young GC 要扫描整个老年代来找 '老年代 → 新生代' 的引用。有 RSet：每个 Region 维护一个 '谁引用了我' 的集合——Young GC 只读 Survivor Region 的 RSet → 找到所有老年代引用 → 只扫描这些卡。RSet 是 G1 局部回收的关键——它用空间（每个 Region ~5% 开销）换时间（Young GC 不扫老年代）。 |
+| "SATB 是什么？为什么 G1 用 SATB 而不是增量更新？" | 05-SATB-Barrier §why-satb | CMS 用'增量更新'：A.field = B 把 A 标记为脏卡 → 并发标记重新扫描脏卡。SATB 用 'at the beginning snapshot'：A.field = B 把 B 推到 SATB 队列 → 并发标记处理 SATB 队列。区别：增量更新标记'修改者'（A），SATB 标记'被引用的对象'（B）。SATB 的优势：不会漏标——GC 开始时的所有 live objects 都能被标记到（通过 SATB 队列中'被丢弃的引用'）。代价：多标记（floating garbage）不影响正确性。 |
+| "并发标记怎么做到不 STW？" | 06+07-ConcurrentMark | 四个阶段：1) Initial Mark（STW, <1ms, 只标记 GC Roots）→ 2) Root Region Scan（并发, 扫描 Survivor Region 中的 root）→ 3) Concurrent Mark（并发, 从 roots 出发追踪引用链，用 SATB 屏障保证一致性）→ 4) Remark（STW, <10ms, 处理 SATB 队列 + 最后一致化）→ 5) Cleanup（STW, <1ms, 计算每个 Region 的 live bytes）。为什么不是 100% 并发？Initial Mark 和 Remark 需要 STW——但这是唯一的长停顿。 |
+| "Mixed GC 怎么选择哪些 Region 回收？" | 08-MixedGC-Policy §selection | G1Policy 计算每个 Old Region 的 'gc_efficiency' = live_bytes / predicted_copy_time。高 live_bytes → 回收的垃圾多 → 优先回收。但也要平衡预测暂停时间：每次 Mixed GC 在 `MaxGCPauseMillis` 内（默认 200ms）。公式：从 gc_efficiency 最高的开始，累计 predicted_time ≤ MaxGCPauseMillis → 这些 Region 进 CSet。 |
+| "PLAB 是什么？和 TLAB 的区别？" | 10-PLAB §plab-vs-tlab | TLAB = Thread-Local Allocation BUFFER（线程在 Eden 中分配对象）。PLAB = Promotion Local Allocation BUFFER（线程在 Survivor/Old Region 中晋升对象）。都是减少锁竞争——TLAB 减少 Eden 的 CAS 竞争，PLAB 减少 Survivor 分配的 CAS 竞争。TLAB 大小在运行时调整，PLAB 在 GC 时从 Survivor Region 中切分。 |
+| "Full GC 什么时候触发？G1 怎么避免？" | 09-FullGC §triggers | 四种触发：1) Concurrent Mode Failure（并发标记没完成，老年代被填满 → 退化为 STW Full GC）→ 增大 `-XX:InitiatingHeapOccupancyPercent` 或减小 Heap。2) Evacuation Failure（Mixed GC 时没有空闲 Region 接收晋升对象 → Full GC）→ 增大 `-XX:G1ReservePercent`（默认 10%）。3) Allocation Failure（年轻代完全满 → Full GC）→ G1 自动扩大年轻代，只在堆完全满时触发。4) System.gc() 默认触发 Full GC → `-XX:+ExplicitGCInvokesConcurrent` 改为并发。 |
+| "卡表为什么是 512 bytes/card？这个数字怎么来的？" | 04-CardTable-RSet §card-size | 1 card = 512 bytes = a single page access. Card table byte = 1 dirty card. 扫描 1 个 dirty card = 扫描 512 bytes 堆空间。太大（4KB）→ 扫描不必要的老年代内存 → 效率低。太小（128B）→ Card table 太大 → 内存开销高。512 bytes = L1 cache line（64B）× 8 → 对齐到 2 的幂 + 适中的 card scanning granularity。 |
+| "Reference 处理（Soft/Weak/Phantom）在 GC 中什么时候发生？" | 11-Reference-Processing §phases | 在 Remark 阶段之后（G1）：1) SoftReferences 在内存压力下被清除（基于 `-XX:SoftRefLRUPolicyMSPerMB`）。2) Weak + Phantom + Finalizer 在 Concurrent Cleanup 之前被更新——这样 Concurrent Cleanup 可以统计这些 Reference 回收后的实际 live bytes。3) Reference 处理可以并发——但 G1 默认在 STW 中处理（比并行处理更简单）。 |
+
+### §十三 生产故障 × 诊断 (8 scenarios)
+
+| 生产场景 | 症状 | 文档 | 诊断路径 |
+|---------|------|------|---------|
+| Full GC 频繁 | GC 日志 "Full GC (Allocation Failure)" 每 10s 一次 | 09 | 检查 `MaxHeapFreeRatio` 和 `InitiatingHeapOccupancyPercent`。gceasy.io 看 Full GC 频率 → 如果是 Allocation Failure → 堆满了 → 增大 `-Xmx` 或减小 live set。 |
+| Mixed GC 不回收 | GC 日志显示 "Mixed GC" 但堆不减小 | 08 | `-XX:+PrintAdaptiveSizePolicy` → 看 `G1Policy::mixed_gc_live_threshold_bytes()` → 如果 live_bytes > threshold → Region 不进 CSet → 所有 Region 都没回收 → Full GC。阈值 = `G1MixedGCLiveThresholdPercent`（默认 85%）→ 降低它。 |
+| RSet 扫描慢 | Young GC 中 'Scan RS' 耗时 20ms+ | 04 | 某个 Region 的 RSet 太大 → `G1RSetScanBlockSize` → 降低它。或者 Region 有很多 coarse entries → RSet 退化 → 全 Region 扫描。 |
+| SATB 队列满 | Concurrent Mark 暂停处理 SATB 队列 | 05 | `G1SATBBufferSize`（默认 1KB） → 增大。如果并发标记线程处理不过来 → 增加 `ConcGCThreads`。 |
+| Concurrent Mark >200ms | GC 日志 "Concurrent Mark" 一直不完成 | 06+07 | 检查 CPU（cgroup limit）→ ConcGCThreads = `ParallelGCThreads / 4` → 容器只有 2 核 → 只有 1 个并发线程 → concurrent mark 太慢。增容器核数或 `ConcGCThreads=2`。 |
+| Reference 处理导致 STW | Remark 阶段 "Reference Processing" >500ms | 11 | 许多 SoftReference 等待清除 → LRU policy 清除慢。`-XX:SoftRefLRUPolicyMSPerMB=0` → 尽快清除。或者用 `-XX:+ParallelRefProcEnabled` → parallel reference processing。 |
+| Humongous allocation | "G1 Humongous Allocation" 日志，Full GC | 01 §humongous | Object > Region/2（>2MB for 4MB Region）→ Humongous → 在连续的 Region 中分配 → 碎片容易导致 Full GC。避免大对象，或增大 Region size（减小 `-XX:G1HeapRegionSize`）。 |
+| GC log 解读困惑 | 看到各种 GC 日志但不知道含义 | 00+03 | gceasy.io upload gc.log → HTML report → 可视化。或者 `-Xlog:gc*=info:file=gc.log` → 抓关键字段：GC pause = Young/Mixed/Full。 |
+
+### §十四 评审矩阵 (12 docs)
+
+| # | 文档 | 生产故障 | 面试题 | why 设计 | GDB | 评级 |
+|---|------|:---:|:---:|:---:|:---:|:---:|
+| 00 | 00-G1GC-Overview | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+| 01 | 01-HeapRegion | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+| 02 | 02-ObjectAllocation | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+| 03 | 03-YoungGC | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+| 04 | 04-CardTable-RSet | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+| 05 | 05-SATB-Barrier | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+| 06 | 06-ConcurrentMark-Core | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+| 07 | 07-ConcurrentMark-Phases | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+| 08 | 08-MixedGC-Policy | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+| 09 | 09-FullGC | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+| 10 | 10-PLAB | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+| 11 | 11-Reference-Processing | ✅ | ✅ | ⚠️ | ⚠️ | 🟡 |
+
+Note: initially marked all as 🟡 — the AI will audit each and replace with honest ✅/🟡/🔴.
+
+### §十五 深度审计问题 (≥18, 从第一性原理出发)
+
+Tier 1 — Region Model:
+1. "为什么把堆分成 Region？什么是碎片化的好处？→ 00 §regions"
+2. "如果 Region 太小（1MB）→ 分配位图变大。太大（32MB）→ 局部回收粒度粗。为什么 G1 的动态 Region sizing 用 Heap/2048 而不是固定值？→ 01 §sizing"
+3. "为什么 G1 把年轻代也分成 Region——而不是单独的一块 Eden？Eden 不是一次性分配的？→ 03 §young-regions"
+
+Tier 2 — Write Barriers:
+4. "为什么 SATB 只需要 pre-write barrier——'先保存旧的引用值'——而 CMS 需要 post-write barrier？→ 05 §why-satb"
+5. "Card table 为什么是 1-to-1 映射（1 card = 512B heap）而不是 hash-based？→ 04 §card-mapping"
+6. "为什么 RSet 用 PerRegionTable（稀疏）和 CoarseMap（密集）两种表示？→ 04 §rset-data-structure"
+
+Tier 3 — Concurrent Mark:
+7. "为什么 Initial Mark 必须 STW？是否可以在 GC Roots 扫描阶段做部分并发？→ 07 §initial-mark"
+8. "为什么 Remark 阶段不能是 100% 并发？SATB 队列的处理 + 对象引用的最后一致化需要什么？→ 07 §remark"
+9. "为什么 Cleanup 阶段在 STW 中——统计每个 Region 的 live bytes 明明是只读操作？→ 07 §cleanup"
+
+Tier 4 — Mixed GC + Policy:
+10. "为什么 G1Policy 使用 projected pause time 而不是 actual pause time 来选择 CSet？预测不准怎么办？→ 08 §prediction"
+11. "为什么 Mixed GC 只回收 Old Region 中的一部分——而不是一次性回收所有？→ 08 §mixed-gc-design"
+12. "为什么 G1 需要 -XX:MaxGCPauseMillis（默认 200ms）作为目标——不设目标 GC 可以每次都回收尽可能多？→ 08 §pause-goal"
+
+Tier 5 — PLAB + Reference:
+13. "为什么需要 PLAB？如果线程直接从 Survivor 的 Eden 分配空间——不需要 PLAB？→ 10 §why-plab"
+14. "为什么 SoftReference 的清除策略用 LRU policy 而不是简单的 '内存不足就清除'？→ 11 §soft-ref"
+15. "为什么 PhantomReference 的处理放在 Reference 处理的最后？→ 11 §phantom"
+16. "如果 PLAB 太大 → 浪费 Survivor 空间。太小 → 频繁 refill → 竞争。G1 怎么调整 PLAB 大小？→ 10 §plab-sizing"
+17. "G1 的 Young GC 只扫描 Eden+Survivor Region——这些 Region 的总数如何影响 GC 暂停时间？→ 03 §young-gc-cost"
+18. "为什么 G1 不混用不同的 GC 策略（如 young GC 用 parallel, mixed GC 用 concurrent）？→ 00 §design-philosophy"
+
+### §十六 和前后阶段的连接
+
+| 前阶段 | 传递给 06 什么 | 06 如何消费 |
+|--------|-------------|-----------|
+| 01-jvm-startup | G1CollectedHeap 初始化（07-G1CollectedHeap-Initialize-Deep-Dive） | 00 文档的基础——堆是怎么建起来的 |
+| 03-object-model | oopDesc, markOop（biased locking bits）, TLAB | 02-ObjectAllocation 消费——分配对象时的 markOop 初始化 |
+| 05-jit-compiler | C2 生成的代码中包含 TLAB 分配 + write barriers | 编译代码分配对象 → 触发 write barrier → Card Table + SATB |
+| 12-cpu-layer | card-mark assembly（`movb $0, (%r12, %r10, 1)`）| 04 文档：card-mark 和 assembly-level write barrier |
+
+---
+
+## Step 2: Audit all 12 docs against §十四
+
+Read each existing doc fully. Answer per doc:
+- Production scenario opener: does it open with a real problem? (5 pts)
+- Design rationale: "why X instead of Y"? (5 pts)
+- Source evidence: file:line for key claims? (5 pts)
+- GDB verification: real session output? (5 pts)
+- Interview readiness: could answer §十二's question? (5 pts)
+
+Score /25. Identify 🔴 (<15) and 🟡 (<20) docs.
+
+---
+
+## Step 3: Fix all 🔴+🟡 docs
+
+For each flagged doc:
+1. Add production scenario opener with real GC log output
+2. Add ≥2 design rationales ("why G1 does X instead of Y")
+3. Add GDB session with real (gdb) prompt format
+4. Reference §十二's mapped interview question
+5. Cross-reference prior phases (01's G1 init, 03's object model, 05's JIT allocation, 12's card-mark assembly)
+
+---
+
+## Step 4: Verify
+```
+sverklo_investigate(expand_graph=true) → codegraph query + callers → rg -n
+```
+
+## Report
+Before/after per-doc scores. Phase score estimate. Ready for series graduation?

@@ -1,6 +1,9 @@
 # 3.2 Threads::create_vm 总览
 
-`Threads::create_vm` 在 `/data/workspace/jdk11u-copy/src/hotspot/share/runtime/thread.cpp`，是 HotSpot 初始化的心脏函数。
+> **前置依赖**：[3.1 JNI_CreateJavaVM](01-overview.md)：两把原子锁 + JNI_CreateJavaVM_inner → Threads::create_vm
+> → **后续**：[3.3 前置初始化](03-preamble-init.md)：Stage 1 详细展开
+
+`Threads::create_vm` 在 `thread.cpp`，是 HotSpot 初始化的心脏函数。
 
 本节只粗略看全貌——把 9 个阶段过一遍，知道每个阶段做了什么、各阶段之间的先后关系。不会深入到 `os::init`、`Arguments::parse`、`init_globals` 等函数内部，那些在后续章节逐一展开。
 
@@ -429,6 +432,13 @@ Java 基础类就绪后，启动编译器和各种后台服务线程：
 | 第 4 章 | 阶段 5-6 | `new JavaThread`, `init_globals` | JavaThread 创建、堆初始化、VMThread 启动 |
 | 第 5 章 | 阶段 7 | `initialize_java_lang_classes` | Java 基础类加载、Klass 模型 |
 | 第 6 章 | 阶段 8-9 | 编译器、模块系统 | C1/C2 初始化、模块系统、系统类加载器 |
+
+
+## 设计权衡
+
+**为什么 `Threads::create_vm` 要分 9 个阶段，而不是一个大函数顺序执行？** 每个阶段的失败语义不同——阶段 1 失败说明 OS 环境有问题（如 TLS 分配失败、信号处理器注册失败），此时 JVM 还没真正开始，可以直接 return error code。阶段 4-6 失败时 JVM 已经创建了部分数据结构（JavaThread 对象、堆），需要 `vm_exit_during_initialization` 做带异常信息的清理退出。`canTryAgain` 传出参数也跟阶段语义绑定——阶段 1-3 失败通常可重试，阶段 4+ 失败通常不可重试。
+
+**为什么 `vm_init_globals()` 和 `init_globals()` 分成两个函数？** HotSpot 的初始化有两层——基础设施层（锁、日志、内存池、PerfData 共享内存）和业务层（堆、解释器、编译器、SystemDictionary）。`vm_init_globals()`（`init.cpp:90`）在 Stage 4 执行，此时还没有 `JavaThread`——`Thread::current()` 返回裸 OS 线程——只能做不依赖 JavaThread 的"裸"初始化。`init_globals()`（`init.cpp:101`）在 Stage 6 执行，此时主线程已经登记为 `JavaThread`（有了 HandleMark、ResourceArea、JNIHandleBlock），可以安全地创建 Handle、分配 ResourceArea。第一行 `HandleMark hm` 就是"在 Java 线程上下文中执行"的标志。
 
 ---
 ## 小结

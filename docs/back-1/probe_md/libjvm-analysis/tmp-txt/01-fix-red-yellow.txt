@@ -1,0 +1,71 @@
+Fix remaining 3 🔴 and 6 🟡 docs in 01-jvm-startup. For 🔴: add content per audit. For 🟡: add production scenario + interview mapping only.
+
+## Verification SOP
+```
+sverklo_investigate(expand_graph=true) → codegraph query + callers → rg -n
+```
+
+## Style reference
+probe_md/libjvm-analysis/01-jvm-startup/18-Interpreter-Template-Dispatch.md (595 lines, just fixed ✅)
+
+---
+
+## 🔴 11-universe2_init.md (25/50 → target 40+)
+
+### Add:
+1. **Production opener**: "new byte[10] in static init crashes with ShouldNotReachHere — TypeArrayKlass not created yet"
+2. **create_klass() internals**: walkthrough with file:line showing Metaspace allocation inside `create_klass()`
+3. **Why TypeArrayKlass in Metaspace** not C-Heap: unified Klass hierarchy, GC scanning
+4. **Symbol intern table**: what `Symbol::equals()` does, why intern, ~200 symbols × avg 30B
+5. **GDB verification**: breakpoints at each `create_klass` call, verify oops non-NULL
+
+---
+
+## 🔴 12-javaClasses_init.md (27/50 → target 40+)
+
+### Add:
+1. **Production opener**: "JDK upgrade → Thread.setPriority() corrupts wrong field — CDS offset mismatch"
+2. **compute_offset() internals**: through InstanceKlass::find_field() → fieldDescriptor::initialize() → ConstantPool
+3. **Why FIELD_COMPUTE_OFFSET macro** vs hand-written per class
+4. **CDS interaction**: assert guards, why offsets may already be set
+5. **GDB**: break at java_lang_Thread::compute_offsets(), print all 12 offsets
+
+---
+
+## 🔴 13a-universe_post_init.md (29/50 → target 43+)
+
+### Add:
+1. **Production opener improvement**: "Heap 95%, GC thrashing, process vanishes without hs_err — last OOM alloc failed"
+2. **Why 6 separate OOM objects** vs 1 with dynamic message
+3. **allocate_instance() internals**: Metaspace allocation inside CHECK_false context
+4. **GDB**: break at universe_post_init(), step to _fully_initialized=true, verify 6 OOM oops
+5. **reinitialize_vtable_of() deep-dive**: what KlassVtable::initialize_vtable() does
+
+---
+
+## 🟡 6 yellow docs (add production opener + interview mapping only)
+
+### 02-All-Core-Structures.md
+- Add: "production triage: use this table to find which structure to GDB when X crashes"
+
+### 04-Threads-create_vm-Trace.md
+- Already has production value — add explicit mapping: "📋 生产场景对应: 启动慢→§X阶段N，参数不生效→§X parse流程"
+
+### 05-create_vm-Deep-Dive.md
+- Add: "📋 面试必问: '为什么 Safepoint 初始化早于 GC？' → §X.Phase12"
+
+### 08-HeapRegionManager-Deep-Dive.md
+- Add: "📋 生产场景: Region 数量不对导致 GC 频繁 → §X Region 初始化"
+
+### 09-G1ConcurrentMark-Constructor-Deep-Dive.md
+- Add: "📋 生产场景: 并发标记内存占用过高 → §X bitmap 大小计算"
+
+### 16-G1Policy-SubComponents-Deep-Dive.md
+- Add: "📋 面试必问: 'G1Policy 如何决定 Mixed GC 的 CSet 大小？' → §X"
+
+### 14-create_vm-Stage5-8-Deep-Dive.md (历史, skip — mark as "已被17替代")
+
+---
+
+## Output
+Report each doc: old→new lines, what was added, production scenario + interview mapping present?

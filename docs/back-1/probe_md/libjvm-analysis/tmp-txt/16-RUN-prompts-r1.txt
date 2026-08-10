@@ -1,0 +1,83 @@
+Produce 3 prompts for 16-nio-network — the Selector engine + Socket lifecycle + DirectBuffer I/O. Standard 10-section format (§〇~§十). Each prompt EXACT specifications.
+
+## README
+probe_md/16-nio-network/README.md (702 lines, 68/70, level-triggered correction verified)
+
+## Benchmark prompts
+probe_md/15-core-native/prompts/prompt-00-System-Arraycopy.md (60/60)
+
+## Output
+probe_md/16-nio-network/prompts/prompt-00-Epoll-Selector.md (target: 400+ lines)
+probe_md/16-nio-network/prompts/prompt-01-SocketChannel-Native.md (target: 400+ lines)
+probe_md/16-nio-network/prompts/prompt-02-DirectByteBuffer-IO.md (target: 400+ lines)
+
+## Quality mandate (all 3)
+- Depth: §四 ≥6 Q groups, each counterfactual with quantified alternative
+- Breadth: §三 source files from README Step 1 with full paths + verified line numbers
+- Interview: §一 story-format answer from README §五
+- Continuity: §一 states "Reader completed 15-core-native (JNI patterns), 09-native-interface (JNI), 11-os-layer (epoll syscalls)"
+- First principles: every design decision derived
+- Beginner: §六 callouts for epoll, level-triggered, EPOLLIN/EPOLLOUT, DirectBuffer, wakeup pipe, EINPROGRESS
+
+## CRITICAL: Level-triggered correction
+Java NIO uses **level-triggered**, NOT edge-triggered. EPoll.java:63-67 has no EPOLLET constant. translateInterestOps() at SocketChannelImpl.java:1057-1065 only returns EPOLLIN|EPOLLOUT. This MUST be reflected in every prompt.
+
+## Verified source line numbers (from README)
+epoll_create(256): EPoll.c:61
+epollCtl: EPoll.c:87-96
+epollWait: EPollArrayWrapper.c
+NUM_EPOLLEVENTS: EPollSelectorImpl.java:53
+wakeup pipe: EPollSelectorImpl.java:181-204/254
+DirectBuffer address: IOUtil.java:276, FileDispatcherImpl.c:83
+Unsafe.allocateMemory: Direct-X-Buffer.java.template:112-140
+NET_Dup2: linux_close.c:275-321
+
+---
+
+## prompt-00-Epoll-Selector.md — EXACT specs
+
+### §〇 Production
+Selector thread 100% CPU spin: select() returns 0 immediately in tight loop. Root cause: JDK epoll bug on Linux <2.6.27 — ep_remove in event-poll.c doesn't clear event item when removing last ready event → epoll_wait returns 0 instead of blocking. Triggered by RecycledSelector pattern (temporarily unregister+reregister keys). JDK 9+ fixed. Fix: `-Djava.nio.channels.spi.SelectorProvider=sun.nio.ch.PollSelectorProvider`.
+
+### §四 groups (≥6):
+4.1: epoll_create(256) at EPoll.c:61 — size hint ignored since Linux 2.6.8. Counterfactual: "If size was used: pre-allocated room for 256 fds → memory waste. Ignored: kernel auto-sizes."
+4.2: epollCtl at EPoll.c:87-96 — ADD/MOD/DEL operations. EPOLL_CTL_ADD with EPOLLIN for OP_ACCEPT/OP_READ. Counterfactual: "If Java used EPOLLET: translateInterestOps would OR in EPOLLET → edge-triggered → forces drain-until-EAGAIN → complicates non-blocking read model. Level-triggered: epoll_wait returns fd again if data remains → simpler read logic."
+4.3: epollWait at EPollArrayWrapper.c — blocks until events OR timeout. Returns count of ready fds. Counterfactual: "If poll was used: O(n) scan of ALL fds → 10K fds × 1μs = 10ms overhead per select() call. epoll: O(1) scan of only ready fds."
+4.4: fd→key mapping at EPollSelectorImpl.java — Map<Integer, SelectionKey> fdToKey. Each epoll_event contains fd → lookup in map → get key → update readyOps.
+4.5: NUM_EPOLLEVENTS = min(fdLimit(), 1024) at EPollSelectorImpl.java:53 — max 1024 events per select(). Counterfactual: "If unlimited: large event array → kernel stack overflow → EFAULT. Capped at 1024: safe kernel stack usage."
+4.6: level-triggered behavior — correct: epoll_wait returns same fd until you read all data. Counterfactual: "If edge-triggered: fd returned ONCE → if you read 4KB of 8KB → remaining 4KB waits forever → must use non-blocking + read-until-EAGAIN → more complex."
+
+### §十 GDB: break EPoll.c:61 (epollCreate), EPoll.c:87 (epollCtl), verify EPOLLIN flags (no EPOLLET). Step through epollWait return.
+
+---
+
+## prompt-01-SocketChannel-Native.md — EXACT specs
+
+### §〇 Production
+`IOException: Too many open files` — ServerSocketChannel.accept() creates new fd but process fd limit exhausted. Each connection = 1 fd. 10K connections + stdin/out/err + JAR fds + Selector epoll fd → limit 1024 → crashes at ~1000th connection.
+
+### §四 groups:
+4.1: socket() — AF_INET6 with SOCK_STREAM. Counterfactual: "If AF_INET only: IPv4 only → no IPv6 → dual-stack hosts break."
+4.2: bind() — bind to port. SO_REUSEADDR for fast restart after crash.
+4.3: listen(backlog) — queue size for pending connections. Counterfactual: "If backlog too small: TCP handshake timeout → client sees Connection refused."
+4.4: accept() — returns new fd for each connection. Blocking or non-blocking.
+4.5: non-blocking connect with EINPROGRESS — connect() returns immediately → register OP_CONNECT → epoll_wait → getsockopt(SO_ERROR) checks success.
+4.6: dup2 trick at linux_close.c:275 — NET_Dup2(marker_fd, fd) + WAKEUP_SIGNAL → wake blocked thread. Race prevention: fd lock.
+
+### §十 GDB: break Net.c (socket), verify AF_INET6, step accept, break linux_close.c:275.
+
+---
+
+## prompt-02-DirectByteBuffer-IO.md — EXACT specs
+
+### §〇 Production
+`OutOfMemoryError: Direct buffer memory` — ByteBuffer.allocateDirect(10MB) fails when total direct memory exceeds -XX:MaxDirectMemorySize. DirectBuffers aren't freed by young GC → need Full GC or System.gc() to clean via Cleaner. Netty's pooled allocator reuses buffers.
+
+### §四 groups:
+4.1: Unsafe.allocateMemory(size) at Direct-X-Buffer.java.template:112 — returns native address. Counterfactual: "If Java heap: address unstable (GC compaction) → kernel writes to wrong memory → data corruption."
+4.2: GetDirectBufferAddress at IOUtil.java:276 — ((DirectBuffer)bb).address() → native long → C: jlong_to_ptr(addr) → void* → read(fd, ptr, len). Zero-copy: kernel socket buffer → DirectBuffer (no Java heap copy).
+4.3: Cleaner/Deallocator at Direct-X-Buffer.java.template:118 — PhantomReference-based deallocation. Counterfactual: "Without Cleaner: manual free → double-free risk → SIGSEGV. Cleaner: single guaranteed free on GC detection."
+4.4: DirectBuffer vs HeapBuffer I/O cost — Direct: stable address → 1 syscall. Heap: copy to temp native buffer (GetPrimitiveArrayCritical → memcpy → read → memcpy back → ReleasePrimitiveArrayCritical) → 3x overhead.
+4.5: maxDirectMemory limit — -XX:MaxDirectMemorySize. Default = Xmx. Counterfactual: "No limit: 10K connections × 64KB DirectBuffer each = 640MB → OOM Killer → process killed."
+
+### §十 GDB: break Direct-X-Buffer.java.template:112, verify native address, trace read(fd, addr, len) at FileDispatcherImpl.c:83.

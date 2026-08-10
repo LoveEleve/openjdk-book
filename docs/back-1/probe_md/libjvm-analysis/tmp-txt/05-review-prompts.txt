@@ -1,0 +1,254 @@
+Deep-review 7 prompts for 05-jit-compiler. This is the MOST COMPLEX phase — if the prompts are weak, the docs will be shallow, and the reader won't understand the most important JVM subsystem.
+
+## Benchmark
+probe_md/libjvm-analysis/09-native-interface/prompt-06-MethodHandles-invokedynamic.md (30/30)
+probe_md/libjvm-analysis/12-cpu-layer/prompt-01-Frames.md (45/45)
+
+## Prompts to review
+prompt-01-C2-Pipeline.md (463 lines)
+prompt-02-Inline-Decision.md (366 lines)
+prompt-03-Chaitin-RegAlloc.md (360 lines)
+prompt-04-CodeCache-Sweeper.md (298 lines)
+prompt-05-Deoptimization.md (308 lines)
+prompt-06-OopMap-GC-Roots.md (291 lines)
+prompt-07-Profile-Data-Flow.md (322 lines)
+
+---
+
+## 1. Production authenticity — 10 pts per prompt
+
+For EACH prompt, verify §〇:
+
+**P01 C2 Pipeline**: Does §〇 show REAL hs_err with `V [libjvm.so+0x...] PhaseIdealLoop`? Does it show the ENTIRE native frames stack (not just 1 line)? Does it explain HOW to exclude the crashing method (`-XX:CompileCommand=exclude`)? Is there a concrete WORKFLOW: "find method in hs_err → grep -r for method name in logs → add CompileCommand → restart"?
+
+**P02 Inline Decision**: Does §〇 show REAL `-XX:+PrintInlining` output with inline tree depth? The key symptom is "already compiled into a big method" — is this explained? Does it show the CASCADE: "1 method inlines 2000+ callees → single nmethod 2MB → CodeCache full → CompileBroker disabled"?
+
+**P03 Chaitin RegAlloc**: Does §〇 show REAL `perf top` output with `mov %rax, disp(%rbp)` spill instructions? Does it show the spill storm ratio (>5% spills = problematic)? Does it explain the ROOT CAUSE: "too many live ranges → register pressure > 16 → Chaitin spills → mov instructions dominate"?
+
+**P04 CodeCache**: Does §〇 show the EXACT log line `"CodeCache is full. Compiler has been disabled."`? Does it quantify the IMPACT: "3 minutes at 100% → QPS drops 80% → after sweeper cleans, CodeCache back to 85% but damage done"? Does it connect to P02's inline-depth problem?
+
+**P05 Deopt**: Does §〇 show REAL `-XX:+PrintDeoptimizationDetails` output? Does it explain the deopt LOOP: "compile → deopt → recompile → deopt → ..."? Does it show the CPU cost (50% CPU in deopt blob)?
+
+**P06 OopMap**: Does §〇 show REAL hs_err with `bad oop`? The exact line: `G1ParScanThreadState::copy_to_survivor` with the bad oop address? Does it explain WHY the OopMap was wrong?
+
+**P07 Profile Data Flow**: Does §〇 show the profile pollution scenario concretely? "Warmup receiver = HashMap 100%. Production receiver = TreeMap 50%. Profile says 100% HashMap → C2 generates monomorphic guard → production trips guard → deopt → recompile → deopt again."
+
+### Scoring per prompt:
+9-10: real output + concrete workflow + root cause explained
+7-8: real output present but workflow incomplete
+5-6: scenario described but no actual output shown
+3-4: vague or hypothetical scenario
+1-2: no production scenario
+
+---
+
+## 2. First-principles depth — 10 pts per prompt
+
+For EACH prompt, check §四 question groups:
+
+**Counterfactual check**: For each question group, is there a clear "if you designed this without X"? If at least 4 of 6-7 groups have explicit counterfactuals, the prompt passes.
+
+**Quantification check**: Are tradeoffs QUANTIFIED? 
+- Good: "Without inline: 40 cycles per call overhead × 1000 calls = 40000 cycles"
+- Bad: "Without inline, it would be slower"
+
+**Specific checks per prompt:**
+
+P01: Does §4.3 explain "Sea of Nodes vs Linear IR" with concrete tradeoff? "Sea of Nodes allows floating nodes → better GVN. But graph matching is NP-hard → HotSpot uses ADL patterns not automorphic matching."
+
+P02: Does §4.5 show the BEFORE/AFTER inline cascade with actual instruction counts? Not "it gets faster" — "67 instructions → 31 instructions, 54% reduction."
+
+P03: Does §4.5 explain Coalesce BEFORE coloring? "AggressiveCoalesce happens at line 425, BEFORE physical IFG at line 490. This is different from standard Chaitin 1982 where coalesce is post-coloring."
+
+P04: Does §4.5 explain WHY sweeper uses safepoint-based sweeping? "Sweeper marks nmethod as zombie → waits for all threads to exit → code cache sweep at safepoint. Free at safepoint: no concurrent free, no ABA problem."
+
+P05: Does §4.2 explain WHY frame rebuild needs OopMap? "Without OopMap: deopt can't tell if R10 contains int or oop → can't write to correct interpreter frame slot."
+
+P06: Does §4.1 explain WHY OopMap is a BITMASK not a list? "Compressed bitmask: each safepoint ~10 bytes. List: each oop = 8-byte pointer × 5 oops = 40 bytes. 1M methods × 5 safepoints × 30 bytes saved = 150MB CodeCache savings."
+
+P07: Does §4.5 explain Profile Maturity with COUNTERFACTUAL? "Without maturity: C2 uses 10 warmup calls → 100% HashMap → wrong inline → deopt loop. With maturity: 500+ invocation counter → real traffic patterns → correct inline."
+
+### Scoring per prompt:
+9-10: 4+ groups have explicit counterfactuals with quantification
+7-8: 3 groups have counterfactuals
+5-6: groups describe mechanisms but don't counterfactualize
+3-4: groups are "what" not "why"
+1-2: no first-principles reasoning
+
+---
+
+## 3. Beginner callout completeness — 10 pts per prompt
+
+For EACH prompt, check §六:
+
+**Callout accuracy**: Are the "你需要知道的" concepts genuinely ones a Java engineer without compiler knowledge wouldn't know?
+
+CORRECT callouts: Sea of Nodes, Ideal Graph, GVN/IGVN, CHA, Live Range, Spill, Coalesce, nmethod, OopMap, deopt, uncommon trap, ciMethod, ProfileData, ADL, MDO
+
+INCORRECT callouts (explain in prior phases or obvious): "compiler", "JIT", "bytecode", "method" 
+
+**Check for concept LEAP**: Does any callout use a term that needs ITS OWN callout? Example: "你需要知道的: Live Range = 值的活跃区间" — does the reader know what "活跃区间" means? "Interval from definition to last use" is clearer.
+
+**Per-prompt MINIMUM**: 3 callouts for P04/P05/P06 (smaller scope), 4 for P02/P03/P07, 5 for P01 (foundation).
+
+**Coverage check per prompt**:
+P01: Sea of Nodes ✓? Node ✓? Ideal Graph ✓? GVN/IGVN ✓? ADL ✓?
+P02: InlineTree ✓? CHA ✓? Type profile ✓? Hot count ✓?
+P03: Live Range ✓? IFG ✓? Spill ✓? Coalesce ✓?
+P04: nmethod ✓? CodeCache segments ✓? Sweeper cycle ✓?
+P05: Deopt ✓? Uncommon trap ✓? Frame rebuild ✓?
+P06: OopMap ✓? Bitmask ✓? GC root ✓?
+P07: ciMethod ✓? ciKlass ✓? ProfileData ✓? MDO ✓? Maturity ✓?
+
+### Scoring per prompt:
+9-10: all required callouts present + correctly defined + no incorrect callouts
+7-8: all required present but 1-2 definitions unclear
+5-6: 1-2 callouts missing
+3-4: >2 callouts missing OR incorrect callouts present
+1-2: no callouts
+
+---
+
+## 4. Cross-reference coherence — 10 pts per prompt
+
+For EACH prompt, verify §一:
+
+**Internal cross-references** (within 05-jit-compiler):
+- P02 → "Reader has read 01-Pipeline §二(Parse) + §三(IGVN). This doc expands the Inline phase."
+- P03 → "Reader has read 01-Pipeline §八(Matching). This doc expands RegAlloc."
+- P05 → "Reader has read 01-Pipeline + 06-OopMap-GC-Roots."
+- P06 → "Reader has read 01-Pipeline §九(Output) + 05-Deoptimization."
+- P07 → "Reader has read 02-Inline §二(CHA) + §三(type profile). This doc explains WHERE the data comes from."
+
+**External cross-references** (to other phases):
+- ALL → "Reader completed 04-interpreter phase — knows InvocationCounter triggers CompileBroker. This doc answers what happens AFTER."
+- P01 → should reference 12-cpu-layer for x86 instruction encoding details
+- P05 → should reference 12-cpu-layer for frame layout details
+
+**Dependency direction**: Can the reader read prompts in order (01→02→03→04→05→06→07)? If P06 says "Reader has read 05" but 05 hasn't been written yet — acceptable (prompts are written in parallel, docs will be written in dependency order).
+
+### Scoring per prompt:
+9-10: all internal + external references present and accurate
+7-8: most references present, 1-2 missing or inaccurate
+5-6: only basic "reader knows 04-interpreter" reference
+3-4: no dependencies stated
+1-2: wrong dependencies
+
+---
+
+## 5. Source file completeness — 10 pts per prompt
+
+For EACH prompt, verify §三:
+
+**Minimum files**: P01=10+, P02=6+, P03=5+, P04=6+, P05=5+, P06=5+, P07=7+
+
+**Completeness check**: 
+P01: compile.cpp, parse1.cpp, parse2.cpp, phaseX.cpp, loopnode.cpp, escape.cpp, macro.cpp, matcher.cpp, chaitin.cpp, output.cpp, doCall.cpp, compileBroker.cpp, x86_64.ad — ALL 13 present?
+P02: doCall.cpp, inline.cpp, ciMethod.cpp, ciCallProfile.hpp, parse1.cpp, ciKlass.hpp — all 6 present?
+P03: chaitin.cpp, ifg.cpp, coalesce.cpp, live.cpp, output.cpp, reg_split.cpp — all 6 present?
+P04: nmethod.cpp, codeCache.cpp, nmethodSweeper.cpp, codeBlob.cpp, compiledMethod.cpp, compileBroker.cpp — all 6 present?
+P05: deoptimization.cpp, sharedRuntime.cpp, frame_x86.cpp, oopMap.cpp, compile.cpp — all 5 present?
+P06: oopMap.cpp, oopMap.hpp, debugInfoRec.cpp, output.cpp, nmethod.cpp — all 5 present?
+P07: ciMethod.cpp, ciKlass.cpp, ciCallProfile.hpp, ciTypeFlow.cpp, methodData.cpp, methodData.hpp — all 6 present?
+
+**Format check**: Every entry has: File name + Full path + Module name + Role in doc? If Role is missing for any file → -1.
+
+**Accuracy check**: Spot-check 2 file paths per prompt. `compile.cpp` at `hotspot/share/opto/compile.cpp` — correct. `chaitin.cpp` at `hotspot/share/opto/chaitin.cpp` — correct.
+
+### Scoring per prompt:
+9-10: all required files present + paths correct + roles specific
+7-8: all files present, 1-2 roles vague
+5-6: 1-2 files missing
+3-4: >2 files missing
+1-2: incomplete file list
+
+---
+
+## 6. Against 09-06 benchmark — 5 pts per prompt
+
+Compare each prompt to 09-06 (MethodHandles-invokedynamic, 30/30):
+
+**What made 09-06 30/30**:
+- §〇 shows real `invokedynamic` bytecode output with LambdaMetafactory stack trace
+- §四 questions are counterfactual: "If you did X instead of Y, what breaks?"
+- §六 explicitly requires assembly-level annotation (register-by-register trace)
+- GDB assertions are falsifiable with exact breakpoint line numbers
+- Production scenario is specific: "Spring Boot app with 1000 Lambda expressions crashes with StackOverflow"
+
+**P01 check**: Does §四 include register-level trace of the compiled method? "After C2: aload_0 becomes `mov -0x10(%rbp), %rax` — but the doc is about the PIPELINE, not the assembly." This is REASONABLE — P01 is about phases, not instruction encoding. Don't penalize.
+
+**P03 check**: Does §四 include cycle counts for spill vs non-spill? "Spill: `mov %rax, -0x10(%rbp)` = 1 cycle L1 + store-forwarding = ~5 cycles. Non-spill: `add %rax, %rbx` = 1 cycle." This SHOULD be present.
+
+**P05 check**: Does §四 show the BEFORE/AFTER of frame rebuild? "Compiled frame: R10=oop, RDI=int, RSI=float. After deopt: interpreter frame locals[0]=oop, locals[1]=int, locals[2]=float." This SHOULD be present.
+
+### Scoring per prompt:
+5: matches or exceeds 09-06 depth in ALL dimensions
+4: matches in most dimensions, 1-2 slightly weaker
+3: solid but noticeably less depth than benchmark
+2: significantly less depth
+1: doesn't approach benchmark quality
+
+---
+
+## Phase-wide coherence — 5 pts
+
+### Check 1: Dependency chain correctness (2 pts)
+Can a reader follow prompts 01→02→03→04→05→06→07?
+- 01: foundation, no internal deps ✅
+- 02: depends on 01 (Parse+IGVN), 04-interpreter ✅
+- 03: depends on 01 (Matching), 04-interpreter ✅
+- 04: depends on 01 (Output), 04-interpreter ✅
+- 05: depends on 01 (compilation) + 06 (OopMap) — CIRCULAR? 05 says depends on 06, 06 says depends on 05?
+  - P05: "Reader has read 06-OopMap-GC-Roots" ← depends on 06
+  - P06: "Reader has read 05-Deoptimization" ← depends on 05
+  - This creates a CIRCULAR dependency! Must resolve: 06 should NOT depend on 05. OopMaps are GENERATED during compilation — they're consumed BY deopt. So 06 is logically BEFORE 05. P05 should depend on P06, P06 should NOT depend on P05.
+- 07: depends on 01+02, 04-interpreter ✅
+
+Score: 2 if dependency chain is non-circular and correct; 1 if minor circularity; 0 if broken
+
+### Check 2: Terminology consistency (1 pt)
+Same concept called the same thing across all 7 prompts? "Ideal Graph" vs "Ideal IR"? "GVN" vs "IGVN"? "nmethod" vs "compiled method"? "Live Range" vs "live range"?
+
+Score: 1 if consistent; 0 if inconsistent
+
+### Check 3: Coverage completeness (2 pts)
+Do the 7 prompts collectively cover the ENTIRE C2 pipeline from README §八?
+- Parse: P01 ✅
+- Optimize (IGVN + Loop + EA + Macro): P01 ✅
+- Inline: P02 ✅
+- Matching: P01 ✅
+- RegAlloc: P03 ✅
+- Output + CodeCache: P01 + P04 ✅
+- Deopt: P05 ✅
+- OopMap: P06 ✅
+- ProfileData flow: P07 ✅
+- Any C2 phase WITHOUT a prompt? No — all 9 phases covered.
+
+Score: 2 if complete coverage; 1 if 1 phase missing; 0 if >1 missing
+
+---
+
+## Output
+
+### Per-prompt score matrix
+| Prompt | Production | First-principles | Beginners | Cross-refs | Source files | Benchmark | /60 |
+|--------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 01-Pipeline | | | | | | | |
+| 02-Inline | | | | | | | |
+| 03-Chaitin | | | | | | | |
+| 04-CodeCache | | | | | | | |
+| 05-Deopt | | | | | | | |
+| 06-OopMap | | | | | | | |
+| 07-Profile | | | | | | | |
+
+### Phase-wide coherence: /5
+
+### Total: /425
+
+### Top 3 issues (with exact prompt:section)
+
+### Best prompt (and why)
+
+### Worst prompt (and fix priority)
+
+### Ready to write docs? Yes / Conditionally / No (with specific conditions)

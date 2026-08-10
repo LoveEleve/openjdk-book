@@ -1,0 +1,196 @@
+Fix ALL gaps from 01-jvm-startup deep review (35/55). Priority: container > arguments > GDB > VMThread > design rationale.
+
+## Verification SOP
+```
+codegraph query + callers → rg -n → verify every claim
+```
+
+---
+
+## 🔴 GAP 1: Container/Cgroup Document (NEW — biggest missing piece)
+
+Create: probe_md/libjvm-analysis/01-jvm-startup/19-Container-Cgroup-Support.md
+
+### Why this matters
+In 2025, >80% of production JVMs run in containers. Without this doc, a reader whose Pod OOMKilled before JVM starts has ZERO diagnostic guidance from phase 01.
+
+### Content
+1. **Production opener** (3 real scenarios, not 1):
+   - "Pod memory limit 512Mi, -Xms512m, JVM OOMKilled during heap init — `kubectl describe pod` shows Exit Code 137, no hs_err, no GC log"
+   - "Pod CPU limit 2 cores, but `java -version` prints `-XX:ActiveProcessorCount=16` — GC threads over-provisioned, CPU throttled, STW pauses explode"
+   - "Two JVMs on same K8s node, both expect 4GB heap, node has 6GB — OOM score battle"
+
+2. **os::init_container_support() walkthrough** (osContainer_linux.cpp, ~500 lines, give file:line for each):
+   - `OSContainer::init()`: the detection entry
+   - cgroup v1 vs v2 detection: read `/proc/self/mountinfo`, check for `cgroup2` filesystem type vs `cgroup` with specific controller
+   - v1 path: `/sys/fs/cgroup/cpu/cpu.cfs_quota_us` and `cpu.cfs_period_us` → `active_processor_count = ceil(quota / period)`; if quota=-1 (unlimited) → read `cpu.shares` → `min(available_processors(), ceil(shares / 1024))`
+   - v1 path: `/sys/fs/cgroup/memory/memory.limit_in_bytes` → if < physical RAM → `MaxRAM` = limit; if < `-Xmx` → override; if > 2^63-1 → "unlimited" (container has no memory limit)
+   - v2 path: `/sys/fs/cgroup/cpu.max` (format: `$MAX $PERIOD`), `/sys/fs/cgroup/memory.max`
+   - `-XX:ActiveProcessorCount` → feeds `ParallelGCThreads`, `ConcGCThreads`, `CICompilerCount`
+
+3. **What happens when limits clash**:
+   - `memory.limit_in_bytes` (512M) < `-Xms512m` → JVM can't commit initial heap → `os::commit_memory()` fails → `vm_exit_out_of_memory()` → exit code 1 (not 137!)
+   - `memory.limit_in_bytes` (1G) < `-Xmx2G` → JVM starts OK, heap grows to 1G, next GC sees free memory exhausted → kernel OOM killer → exit 137 — no hs_err, no log
+   - CPU limit < actual cores → `ActiveProcessorCount` = 2 → GC threads = 2 → concurrent mark starves mutators → STW non-stop
+
+4. **`-XX:+UseContainerSupport` decision flow**:
+   - Default true since JDK 10 (JDK 8u191+ backported)
+   - Disabled → uses host /proc/cpuinfo and /proc/meminfo (reads physical machine, not container limits)
+   - Why you'd disable: VM running on dedicated node (no other containers) — wants full machine resources
+
+5. **Dynamic GC threads**: `-XX:+UseDynamicNumberOfGCThreads` (since JDK 11) — GC thread count adjusts when container CPU limit changes
+
+6. **Multi-tenant JVM on K8s**:
+   - `memory.limit_in_bytes` = total pod limit, `memory.usage_in_bytes` = total pod usage — includes JVM + agent + OS page cache
+   - JVM sees `MaxRAM` = total limit, but actual available = limit - agent overhead - OS overhead
+   - OOM score: kernel assigns per-process OOM score based on memory usage ratio → larger JVM killed first
+
+7. **GDB verification** (full session format, with `(gdb)` prompts):
+   ```
+   (gdb) break os::Linux::init_container_support
+   (gdb) run
+   (gdb) p Arguments::_cpu_count
+   $1 = 4
+   (gdb) p Arguments::_max_physical_memory
+   $2 = 536870912  ← 512MB from cgroup, not 64GB from /proc/meminfo
+   ```
+
+8. **Production checklist**: "Pod restart loop → 1) check `kubectl describe pod` exit code (137=OOMKilled, 1=JVM exit) → 2) check cgroup limits match -Xms/-Xmx → 3) enable `-Xlog:gc+ergo*=debug` for heap sizing decisions → 4) check `-XX:+PrintFlagsFinal | grep -i container` for final flag values"
+
+9. **Mermaid**: cgroup detection v1/v2 decision tree → ActiveProcessorCount computation → MaxRAM override flow
+
+10. **Cross-reference**: 01 (heap init), 04 (Arguments::parse at Stage 8), 06 (Universe/heap creation), 07 (G1 12-step init with heap size from container), 15 (thread count depends on CPU count)
+
+### Style
+Match 06-universe_init-Deep-Dive.md (✅ green). Source evidence per claim. GDB session format throughout.
+
+---
+
+## 🔴 GAP 2: Arguments::parse() Flow Document (NEW — structural hole)
+
+Create: probe_md/libjvm-analysis/01-jvm-startup/20-Arguments-Parse-Flow.md
+
+### Why this matters
+README §三 shows Arguments::parse() as Stage 8 of create_vm(). The JVMFlag struct is covered in doc 15 §十八 — but the PARSE FLOW ITSELF has no walkthrough. For an entry-point phase promising "every millisecond explained," the reader never sees how their flags become memory addresses.
+
+### Content
+1. **Production opener** (2 scenarios):
+   - "-XX:+PrintGCDetails doesn't work at 3am → because JAVA_TOOL_OPTIONS=-XX:-PrintGCDetails overrides your command line"
+   - "GC logs show G1 but you used -XX:+UseParallelGC → because _JAVA_OPTIONS's UseG1GC takes precedence"
+
+2. **4-source priority chain** (with `arguments.cpp` file:line for each):
+   - `-XX:Flags=<file>` (lowest priority — `arguments.cpp:parse_java_tool_options_flags_file()`)
+   - `JAVA_TOOL_OPTIONS` env var
+   - `_JAVA_OPTIONS` env var  
+   - Command line (highest priority)
+   - Source order: read in LOWER-priority order first, so HIGHER priority overwrites. This is the #1 cause of "my flag doesn't work" production issues.
+
+3. **parse_each_vm_init_arg()** detailed walkthrough (arguments.cpp):
+   - String parsing: `-Xms8g` → split at '=' or ':' → name="Xms", value="8g", origin=JVMFlagsOrigin_COMMAND_LINE
+   - `-XX:+/-FlagName` → `set_bool_flag()` → `JVMFlag::boolAtPut(origin, &cmd_line_bool)`
+   - `-XX:FlagName=value` → `JVMFlag::set_flag_from_env()` → type detection → constraint check → range check
+   - Constraint check: `-Xms > -Xmx` → `vm_exit_during_initialization("Incompatible...")`
+   - Range check: `-XX:ObjectAlignmentInBytes=7` → fails (must be power of 2, 8-256)
+   - Diagnostic flag gate: `-XX:+UnlockDiagnosticVMOptions` must precede diagnostic flags
+
+4. **Specific flag parsing** (most common flags):
+   - `-Xms/-Xmx`: `Arguments::set_heap_size()` → `MinHeapSize`/`MaxHeapSize`/`InitialHeapSize` with byte-to-GB conversion + alignment to page size
+   - `-Xss`: `set_thread_stack_size()` → minimum 144k (64-bit), maximum 1G, alignment to page
+   - `-XX:+UseG1GC`: sets `UseG1GC=true` and clears `UseSerialGC`/`UseParallelGC`/`UseConcMarkSweepGC`/`UseShenandoahGC`
+   - `-Xlog:gc*=info`: `LogConfiguration::parse_log_arguments()` → creates LogOutput + LogTagSet + LogDecorator chain
+
+5. **JVMFlag write toggles**: `FLAG_SET_DEFAULT` vs `FLAG_SET_CMDLINE` vs `FLAG_SET_ERGO` — origin determines if later override is allowed
+
+6. **Ergo phase**: `Arguments::apply_ergo()` — for all flags where origin=FLAG_SET_DEFAULT:
+   - Heap size: `RAM <= 1GB → MaxHeapSize = RAM/2`, else `RAM <= 192GB → MaxHeapSize = RAM/4`
+   - GC threads: `ParallelGCThreads = cpu_count <= 8 ? cpu_count : 8 + (cpu_count-8)*5/8`
+   - CICompilerCount: `CICompilerCount = max(1, min(4, cpu_count/2))`
+   - CodeCache size: tiered compilation → 240MB, non-tiered → 48MB
+
+7. **Constraint violations**: what prints what error, where in startup the exit happens, exit code
+
+8. **GDB session**: break at `parse_vm_init_args()`, step through parsing of `-Xms512m`, show JVMFlag before/after write, verify origin byte
+
+9. **Production diagnostic**: "Which source set my flag?" → `-XX:+PrintFlagsFinal | grep <flagname>` → check the `origin` column → map to source priority
+
+10. **Mermaid**: 4-source chain → parse_each_vm_init_arg → set_flag → constraint/range → ergo
+
+---
+
+## 🟡 GAP 3: VMThread Creation Doc (small new doc or § expansion)
+
+The review noted: "What is the VM thread and why does it start before main()?" — currently ~20 lines in doc 14.
+
+### Option: expand doc 15 §VMThread section, or create small doc 21
+
+Content needed:
+1. VMThread::create() at create_vm() stage 14: `thread.cpp:4141-4150`
+2. VMThread lifecycle: `VMThread::loop()` (vmThread.cpp) — `wait()` on VMOperationQueue → `VMOperation::evaluate()` → `VM_Operation::doit()` → post-operation cleanup
+3. "Before main()" table: at `main()` entry, exactly these threads exist:
+   - main thread (JavaThread, _thread_in_vm)
+   - VM Thread (named "VM Thread", _thread_in_vm, waiting on VMOperationQueue)
+   - Reference Handler (JavaThread, _thread_blocked, waiting on ReferenceQueueLock)
+   - Finalizer (JavaThread, _thread_blocked, waiting on ReferenceQueueLock)
+   - Signal Dispatcher (JavaThread, _thread_blocked)
+   - C1 CompilerThread N (NamedThread, _thread_blocked)
+   - C2 CompilerThread M (NamedThread, _thread_blocked)
+   - Service Thread (JavaThread, _thread_blocked)
+   - Common-Cleaner (JavaThread, _thread_blocked)
+   - Notification Thread (JavaThread, _thread_blocked)
+   - WatcherThread (non-JavaThread)
+   - G1 concurrent refinement threads N
+   - G1 concurrent marking threads M (if UseG1GC)
+   (Give exact counts: e.g., C2 threads = CICompilerCount - C1 threads; refinement threads = ParallelGCThreads)
+
+---
+
+## 🟡 GAP 4: GDB Session Transcripts (top 10 docs)
+
+For these 10: 01, 04, 05, 06, 07, 10, 15, 17-call_initPhase2-3, 21, 03b
+
+Format — do NOT just show `p sizeof(X) → 432`. Show full session:
+```
+(gdb) break <exact_function_name>
+Breakpoint 1 at 0x7f...: file <filename>, line <NNN>.
+(gdb) run
+Breakpoint 1, <function> (args...) at <file>:<line>
+(gdb) p <variable>
+$1 = <actual_value>
+(gdb) p/x <register_or_address>
+$2 = 0x...
+```
+
+Insert ONE such session at the doc's primary verification section. Do not rewrite the doc.
+
+---
+
+## 🟡 GAP 5: Design Rationale + Mermaid (11, 12, 13a)
+
+### 11-universe2_init-Deep-Dive.md
+Add:
+- "Why 8 TypeArrayKlass in specific order (boolean→byte→char→short→int→long→float→double)" — because smaller types reuse larger types' array copiers; if created out of order, arraycopy would fail
+- Mermaid: primordial class loading sequence (SystemDictionary resolve → Klass creation → Metaspace allocation)
+- SystemDictionary::resolve_well_known_classes() walkthrough with file:line
+
+### 12-javaClasses_init-Deep-Dive.md
+Add:
+- Mermaid: compute_offset() flow (InstanceKlass::find_field → fieldDescriptor::initialize → ConstantPool index → offset table write)
+- CDS stale offset: assert(_group_offset == 0 || _group_offset == old_offset) — why this check exists, what CDS archive mismatch means
+
+### 13a-universe_post_init-Deep-Dive.md
+Add:
+- Mermaid: vtable index reindex (Klass::vtable() → KlassVtable::initialize_vtable → reindex for overridden methods)
+- "Why 6 separate OOM objects, not 1 with dynamic message" — because signal context can't call malloc → preallocated oops only
+- GDB: break at universe_post_init(), step to _fully_initialized=true, print all 6 OOM oops addresses
+
+---
+
+## 🗑️ GAP 6: Demote Doc 14
+
+14-create_vm-Stage5-8-Deep-Dive.md (248 lines): add one-line header
+"⚠️ 本文档已被 17-call_initPhase2-3-Deep-Dive.md 替代。如需了解 Phase 5-8 详情，请直接阅读 17。"
+
+---
+
+## Report after completion
+Per-gap: lines added/changed, new docs created, verification tools used, key production scenarios now covered.

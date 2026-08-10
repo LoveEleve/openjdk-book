@@ -173,32 +173,49 @@ init_globals()
 
 ## 依赖关系与返回值检查
 
-源码注释里埋了 6 条硬约束（`init.cpp` 行内注释）：
+`init.cpp` 行内注释藏了 **16 条**硬约束——不只是文章中常见的 6 条。完整依赖链：
 
 ```
-依赖链（从 init.cpp 注释提取）：
+完整依赖链（从 init.cpp 的 16 条行内注释提取）：
+─────────────────────────────────────────────────────────────
+Block A — universe_init 的前置依赖：
 
-VM_Version_init --→ os_init_globals                  // os depends on VM_Version, before universe
-                         |
-codeCache_init -----+    |
-stubRoutines_init1 -+---→ universe_init               // universe depends on codeCache + stubRoutines
-                    |      |
-                    |      ↓
-                    |   gc_barrier_stubs_init          // depends on universe, before interpreter
-                    |      |
-                    |      ↓
-                    |   interpreter_init               // before any methods loaded
-                    |   invocationCounter_init          // before any methods loaded
-                    |
-                    +--→ universe2_init                // depends on codeCache + stubRoutines
-                    |
-                    |      javaClasses_init             // after vtable, before referenceProcessor
-                    |           |
-                    |           ↓
-                    |   referenceProcessor_init
-                    |
-                    +--→ ... --→ compileBroker_init --→ universe_post_init
-                                                       // post_init must be after compiler_init
+VM_Version_init ──→ os_init_globals       // depends on VM_Version, before universe
+codeCache_init ──┐
+stubRoutines_init1┼──→ universe_init       // depends on codeCache + stubRoutines
+
+Block C — 解释器与运行时依赖：
+
+universe_init ──→ gc_barrier_stubs_init    // depends on universe, must be before interpreter
+                     ↓
+               interpreter_init            // before any methods loaded
+               invocationCounter_init      // before any methods loaded (同级约束，解释器和 JIT 都需要)
+
+VMRegImpl::set_regName                     // need this before generate_stubs (for printing oop maps)
+    ↓
+SharedRuntime::generate_stubs
+
+codeCache_init ──┐
+stubRoutines_init1┼──→ universe2_init       // depends on codeCache + stubRoutines1 (和 universe_init 相同前置)
+
+javaClasses_init                            // must happen after vtable, before referenceProcessor
+    ↓
+referenceProcessor_init
+
+Block D — 编译器初始化边界：
+
+// ═══ Initialization after compiler initialization ═══  ← 语义边界注释（L79）
+compileBroker_init
+    ↓
+universe_post_init                          // must happen after compiler_init
+
+Block E — 后置收尾：
+
+stubRoutines_init2                          // note: StubRoutines need 2-phase init
+MethodHandles::generate_adapters
+    ↓
+NMT_stack_walkable = true                   // Solaris: stack walkable only after stubRoutines set up
+─────────────────────────────────────────────────────────────
 ```
 
 **3 个返回值检查点**——只有这 3 个函数的失败会让 `init_globals()` 提前返回，其余 27 个函数都是 `void` 或返回值被忽略：
@@ -286,5 +303,19 @@ universe_init()
 **5 篇级**：ch06 codeCache / ch08 stubRoutines1 / ch18 generate_stubs / ch19 universe2 / ch29 universe_post / ch30 stubRoutines2
 
 写作顺序按依赖关系：ch04 → ch05-ch08（Block A）→ ch09-ch13（Block B）→ ch14-ch24（Block C）→ ch25-ch28（Block D）→ ch29-ch32（Block E）。
+
+> **章节地图说明**：下表为完整规划（30 个 init_globals 步骤对应的章节映射）。**当前已写至 ch14**，ch15+ 为 Vol 1 后续和 Vol 2 规划。实际章节编号和内容可能随写作进展调整——以各章 PLAN.md 为准。**
+
+---
+
+## 设计权衡
+
+**为什么 `init_globals()` 要拆成 30 个独立函数而不是一个大的初始化函数？** 如果把这 30 步写在一个 1000+ 行的函数里，有两个致命问题：(1) 依赖链不可见——哪个函数必须在哪个之前，只能靠阅读函数体理解；(2) 部分平台某些函数是条件编译（`#if INCLUDE_CDS`/`#if INCLUDE_VM_STRUCTS`/`#if INCLUDE_NMT`），合在一个大函数里会让 `#ifdef` 嵌套层层加深。拆成独立函数后，每个函数有明确的输入（全局 Flag + 前置子系统状态）和输出（副作用），平台差异通过条件编译函数调用解决而不是条件编译大段代码块。
+
+**为什么只有 3 个返回值检查点，其余 27 个函数的返回值被忽略？** `universe_init()` 创建堆——分配几十 GB 的虚拟地址空间，可能因为系统内存不足或 CDS 映射失败而返回错误。`compileBroker_init()` 解析编译指令文件——用户提供的文件可能有语法错误。`universe_post_init()` 预分配 OOM 异常实例——hotspot 的预分配 OOM 机制需要保证这 6 个实例可创建。其余 27 个函数要么做的是"不可能失败"的操作（`bytecodes_init` 只 check enum 大小、`accessFlags_init` 只 sizeof 断言），要么失败后的策略是"继续前进"（`interpreter_init` 失败了 JVM 还能用 C++ 解释器回退，不应终止启动）。
+
+**为什么 `vm_init_globals()` 和 `init_globals()` 不合并？** `vm_init_globals()` 在 Stage 4 执行，此刻连 `JavaThread` 都不存在——`Thread::current()` 返回裸 OS 线程。它只能做不依赖 Java 线程基础设施的初始化（锁、日志、内存池）。`init_globals()` 在 Stage 6 执行，主线程已登记为 `JavaThread`，可以创建 Handle（HandleMark RAII）、分配 ResourceArea。合并在一个函数里必须判断"当前线程是 JavaThread 吗？"来决定每条初始化逻辑走哪条分支——这比直接拆成两个函数更复杂，且失去了"在哪个阶段能做什么"的编译期保证（`HandleMark hm` 在 `vm_init_globals` 阶段编译就会报错——没有 JavaThread 的 TLS 中没有 HandleMark 栈）。
+
+---
 
 下一章（ch05）从 `compilationPolicy_init` 开始——选择编译策略（C1/C2/Tiered）、设置编译阈值、计算编译线程数。它是 `universe_init` 的前置依赖之一。

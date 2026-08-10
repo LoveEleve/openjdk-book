@@ -1,0 +1,214 @@
+Deep-review 15-core-native — 4 docs + README, ~3312 lines. Covers the most-called native methods in Java — bugs here are the most visible to users.
+
+## Documents
+probe_md/15-core-native/README.md (515 lines)
+probe_md/15-core-native/00-System-Arraycopy.md (672 lines)
+probe_md/15-core-native/01-Class-String.md (684 lines)
+probe_md/15-core-native/02-Runtime-Throwable.md (652 lines)
+probe_md/15-core-native/03-JNI-Utility.md (789 lines)
+
+## Benchmark
+14-zip-jimage (370/400) — same review structure
+
+---
+
+## 1. Source Line Accuracy — 10 pts
+
+### Verify against actual source with rg:
+
+| # | Claim | File | Line | Match? |
+|---|-------|------|------|:---:|
+| 1 | arraycopy RegisterNatives | System.c | 41 | |
+| 2 | identityHashCode → JVM_IHashCode | System.c | 56 | |
+| 3 | hashCode RegisterNatives | Object.c | 43 | |
+| 4 | getClass | Object.c | 58/64 | |
+| 5 | forName0 → JVM_FindClassFromCaller | Class.c | 137 | |
+| 6 | VerifyClassname check | Class.c | 132 | |
+| 7 | IsAssignableFrom | Class.c | 162 | |
+| 8 | String.intern → JVM_InternString | String.c | 32 | |
+| 9 | Float.floatToRawIntBits union | Float.c | 49 | |
+| 10 | availableProcessors | Runtime.c | 71 | |
+| 11 | fillInStackTrace | Throwable.c | 49 | |
+| 12 | JVM_ArrayCopy impl | jvm.cpp | 328 | |
+| 13 | JVM_IHashCode impl | jvm.cpp | 609 | |
+| 14 | JVM_FindClassFromCaller | jvm.cpp | 795 | |
+| 15 | JVM_InternString | jvm.cpp | 3542 | |
+
+### Scoring:
+10: 15/15
+8: 13-14/15
+6: 11-12/15
+4: 9-10/15
+2: <9/15
+
+---
+
+## 2. Production Authenticity — 10 pts
+
+### Verify §〇 per doc:
+
+**00**: `ArrayStoreException: Integer` — exact error? Object[] source with Integer, String[] destination — specific scenario? Diagnostic: `src.getClass().getComponentType()` vs `dst.getClass().getComponentType()`? Fix: allocate correct type?
+
+**01**: CNFE in OSGi — forName0 uses caller's classloader trap? `Thread.currentThread().getStackTrace()[1].getClassLoader()` diagnostic? `Class.forName(name, true, contextLoader)` as fix?
+
+**02**: Docker over-threading — JDK 8/9 vs 10+ cgroup awareness? `PrintFlagsFinal | grep GCThreads` diagnostic? `cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us` diagnostic? Fix: JDK 10+ or `-XX:ParallelGCThreads=2`?
+
+**03**: Silent NPE inconsistency — `NullPointerException` with no message in some paths? `JNU_ThrowNullPointerException(env, msg)` vs raw `ThrowNew`? Diagnostic: `-XX:+ShowMessageBoxOnError` to catch?
+
+### Scoring:
+10: all 4 openers with exact errors + actionable diagnostics + fixes
+8: 3/4 solid
+6: 2/4 solid
+4: scenarios exist but diagnostics thin
+2: no production grounding
+
+---
+
+## 3. First-Principles Depth — 10 pts
+
+### Counterfactual count per doc (verified in actual doc body):
+
+00 expected ≥5:
+- "RegisterNatives vs named JNI: ~10ns overhead eliminated"
+- "memmove bulk copy vs element-by-element: 40x faster"
+- "memcpy vs memmove: UB on overlap" (Gap 1 from README review — present?)
+- "C2 intrinsic vs JNI call: ~50ns → ~5ns for small arrays"
+- "Object[] type-check vs memmove skip: ClassCastException later"
+- "nanoTime CLOCK_REALTIME vs CLOCK_MONOTONIC: negative duration"
+- "identityHashCode virtual dispatch bypass: HashMap infinite loop"
+
+01 expected ≥5:
+- "callee classloader vs context classloader: sandbox broken"
+- "StringTable heap vs metaspace: 3 JNI crossings → 150ns vs CAS 10ns → 15x"
+- "VerifyClassname null byte check: security attack prevention"
+- "Float union: Java no equivalent → must be native"
+- "isAssignableFrom Java O(n) hierarchy vs native O(1) Klass*"
+
+02 expected ≥4:
+- "no cgroup: 47% Docker JVMs wrong CPU"
+- "cgroup v1 vs v2: different file format parsing"
+- "fillInStackTrace opaque C2 frames: 67% backtrace useless"
+- "System.gc → concurrent cycle not Full GC when -XX:+ExplicitGCInvokesConcurrent"
+
+03 expected ≥4:
+- "JNU utilities vs raw JNI: 3x code bloat in 42 files"
+- "cached jclass vs FindClass per call: ~100ns saved"
+- "encoding fast path: ISO-8859-1 shortcut vs full Unicode convert"
+
+### Scoring:
+10: 20+ counterfactuals across 4 docs, all quantified
+8: 16-19
+6: 12-15
+4: 8-11
+2: <8
+
+---
+
+## 4. Interview Readiness — 10 pts
+
+### Verify each doc has story-format answer matching README §五:
+
+00: Q1 "System.arraycopy?" / Q2 "hashCode vs identityHashCode?" / Q3 "Float.floatToIntBits?" — all in 00 §七?
+01: Q4 "forName classloader?" / Q5 "String.intern?" / Q6 "getClass?" — all in 01 §七?
+02: Q7 "availableProcessors Docker?" / Q8 "fillInStackTrace?" — all in 02 §七?
+03: Q9/10/11? — in 03 §七?
+
+### Also check: story-format not fact-dump? Can reader deliver in 60 seconds?
+
+### Scoring:
+10: all README Qs have story-format answers in docs
+8: most solid, 1-2 thin
+6: answers exist but fact-dumps
+4: thin
+2: missing
+
+---
+
+## 5. Beginner-Friendliness — 10 pts
+
+### Callout boxes per doc:
+
+00: JNI_ENTRY, JVM_ENTRY, intrinsic, memmove, markOop — 5 expected, 5 found?
+01: JNI_ENTRY (reuse), intrinsic, StringTable, JVM_FindClassFromCaller, VerifyClassname, C union — 6 expected (after fix), 6 found?
+02: JVM_ENTRY_NO_ENV, cgroup, stack walking, nmethod metadata — 4 expected, 4 found?
+03: jni_util, JNU_ThrowNullPointerException, encoding fast path — 3 expected, 3 found?
+
+### Concept leap check:
+- "union { float f; int32_t i; }" — explained before use?
+- "clock_gettime(CLOCK_MONOTONIC)" — explained?
+- "cgroup cpu.cfs_quota_us" — what is quota_us? Period?
+- "nmethod metadata" — what is nmethod? from 05-jit-compiler?
+
+### Scoring:
+10: all callouts present + clear + no unexplained concepts
+8: all present, 1-2 unclear
+6: 1-2 missing
+4: >2 missing
+2: no scaffolding
+
+---
+
+## 6. Cross-Doc Coherence — 10 pts
+
+### Reading order: 00→01→02→03?
+
+00 §一: prerequisites (09-native-interface, 03-object-model, 05-jit-compiler)?
+01 §一: "after 00, reader knows arraycopy dispatch. This doc: reflection + interning."
+02 §一: "after 00, reader knows native call patterns. This doc: runtime + stack walk."
+03 §一: "after 00-02, reader knows the methods. This doc: shared utility beneath."
+
+### Terminology consistency:
+- "JVM_IHashCode" vs "JVM_IHashCode" — same across docs?
+- "RegisterNatives" — same meaning?
+- "JNI_ENTRY" vs "JNI native entry" — consistent?
+
+### Cross-phase refs:
+All reference: 09-native-interface (JNI basics), 03-object-model (markOop), 05-jit-compiler (C2 intrinsics)?
+00 additionally: 12-cpu-layer (REP MOVS assembly)?
+01 additionally: 02-class-loading (FindClass)? 14-zip-jimage (ClassLoader bridge)?
+02 additionally: 06-gc-memory (System.gc → G1)?
+
+### Scoring:
+10: clean chain + consistent terms + all cross-phase refs
+8: 1-2 missing
+6: several gaps
+4: broken reading order
+2: contradictory
+
+---
+
+## 7. Line Number Accuracy — 5 pts
+
+### Quick rg spot-check on 5 critical claims:
+
+| Claim | Expected | rg result | Match? |
+|-------|----------|-----------|:---:|
+| System.c:41 arraycopy RegisterNatives | 41 | | |
+| Class.c:137 forName0 | 137 | | |
+| Float.c:49 floatToRawIntBits | 49 | | |
+| Runtime.c:71 availableProcessors | 71 | | |
+| Throwable.c:49 fillInStackTrace | 49 | | |
+
+### Scoring:
+5: 5/5
+4: 4/5
+3: 3/5
+2: ≤2/5
+1: unverified
+
+---
+
+## Output
+
+### Per-doc scores
+| Doc | Line# | Production | 1st-Prin | Interview | Beginner | Coherence | Total |
+|-----|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| README | — | 10 | 10 | 10 | 10 | 10 | 50/50 |
+| 00 | | | | | | | /60 |
+| 01 | | | | | | | /60 |
+| 02 | | | | | | | /60 |
+| 03 | | | | | | | /60 |
+
+Phase total: /290 (with README)
+
+Top 3 gaps. Best doc. Ready for 16-nio-network?
