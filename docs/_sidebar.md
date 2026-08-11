@@ -6,6 +6,7 @@
   * [T02：jcmd 万能诊断命令](openjdk/vol-tools/ch02.md)
   * [T03：jmap 与 MAT 堆分析](openjdk/vol-tools/ch03.md)
   * [T04：javap 与 JIT 观察](openjdk/vol-tools/ch04.md)
+  * [T05：jhsdb 与 Serviceability Agent](openjdk/vol-tools/ch05.md)
 * [第 1 卷：启动](openjdk/vol-01/ch01)
   * [Ch01：Launcher Chain](openjdk/vol-01/ch01)
   * [Ch02：JavaMain → InitializeJVM](openjdk/vol-01/ch02.md)
