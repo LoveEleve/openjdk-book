@@ -43,16 +43,16 @@ materials/
 
 > 目的: 生态工具全部"实测可用"后才开始采集,避免素材半途失败(深审 #6)
 
-| # | 任务 | 命令/操作 | 通过标准 | 关联 |
+| # | 任务 | 状态(2026-08-11 实测) | 通过标准 | 关联 |
 |---|---|---|---|---|
-| A1 | JITWatch 启动 | `java -jar /opt/tools/jitwatch-ui.jar`(Xvfb) | 窗口出现,可导入 hotspot.log | 篇 4 |
-| A2 | GCViewer 启动 | `java -jar gcviewer-1.37.jar gc.log` | 图表渲染 | 篇 3 |
-| A3 | VisualVM 启动 | `/opt/tools/visualvm_2110/bin/visualvm` | 窗口 + 本地 JVM 列表 | 篇 3/6 |
-| A4 | JMC 实时连接 | JMC → Connect → 本地 JVM(demo) | 控制台 CPU/堆曲线动 | 篇 1/6 |
-| A5 | JMC MBean 浏览器 | JMC 连接后打开 MBean Browser | 树可见 | 篇 6 |
-| A6 | JMC JOverflow | JOverflow 打开 heap.hprof | 泄漏分析报告 | 篇 3 |
-| A7 | async-profiler 录 JFR | 直启: `java -agentpath:<so>=start,event=cpu,file=out.jfr -jar app` + `kill -SIGTERM` flush | ✅ **通过(v4 终版)双模式**: ① 独立 JFR(JDK17/21): ap-target.jfr(ExecutionSample 6282 条)② jfrsync 合并(JDK21): ap21-sync.jfr(27MB,JDK 全量事件+AP 采样一个文件)——jfrsync 值必须是合法 JFR 配置路径 | 篇 1/KP08 |
-| A8 | perf 权限 | `perf record -g -p <demo-pid> sleep 3 && perf report` | 采样成功(否则降级: 记录权限结论) | 篇 6 |
+| A1 | JITWatch 启动 | ✅ 已验: JDK21 + Xvfb 界面渲染(a1-jitwatch.png),GLX 回退软件渲染 | 窗口出现,可导入 hotspot.log | 篇 4 |
+| A2 | GCViewer 启动 | ✅ 已验: 打开 13MB gc.log 图表渲染(a2-gcviewer.png) | 图表渲染 | 篇 3 |
+| A3 | VisualVM 启动 | ✅ 已验: --jdkhome 指定 JDK21,界面渲染(a3-visualvm.png) | 窗口 + 本地 JVM 列表 | 篇 3/6 |
+| A4 | JMC 实时连接 | 🟡 数据面已验(ManagementAgent.start_local + JMX 26 MBean);GUI 截图待 B1.6 交互 | 控制台 CPU/堆曲线动 | 篇 1/6 |
+| A5 | JMC MBean 浏览器 | 🟡 数据面已验(MBean 树 26 个,素材已存 INDEX);GUI 待交互 | 树可见 | 篇 6 |
+| A6 | JMC JOverflow | 🟡 无独立主类(OSGi bundle),验证归 B3.5 交互;heap.hprof 可分析已验(MAT) | 泄漏分析报告 | 篇 3 |
+| A7 | async-profiler 录 JFR | ✅ **双模式**: ① 独立 JFR(JDK17/21): ap-target.jfr(ExecutionSample 6282 条)② jfrsync 合并(JDK21): ap21-sync.jfr(JDK 全量+AP 采样一个文件)——jfrsync 值必须是合法 JFR 配置路径 | 生成 .jfr,JMC 可打开 | 篇 1/KP08 |
+| A8 | perf 权限 | ✅ 已验: paranoid=2,record 56718 样本 + perf→stackcollapse→flamegraph 全链路打通 | 采样成功 | 篇 6 |
 
 **A 组完成定义**: 8 项全通过或记录明确降级理由;`materials/INDEX.md` 建好。
 
