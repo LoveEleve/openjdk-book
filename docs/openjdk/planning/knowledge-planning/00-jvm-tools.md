@@ -335,20 +335,18 @@
 ## 09 43 域素材就绪度(v5 新增,实操补缺依据)
 
 > ✅ 就绪 = 已有实测输出可直接引用 | 🟡 半就绪 = 有数据待补全 | 🔴 空 = 无实测素材 | ✗ = 无途径(源码分析)
+> **v7 更新(2026-08-11,执行计划 C 组闭环)**: 48 域逐域核对表见 `00-jvm-tools-readiness.md`——✅ 32 / 🟡 9 / 🔴 2 / ✗ 5;B 组 38 任务全部执行完毕(GUI 8 项降级至附录 G)
 
 | 状态 | 域 | 已有素材 | 待补(阶段) |
 |---|---|---|---|
-| ✅ 就绪(20) | 01/03/07/09/10/13/16/17/18/20/22/24/25/26/32/43/48 + **33(MBean 树 26 个实测,A4/A5)** | rec-demo.jfr 90 类事件(SafepointBegin 2710 条、ExecuteVMOperation 2709 条、GCPhaseParallel 229万)+ jcmd 实测输出 + perf 全链路(A8)+ MBean 树 | - |
-| 🟡 半就绪 | 06、37(heap.hprof + MAT 泄漏报告) | 待 histo/支配树深度分析(阶段 3) |
-| 🟡 半就绪 | 19(jsnap 锁计数)、38(jsnap) | LockInstancesPage 截图(阶段 1) |
-| 🟡 半就绪 | 41(jimage/jlink 实测) | 截图(阶段 7) |
-| 🟡 半就绪 | 28、47(事件名有) | ClassRedefinition 实测(阶段 2/5) |
-| 🔴 空 | 02/04/08/11/12/14/15/21/23/27/34/40/42/44/46 | 阶段 2/4/5 补;15-c2 需触发 CompilerInlining |
-| ✗ 无途径 | 05/29/30/31/45 | 源码分析(已定) |
+| ✅ 就绪(32) | 01/03/04/06/07/08/09/10/11/13/14/15/16/17/18/19/20/22/24/25/26/32/33/34/35/36/37/38/39/41/46/48 | rec-demo.jfr 90 类事件(SafepointBegin 2710、ExecuteVMOperation 2709、GCPhaseParallel 229万)+ jcmd 49 子命令全量 + jstat 12 + jsnap + clhsdb/jhsdb + javap + LogCompilation(609 任务)+ inline 4122 事件 + jmap/MAT/OOM + MBean 全属性 + jimage/jlink/jdeps + default-vs-profile 对比 + perf 全链路 | 详见 `00-jvm-tools-readiness.md` |
+| 🟡 半就绪(9) | 02/21/23/27/28/40/43/44/47 | JITWatch/VM.info/dynlibs/arthas trace/jlink/IO 页截图/javap -v | GUI 截图(附录 G4/G5/G7)或特定场景(ClassRedefinition 等) |
+| 🔴 空(2) | 12/42 | 无 CLI 面 | 源码分析 + JFR CompilerPhase 间接观察 |
+| ✗ 无途径(5) | 05/29/30/31/45 | - | 源码分析(已定,REVIEW v1/v2 复核) |
 
-**素材目录**(v5): `outlines/00-jvm-tools/materials/` = screenshots/ + commands/ + jfr-recordings/(rec-demo.jfr、probe.jfr、rec.jfr、heap.hprof 已入库)
+**素材目录**(v7): `outlines/00-jvm-tools/materials/` = screenshots/(21 张)+ commands/(130+ 文件)+ jfr-recordings/(10 个)+ logs/(gc.log 13MB + hotspot.log 2.2MB);`INDEX.md` 全量登记
 
-**执行计划**(v6): `00-jvm-tools-execution-plan.md`——A 基础设施验证(8 项)/ B 七篇素材采集(38 任务)/ C 就绪度闭环 / D 归档交接;每任务有命令、产出、对应域、DoD;素材索引 `materials/INDEX.md`
+**执行计划**(v7): `00-jvm-tools-execution-plan.md`——A 基础设施验证(8 项全通过)/ B 七篇素材采集(**38 任务全部完成**,8 项 GUI 降级见附录 G)/ C 就绪度闭环(完成,见 `00-jvm-tools-readiness.md`)/ D 归档交接
 
 ---
 

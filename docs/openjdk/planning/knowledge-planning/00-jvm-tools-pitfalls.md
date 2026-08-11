@@ -116,6 +116,25 @@
 - **根因**: default.jfc 的 threshold(SafepointBegin 10ms/锁 20ms)过滤掉短事件
 - **解法**: 素材采集统一 `settings=profile`(threshold 0ms);写文章用 "default vs profile" 对比当素材
 
+### 坑 17: ExecutionSample.state 是线程状态,不是执行模式
+- **现象**: B1.3 计划预期 `jfr print` 出现 state=INTERPRETED
+- **根因**: jdk.ExecutionSample 的 state 字段 = java.lang.Thread.State(RUNNABLE/WAITING),
+  无解释/编译标记;解释器模式没有专门 JFR 事件字段
+- **解法**: -Xint 实证改判——`jfr summary` 中 `jdk.Compilation == 0` 即为解释模式
+  (jfr-xint-executionsample.txt 已按此修正)
+
+### 坑 18: bash 工具超时会杀整个进程组
+- **现象**: nohup java Demo & 后,shell 120s 超时 java 也被杀(Demo 反复"神秘退出")
+- **根因**: 工具超时清理按进程组 SIGKILL,nohup 不脱离进程组
+- **解法**: `setsid java Demo > log 2>&1 < /dev/null &` 脱离进程组;
+  PID 提取用 `ps -eo pid,args | awk '$2 ~ /java$/ && $0 ~ /Demo/ && $0 !~ /bash/'`
+  (grep 会匹配 wrapper shell 自身命令行——坑 2 变体)
+
+### 坑 19: ps/grep 匹配到 wrapper shell 自身
+- **现象**: `ps aux | grep "java Demo"` 返回多个 PID,attach 报 "No such process"
+- **根因**: bash -c 包装命令行里含有同名字符串
+- **解法**: awk 精确匹配 `$2 ~ /java$/` + 排除 `/bash/`;或直接 jcmd 输出验证存活
+
 ---
 
 ## 六、排查方法论(以上坑的共性教训)
