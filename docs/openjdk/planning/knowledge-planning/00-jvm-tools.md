@@ -36,7 +36,7 @@
 > 7. **生态工具状态更新**: MAT/JITWatch/VisualVM/GCViewer/perf/FlameGraph 均已下载安装 ✅
 >
 > **v2 修订要点**(2026-08-11 实测后校准):
-> 1. **补 `jfr` CLI**(JDK 11+ 自带): 无头环境素材提取主力,已实测提取 90 类事件/热点方法/GC 时序
+> 1. **补 `jfr` CLI**(JDK 11+ 自带): 无头环境素材提取主力,已实测提取 86 类事件(计数非0)/热点方法/GC 时序
 > 2. **JMC 功能补全**: 除时间线外还有自带火焰图/热力图/依赖视图/MBean 浏览器/JOverflow 泄漏分析/实时连接
 > 3. **jfr2flame 事实修正**: 交接文档声称"async-profiler jfr2flame ✅(Arthas 仓库 converter)"——Arthas 仓库嵌入的 async-profiler **仅含 3 个 .so,未带 converter.jar/profiler.sh**(async-profiler 官方 release 才有 converter)。对照工具改为 JMC 自带 Flame Graph 视图 + async-profiler 原生 JFR 输出
 
@@ -339,7 +339,7 @@
 
 | 状态 | 域 | 已有素材 | 待补(阶段) |
 |---|---|---|---|
-| ✅ 就绪(32) | 01/03/04/06/07/08/09/10/11/13/14/15/16/17/18/19/20/22/24/25/26/32/33/34/35/36/37/38/39/41/46/48 | rec-demo.jfr 90 类事件(SafepointBegin 2710、ExecuteVMOperation 2709、GCPhaseParallel 229万)+ jcmd 49 子命令全量 + jstat 12 + jsnap + clhsdb/jhsdb + javap + LogCompilation(609 任务)+ inline 4122 事件 + jmap/MAT/OOM + MBean 全属性 + jimage/jlink/jdeps + default-vs-profile 对比 + perf 全链路 | 详见 `00-jvm-tools-readiness.md` |
+| ✅ 就绪(32) | 01/03/04/06/07/08/09/10/11/13/14/15/16/17/18/19/20/22/24/25/26/32/33/34/35/36/37/38/39/41/46/48 | rec-demo.jfr 86 类事件(计数非0)(SafepointBegin 2710、ExecuteVMOperation 2709、GCPhaseParallel 229万)+ jcmd 49 子命令全量 + jstat 12 + jsnap + clhsdb/jhsdb + javap + LogCompilation(609 任务)+ inline 4122 事件 + jmap/MAT/OOM + MBean 全属性 + jimage/jlink/jdeps + default-vs-profile 对比 + perf 全链路 | 详见 `00-jvm-tools-readiness.md` |
 | 🟡 半就绪(9) | 02/21/23/27/28/40/43/44/47 | JITWatch/VM.info/dynlibs/arthas trace/jlink/IO 页截图/javap -v | GUI 截图(附录 G4/G5/G7)或特定场景(ClassRedefinition 等) |
 | 🔴 空(2) | 12/42 | 无 CLI 面 | 源码分析 + JFR CompilerPhase 间接观察 |
 | ✗ 无途径(5) | 05/29/30/31/45 | - | 源码分析(已定,REVIEW v1/v2 复核) |

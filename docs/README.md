@@ -22,6 +22,16 @@
 * [第三章 — make 到底做了什么](openjdk/vol-00/ch03.md) — 8 阶段流水线拆解 make 的 1 分 31 秒
 * [第四章 — jdk11u-copy：裁剪、CMake 与 IDE](openjdk/vol-00/ch04.md) — 从 Make 到 CMake，秒级增量编译
 
+## 卷 T · 工具观测（先读：怎么"看见"一个活着的 JVM）
+
+* [第一章 — 先录一次 JFR，看见整个 JVM](openjdk/vol-tools/ch01.md) — JFR 录制 + JMC 29 页签 + jfr CLI
+* [第二章 — jcmd 万能诊断命令](openjdk/vol-tools/ch02.md) — 50 个子命令（待写）
+* [第三章 — 内存工具](openjdk/vol-tools/ch03.md) — jmap/MAT/GCViewer（待写）
+* [第四章 — JIT/字节码工具](openjdk/vol-tools/ch04.md) — javap/JITWatch/LogCompilation（待写）
+* [第五章 — SA 内部查看](openjdk/vol-tools/ch05.md) — jhsdb/clhsdb/jsnap（待写）
+* [第六章 — JMX/火焰图](openjdk/vol-tools/ch06.md) — jconsole/perf/FlameGraph（待写）
+* [第七章 — 模块/镜像工具](openjdk/vol-tools/ch07.md) — jimage/jlink/jdeps（待写）
+
 ## 卷 1 · 启动
 
 * [第一章 — Launcher Chain](openjdk/vol-01/ch01) — main.c → JLI_Launch → dlopen → dlsym
