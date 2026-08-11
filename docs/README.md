@@ -29,7 +29,7 @@
 * [第三章 — 堆里到底有什么](openjdk/vol-tools/ch03.md) — jmap 三路导出 + MAT 四板斧 + GCViewer/VisualVM 对照
 * [第四章 — 代码怎么被加工](openjdk/vol-tools/ch04.md) — javap 字节码 + 编译日志/内联决策
 * [第五章 — 钻到 JVM 肚子里](openjdk/vol-tools/ch05.md) — jhsdb/clhsdb 白盒读内存 + jsnap
-* [第六章 — JMX/火焰图](openjdk/vol-tools/ch06.md) — jconsole/perf/FlameGraph（待写）
+* [第六章 — JMX 与火焰图](openjdk/vol-tools/ch06.md) — jconsole MBean 树 + perf 内核采样 + 栈折叠
 * [第七章 — 模块/镜像工具](openjdk/vol-tools/ch07.md) — jimage/jlink/jdeps（待写）
 
 ## 卷 1 · 启动
