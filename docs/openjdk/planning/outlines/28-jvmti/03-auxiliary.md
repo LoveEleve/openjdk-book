@@ -23,7 +23,7 @@ tag map:
 
 场景: app 线程触发事件→不能立即调 agent(可能 block)→推入 deferred queue→ServiceThread 后来处理。
 
-**JvmtiDeferredEventQueue** (`jvmtiImpl.cpp:events`):
+**JvmtiDeferredEventQueue** (`jvmtiImpl.cpp:902-1000`):
 ```
 app thread: 
   → fire_event(METHOD_ENTRY) → push to thread's _jvmti_event_queue

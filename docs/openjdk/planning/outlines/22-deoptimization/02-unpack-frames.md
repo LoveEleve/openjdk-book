@@ -7,7 +7,7 @@
 
 场景: C2 编译时内联了 `A.bar()→B.baz()→C.qux()` —— 一个 compiled frame 包含 3 层 inline。deopt 时需要展开成 3 个解释器帧。
 
-**ScopeDesc → vframe** (`scopeDesc.hpp` + `deoptimization.cpp:unpack_deoptimization`):
+**ScopeDesc → vframe** (`scopeDesc.hpp` + `deoptimization.cpp:623-700`):
 ```
 compiled frame ← 1 帧, 3 scope
     scope[0]=A.bar (最外层 caller)

@@ -629,5 +629,7 @@ cpu/x86/ **不是一个独立域**——是每个域的平台镜像层。103 个
 ## 后续步骤
 
 1. 确认 v3.2 域清单（48 域）→ 重组 knowledge-planning/ 目录结构
+
+> **2026-08-10 补充: 域 00 JVM 工具层** — 探索前置域(非实现域): JMC/JFR、jcmd、jmap/MAT、JITWatch/javap、jhsdb(SA)、jconsole/perf/FlameGraph 六篇大纲,关联 18 个实现域(32/35/03/25/26/37/06/13/14/15/22/44/46/09/17/18/33/16)。用途: 写作前先用工具积累实证素材(事件列表/对象头截图/编译日志/MBean 树)。见 `knowledge-planning/00-jvm-tools.md` + `outlines/00-jvm-tools/`。
 2. 为 48 域创建知识规划文件桩
 3. 从域 1 OS 抽象层开始逐源提取

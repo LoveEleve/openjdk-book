@@ -11,11 +11,17 @@
 
 *2 知识点*
 
-## 02 聚合 — 单层
+## 02 聚合 — P1/P2/P3
 
+### P2 (2-4文件)
 | KP | 出现文件 |
 |----|---------|
-| HeapDumper + hprof format | heapDumper.*, heapDumperCompression.* |
+| HeapDumper + hprof format | heapDumper.cpp, heapDumper.hpp |
+
+### P3 (=1文件)
+| KP | 出现文件 |
+|----|---------|
+| GZip Compression on-the-fly | heapDumperCompression.cpp, heapDumperCompression.hpp |
 
 ## 03 深度分类
 

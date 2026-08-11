@@ -23,7 +23,7 @@ class JvmtiEnv : public JvmtiEnvBase {
 
 场景: agent 说 "我要接收 METHOD_ENTRY 事件"。JVM 在每个方法入口检查 event bit→如果设置→dispatch to agent。
 
-**事件分发** (`jvmtiEventController.hpp:40-150 + jvmtiImpl.cpp:事件dispatch`):
+**事件分发** (`jvmtiEventController.hpp:40-150 + jvmtiImpl.cpp:514-560`):
 ```
 SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_METHOD_ENTRY):
   → set _event_enabled_bits[THREAD][METHOD_ENTRY] = 1
@@ -43,7 +43,7 @@ Thread enters method:
 
 ### 3. "Capability — 两阶段"
 
-**Capability 两阶段** (`jvmtiEnv.cpp:capability handling`):
+**Capability 两阶段** (`jvmtiEnv.cpp:536-596`):
 ```
 Phase 1: OnLoad — agent declares needed capabilities (via AddCapabilities)
 Phase 2: Live — agent requests actual capability use. 

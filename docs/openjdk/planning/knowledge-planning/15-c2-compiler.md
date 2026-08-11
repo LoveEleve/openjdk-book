@@ -26,7 +26,30 @@
 
 *16 个知识点*
 
-## 02 深度分类
+## 02 聚合 — P1/P2/P3
+
+### P1 (≥5文件)
+| KP | 出现文件 |
+|----|---------|
+| Ideal Graph (Node+Type+IGVN+GVN) | type.cpp, node.cpp, igvn.cpp, phaseX.cpp, gvn.cpp |
+| Parse (字节码→Ideal) | parse1.cpp, parse2.cpp, parse3.cpp, graphKit.cpp |
+| Loop 优化 (unroll+predicate+superword) | loopnode.cpp, loopopts.cpp, loopTransform.cpp, loopUnswitch.cpp, loopPredicate.cpp, superword.cpp |
+| PhaseMacroExpand | macro.cpp, macroArrayCopy.cpp, callnode.cpp, escape.cpp |
+
+### P2 (2-4文件)
+| KP | 出现文件 |
+|----|---------|
+| Chaitin 寄存器分配 | chaitin.cpp, ifg.cpp, coalesce.cpp |
+| Matcher + CodeGen | matcher.cpp, output.cpp, block.cpp, gcm.cpp |
+| Library Call Intrinsics | library_call.cpp (6991行独大) |
+
+### P3 (=1文件)
+| KP | 出现文件 |
+|----|---------|
+| Compile 入口调度 | compile.cpp |
+| CFG+Arithmetic 节点定义 | cfgnode.hpp, connode.cpp, divnode.cpp 等 |
+
+## 03 深度分类
 
 ### 🔴 Deep — 核心设计决策 (6 KP)
 | KP | 为什么🔴 |

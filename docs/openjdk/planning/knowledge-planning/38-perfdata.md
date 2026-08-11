@@ -12,10 +12,17 @@
 
 *3 知识点*
 
-## 02 聚合 — P1
+## 02 聚合 — P1/P2/P3
+
+### P2 (2-4文件)
 | KP | 出现文件 |
 |----|---------|
-| PerfData + perfMemory | perfData.*, perfMemory.*, statSampler.*, os/linux/os_perf_linux.cpp |
+| PerfData + perfMemory 共享内存 | perfData.cpp, perfMemory.cpp, statSampler.cpp |
+
+### P3 (=1文件)
+| KP | 出现文件 |
+|----|---------|
+| OS 平台层 perfMemory | os/linux/os_perf_linux.cpp |
 
 ## 03 深度分类
 

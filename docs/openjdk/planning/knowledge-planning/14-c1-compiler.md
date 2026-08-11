@@ -21,7 +21,25 @@
 
 *11 个知识点*
 
-## 02 深度分类
+## 02 聚合 — P1/P2/P3
+
+### P1 (≥5文件)
+| KP | 出现文件 |
+|----|---------|
+| C1 编译管线 (GraphBuilder→LIR→CodeGen) | c1_GraphBuilder.cpp, c1_LIRGenerator.cpp, c1_LIRAssembler.cpp, c1_LinearScan.cpp, c1_Runtime1.cpp, c1_Compiler.cpp |
+
+### P2 (2-4文件)
+| KP | 出现文件 |
+|----|---------|
+| C1 IR + 优化 (Canonicalizer/GVN) | c1_IR.cpp, c1_Canonicalizer.cpp, c1_Optimizer.cpp, c1_ValueMap.cpp |
+| 栈帧 + 寄存器 | c1_FrameMap.cpp, c1_LinearScan.cpp |
+
+### P3 (=1文件)
+| KP | 出现文件 |
+|----|---------|
+| (全部 KPs 已在 P1/P2) | — |
+
+## 03 深度分类
 
 ### 🔴 Deep — 核心设计决策 (4 KP)
 | KP | 为什么🔴 |

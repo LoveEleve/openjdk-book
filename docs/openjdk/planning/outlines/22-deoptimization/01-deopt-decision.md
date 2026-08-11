@@ -74,7 +74,7 @@ trap_state = [action:3bit][reason:5bit][debug_id:23bit]
 - 关键设计: 全压缩到 32-bit——存进 MethodData 的 DataLayout(每个 hot bci 的 profiling slot)。不是每 trap 一个新 slot→而是覆盖写入→最新 trap 覆盖之前。rare traps 不被记录(none action)→节省 profiling 空间
 - [C++: 3+5+23=31 bit packed into one int32. Per-bytecode record→每个频繁执行的 bci 有一个 DataLayout(分配在 MethodData 的 VariableSizedSegment 中) `trap_bits` 字段存这个压缩值。用 bitmask 提取对应部分: `trap_bits >> 24`=action, `(trap_bits >> 19) & 0x1F`=reason, `trap_bits & 0x7FFFF`=debug_id]
 
-**PerBytecodeTrapLimit** (`deoptimization.cpp:deopt_action`):
+**PerBytecodeTrapLimit** (`deoptimization.cpp:1875-1920`):
 ```
 trap_count[this_bci] += 1
 if trap_count > PerBytecodeTrapLimit(默认 100):

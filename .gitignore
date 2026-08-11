@@ -1,3 +1,7 @@
 opencode.json
 opencode-analysis.txt
 *.pdf
+
+# 域 00 实操素材与工具归档(不入库)
+docs/openjdk/planning/outlines/00-jvm-tools/materials/
+docs/openjdk/planning/outlines/00-jvm-tools/tools/

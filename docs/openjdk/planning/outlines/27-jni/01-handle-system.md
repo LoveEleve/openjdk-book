@@ -7,7 +7,7 @@
 
 场景: JNI_GetObjectArrayElement 返回 jobject→它是 local handle。如果你要跨多次 native 调用持有它→必须升级为 global handle。如果你想要 GC 可回收的引用→weak global handle。
 
-**三种 Handle 类型** (`jniHandles.hpp:34-80 + jniHandles.cpp:allocation`):
+**三种 Handle 类型** (`jniHandles.hpp:34-80 + jniHandles.cpp:52-80`):
 ```
 Global handle:     OopStorage 分配, 跨 native 调用持久, 必须手动 DeleteGlobalRef
 Local handle:      per-thread JNIHandleBlock 链表, 自动释放(Native返回后pop)
@@ -35,7 +35,7 @@ inline oop JNIHandles::resolve(jobject handle) {
 
 ### 3. "OopStorage — Handle 的底层存储"
 
-**OopStorage 分配** (`oopStorage.hpp:在域25已覆盖`):
+**OopStorage 分配** (`oopStorage.hpp:40-150`):
 ```
 Global handles → OopStorage::allocate() → _global_handles storage
 Weak handles   → OopStorage::allocate() → _weak_global_handles storage

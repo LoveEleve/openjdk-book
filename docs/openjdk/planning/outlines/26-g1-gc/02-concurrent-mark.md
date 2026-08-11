@@ -43,7 +43,7 @@ G1CMBitMap* _nextMarkBitMap; // 当前轮标记(concurrent 期间填充)
 
 场景: concurrent marking 结束后——有些在标记期间通过 SATB buffer 和与分配的队列中"catch up"的对象需要 finalize。Remark phase(STW) 解决这些。
 
-**Remark 流程** (`g1ConcurrentMark.cpp:remarks`):
+**Remark 流程** (`g1ConcurrentMark.cpp:1139-1200`):
 ```
 remark:
   1. Process remaining SATB buffers(enqueue'd during concurrent mark)

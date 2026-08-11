@@ -7,7 +7,7 @@
 
 场景: 标准 JNI GetIntField 调用——Java→Native→JNIEnv→函数表→check→resolve→读 field。
 
-**正常 GetIntField 开销** (`jni.cpp:GetIntField`):
+**正常 GetIntField 开销** (`jni.cpp:2146-2160`):
 ```
 JNI_GetIntField:
   1. JNIEnv→functions→GetIntField(jenv, obj, fieldID)  // 2 indirections
@@ -43,7 +43,7 @@ Slow path:
 
 ### 3. "支持哪些类型？"
 
-**FastGetField 覆盖** (`jniFastGetField.cpp:generate`):
+**FastGetField 覆盖** (`jniFastGetField_x86_64.cpp:56-100`):
 ```
 GetIntField, GetFloatField, GetLongField, GetDoubleField, GetObjectField
 GetStaticIntField, GetStaticFloatField, ... 等

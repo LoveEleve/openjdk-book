@@ -18,7 +18,25 @@
 
 *8 个知识点*
 
-## 02 深度分类
+## 02 聚合 — P1/P2/P3
+
+### P1 (≥5文件)
+| KP | 出现文件 |
+|----|---------|
+| 编译队列 + 编译策略 | compileBroker.cpp, compileTask.cpp, compilationPolicy.cpp, tieredThresholdPolicy.cpp, compileLog.cpp |
+
+### P2 (2-4文件)
+| KP | 出现文件 |
+|----|---------|
+| 编译器抽象 (C1/C2接口) | abstractCompiler.cpp, compilerDefinitions.cpp |
+| 编译指令 (CompileCommand) | compilerDirectives.cpp, directivesParser.cpp, methodMatcher.cpp |
+
+### P3 (=1文件)
+| KP | 出现文件 |
+|----|---------|
+| OopMap (GC栈映射) | oopMap.cpp |
+
+## 03 深度分类
 
 ### 🔴 Deep — 核心设计决策 (3 KP)
 | KP | 为什么🔴 |
