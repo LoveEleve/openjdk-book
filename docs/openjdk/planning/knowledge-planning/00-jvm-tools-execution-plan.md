@@ -45,9 +45,9 @@ materials/
 
 | # | 任务 | 状态(2026-08-11 实测) | 通过标准 | 关联 |
 |---|---|---|---|---|
-| A1 | JITWatch 启动 | ✅ 已验: JDK21 + Xvfb 界面渲染(a1-jitwatch.png),GLX 回退软件渲染 | 窗口出现,可导入 hotspot.log | 篇 4 |
+| A1 | JITWatch 启动 | ✅ 启动/界面已验(a1-jitwatch.png);**"导入 hotspot.log"归 B4.4**(v5 审计标注) | 窗口出现,可导入 hotspot.log | 篇 4 |
 | A2 | GCViewer 启动 | ✅ 已验: 打开 13MB gc.log 图表渲染(a2-gcviewer.png) | 图表渲染 | 篇 3 |
-| A3 | VisualVM 启动 | ✅ 已验: --jdkhome 指定 JDK21,界面渲染(a3-visualvm.png) | 窗口 + 本地 JVM 列表 | 篇 3/6 |
+| A3 | VisualVM 启动 | ✅ 界面渲染(a3-visualvm.png);**"本地 JVM 列表"归 B3.5 确认**(v5 审计标注) | 窗口 + 本地 JVM 列表 | 篇 3/6 |
 | A4 | JMC 实时连接 | 🟡 数据面已验(ManagementAgent.start_local + JMX 26 MBean);GUI 截图待 B1.6 交互 | 控制台 CPU/堆曲线动 | 篇 1/6 |
 | A5 | JMC MBean 浏览器 | 🟡 数据面已验(MBean 树 26 个,素材已存 INDEX);GUI 待交互 | 树可见 | 篇 6 |
 | A6 | JMC JOverflow | 🟡 无独立主类(OSGi bundle),验证归 B3.5 交互;heap.hprof 可分析已验(MAT) | 泄漏分析报告 | 篇 3 |
@@ -70,7 +70,7 @@ materials/
 | B1.4 | 关键页签截图 | JMC 打开 rec-demo.jfr,截 Overview/Threads/LockInstances/VMOperation/Tlab/Event Browser/Flame Graph/GC | screenshots/01-jmc-*.png ×8 | 25/17/19/20/09/32 |
 | B1.5 | Automated Analysis | JMC 自动分析页截图(74 规则实际触发) | screenshots/01-jmc-automatedanalysis.png | 32 |
 | B1.6 | 实时连接+控制台 | A4 复用,截图 | screenshots/01-jmc-console.png | 33 |
-| B1.7 | AP 两种写者对照 | A7 产物,对比 JDK JFR 事件集差异(**v4 更新: 标注 jfrsync 该 .so 构建缺陷,写作用"独立 JFR 输出实证"(ap-target.jfr)**) | commands/ap-jfr-events.txt(AP 事件清单) | 32 |
+| B1.7 | AP 两种写者对照 | A7 产物(**v5 审计修正: 双模式均已打通**——独立 ap-target.jfr + jfrsync 合并 ap21-sync.jfr),对比 JDK JFR 事件集差异 | commands/ap-jfr-events.txt(AP 事件清单,已入库 ap21-sync.jfr) | 32 |
 | B1.8 | 锁事件触发 | 多线程抢锁 demo 录 JFR(JavaMonitorEnter/Inflate 实测) | commands/jfr-monitor.txt | 19 |
 | B1.9 | **default vs profile 对比**(v4 新增) | 同 demo 同 30s,分别 default/profile 录制 → 事件计数对比表 | commands/jfr-default-vs-profile.txt | 18/25/32 |
 
@@ -120,7 +120,7 @@ materials/
 |---|---|---|---|---|
 | B6.1 | jconsole 六面板 | `jconsole <pid>` → Overview/Memory/Threads/Classes/MBeans/VM | screenshots/06-jconsole-*.png ×2(MBeans+Memory) | 33 |
 | B6.2 | MBean 树全量 | 导出 Threading/Memory/GarbageCollector 属性 | commands/jconsole-mbean.txt | 33 |
-| B6.3 | perf 全链路 | `perf record -g` → `perf script` → stackcollapse → flamegraph.html | logs/perf.data + screenshots/06-flamegraph.png | 18/32 |
+| B6.3 | perf 全链路 | `perf record -g` → `perf script` → stackcollapse → flamegraph.html | **✅ 已由 A8 完成(2026-08-11)**: perf.data/stacks/folded/perf-flamegraph.html 已归档——不再重复执行 | 18/32 |
 | B6.4 | JMC MBean 浏览器对照 | A5 复用 | screenshots/06-jmc-mbean.png | 33 |
 | B6.5 | Arthas 对照 | `dashboard`/`jvm` 输出 | commands/arthas-jvm.txt | 33 |
 

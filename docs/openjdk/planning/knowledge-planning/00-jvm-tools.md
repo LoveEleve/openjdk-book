@@ -338,7 +338,7 @@
 
 | 状态 | 域 | 已有素材 | 待补(阶段) |
 |---|---|---|---|
-| ✅ 就绪(17) | 01/03/07/09/10/13/16/17/18/20/22/24/25/26/32/43/48 | rec-demo.jfr 90 类事件(SafepointBegin 2710 条、ExecuteVMOperation 2709 条、GCPhaseParallel 229万)+ jcmd 实测输出 | - |
+| ✅ 就绪(20) | 01/03/07/09/10/13/16/17/18/20/22/24/25/26/32/43/48 + **33(MBean 树 26 个实测,A4/A5)** | rec-demo.jfr 90 类事件(SafepointBegin 2710 条、ExecuteVMOperation 2709 条、GCPhaseParallel 229万)+ jcmd 实测输出 + perf 全链路(A8)+ MBean 树 | - |
 | 🟡 半就绪 | 06、37(heap.hprof + MAT 泄漏报告) | 待 histo/支配树深度分析(阶段 3) |
 | 🟡 半就绪 | 19(jsnap 锁计数)、38(jsnap) | LockInstancesPage 截图(阶段 1) |
 | 🟡 半就绪 | 41(jimage/jlink 实测) | 截图(阶段 7) |
@@ -348,7 +348,7 @@
 
 **素材目录**(v5): `outlines/00-jvm-tools/materials/` = screenshots/ + commands/ + jfr-recordings/(rec-demo.jfr、probe.jfr、rec.jfr、heap.hprof 已入库)
 
-**执行计划**(v6): `00-jvm-tools-execution-plan.md`——A 基础设施验证(8 项)/ B 七篇素材采集(33 任务)/ C 就绪度闭环 / D 归档交接;每任务有命令、产出、对应域、DoD;素材索引 `materials/INDEX.md`
+**执行计划**(v6): `00-jvm-tools-execution-plan.md`——A 基础设施验证(8 项)/ B 七篇素材采集(38 任务)/ C 就绪度闭环 / D 归档交接;每任务有命令、产出、对应域、DoD;素材索引 `materials/INDEX.md`
 
 ---
 
