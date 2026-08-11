@@ -30,7 +30,7 @@
 * [第四章 — 代码怎么被加工](openjdk/vol-tools/ch04.md) — javap 字节码 + 编译日志/内联决策
 * [第五章 — 钻到 JVM 肚子里](openjdk/vol-tools/ch05.md) — jhsdb/clhsdb 白盒读内存 + jsnap
 * [第六章 — JMX 与火焰图](openjdk/vol-tools/ch06.md) — jconsole MBean 树 + perf 内核采样 + 栈折叠
-* [第七章 — 模块/镜像工具](openjdk/vol-tools/ch07.md) — jimage/jlink/jdeps（待写）
+* [第七章 — 翻开 JDK 的箱子](openjdk/vol-tools/ch07.md) — jimage 镜像 + jlink 最小运行时 + jdeps 依赖图
 
 ## 卷 1 · 启动
 
