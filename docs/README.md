@@ -27,7 +27,7 @@
 * [第一章 — 先录一次 JFR，看见整个 JVM](openjdk/vol-tools/ch01.md) — JFR 录制 + JMC 29 页签 + jfr CLI
 * [第二章 — jcmd 万能诊断命令](openjdk/vol-tools/ch02.md) — 49 个子命令 + 六个典型输出精读
 * [第三章 — 堆里到底有什么](openjdk/vol-tools/ch03.md) — jmap 三路导出 + MAT 四板斧 + GCViewer/VisualVM 对照
-* [第四章 — JIT/字节码工具](openjdk/vol-tools/ch04.md) — javap/JITWatch/LogCompilation（待写）
+* [第四章 — 代码怎么被加工](openjdk/vol-tools/ch04.md) — javap 字节码 + 编译日志/内联决策
 * [第五章 — SA 内部查看](openjdk/vol-tools/ch05.md) — jhsdb/clhsdb/jsnap（待写）
 * [第六章 — JMX/火焰图](openjdk/vol-tools/ch06.md) — jconsole/perf/FlameGraph（待写）
 * [第七章 — 模块/镜像工具](openjdk/vol-tools/ch07.md) — jimage/jlink/jdeps（待写）
