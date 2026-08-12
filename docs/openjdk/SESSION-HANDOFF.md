@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-12 | 卷 2 写作中: **30/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 18/26: 02/03/04/06 域完结,16-codecache 域 4/5 完成) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
+> **状态**: 2026-08-12 | 卷 2 写作中: **31/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 19/26: 02/03/04/06/16 域完结) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 16-codecache/05(dependencies-deopt,依赖与反优化)。
+**下一步(唯一,无选择)**: 38-perfdata/01(PerfData 架构)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移(27 篇无一例外)**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误,见 §6.5-4);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交。
 
@@ -40,7 +40,7 @@
 
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
-第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(18/26: 02/03/04/06 完结,16 域 4/5)
+第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(19/26: 02/03/04/06/16 域完结)
 第 3 批(对象/类): 07 → 09 → 17
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
@@ -60,11 +60,11 @@
 | 03-arguments-flags | 1-2 | `03-arguments-flags/` 2 篇 | ✅ 完成 — 03 域完结 |
 | 04-logging | 1-2 | `04-logging/` 2 篇 | ✅ 完成 — 04 域完结(02 篇 d1fa856) |
 | 06-oops | 1-6 | `06-oops/01-markoop-oopdesc.md`(207 行)/02(168 行)/03(166 行)/04(129 行)/05(116 行)/06(104 行) | ✅ 本会话完成 — **06 域完结**(六篇,大纲 60+ 处错误全部回填) |
-| 16-codecache | 1-4 | `16-code-cache/01-codeblob-heap.md`(115 行)/02-nmethod-structure.md(288 行)/03-nmethod-lifecycle.md(277 行)/04-relocation-ic.md(182 行) | ✅ 本会话完成 — 16 域 4/5 |
+| 16-codecache | 1-5 | `16-code-cache/` 5 篇(01 115 行/02 288 行/03 277 行/04 182 行/05 225 行) | ✅ 本会话完成 — **16 域完结** |
 
-**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
+**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01、02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 16-05 前先读 16-04 大纲 ⚠️ 块**(relocInfo 位布局/ICBuffer/NativeInst 均已验证)。
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01、02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 38-01 前先读 16-05 大纲 ⚠️ 块**(依赖 11 种/对账链/deopt 两段式均已验证)。
 
 ---
 
@@ -237,6 +237,13 @@
   - **无 CMPXCHG16B**(大纲编造): 原地补丁=set_destination_mt_safe(nativeInst_x86.cpp:261,前提 Patching_lock/safepoint :265-266)写序三步(①前 2 字节改 jmp rel8 -2 自旋 ②写后 3 字节 ③覆盖前 2 字节;每步 ICache flush);NativeCall :156(size=5,disp_offset=1)/NativeMovConstReg :253(0xB8+REX.W,size=10,data_offset=1+rex)/NativeJump :494(0xe9,5)
   - **ICBuffer 两阶段**: create_transition_stub icBuffer.cpp:172-194(组装: ICStub::set_stub :71-79 写 lea rax,[cached];jmp entry,icBuffer_x86.cpp:52-62)→切换(只改 call 目标指向桩)→safepoint finalize(:50-58 写回两字段,链: update_inline_caches→remove_all stubs.cpp:200→remove_first→stub_finalize :175→ICStubInterface::finalize);桩队列=StubQueue(InlineCacheBufferSize=10K globals.hpp:412),满→VM_ICBufferFull(new_ic_stub :120-143)
   - IC miss: handle_wrong_method_ic_miss(sharedRuntime.cpp:1421-1434)→handle_ic_miss_helper(:1552,CompiledIC_lock :1617): 静态可绑定→reresolve/mono→compute+set_to_monomorphic/否则→set_to_megamorphic(失败 set_to_clean);immediate oop 更新: fix_oop_relocations→oop_Relocation::fix_oop_relocation→oop_addr=pd_address_in_code
+- **05 篇(依赖/deopt,16 域收官,大纲漂移 15+ 处,重点沉淀)**:
+  - **dep 类型 11 种赌注**(枚举 12 值含 end_marker,TYPE_LIMIT=12,dependencies.hpp:104-171): evol_method/leaf_type/abstract_with_unique_concrete_subtype/abstract_with_no_concrete_subtype/concrete_with_no_concrete_subtype/unique_concrete_method/abstract_with_exclusive_concrete_subtypes_2/exclusive_concrete_methods_2/unique_implementor/no_finalizable_subclasses/call_site_target_value;concrete_klass 编造不存在;assert_xxx 声明 dependencies.hpp:359-389,assert_common_2 实现 dependencies.cpp:236
+  - 注册侧: new_nmethod nmethod.cpp:512-534(call_site→MethodHandles::add_dependent_nmethod;否则 InstanceKlass::cast(klass)->add_dependent_nmethod;注释 "The slow way is to check every nmethod");赌注本体 dependencies->copy_to(this) nmethod.cpp:760
+  - 对账: spot_check_dependency_at dependencies.cpp:2047-2056(involves_context 筛选)→check_klass_dependency :1984-2026(10 个 case 分派,返回 witness)/check_call_site_dependency :2029
+  - DeoptimizationBlob codeBlob.hpp:554-628: unpack/unpack_with_exception/unpack_with_reexecution :605-607 + C1 in_tls :618-621(注释 :613-617);**deopt 桩调 2 个 C 例程**(sharedRuntime_x86_64.cpp:2845-2858 注释): fetch_unroll_info deoptimization.cpp:139→helper :158(vframe 收集内联链,注释 :180-181)→UnrollBlock :514→汇编铺骨架帧→unpack_frames :623→vframeArray::unpack_to_stack vframeArray.cpp:567;Location location.hpp:45-60(register_number :108/stack_offset :107)
+  - PcDesc 查找: 缓存+radix 二分(find_pc_desc_internal nmethod.cpp:1791-1872,"almost 100% hit rate")
+  - VtableStubs: (is_vtable, vtable_index) 哈希(find_stub vtableStubs.cpp:208-260,VtableStubs_lock);x86-64 receiver=j_rarg0(rdi);load_klass(:83)→lookup_virtual_method(:113)→jmp [rbx+Method::from_compiled_offset](:132);CodeHeap Analytics: aggregate codeHeapState.hpp:106,实证 Reserved 245760/Committed 7488/Unallocated 243224 KB(3%)
 
 ---
 
@@ -259,7 +266,9 @@
 - [x] **16-codecache/02**(nmethod-structure)——已完结,b8c35d8
 - [x] **16-codecache/03**(nmethod-lifecycle)——已完结,904eab3
 - [x] **16-codecache/04**(relocation-ic)——已完结,ec7599c
-- [ ] **16-codecache/05**(dependencies-deopt)——大纲在 `planning/outlines/16-code-cache/05-dependencies-deopt.md`,16 域第 5 篇(16 域完结后 16 域 README 勾选)
+- [x] **16-codecache/05**(dependencies-deopt)——已完结,8a223d2,**16 域完结**
+- [ ] **38-perfdata/01**(perfdata)——大纲在 `planning/outlines/38-perfdata/01-perfdata.md`,38 域第 1 篇
+- [ ] 38-perfdata/02(stat-sampler)(38 域完结后 README 勾选);第 2 批剩余 41-zipjimage → 42-core-native
 - [ ] 第 2 批剩余域: 38-perfdata → 41-zipjimage → 42-core-native
 - [ ] 第 3 批: 07-classfile-classloader(06 域悬念桥接指向它)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
@@ -296,10 +305,10 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/16-code-cache/05-dependencies-deopt.md(大纲,注意 ⚠️ 块;16-04 已回填,见其 ⚠️ 块)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: 依赖类型清单/DependencyContext/DepChange/deopt 路径是否编造;dependencies.hpp 在 share/code/)
+1. 读 planning/outlines/38-perfdata/01-perfdata.md(大纲,注意 ⚠️ 块)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: PerfData 架构/DataLayout/计数器类型/无锁更新是否编造;perfData.hpp 在 share/runtime/)
 3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
-4. 16 域 5 篇全部完成后 → 38-perfdata
+4. 38 域完结后 → 41-zipjimage → 42-core-native(第 2 批收官)→ 第 3 批 07
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
