@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-12 | 卷 2 写作中: **32/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 20/26: 02/03/04/06/16 域完结,38 域 1/2) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
+> **状态**: 2026-08-12 | 卷 2 写作中: **33/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 21/26: 02/03/04/06/16/38 域完结) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 38-perfdata/02(StatSampler,周期性刷新与同步)。
+**下一步(唯一,无选择)**: 41-zip-jimage/01(ZIP 文件读取)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移(27 篇无一例外)**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误,见 §6.5-4);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交。
 
@@ -40,7 +40,7 @@
 
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
-第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(20/26: 02/03/04/06/16 完结,38 域 1/2)
+第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(21/26: 02/03/04/06/16/38 域完结)
 第 3 批(对象/类): 07 → 09 → 17
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
@@ -61,11 +61,11 @@
 | 04-logging | 1-2 | `04-logging/` 2 篇 | ✅ 完成 — 04 域完结(02 篇 d1fa856) |
 | 06-oops | 1-6 | `06-oops/01-markoop-oopdesc.md`(207 行)/02(168 行)/03(166 行)/04(129 行)/05(116 行)/06(104 行) | ✅ 本会话完成 — **06 域完结**(六篇,大纲 60+ 处错误全部回填) |
 | 16-codecache | 1-5 | `16-code-cache/` 5 篇(01 115 行/02 288 行/03 277 行/04 182 行/05 225 行) | ✅ 本会话完成 — **16 域完结** |
-| 38-perfdata | 1 | `38-perfdata/01-perfdata.md`(117 行) | ✅ 本会话完成 — 38 域 1/2 |
+| 38-perfdata | 1-2 | `38-perfdata/01-perfdata.md`(117 行)/02-stat-sampler.md(119 行) | ✅ 本会话完成 — **38 域完结** |
 
-**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
+**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);38域02=03bc615(正文+大纲回填)+8769a40(README,38 域完结);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01、02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 38-02 前先读 38-01 大纲 ⚠️ 块**(计数器模型/文件映射/无锁协议均已验证;02 篇 StatSampler 与 01 篇 sample()/create_sampled_perfdata 部分衔接)。
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01、02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 41-01 前先读 38-02 大纲 ⚠️ 块**(采样机制/事件驱动 vs 采样型/accessible 均已验证)。
 
 ---
 
@@ -245,6 +245,11 @@
 - **目录权限 0755 非 0700**(make_user_tmp_dir perfMemory_linux.cpp:852-853 注释 "create the directory with 0755 permissions");隔离靠**文件 0600**(create_sharedmem_file :909 S_IRUSR|S_IWUSR);防 symlink is_directory_secure :240/is_file_secure :417;容器 flock :938-942;路径 /tmp/hsperfdata_<user>/<pid>(PERFDATA_NAME perfMemory.cpp:43;容器 /proc/{vmid}/root/tmp :142-146);mmap_create_shared :1056(mmap :1091);attach mmap_attach_shared :1181;unlink delete_shared_memory :1135(remove_file :1145);残留清理 cleanup_sharedmem_files;flock 注释 :938-940
 - 计数器注册: 各子系统 create(CollectorCounters collectorCounters.cpp:43-58 sun.gc.collector.<n>.time/invocations/lastEntryTime/lastExitTime;name_space perfData.cpp:373-377);PerfDataManager 挂列表 _all/_sampled/_constants(:40-42);StatSampler 建 sun.rt.javaCommand(:322-324)/sun.os.hrt.ticks(:356-359);UsePerfData 默认 true(globals.hpp:2419);PerfDataSaveToFile(globals.hpp:2423,save_memory_to_file :82,调用 :1345-1346)
 - 无锁协议: 8 字节对齐 + x86-64 aligned store 原子 + 单调语义容忍旧值(inc/add perfData.hpp:427-430);sample() perfData.cpp:216-220(02 篇展开);实证 jstat-gc.txt 各列=计数器
+- **02 篇(StatSampler,大纲漂移 10+ 处,重点沉淀)**:
+  - StatSampler=PeriodicTask 子类(statSampler.cpp:41-45);engage :78-90 在 Thread::create_vm(thread.cpp:4048);enroll 进 _tasks[](task.cpp:121,max_tasks=10 task.hpp:45-48);WatcherThread::run(thread.cpp:1453-1507,sleep 后 real_time_tick task.cpp:49-71)→execute_if_pending(task.hpp:82-92 累积 delay_time 达 _interval 执行 task());PerfDataSamplingInterval=50ms(globals.hpp:2431);WatcherThread 非 safepoint 参与者注释 task.cpp:65
+  - 采样循环: collect_sample(statSampler.cpp:158-177)→sample_data(_sampled)(:135-143)→item->sample();_sampled=PerfDataManager::sampled()(:69);采样型注册=create_xxx 带 PerfSampleHelper→add_item(p,true)(perfData.cpp:487-503)→_sampled 列表(:318-322);hrt.ticks=HighResTimeSampler(statSampler.cpp:338-342,os::elapsed_counter)
+  - **事件驱动 vs 采样型**: sun.rt.safepointTime/applicationTime/safepoints=RuntimeService::init(runtimeService.cpp:45-68)+safepoint 事件 inc(:87-102);sun.cls.loadedClasses=ClassLoadingService::init(classLoadingService.cpp:87)——都绕过 StatSampler(大纲"sample_xxx 函数采样"编造)
+  - 无"size=0 协议": 就绪信号=accessible(management.cpp:205-207)+magic/版本;目录名 **41-zip-jimage**(非 41-zipjimage),文件 01-zip.md/02-jimage.md
 - **05 篇(依赖/deopt,16 域收官,大纲漂移 15+ 处,重点沉淀)**:
   - **dep 类型 11 种赌注**(枚举 12 值含 end_marker,TYPE_LIMIT=12,dependencies.hpp:104-171): evol_method/leaf_type/abstract_with_unique_concrete_subtype/abstract_with_no_concrete_subtype/concrete_with_no_concrete_subtype/unique_concrete_method/abstract_with_exclusive_concrete_subtypes_2/exclusive_concrete_methods_2/unique_implementor/no_finalizable_subclasses/call_site_target_value;concrete_klass 编造不存在;assert_xxx 声明 dependencies.hpp:359-389,assert_common_2 实现 dependencies.cpp:236
   - 注册侧: new_nmethod nmethod.cpp:512-534(call_site→MethodHandles::add_dependent_nmethod;否则 InstanceKlass::cast(klass)->add_dependent_nmethod;注释 "The slow way is to check every nmethod");赌注本体 dependencies->copy_to(this) nmethod.cpp:760
@@ -276,8 +281,9 @@
 - [x] **16-codecache/04**(relocation-ic)——已完结,ec7599c
 - [x] **16-codecache/05**(dependencies-deopt)——已完结,8a223d2,**16 域完结**
 - [x] **38-perfdata/01**(perfdata)——已完结,2094349
-- [ ] **38-perfdata/02**(stat-sampler)——大纲在 `planning/outlines/38-perfdata/02-stat-sampler.md`,38 域第 2 篇(38 域完结后 README 勾选)
-- [ ] 第 2 批剩余 41-zipjimage → 42-core-native
+- [x] **38-perfdata/02**(stat-sampler)——已完结,03bc615,**38 域完结**
+- [ ] **41-zip-jimage/01**(zip)——大纲在 `planning/outlines/41-zip-jimage/01-zip.md`(目录名 41-zip-jimage 非 41-zipjimage)
+- [ ] 41-zip-jimage/02(jimage);第 2 批剩余 42-core-native(收官)
 - [ ] 第 2 批剩余域: 38-perfdata → 41-zipjimage → 42-core-native
 - [ ] 第 3 批: 07-classfile-classloader(06 域悬念桥接指向它)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
@@ -314,10 +320,10 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/38-perfdata/02-stat-sampler.md(大纲,注意 ⚠️ 块)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: StatSampler 线程/采样周期/同步协议/PerfSampleHelper 是否编造;statSampler.cpp 在 share/runtime/)
+1. 读 planning/outlines/41-zip-jimage/01-zip.md(大纲,注意 ⚠️ 块)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: ZIP 结构/central directory/hash lookup 是否编造;jimage.cpp 在 share/classfile/)
 3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
-4. 38 域完结后 → 41-zipjimage → 42-core-native(第 2 批收官)→ 第 3 批 07
+4. 41 域完结后 → 42-core-native(第 2 批收官)→ 第 3 批 07
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
