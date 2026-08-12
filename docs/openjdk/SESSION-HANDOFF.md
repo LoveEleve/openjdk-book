@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-12 | 卷 2 写作中: **37/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 25/26: 02/03/04/06/16/38/41 域完结,42 域 2/3) | 上下文已满,本文件为**非常详细交接版**(350+ 行)——新 AI 只读本文件即可继续
+> **状态**: 2026-08-12 | 卷 2 写作中: **38/152 篇完成**(第 1 批 12 篇 ✅ 完结;第 2 批 26/26 ✅ **收官**: 02/03/04/06/16/38/41/42 域全完结) | 上下文已满,本文件为**非常详细交接版**(350+ 行)——新 AI 只读本文件即可继续
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 42-core-native/03(class-io)。
+**下一步(唯一,无选择)**: 第 3 批 07-classfile-classloader/01(06 域悬念桥接指向它)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移(36 篇无一例外)**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误,见 §6.5-4);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交。
 
@@ -40,15 +40,15 @@
 
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
-第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(25/26: 02/03/04/06/16/38/41 完结,42 域 2/3)
-第 3 批(对象/类): 07 → 09 → 17
+第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26,**第 2 批收官**)
+第 3 批(对象/类): 07 → 09 → 17   🚧 进行中
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 37 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 25):
+**已完成 38 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -63,11 +63,11 @@
 | 16-codecache | 1-5 | `16-code-cache/` 5 篇(01 115/02 288/03 281/04 183/05 225 行) | ✅ 本会话完成 — **16 域完结** |
 | 38-perfdata | 1-2 | `38-perfdata/01-perfdata.md`(117 行)/02-stat-sampler.md(119 行) | ✅ 本会话完成 — **38 域完结** |
 | 41-zip-jimage | 1-2 | `41-zip-jimage/01-zip.md`(164 行)/02-jimage.md(194 行) | ✅ 本会话完成 — **41 域完结** |
-| 42-core-native | 1-2 | `42-core-native/01-jni-system.md`(129 行)/02-process.md(264 行) | ✅ 本会话完成 — 42 域 2/3 |
+| 42-core-native | 1-3 | `42-core-native/01-jni-system.md`(129 行)/02-process.md(264 行)/03-class-io.md(228 行) | ✅ 本会话完成 — **42 域完结,第 2 批收官** |
 
-**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);38域02=03bc615(正文+大纲回填)+8769a40(README,38 域完结);41域01=df0b073(正文+大纲回填)+079ba1c(README);41域02=ccd9b08(正文+大纲回填)+a59daa2(README,41 域完结);42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
+**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);38域02=03bc615(正文+大纲回填)+8769a40(README,38 域完结);41域01=df0b073(正文+大纲回填)+079ba1c(README);41域02=ccd9b08(正文+大纲回填)+a59daa2(README,41 域完结);42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(01/02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 42-03 前先读 42-02 大纲 ⚠️ 块**(10 处漂移含 4 处机制错已回填);42-03 写完后回填其 ⚠️ 块。
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(三篇)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**第 2 批 26 篇全部完成,进入第 3 批 07-classfile-classloader——写作 07-01 前先读其大纲 ⚠️ 块(06 域三篇的悬念都指向它: InstanceKlass 仓库、常量池、类加载链)。**
 
 ---
 
@@ -288,6 +288,13 @@
   - **ProcessHandle(Linux)**: isAlive0(ProcessHandleImpl_unix.c:387-394)=os_getParentPidAndTimings(ProcessHandleImpl_linux.c:74-132:fopen /proc/pid/stat,strchr '('+strrchr ')' 跳过 comm :108-118,sscanf 取 ppid(4)/utime(14)/stime(15)/starttime(22) :122;startTime=bootTime_ms(btime /proc/stat :248-271)+start*1000/CLK_TCK :129);**kill(pid,0) 仅 Solaris/AIX 读 psinfo 后校验**(unix.c:666);getProcessPids0 :341→unix_getChildren :508-615(opendir :546/readdir :570/atoi :576;每候选一次 stat :582;pid==0=全部 :583);getCurrentPid0 :301;waitForProcessExit0 :231(waitpid :245;WIFEXITED→WEXITSTATUS/WIFSIGNALED→128+signum :254-260);destroy0 :312-327=kill+**startTime 比对防 pid 复用**(:320-326,非 kill+waitpid)
   - **reaper 线程**: ProcessHandleImpl.completion(ProcessHandleImpl.java:123-181)单例化 completions map;守护线程 "process reaper (pid N)" daemon MAX_PRIORITY 128KB 栈(:54,:84-107);ProcessImpl.waitFor 只是 monitor wait(:493-498),exitcode 由 reaper 回调 notifyAll(:389-406);NOT_A_CHILD=-2 时轮询 isAlive0(300ms+30ms 递增,上限 5s)检测 startTime 变化(:149-166);pid 复用防护体系: isAlive startTime 匹配(:388-391)/children filter(:413)/Info.info 清空(:587-598)
   - 实证: materials/commands/42-process-demo.txt(exitValue=7;destroy→143=128+15 SIGTERM;handle.info cmd=readlink /proc/pid/exe 结果)+42-process-reaper-thread.txt(jstack 见 reaper 线程)
+- **42 域 03 篇(ClassLoader+I/O+TimeZone,大纲漂移 12 处含 5 处机制编造,42 域收官)**: ClassLoader.c 在 share/native/libjava/(523 行);io_util.c 224/io_util.h 130;io_util_md.c 238/io_util_md.h 106(unix/native/libjava/);TimeZone_md.c 901 行;TimeZone.c/FileDescriptor_md.c/ObjectStreamClass.c(98 行仅 2 个 JNI 函数 :40/:58)
+  - **dlopen 在 hotspot**: JVM_LoadLibrary=jvm.cpp:3448→os::dll_load os_linux.cpp:1872→dlopen_helper :2106-2125(::dlopen RTLD_LAZY :2108,**无 RTLD_GLOBAL**);ClassLoader.c:354 是 NativeLibrary_load0(:337-406)的调用点;**execstack 库在 safepoint/VMThread 加载修栈保护页**(os_linux.cpp:1884-1927);dlerror→ebuf→UnsatisfiedLinkError "%s: %s"(jvm.cpp:3458-3466)
+  - **load0 流程**: isBuiltin?procHandle:JVM_LoadLibrary(:354)→findJniFunction :290-330(试 JNI_OnLoad+JNI_OnLoad_<库名>,buildJniFunctionName jni_util_md.c:53: sym+"_"+cname;JNI_ONLOAD_SYMBOLS jvm_md.h:40)→无入口 jniVersion=0x00010001(:365)→JVM_IsSupportedJNIVersion(:378-389,失败 UnsatisfiedLinkError "unsupported JNI version 0x%08X" 并 Unload 回滚)→handle :400/jniVersion :390 存回(用途 javadoc ClassLoader.java:2406-2412);**native 方法不批量 dlsym,首次调用按需动态链接**(实证: jni+resolve "Dynamic-linking native method Hello.nativeGreet",42-classio-jnionload.txt)
+  - **defineClass1**: JVM_DefineClassWithSource(:136)非 JVM_DefineClass;malloc+GetByteArrayRegion :106/:113;getUTF :118-123;VerifyFixClassname :123(libverify);defineClass2 ByteBuffer 版 GetDirectBufferAddress :173 不拷贝;findBootstrapClass :217-248
+  - **fd 体系**: GET_FD/SET_FD 宏在 io_util_md.h:53-59(非 io_util.h);IO_fd_fdID 由 FileDescriptor.initIDs 缓存(FileDescriptor_md.c:51-57,GetFieldID "fd" "I" int;**Windows 版 GetLongField+IO_handle_fdID**);io_util.c 无 getFD/setFD 函数(编造);IO_Read/IO_Write=别名宏(io_util_md.h:70-71),EINTR 重试在 handleRead/handleWrite(RESTARTABLE io_util_md.c:166-180);fileOpen 剥尾部斜杠 :101-106;handleOpen 目录→EISDIR :82-86;fileDescriptorClose 先置 -1 再关(:137-143)+0/1/2 重定向 /dev/null(:147-160)
+  - **TimeZone 函数名**: getSystemTimeZoneID/getSystemGMTOffsetID=Java_java_util_TimeZone_xxx(TimeZone.c:40/67);TimeZone_md.c 实际函数 findJavaTZ_md :793-850/getPlatformTimeZoneID :251-354/getGMTOffsetID :855-901;链路: user.timezone 属性(TimeZone.java:660-697)→TZ 环境变量(:800-805)→/etc/timezone fgets 一行(:269-285)→/etc/localtime lstat 三态(:288-353: symlink→readlink+getZoneName / 普通文件→findZoneinfoFile :123-195 全目录比对 isFileIdentical :203-243 大小+memcmp,跳过 .开头/ROC/posixrules/localtime :154-176,UTC/GMT 快速路径 :132-147)→GMT;":" 前缀 :809-811+posix/ :814-816;getGMTOffsetID=localtime_r/gmtime_r 比较(:873-880)+strftime %z(:893-898)
+  - 实证: 42-classio-tz.txt(容器 TencentOS 无 /etc/timezone、/etc/localtime→Asia/Shanghai 走 readlink 分支)+42-classio-jnionload.txt+已存 jcmd-VM.system_properties.txt:9(user.timezone=Asia/Shanghai)
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
@@ -314,7 +321,8 @@
 - [x] **41-zip-jimage/02**(jimage)——已完结,ccd9b08,**41 域完结**
 - [x] **42-core-native/01**(jni-system)——已完结,d52e3a3
 - [x] **42-core-native/02**(process)——已完结,476c3a9
-- [ ] **42-core-native/03**(class-io)——大纲在 `planning/outlines/42-core-native/03-class-io.md`(42 域完结=第 2 批收官)
+- [x] **42-core-native/03**(class-io)——已完结,c4d1b1f,**42 域完结 = 第 2 批收官(26/26)**
+- [ ] **第 3 批: 07-classfile-classloader/01**(06 域悬念桥接指向它;07 大纲在 `planning/outlines/07-classfile-classloader/`)
 - [ ] 42-core-native/03(class-io)(42 域完结=第 2 批收官)→ 第 3 批 07
 - [ ] 42-core-native/03(class-io)完成后 = **第 2 批收官**(26/26)
 - [ ] 第 3 批: 07-classfile-classloader(06 域悬念桥接指向它)
@@ -352,10 +360,10 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/42-core-native/03-class-io.md(大纲,注意 ⚠️ 块——02 篇 10 处漂移已回填,03 篇是 42 域收官篇)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: ClassLoader.c 的 defineClass1/findBootstrapClass/JVM_LoadLibrary 行号;io_util.c/io_util.h GET_FD/SET_FD 宏位置;TimeZone_md.c 实际行数与 /etc/timezone 机制;文件名先 find 验证——ClassLoader.c/io_util.c 在 share/native/libjava/,TimeZone_md.c 在 unix/native/libjava/)
+1. 读 planning/outlines/07-classfile-classloader/ 的大纲(注意 ⚠️ 块;第 3 批第一篇,06 域悬念指向它)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;文件名先 find 验证——ClassFileParser/ClassLoaderData/SystemDictionary 在 hotspot share/classfile/,勿凭记忆)
 3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
-4. 42 域 3 篇完结后 = **第 2 批收官(26/26)** → 第 3 批 07-classfile-classloader(06 域悬念桥接指向它;07 大纲在 planning/outlines/07-classfile-classloader/)
+4. 第 3 批顺序: 07 → 09 → 17
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
