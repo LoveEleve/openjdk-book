@@ -59,7 +59,7 @@
 | 02-assembler | 1-4 | `02-assembler/` 4 篇 | ✅ 完成 — 02 域完结 |
 | 03-arguments-flags | 1-2 | `03-arguments-flags/` 2 篇 | ✅ 完成 — 03 域完结 |
 | 04-logging | 1-2 | `04-logging/` 2 篇 | ✅ 完成 — 04 域完结(02 篇 d1fa856) |
-| 06-oops | 1-6 | `06-oops/01-markoop-oopdesc.md`(207 行)…`06-symbol-annotations-aux.md`(104 行) | ✅ 本会话完成 — **06 域完结**(六篇,大纲 60+ 处错误全部回填) |
+| 06-oops | 1-6 | `06-oops/01-markoop-oopdesc.md`(207 行)/02(168 行)/03(166 行)/04(129 行)/05(116 行)/06(104 行) | ✅ 本会话完成 — **06 域完结**(六篇,大纲 60+ 处错误全部回填) |
 | 16-codecache | 1 | `16-code-cache/01-codeblob-heap.md`(115 行) | ✅ 本会话完成 — 16 域 1/5 |
 
 **每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
@@ -150,7 +150,7 @@
 
 ## 六、本会话实战经验(最重要,新 AI 必读)
 
-### 6.1 大纲漂移的规律(27 篇全部出现,2-8 处/篇)
+### 6.1 大纲漂移的规律(27 篇全部出现,2-8 处/篇;02/03/04/45/48 域案例为更早会话沉淀,06/16 域为本会话新增)
 **任何机制描述/行号/值/专有名词,一律当"线索"而非"事实"**。高频漂移类型:
 1. **机制编造**(最严重): 大纲把"想当然的实现"写成机制——实证全部是编造:
    - 02-01: "delayed_nop" 编造(实际是 Label 长格式预发+add_patch_at 回填)
@@ -210,7 +210,7 @@
 
 ### 6.7 16-codecache 域经验(01 篇,2026-08-12)
 - codeBuffer.hpp 在 **share/asm/**: section 枚举 :353-361(SECT_FIRST=0,CONSTS=0/INSTS/STUBS,顺序即最终布局,compute_final_layout codeBuffer.cpp:472 按枚举序紧凑排);Section 类字段 _start/_end/_limit/_locs_start/_locs_end 在 :86-92
-- CodeBlobType :40-44(struct 含 NumTypes=5);层次: CodeBlob :86 → RuntimeBlob :340(BufferBlob :383/AdapterBlob :424/VtableBlob :437/RuntimeStub :468/SingletonBlob :517/Deopt :554/UncommonTrap :642/Exception :672/Safepoint :703)+ CompiledMethod→nmethod;AOT 在 C 堆(codeBlob.hpp:54-56 注释)
+- CodeBlobType :38-46(struct CodeBlobType{enum{...NumTypes=5}});层次: CodeBlob :86 → RuntimeBlob :340(BufferBlob :383/AdapterBlob :424/VtableBlob :437/RuntimeStub :468/SingletonBlob :517/Deopt :554/UncommonTrap :642/Exception :672/Safepoint :703)+ CompiledMethod→nmethod;AOT 在 C 堆(codeBlob.hpp:54-56 注释)
 - CodeCache::allocate :482(降级路径注释 :510-512 "NonNMethod -> MethodNonProfiled -> MethodProfiled");commit :588;get_code_blob_type codeCache.hpp:260-273;SegmentedCodeCache 条件=分层+ReservedCodeCacheSize≥240MB(:61-66 注释)
 - CodeHeap 在 share/memory/heap.hpp:81:allocate heap.cpp:285(search_freelist :291+顺序后备 _next_segment)+deallocate :369(add_to_freelist :617,merge_right 合并);find_start :486(地址右移段大小→segmap 定位,非二分);VirtualSpace 页对齐=ReservedSpace::page_align_size_up(virtualspace.cpp:256)
 
