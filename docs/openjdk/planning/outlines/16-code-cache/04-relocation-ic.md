@@ -2,6 +2,17 @@
 
 > 🔴 Deep | 4 KP 中的自描述机制
 > 读者处境: GC 移动了对象——嵌在机器码里的 oop 指针怎么自动更新？方法调用怎么从查 vtable 变成直接 call？
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/16-code-cache/04 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **位布局错**: "4 type + 12 offset" 是通用格式注释(relocInfo.hpp:75-83);x86-64 有 `format_width=2`(relocInfo_x86.hpp:38-41),实际 **4 type + 2 format + 10 offset**(offset_width=nontype_width-format_width relocInfo.hpp:432),单条最大偏移 1024 字节(offset_limit :344),非 4095
+> - **"只用 9 种余量充足"错**: 枚举 0-15 全部有定义(relocInfo.hpp:257-275:none/oop/virtual_call/opt_virtual_call/static_call/static_stub/runtime_call/external_word/internal_word/section_word/poll/poll_return/metadata/trampoline_stub/runtime_call_w_cp/data_prefix_tag)
+> - **"pseudo reloc"→filler**: filler_relocInfo(relocInfo.hpp:458-460)=none+offset_limit-offset_unit,三用途注释 :337-343(跳大段/对齐/禁用);prefix(data_prefix_tag)携带数据,advance_over_prefix relocInfo.cpp:222-237,10 位以内压进前缀本身(:350-352)
+> - RelocIterator: 构造 relocInfo.cpp:128-155(_addr 从 content_begin);next() 累积 delta(relocInfo.hpp:569-590 `_addr += addr_offset`);set_limits 顺序推进(:196);用途: oops_do immediate oop(nmethod.cpp:1578-1608,oop_index()==0 relocInfo.hpp:941)、CompiledIC 定位(compiledIC.cpp:196-201)、**sweeper 清 IC**(cleanup_inline_caches_impl compiledMethod.cpp:556-589 遍历 virtual/opt_virtual/static_call 三类);oops_reloc_begin 从 verified_entry_point 起(compiledMethod.cpp:234-240,not_entrant 开头被 jmp 覆盖)
+# **CMPXCHG16B 编造**: 无 16 字节原子写;原地补丁=set_destination_mt_safe(nativeInst_x86.cpp:261)写序技巧(①前 2 字节改 jmp rel8 -2 跳自身 ②写后 3 字节位移 ③覆盖前 2 字节;每步 ICache flush "Opteron requires a flush after every write";前提 Patching_lock/safepoint :265-266)
+# **ICBuffer 机制**(大纲"先写 stub→cmpxchg 切换"不实): create_transition_stub icBuffer.cpp:172-194=组装(ICStub::set_stub :71-79 写 lea rax,[cached];jmp entry,icBuffer_x86.cpp:52-62)→切换(ic->set_ic_destination(stub) 只改 call 目标)→safepoint finalize(:50-58 写回调用点两字段);桩队列=StubQueue(:112-119,InlineCacheBufferSize=10K globals.hpp:412),满→VM_ICBufferFull(new_ic_stub :120-143)
+# NativeInst 行号漂移: NativeCall :156(instruction_size=5,displacement_offset=1 :160-162,set_destination :172-177)/NativeMovConstReg :253(0xB8+REX.W,size=10 :262-269,data/set_data :273-274)/NativeJump :494(0xe9,5)
+# IC miss: handle_wrong_method_ic_miss(sharedRuntime.cpp:1421-1434)→handle_ic_miss_helper(:1552,CompiledIC_lock :1575): 静态可绑定→reresolve;mono 路径 compute_monomorphic_entry+set_to_monomorphic;否则 set_to_megamorphic(失败 set_to_clean);返回 verified_code_entry
+# 大纲 [x86] "cmp [rsi+8]...call cached_target" 是旧版形态,真实调用点/入口检查见 16-02 ⚠️ 块(movq rax,imm64+call / UEP cmp rax,[rdi+8]);"reloc ~code 10%" 无依据已弃用
 
 ### 1. "我身体里的指针在哪？" — relocInfo 压缩编码
 
