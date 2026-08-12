@@ -2,6 +2,15 @@
 
 > 🔴 Deep | JNI exception/string/field + System properties
 > 读者处境: JVM 启动后 `System.getProperties()` 返回 `os.name=Linux`、`user.home=/root` 等 ~30 个属性——这些值在 Java 层作为 key-value 存储，但是**采集自 C 层的 /proc、/etc、环境变量**。`System.setOut(new PrintStream(file))` 怎么把 Java FileOutputStream→fd 映射到 C 层 standard stream？
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/42-core-native/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **JNU_NewStringPlatform 机制错**: 不是 "JNU_GetDefaultEncoding→NewStringUTF"(JNU_GetDefaultEncoding 不存在);真实=按全局 fastEncoding 分派(jni_util.c:860-876: FAST_UTF_8/8859_1/646_US/CP1252 快速路径+NO_ENCODING_YET 抛 InternalError+newStringJava 慢路径);fastEncoding 由 InitializeEncoding(:793-836)在 System.initProperties 里用 sun.jnu.encoding 设置(System.c:291-294,注释 "platform native encoding for strings has not been set up yet");newStringUTF8(:765-780)是"ASCII 扫描+按字节构造"优化器非严格 UTF-8 解码
+> - **JNU_GetFieldByName "static cache" 编造**: 无缓存,每次 GetObjectClass+GetFieldID(:1253-1310)
+> - **"user.home — getenv(HOME)" 错**: 实为 getpwuid(getuid())->pw_dir(java_props_md.c:569-574);user.name=pw_name;user.dir=getcwd(:601-606)
+> - **JVM_NativePath "标准化" 错**: hotspot 侧 jvm.cpp:697-701 → os::native_path,**Unix 是 no-op 原样返回**(os_posix.cpp:1486-1488);canonicalize_md.c 是 java.io.File 的 getCanonicalPath 服务(canonicalize :190: 先 realpath 整条 :202-204,失败逐段缩回重试 :218-240;collapsible :49)——非"所有路径进 JVM 前 normalize"
+> - JNU_ThrowXxx 行号 ✓: ThrowByName :51-57/NullPointer :62-64/OutOfMemory :74-76/NoSuchMethod :110-112/ClassNotFound :116-118/IO :128-130;带 errno 变体 JNU_ThrowByNameWithLastError :164-180(defaultDetail 兜底);jni_util.c 1512 行 ✓;java_props_md.c 620 行 ✓
+> - 属性链路 ✓: Java_java_lang_System_initProperties System.c:166 起(GetJavaProperties :177、InitializeEncoding :294、file.encoding :377= sun.jnu.encoding、sun.jnu.encoding :384);GetJavaProperties 一次性采集(static sprops+user_dir 缓存 :407-414);os 三件套 uname/ARCHPROPNAME(:480-497);setlocale(LC_ALL,"")+ParseLocale+编码 nl_langinfo(CODESET)(:268-279,:515);Mac sun_jnu_encoding 硬编码 UTF-8(:542-546);file/path/line separator :608-610
+> - 悬念指向 02-process ✓(标题 "02. 进程管理 — Runtime.exec() 的 fork+exec+wait")
 
 ### 1. "jni_util — JNI 工具基础层"
 
