@@ -109,9 +109,9 @@ x86 的指令缓存**自动一致**——`ICache::flush` 走默认实现(no-op),
 
 ### TSC:rdtsc 与高精度计时
 
-`rdtsc_x86.hpp:31-44` 提供 `rdtsc()` 接口;`os::elapsed_counter()`(os.cpp:1435)用它做高精度时间戳——GC 阶段计时、JFR 事件时间戳。
+`rdtsc_x86.hpp:31-44` 提供 `rdtsc()` 接口(留给需要自 CPU 上电 cycle 计数的场景);JVM 的高精度计时主力是 `os::elapsed_counter()`(os_linux.cpp:1435)——它走 `javaTimeNanos()`(os_linux.cpp:1555)的 `clock_gettime(CLOCK_MONOTONIC)`(单调时钟,纳秒级),GC 阶段计时、JFR 事件时间戳都基于它。
 
-- [x86: rdtsc 读 TSC(自 CPU 上电的 cycle 计数);rdtscp 额外返回 CPU 核心 ID(IA32_TSC_AUX MSR)——多 socket 的 TSC 不同步,socket0 可能比 socket1 快 ~100 cycles,跨核计时需注意]
+- [x86: rdtsc 读 TSC(自 CPU 上电的 cycle 计数);rdtscp 额外返回 CPU 核心 ID(IA32_TSC_AUX MSR)——多 socket 的 TSC 不同步,socket0 可能比 socket1 快 ~100 cycles,跨核计时需注意。这也是 JVM 默认用 clock_gettime 而非 rdtsc 的原因之一]
 - [man 2 clock_gettime]
 
 ## 核心悬念

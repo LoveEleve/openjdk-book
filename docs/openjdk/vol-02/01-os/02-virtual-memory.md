@@ -135,7 +135,7 @@ JVM 维护页面大小数组 `_page_sizes`(`os.hpp:103-117`,最大 9 项降序 +
 
 - [内核: hugetlbfs 是独立文件系统,挂载在 /dev/hugepages,mmap 文件 = 获得大页。池大小固定(预分配),用完即失败;大页不能 swap,锁定在 RAM]
 
-**SHM**(`os_linux.hpp:99` 的 `reserve_memory_special_shm`):`shmget(SHM_HUGETLB)` + `shmat`,SystemV 共享内存加大页标志。
+**SHM**(`os_linux.hpp:100` 的 `reserve_memory_special_shm`):`shmget(SHM_HUGETLB)` + `shmat`,SystemV 共享内存加大页标志。
 
 - [man 2 shmget][man 2 shmat]
 
