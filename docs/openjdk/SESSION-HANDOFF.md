@@ -22,7 +22,7 @@
 | 卷 | 位置 | 状态 |
 |---|---|---|
 | 卷 0 地基 | `docs/openjdk/vol-00/`(4 章) | ✅ 旧会话完成,不动 |
-| 卷 T 工具观测 | `docs/openjdk/vol-tools/ch01-07.md` | ✅ 旧会话完成(7 篇),写作时引用其素材做实证 |
+| 卷 T 工具观测 | `docs/openjdk/vol-tools/`(ch01.md~ch07.md 共 7 篇) | ✅ 旧会话完成,写作时引用其素材做实证 |
 | 卷 1-bak 启动 | `docs/openjdk/vol-01-bak/`(14 章) | ✅ 归档,不沿用 |
 | **卷 2 运行时深处** | `docs/openjdk/vol-02/` | 🚧 **当前任务**,按 48 域依赖拓扑写 |
 | 域规划 | `docs/openjdk/planning/` | 48 域权威清单(00-domain-discovery-v3.md)+ 每域 KP(knowledge-planning/0X-*.md)+ 每域大纲(outlines/0X-*/) |
@@ -60,10 +60,10 @@
 | 03-arguments-flags | 1-2 | `03-arguments-flags/` 2 篇 | ✅ 完成 — 03 域完结 |
 | 04-logging | 1-2 | `04-logging/` 2 篇 | ✅ 完成 — 04 域完结(02 篇 d1fa856) |
 | 06-oops | 1-6 | `06-oops/01-markoop-oopdesc.md`(207 行)/02(168 行)/03(166 行)/04(129 行)/05(116 行)/06(104 行) | ✅ 本会话完成 — **06 域完结**(六篇,大纲 60+ 处错误全部回填) |
-| 16-codecache | 1-5 | `16-code-cache/` 5 篇(01 115 行/02 288 行/03 277 行/04 182 行/05 225 行) | ✅ 本会话完成 — **16 域完结** |
+| 16-codecache | 1-5 | `16-code-cache/` 5 篇(01 115/02 288/03 281/04 183/05 225 行) | ✅ 本会话完成 — **16 域完结** |
 | 38-perfdata | 1-2 | `38-perfdata/01-perfdata.md`(117 行)/02-stat-sampler.md(119 行) | ✅ 本会话完成 — **38 域完结** |
 | 41-zip-jimage | 1-2 | `41-zip-jimage/01-zip.md`(164 行)/02-jimage.md(194 行) | ✅ 本会话完成 — **41 域完结** |
-| 42-core-native | 1 | `42-core-native/01-jni-system.md`(128 行) | ✅ 本会话完成 — 42 域 1/3 |
+| 42-core-native | 1 | `42-core-native/01-jni-system.md`(129 行) | ✅ 本会话完成 — 42 域 1/3 |
 
 **每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);38域02=03bc615(正文+大纲回填)+8769a40(README,38 域完结);41域01=df0b073(正文+大纲回填)+079ba1c(README);41域02=ccd9b08(正文+大纲回填)+a59daa2(README,41 域完结);42域01=d52e3a3(正文+大纲回填)+1245c25(README);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
 
@@ -145,7 +145,7 @@
 | 素材索引 | `planning/outlines/00-jvm-tools/materials/INDEX.md` | 按域查素材的入口 |
 | JFR 录制 | `materials/jfr-recordings/rec-demo.jfr` 等 10 个 | 事件计数实证 |
 | 命令输出 | `materials/commands/` 115 文件 | jcmd/jstat/jmap 等真实输出 |
-| 卷 T 文章 | `vol-tools/ch01-07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
+| 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md`(7 个独立文件) | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证(如 JOL 对象头输出)不要引用,改为布局推导。
 
@@ -186,7 +186,7 @@
 - **jdk11u 源码树只含 x86 平台**(cpu/ 只有 x86,os/ 只有 linux/posix)——不要断言其他平台的实现细节(ARM 等无法验证,写了就是编造)
 - jdk11u 关键位置: flags/ 在 share/runtime/flags/;vmreg.hpp 在 share/code/;os.hpp/os.cpp 在 share/runtime/;assembler 在 share/asm/ + cpu/x86/;codeBuffer.hpp 在 **share/asm/**;symbolTable.hpp/stringTable.hpp 在 **share/classfile/**;CodeHeap 在 **share/memory/heap.hpp**;accessBackend.hpp 在 share/oops/;markOop 在 share/oops/;NMethodSweeper 在 share/runtime/(非 code/)
 - **JDK 侧源码(java.base)**: libzip(/java.base/share/native/libzip,zip_util.c 1658 行)、libjimage(/java.base/share/native/libjimage,imageFile.cpp 571 行)、libjava(/java.base/share/native/libjava,jni_util.c 1512 行)、java_props_md.c 在 java.base/unix/native/libjava/(620 行)、canonicalize_md.c 在 java.base/unix/native/libjava/;38 域 perfData 在 hotspot share/runtime/
-- 常用实证: CodeEntryAlignment=32(globals_x86.hpp:49)、UseLibmIntrinsic 默认 true(globals_x86.hpp:217)、ErrorLogTimeout=2*60(globals.hpp:636)、CompileThreshold C1=1500(c1_globals_x86.hpp:43)/C2=10000(c2_globals_x86.hpp:43)、NonNMethodCodeHeapSize=32M(globals.hpp:92)、MaxTenuringThreshold=15(gc_globals.hpp:699)、ObjectAlignmentInBytes=8(globals.hpp:245)、LogMinObjAlignmentInBytes=exact_log2(ObjectAlignmentInBytes)(arguments.cpp:1605)、UnscaledOopHeapMax=4G/OopEncodingHeapMax=32G(globalDefinitions.hpp:517-520,值在 arguments.cpp:1609)、card_shift=9→card_size=512(cardTable.hpp:231-232)
+- 常用实证: CodeEntryAlignment=32(globals_x86.hpp:49)、UseLibmIntrinsic 默认 true(globals_x86.hpp:217)、ErrorLogTimeout=2*60(globals.hpp:636)、CompileThreshold C1=1500(c1_globals_x86.hpp:43)/C2=10000(c2_globals_x86.hpp:43)、NonNMethodCodeHeapSize=32M(globals.hpp:92)、MaxTenuringThreshold=15(**share/gc/shared/**gc_globals.hpp:699)、ObjectAlignmentInBytes=8(globals.hpp:245)、LogMinObjAlignmentInBytes=exact_log2(ObjectAlignmentInBytes)(arguments.cpp:1605)、UnscaledOopHeapMax=4G/OopEncodingHeapMax=32G(globalDefinitions.hpp:517-520,值在 arguments.cpp:1609)、card_shift=9→card_size=512(cardTable.hpp:231-232)
 
 ### 6.4 已完成的交叉引用关系(写作时保持一致性)
 - 45-01(fast_sin)→ 45-02(CodeBuffer/生成管道)→ 48-01(vmError)→ 48-02(并发表/位图)→ 48-03(输出流/异常)→ 48-04(三种格式)
