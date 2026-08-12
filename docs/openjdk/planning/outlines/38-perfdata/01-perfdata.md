@@ -2,6 +2,17 @@
 
 > 🔴 Deep | mmap 共享内存计数器
 > 读者处境: `jstat -gc <pid> 1000ms` — 每 1s 输出 GC 计数/Eden 使用/Full GC 时间。这些数据不是 JMX 接口——是 PerfData 通过 mmap 共享内存暴露——**无 IPC 开销 (1 cycle read)**。
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/38-perfdata/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"1 cycle read" 弱化**: 是普通内存读写的代价(无 IPC/序列化),不是字面 1 cycle;64 位无锁的前提=create_entry 8 字节对齐(perfData.cpp:151-153,align=sizeof(jlong)-1)+ x86-64 aligned store 原子 + 计数器单调语义容忍旧值(inc/add 直接写 _valuep,perfData.hpp:416-419)
+> - **"~200 counters" 与"PerfDataManager 创建"不实**: 是各子系统初始化时各自注册(CollectorCounters collectorCounters.cpp:43-58 建 sun.gc.collector.<n>.time/invocations/lastEntryTime/lastExitTime,名称空间 name_space("collector",ordinal) perfData.cpp:373-377;StatSampler 建 sun.rt.javaCommand statSampler.cpp:322-324、sun.os.hrt.ticks :356-359);PerfDataManager::create_xxx 只注册挂列表(_all/_sampled/_constants perfData.cpp:40-42)
+> - **PerfData 对象不是"模板别名 char[] buffer"**: 对象在 C 堆(CHeapObj),值 _valuep 指向共享区;共享区放 PerfDataEntry 固定头+变长 body(perfMemory.hpp:78-98);布局是公共契约(perfMemory.hpp:55-56 注释 "known by the PerfDataBuffer Java class libraries")
+> - **目录权限 0700 错 → 实际 0755**(make_user_tmp_dir perfMemory_linux.cpp:852-853 注释原文 "create the directory with 0755 permissions");隔离靠**文件 0600**(create_sharedmem_file :909 open O_RDWR|O_CREAT|O_NOFOLLOW S_IRUSR|S_IWUSR);防 symlink: is_directory_secure :240/is_file_secure :417;容器 flock 竞争 :938-942
+> - 类层次(perfData.hpp:97-107): PerfLongConstant(alias PerfConstant)/PerfLongVariable(alias PerfVariable)/PerfLongCounter(alias PerfCounter)/PerfString;Variability V_Constant=1/V_Monotonic=2/V_Variable=3(:255-262);Units 六种(:266-273)
+> - 文件: PERFDATA_NAME="hsperfdata"(perfMemory.cpp:43),路径 /tmp/hsperfdata_<user>/<pid>(容器内 /proc/{vmid}/root/tmp/...,perfMemory_linux.cpp:142-146);mmap_create_shared :1056 起(mmap :1091);attach 侧 mmap_attach_shared :1181(RO 只读);unlink 在 delete_shared_memory :1133-1146(remove_file);残留清理 cleanup_sharedmem_files
+> - Prologue(perfMemory.hpp:62-74): magic 0xcafec0c0/字节序/版本 2.0/accessible/used/overflow/mod_time_stamp/entry_offset/num_entries;accessible 在 VM 启动完成时置位(management.cpp:205-207);mod_time_stamp 由 mark_updated 更新(perfMemory.cpp:235-240)
+> - 8 字节对齐(create_entry perfData.cpp:125-186);共享区满退回 C 堆(_on_c_heap,:159-161);UsePerfData 默认 true(globals.hpp:2419);PerfDataSaveToFile(globals.hpp:2423,保存 save_memory_to_file :82,调用 :1345-1346)
+> - 实证: jstat-gc.txt 各列=计数器(YGC/YGCT=U_Events/U_Ticks,S0C/EC/OC=U_Bytes)
 
 ### 1. "PerfData — ~200 计数器系统"
 
