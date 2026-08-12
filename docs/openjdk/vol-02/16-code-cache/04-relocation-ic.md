@@ -27,7 +27,7 @@ GC 搬走对象后,嵌在机器码里的 oop 指针必须跟着改;方法调用�
 // or embedded immediate constants).
 ```
 
-注意这个"4+12"是通用格式,平台会再切走几位做 format:x86-64 的 `format_width = 2`(relocInfo_x86.hpp:38-41),所以实际布局是 **4 位类型 + 2 位 format + 10 位偏移**(`offset_width = nontype_width - format_width`,relocInfo.hpp:432),单条记录覆盖的最大偏移是 1024 字节(`offset_limit = (1 << offset_width) * offset_unit`,relocInfo.hpp:344)。format 位是 x86 特有的需求——一条指令可能含多个可重定位常量(注释 relocInfo.hpp:89-94 原文 "Any machine (such as Intel) whose instructions can sometimes contain more than one relocatable constant needs format codes"),format 告诉读取方"这条 reloc 对应指令里的哪个操作数"。
+注意这个"4+12"是通用格式,平台会再切走几位做 format:x86-64 的 `format_width = 2`(relocInfo_x86.hpp:38-41),所以实际布局是 **4 位类型 + 2 位 format + 10 位偏移**(`offset_width = nontype_width - format_width`,relocInfo.hpp:432),单条记录覆盖的最大偏移是 1024 字节(`offset_limit = (1 << offset_width) * offset_unit`,relocInfo.hpp:344)。format 位解决一类机器的问题——一条指令可能含多个可重定位常量(注释 relocInfo.hpp:89-94 原文 "Any machine (such as Intel) whose instructions can sometimes contain more than one relocatable constant needs format codes"),x86 就是这类: 操作数形态编码在 assembler_x86.hpp:612-617(disp32_operand=1/imm32_operand=2/narrow_oop_operand=3),format 告诉读取方"这条 reloc 指向指令里的哪种操作数"。
 
 **关键设计 (斜体)**: *16 位固定宽度让每条记录恒为 2 字节;偏移是 delta 编码——每条只记"距上一条重定位多远",地址沿流累积(`RelocIterator::next` 里 `_addr += addr_offset`,relocInfo.hpp:585),这样 10 位偏移就能表达任意长度的连续 reloc 序列。GC 遍历 relocation 时本来就是顺序访问,顺序解码没有额外成本;代价是只能顺序读(按 PC 定位也是从起点顺序推进,`set_limits`,relocInfo.cpp:196),但没有消费方需要随机索引。*
 
@@ -70,7 +70,7 @@ GC 搬走对象后,嵌在机器码里的 oop 指针必须跟着改;方法调用�
 
 16 位装不下的信息靠两种补充记录:
 
-- **prefix**(`data_prefix_tag`): 每条 reloc 前至多一条前缀,携带 1 个或多个半字的附加数据(比如 oop 在 oops 表里的索引)。读取时 `advance_over_prefix` 先跳过前缀再读真正的 reloc(relocInfo.cpp:222-237);10 位以内的数据直接压进前缀本身("immediate",注释 relocInfo.hpp:350-352);
+- **prefix**(`data_prefix_tag`): 每条 reloc 前至多一条前缀,携带 1 个或多个半字的附加数据(比如 oop 在 oops 表里的索引)。读取时 `advance_over_prefix` 先跳过前缀再读真正的 reloc(relocInfo.cpp:222-237);10 位以内的数据直接压进前缀本身("immediate",注释 relocInfo.hpp:373-375 原文 "if the sole halfword is a 10-bit unsigned number, it is made 'immediate' in the prefix header word itself");
 - **filler**(`none`): 三种用途(注释 relocInfo.hpp:337-343 原文 "to skip large spans of unrelocated code (this is rare) / to pad out the relocInfo array to the required oop alignment / to disable old relocation information")——其中"跳过大段无重定位代码"就是 offset 超限时的出口: 插一条 `filler_relocInfo()`(relocInfo.hpp:458-460),它的偏移填 `offset_limit - offset_unit`(最大合法值),把地址一下子推过无 reloc 的区域。
 
 ### RelocIterator: 顺序解码器
@@ -174,7 +174,7 @@ void InlineCacheBuffer::create_transition_stub(CompiledIC *ic, void* cached_valu
 2. **应保持单态**——缓存的方法已有编译代码(`FALSE IC miss converting to compiled call`)→ `compute_monomorphic_entry` + `set_to_monomorphic`(经 ICBuffer 过渡);
 3. **否则升级多态** → `set_to_megamorphic`(vtable/itable 桩,02 篇讲过;失败则 `set_to_clean`)。
 
-整个过程在 `CompiledIC_lock` 保护下(sharedRuntime.cpp:1575),最终返回被调方法的 `verified_code_entry`,线程直接跳过去继续执行——IC miss 的代价是"一次解析 + 一次补丁",之后调用点就记住了解析结果。
+整个过程在 `CompiledIC_lock` 保护下(sharedRuntime.cpp:1617),最终返回被调方法的 `verified_code_entry`,线程直接跳过去继续执行——IC miss 的代价是"一次解析 + 一次补丁",之后调用点就记住了解析结果。
 
 ## 核心悬念
 
