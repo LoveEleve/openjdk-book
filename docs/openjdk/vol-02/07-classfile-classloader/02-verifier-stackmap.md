@@ -1,7 +1,7 @@
 # 02. Verifier 与 StackMapTable — 字节码验证
 
 > **前置依赖**:[07-classfile-classloader/01 — ClassFile 解析](openjdk/vol-02/07-classfile-classloader/01-classfile-parser.md):解析把字节变成 InstanceKlass,但字节码本身未检查,StackMapTable 原始字节也在这里被留住;[42-core-native/03 — ClassLoader + I/O + TimeZone](openjdk/vol-02/42-core-native/03-class-io.md):libverify 是老验证器的宿主
-> → **后续**:[03 — Symbol 与 StringTable](03-symbol-string-table.md)
+> → **后续**:[03 — SymbolTable + StringTable](03-symbol-string-table.md)
 > 关联域: 06-oops(类型系统)、13-jit(验证过的字节码才进 JIT)、27-jni
 
 ## 解析通过,不代表字节码安全
@@ -69,7 +69,7 @@ jdk11u 并没有删掉老验证器——它叫 `inference_verify`(verifier.cpp:2
 
 ### 帧: 局部变量 + 操作栈的类型数组
 
-每个方法的验证核心是一个 `StackMapFrame`(stackMapFrame.hpp:43-60,截取核心,逐字):
+每个方法的验证核心是一个 `StackMapFrame`(stackMapFrame.hpp:43-61,截取核心,逐字):
 
 ```cpp
 // stackMapFrame.hpp:43-61(截取核心,逐字)
@@ -92,7 +92,7 @@ class StackMapFrame : public ResourceObj {
   VerificationType* _stack;  // operand stack type array
 ```
 
-"帧" = **局部变量类型数组 + 操作栈类型数组**,`VerificationType` 是类型描述(union 打包: Symbol 指针或编码数据,verificationType.hpp:48-56)。流传的 "OperationStack" 类并不存在——数据流分析用的就是 StackMapFrame 自己。`verify_method`(verifier.cpp:630 起)的初始化(verifier.cpp:648-658,截取核心,逐字):
+"帧" = **局部变量类型数组 + 操作栈类型数组**,`VerificationType` 是类型描述(union 打包: Symbol 指针或编码数据,verificationType.hpp:48-56)。流传的 "OperationStack" 类并不存在——数据流分析用的就是 StackMapFrame 自己。`verify_method`(verifier.cpp:630 起)的初始化(verifier.cpp:647-658,截取核心,逐字):
 
 ```cpp
 // verifier.cpp:647-658(截取核心,逐字)
@@ -118,7 +118,7 @@ class StackMapFrame : public ResourceObj {
 
 验证主体是 `RawBytecodeStream` 从偏移 0 开始的**线性扫描**(verifier.cpp:687 起): 每读一条指令,先把当前帧与 StackMapTable 里同偏移的预计算帧**比对/同步**(`verify_stackmap_table`,verifier.cpp:1858),然后按操作码模拟——`push_stack`/`pop_stack` 维护类型栈(:767-867),引用类型的可赋值性检查在 `StackMapFrame::is_assignable_to`(stackMapFrame.cpp:158,底层用 `VerificationType::is_assignable_from`,verificationType.hpp:267——如 Object 的子类可以赋给 Object,反之不行)。
 
-帧匹配的语义写在 `match_stackmap` 的注释里(stackMapTable.cpp:80-88,逐字):
+帧匹配的语义写在 `match_stackmap` 的注释里(stackMapTable.cpp:78-87,逐字):
 
 ```cpp
 // stackMapTable.cpp:78-123(截取核心,逐字)
@@ -158,7 +158,7 @@ class StackMapFrame : public ResourceObj {
 
 ### 七种 frame 的紧凑编码
 
-StackMapTable 属性从 class 版本 50 起成为**强制项**(Java 6 起): 含分支的方法必须携带,缺失直接 VerifyError)。每个条目是一个 `frame_type` 字节 + 按类型不同的后续字段(stackMapTableFormat.hpp:159-165 的宏枚举了七种):
+StackMapTable 属性从 class 版本 50 起成为**强制项**(Java 6 起): 含分支的方法必须携带,缺失直接 VerifyError。每个条目是一个 `frame_type` 字节 + 按类型不同的后续字段(stackMapTableFormat.hpp:159-165 的宏枚举了七种):
 
 | frame_type | 帧类型 | 附加字段 |
 |---|---|---|
@@ -183,7 +183,7 @@ StackMapTable 属性从 class 版本 50 起成为**强制项**(Java 6 起): 含�
           offset_delta = 5
 ```
 
-循环体里 append 了两个局部变量(int,int)、退出后 chop 掉两个——帧与帧的差异就是这么被压缩的。
+循环体里 append 了两个局部变量(int,int,frame_type 253-251=2)、退出后 chop 掉一个(250 → 251-250=1)——帧与帧的差异就是这么被压缩的。
 
 ### 类型项: 九个 ITEM 加两个带参数的类型
 
@@ -211,6 +211,6 @@ StackMapTable 属性从 class 版本 50 起成为**强制项**(Java 6 起): 含�
 
 ## 核心悬念
 
-验证的三件事到齐: 链接时过门(link_class_impl → verify_code)、逐方法线性扫描 + 帧匹配(match_stackmap 的"check 不 inference")、StackMapTable 的七种 frame 与九个 ITEM(增量编码、Object/Uninitialized 带参)。验证通过后,`rewrite_class` 才把字节码重写成 JVM 内部形式,类正式可用。但全程有一个看不见的主角: 帧里的类型项、指令里的名字,全都以 Symbol 形式存在——"java/lang/String" 这类字符串怎么做到全 JVM 只有一份、验证时随手取用?下一篇: Symbol 与 StringTable。
+验证的三件事到齐: 链接时过门(link_class_impl → verify_code)、逐方法线性扫描 + 帧匹配(match_stackmap 的"check 不 inference")、StackMapTable 的七种 frame 与九个 ITEM(增量编码、Object/Uninitialized 带参)。验证通过后,`rewrite_class` 才把字节码重写成 JVM 内部形式,类正式可用。但全程有一个看不见的主角: 帧里的类型项、指令里的名字,全都以 Symbol 形式存在——"java/lang/String" 这类字符串怎么做到全 JVM 只有一份、验证时随手取用?下一篇: SymbolTable 与 StringTable。
 
-> → [03 — Symbol 与 StringTable](03-symbol-string-table.md)
+> → [03 — SymbolTable + StringTable](03-symbol-string-table.md)

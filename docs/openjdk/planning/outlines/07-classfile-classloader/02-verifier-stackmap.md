@@ -46,6 +46,6 @@
 
 ### 核心悬念
 
-**"StackMapTable 把验证从'推导'变成'核对'。"** — javac 编译期预计算每个分支点的类型状态写进文件,JVM 逐帧核对——线性扫描加常数次比较;每帧仍要重新走可赋值性检查(信任但验证)。验证通过后 rewrite_class 重写字节码,类才正式可用。下一篇: Symbol + StringTable——"java/lang/String" 怎么只存一次。
+**"StackMapTable 把验证从'推导'变成'核对'。"** — javac 编译期预计算每个分支点的类型状态写进文件,JVM 逐帧核对——线性扫描加常数次比较;每帧仍要重新走可赋值性检查(信任但验证)。验证通过后 rewrite_class 重写字节码,类才正式可用。下一篇: SymbolTable + StringTable——"java/lang/String" 怎么只存一次。
 
 > → [03-symbol-string-table.md](03-symbol-string-table.md)
