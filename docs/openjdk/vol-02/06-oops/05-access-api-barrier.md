@@ -6,7 +6,7 @@
 
 ## obj.field = value 不是一条 mov
 
-`this.region = anotherRegion` 在 Java 层是一行赋值,在 JVM 里是一条**被 GC barrier 包围**的写——G1 下,写引用前要把旧值记录进 SATB 队列(并发标记的快照),写完后要把对象所在卡标记为 dirty(remembered set 的粒度)。这套插入对调用方完全透明: 解释器模板、JIT 生成的代码、C++ 运行时,都通过同一个 **Access API** 读写引用,barrier 由模板在编译期组合、由运行时按当前 GC 选择。这篇拆这条看不见的通道: 装饰器怎么组合、G1 的两道 barrier 各管什么、以及元数据持有的引用(OopHandle/WeakHandle)怎么安全地被 GC 管理。
+`this.region = anotherRegion` 在 Java 层是一行赋值,在 JVM 里是一条**被 GC barrier 包围**的写——G1 下,写引用前要把旧值记录进 SATB 队列(并发标记的快照),写完后要把对象所在卡标记为 dirty(remembered set 的粒度)。这套插入对调用方完全透明: 解释器模板与 C++ 运行时走 Access API,JIT 通过各自的 barrier 代码生成器(C1/C2 的 BarrierSetAssembler),同一套语义,barrier 由模板在编译期组合、由运行时按当前 GC 选择。这篇拆这条看不见的通道: 装饰器怎么组合、G1 的两道 barrier 各管什么、以及元数据持有的引用(OopHandle/WeakHandle)怎么安全地被 GC 管理。
 
 ## 1. Access 模板: 装饰器与 barrier 的组合
 
@@ -24,7 +24,7 @@ class Access: public AllStatic {
 - **位置**: `IN_HEAP`(:182,堆内)/ `IN_NATIVE`(:183,堆外但指向堆内);
 - **语义开关**: `AS_RAW`(:155,裸访问不插 barrier,VM 内部用)、`IS_ARRAY`(:191,数组特例)、`IS_NOT_NULL`(:193,允许更快的压缩 oop 路径)。
 
-- [C++: 装饰器是 uint64_t 位集(accessDecorators.hpp:37),模板用 `HasDecorator<decorators, X>::value` 在编译期判断(accessDecorators.hpp:45-49)——哪个分支被编译、哪些 barrier 被内联,写代码时就定死了]
+- [C++: 装饰器是 uint64_t 位集(accessDecorators.hpp:37),模板用 `HasDecorator<decorators, X>::value` 在编译期判断(accessDecorators.hpp:44-45)——哪个分支被编译、哪些 barrier 被内联,写代码时就定死了]
 
 **从模板到具体 GC**: 调用展开到 `AccessInternal::AccessFunction`(accessBackend.hpp:60-71 的 BarrierType 枚举按操作分类: STORE/LOAD/ATOMIC_CMPXCHG/ARRAYCOPY……),最终落到 `BarrierSet::AccessBarrier<decorators, BarrierSetT>`(barrierSet.hpp:167)——GC 子类通过特化自己的 AccessBarrier 覆盖默认行为。注意这里的"选型"是**运行时解析**的: `resolve_barrier()`(access.inline.hpp:269-270)在第一次访问时按当前 BarrierSet 取函数指针——注释原文 "Its accessors will then be automatically resolved at runtime"(barrierSet.hpp:162-165)。
 
@@ -51,7 +51,7 @@ inline void G1BarrierSet::write_ref_field_pre(T* field) {
 }
 ```
 
-机制: 读旧值 → 非空则入队。入队目标是与线程绑定的 SATB 队列,队列满后整体转到全局队列(g1BarrierSet.cpp:71 `_satb_mark_queue_set.shared_satb_queue()->enqueue`),由并发标记线程消费。正常路径只是往本地缓冲里存一个指针,很快;两个装饰器(`IS_DEST_UNINITIALIZED`/`AS_NO_KEEPALIVE`)让"写向全新对象"和"不保活的偷看"跳过这一步。
+机制: 读旧值 → 非空则入队。入队目标是**线程绑定的 SATB 队列**(Java 线程入自己的本地队列,非 Java 线程直接入共享队列,g1BarrierSet.cpp:62-69);本地缓冲满后整块转交队列集合,由并发标记线程消费。正常路径只是往本地缓冲里存一个指针,很快;两个装饰器(`IS_DEST_UNINITIALIZED`/`AS_NO_KEEPALIVE`)让"写向全新对象"和"不保活的偷看"跳过这一步。
 
 ### 2.2 Post-barrier: 写后标记卡
 
