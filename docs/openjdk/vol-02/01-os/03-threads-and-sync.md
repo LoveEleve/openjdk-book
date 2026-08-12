@@ -68,12 +68,21 @@ int os::java_to_os_priority[CriticalPriority + 1] = {
 - [内核: CFS(Completely Fair Scheduler)——vruntime 决定调度顺序:线程的 vruntime 增长速率 = actual_runtime × 1024 / weight。nice 改变 weight——nice=0(weight=1024)增长 1x;nice=-20(weight=88761)增长约 1/87x——即获得约 87 倍 CPU 时间]
 - [man 7 sched]
 
-**调度层次**(实测的创建顺序 + 优先级): `WatcherThread(Critical=11) > VMThread(NearMax=9) > GC(8-9) > Java(Norm=5)`。
+**调度层次**(源码实证,thread.cpp:1388 / vmThread.cpp:301-306 / concurrentGCThread.cpp:44):
+
+```
+WatcherThread(MaxPriority=10)  ← 最高(thread.cpp:1388 set_priority(this, MaxPriority))
+  > VMThread(NearMax=9,且故意用 OS 优先级直设,可高于任何 Java 线程)
+    > 并发 GC(传入 prio,应略低于 VMThread)
+      > Java 线程(Norm=5)
+```
+
+两个细节值得注意: ① **WatcherThread 用的是 MaxPriority 而不是 CriticalPriority**——因为 `os::set_priority` 对 Critical 有硬限制:只有并发 GC 线程才能用 Critical(os.cpp:220 `p == CriticalPriority && thread->is_ConcurrentGC_thread()`);② VMThread 故意不走 `os::set_priority`(它期望 Java 优先级),而是直接 `set_native_priority`(vmThread.cpp:304 注释: "explicitly using OS priorities so that it's possible to set the VM thread priority higher than any Java thread")。
 
 - [C++: setpriority(PRIO_PROCESS, tid, nice) 设置线程 nice;getpriority 读取。pthread 创建后默认继承创建线程的 nice,所以 JVM 创建线程后要显式 set]
 - [man 2 setpriority][man 2 getpriority]
 
-**关键设计 (斜体)**: *为什么 WatcherThread 最高?它是"自适应"的心脏——周期性触发 GC、JIT 编译、JFR 采样。如果它被饿死,整个 JVM 的自适应机制瘫痪:GC 永不触发、堆无限膨胀、JVM 变成"响应僵尸"。给最重要的守护者最高的优先级,是"关键路径优先"原则的典型应用。*
+**关键设计 (斜体)**: *为什么 WatcherThread 最高?它是"自适应"的心脏——周期性触发 GC、JIT 编译、JFR 采样。如果它被饿死,整个 JVM 的自适应机制瘫痪:GC 永不触发、堆无限膨胀、JVM 变成"响应僵尸"。thread.cpp:1385 的注释还给了第二层理由:VMThread 的优先级不能高于 WatcherThread,否则 WatcherThread 的 profiling 会不准。给最重要的守护者最高的优先级,是"关键路径优先"原则的典型应用。*
 
 ### create_thread:一个 pthread_attr 的故事
 
