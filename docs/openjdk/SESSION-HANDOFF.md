@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-12 | 卷 2 写作中: **36/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 24/26: 02/03/04/06/16/38/41 完结,42 域 1/3) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
+> **状态**: 2026-08-12 | 卷 2 写作中: **36/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 24/26: 02/03/04/06/16/38/41 域完结,42 域 1/3) | 上下文已满,本文件为**非常详细交接版**(350+ 行)——新 AI 只读本文件即可继续
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -13,7 +13,7 @@
 
 **下一步(唯一,无选择)**: 42-core-native/02(进程管理)。
 
-**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移(27 篇无一例外)**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误,见 §6.5-4);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交。
+**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移(36 篇无一例外)**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误,见 §6.5-4);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交。
 
 ---
 
@@ -48,7 +48,7 @@
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 27 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 36 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 24):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -67,7 +67,7 @@
 
 **每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);38域02=03bc615(正文+大纲回填)+8769a40(README,38 域完结);41域01=df0b073(正文+大纲回填)+079ba1c(README);41域02=ccd9b08(正文+大纲回填)+a59daa2(README,41 域完结);42域01=d52e3a3(正文+大纲回填)+1245c25(README);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01、02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 42-02 前先读 42-01 大纲 ⚠️ 块**(JNU 工具层/属性链路/fastEncoding 均已验证)。
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(01)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 42-02 前先读 42-01 大纲 ⚠️ 块**(JNU 工具层/属性链路/fastEncoding 均已验证);42-02 写完后回填其 ⚠️ 块。
 
 ---
 
@@ -153,7 +153,7 @@
 
 ## 六、本会话实战经验(最重要,新 AI 必读)
 
-### 6.1 大纲漂移的规律(27 篇全部出现,2-8 处/篇;02/03/04/45/48 域案例为更早会话沉淀,06/16 域为本会话新增)
+### 6.1 大纲漂移的规律(36 篇全部出现,2-8 处/篇;02/03/04/45/48 域案例为更早会话沉淀,06/16/38/41/42 域为本会话新增)
 **任何机制描述/行号/值/专有名词,一律当"线索"而非"事实"**。高频漂移类型:
 1. **机制编造**(最严重): 大纲把"想当然的实现"写成机制——实证全部是编造:
    - 02-01: "delayed_nop" 编造(实际是 Label 长格式预发+add_patch_at 回填)
@@ -184,7 +184,8 @@
 
 ### 6.3 平台/环境事实(写作时已确认)
 - **jdk11u 源码树只含 x86 平台**(cpu/ 只有 x86,os/ 只有 linux/posix)——不要断言其他平台的实现细节(ARM 等无法验证,写了就是编造)
-- jdk11u 关键位置: flags/ 在 share/runtime/flags/;vmreg.hpp 在 share/code/;os.hpp/os.cpp 在 share/runtime/;assembler 在 share/asm/ + cpu/x86/;codeBuffer.hpp 在 **share/asm/**;symbolTable.hpp/stringTable.hpp 在 **share/classfile/**;CodeHeap 在 **share/memory/heap.hpp**;accessBackend.hpp 在 share/oops/;markOop 在 share/oops/
+- jdk11u 关键位置: flags/ 在 share/runtime/flags/;vmreg.hpp 在 share/code/;os.hpp/os.cpp 在 share/runtime/;assembler 在 share/asm/ + cpu/x86/;codeBuffer.hpp 在 **share/asm/**;symbolTable.hpp/stringTable.hpp 在 **share/classfile/**;CodeHeap 在 **share/memory/heap.hpp**;accessBackend.hpp 在 share/oops/;markOop 在 share/oops/;NMethodSweeper 在 share/runtime/(非 code/)
+- **JDK 侧源码(java.base)**: libzip(/java.base/share/native/libzip,zip_util.c 1658 行)、libjimage(/java.base/share/native/libjimage,imageFile.cpp 571 行)、libjava(/java.base/share/native/libjava,jni_util.c 1512 行)、java_props_md.c 在 java.base/unix/native/libjava/(620 行)、canonicalize_md.c 在 java.base/unix/native/libjava/;38 域 perfData 在 hotspot share/runtime/
 - 常用实证: CodeEntryAlignment=32(globals_x86.hpp:49)、UseLibmIntrinsic 默认 true(globals_x86.hpp:217)、ErrorLogTimeout=2*60(globals.hpp:636)、CompileThreshold C1=1500(c1_globals_x86.hpp:43)/C2=10000(c2_globals_x86.hpp:43)、NonNMethodCodeHeapSize=32M(globals.hpp:92)、MaxTenuringThreshold=15(gc_globals.hpp:699)、ObjectAlignmentInBytes=8(globals.hpp:245)、LogMinObjAlignmentInBytes=exact_log2(ObjectAlignmentInBytes)(arguments.cpp:1605)、UnscaledOopHeapMax=4G/OopEncodingHeapMax=32G(globalDefinitions.hpp:517-520,值在 arguments.cpp:1609)、card_shift=9→card_size=512(cardTable.hpp:231-232)
 
 ### 6.4 已完成的交叉引用关系(写作时保持一致性)
@@ -192,7 +193,10 @@
 - 02-01(CodeBuffer/Label)→ 02-02(编码)→ 02-03(指令)→ 02-04(MacroAssembler 运行时)→ 03-01(flag 定义)→ 03-02(flag 生命周期)→ 04-01(日志标签)→ 04-02(输出配置)
 - **06 域链**: 06-01(对象头,union 高 4 字节"普通对象填充")→ 06-02(Klass/vtable/itable)→ 06-03(InstanceKlass 仓库+数组,**数组 length 占 union 高 4 字节**——与 01 篇呼应)→ 06-04(常量池解析/Method 四入口)→ 06-05(Access API/barrier)→ 06-06(Symbol/注解/FieldStream/CompiledICHolder)→ 07-classfile-classloader/01(第 3 批)
 - **16 域链**: 16-01(CodeBuffer→CodeBlob/CodeHeap)→ 16-02(nmethod 结构)→ 16-03(生命周期)→ 16-04(relocation/IC)→ 16-05(dependencies/deopt)
-- 跨域: 02-01 的 CodeBuffer 是 16-01 的起点(前置依赖已链);06-04 的 Method 四入口与 16 域 nmethod 强相关
+- **38 域链**: 38-01(PerfData 架构: 计数器模型/共享内存/无锁)→ 38-02(StatSampler: 采样线程/事件驱动 vs 采样型)
+- **41 域链**: 41-01(ZIP: 链式哈希/惰性偏移/STORED-DEFLATED)→ 41-02(jimage: MPH/mmap/ResourceHeader)——对比视角贯穿
+- **42 域链**: 42-01(JNI 工具层/系统属性)→ 42-02(进程管理)→ 42-03(class-io);42 域完结 = 第 2 批收官
+- 跨域: 02-01 的 CodeBuffer 是 16-01 的起点(前置依赖已链);06-04 的 Method 四入口与 16 域 nmethod 强相关;41 域读类文件(类加载器输入侧),42 域是 JDK 原生库骨架,07 域(第 3 批)消费 41 的输出
 
 ### 6.5 06-oops 域新增经验(2026-08-12,6 篇 60+ 处,接 6.1/6.2)
 1. **规划期"发明"专有名词**(最危险,识别=必 grep 存在性): KlassLayoutHelper、MethodLinker、constantPoolOopDesc、"~20 种 Klass 子类"(实际 7 个)、_indy_bsm/_indy_name/_indy_type、_hash 字段、_holder_method——AI 规划时编造"听起来合理"的类/函数/字段名,行号查不出问题,名字本身是假的
@@ -241,7 +245,7 @@
   - **ICBuffer 两阶段**: create_transition_stub icBuffer.cpp:172-194(组装: ICStub::set_stub :71-79 写 lea rax,[cached];jmp entry,icBuffer_x86.cpp:52-62)→切换(只改 call 目标指向桩)→safepoint finalize(:50-58 写回两字段,链: update_inline_caches→remove_all stubs.cpp:200→remove_first→stub_finalize :175→ICStubInterface::finalize);桩队列=StubQueue(InlineCacheBufferSize=10K globals.hpp:412),满→VM_ICBufferFull(new_ic_stub :120-143)
   - IC miss: handle_wrong_method_ic_miss(sharedRuntime.cpp:1421-1434)→handle_ic_miss_helper(:1552,CompiledIC_lock :1617): 静态可绑定→reresolve/mono→compute+set_to_monomorphic/否则→set_to_megamorphic(失败 set_to_clean);immediate oop 更新: fix_oop_relocations→oop_Relocation::fix_oop_relocation→oop_addr=pd_address_in_code
 
-### 6.9 41-zip-jimage 域经验(01 篇,2026-08-12)
+### 6.9 41-zip-jimage + 42-core-native 域经验(2026-08-12)
 - **zip_util.c 在 JDK 侧**: /data/workspace/jdk11u/src/java.base/share/native/libzip/zip_util.c(1658 行,纯 C)——不在 hotspot!
 - 打开: ZIP_Open_Generic :772-788(缓存优先 ZIP_Get_From_Cache :798,zfiles 链表+lastModified+refs)→miss→ZIP_Put_In_Cache→readCEN :895;findEND :329-386(END_MAXLEN=0xFFFF+ENDHDR :300,分块倒扫找 PK\005\006)
 - readCEN :568 起: **链式哈希非线性探测**(tablelen=(total/2)|1 :694 "Odd -> fewer collisions";entries[i].cenpos/hash :737-739;头插 :742-744);jzcell 只存 hash/next/cenpos 不存名字(zip_util.h:183-187);hashN=31 多项式 :436-441
@@ -305,7 +309,7 @@
 - [x] **42-core-native/01**(jni-system)——已完结,d52e3a3
 - [ ] **42-core-native/02**(process)——大纲在 `planning/outlines/42-core-native/02-process.md`
 - [ ] 42-core-native/03(class-io)(42 域完结=第 2 批收官)→ 第 3 批 07
-- [ ] 第 2 批剩余域: 38-perfdata → 41-zipjimage → 42-core-native
+- [ ] 42-core-native/02、03 完成后 = **第 2 批收官**(26/26)
 - [ ] 第 3 批: 07-classfile-classloader(06 域悬念桥接指向它)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -332,7 +336,7 @@
 
 **自查脚本要点**(python,每篇跑):
 - 代码块: `re.findall(r'```cpp\n// (file):(s)-(e)\(...\)\n(.*?)```')` → 逐行比对 `src[s-1:e]`
-- 行号范围: 文件名→目录映射(share/oops/、share/code/、share/asm/、share/classfile/、share/memory/、share/runtime/、share/utilities/、share/gc/g1/、share/gc/shared/、cpu/x86/、make/autoconf/、os/linux/、os/posix/)→ 行号 ∈ [1, 行数]
+- 行号范围: 文件名→目录映射(hotspot: share/oops/、share/code/、share/asm/、share/classfile/、share/memory/、share/runtime/、share/utilities/、share/gc/g1/、share/gc/shared/、share/opto/、share/ci/、share/compiler/、share/services/、share/prims/、cpu/x86/、os/linux/、os/posix/;JDK 侧: java.base/share/native/libzip、libjimage、libjava、java.base/unix/native/libjava、java.base/linux/native/libjava)→ 行号 ∈ [1, 行数]
 - 星号: 剔除代码 span 后 `count('*') % 2 == 0`
 - 文字锚: `(?!:)(file\.(?:cpp|hpp))(?!:\d)` 且文件存在 → 报错补行号
 
@@ -344,7 +348,7 @@
 1. 读 planning/outlines/42-core-native/02-process.md(大纲,注意 ⚠️ 块)
 2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: fork/exec/ProcessHandle 是否编造;ProcessImpl 在 java.base/unix/native/libjava/)
 3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
-4. 42 域完结后(第 2 批收官)→ 第 3 批 07-classfile-classloader
+4. 42 域 3 篇完结后 = **第 2 批收官(26/26)** → 第 3 批 07-classfile-classloader(06 域悬念桥接指向它;07 大纲在 planning/outlines/07-classfile-classloader/)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
