@@ -6,13 +6,13 @@
 
 ## libjava 的剩余三件事
 
-libjava 的骨架(异常管道/属性)和进程面(exec/ProcessHandle)拆完后,还有三件日常高频的事: **类的字节怎么进 JVM**、**native 库怎么被 dlopen**、**文件描述符与时区从哪来**。`ClassLoader.defineClass` 每次定义类都走一遍,C 代码里的每个 `GET_FD` 都在读 FileDescriptor 的 int 字段,而 `TimeZone.getDefault()` 的第一次调用要把 /etc 翻个底朝天。这一篇把它们串起来。
+libjava 的骨架(异常管道/属性)和进程面(exec/ProcessHandle)拆完后,还有三件日常高频的事: **类的字节怎么进 JVM**、**native 库怎么被 dlopen**、**文件描述符与时区从哪来**。`ClassLoader.defineClass` 每次定义用户类都走一遍,C 代码里的每个 `GET_FD` 都在读 FileDescriptor 的 int 字段,而 `TimeZone.getDefault()` 的第一次调用要把 /etc 翻个底朝天。这一篇把它们串起来。
 
 ## 1. ClassLoader: 类的字节进 JVM,native 库进进程
 
 ### defineClass1: 拷字节、验名字、交 VM
 
-`ClassLoader.defineClass1`(ClassLoader.c:75-148)是 `ClassLoader.defineClass(byte[], ...)` 的 native 侧。步骤不复杂,但每个都有讲究: 先把 byte[] 拷进 C 堆(malloc + `GetByteArrayRegion`,ClassLoader.c:106,:113),类名用 `getUTF`(:118-123)转成 UTF-8 并过 `VerifyFixClassname`(:123,来自 libverify 的类名格式修正),最后调 VM(ClassLoader.c:136,截取核心,逐字):
+`ClassLoader.defineClass1`(ClassLoader.c:75-148)是 `ClassLoader.defineClass(byte[], ...)` 的 native 侧。步骤不复杂,但每个都有讲究: 先把 byte[] 拷进 C 堆(malloc + `GetByteArrayRegion`,ClassLoader.c:106,:113),类名用 `getUTF`(:118-123)转成 UTF-8 并过 `VerifyFixClassname`(:123,libverify 的 check_format.c:256——把 `.` 翻译成 `/`,进入 JVM 内部形式 `java/lang/String`),最后调 VM(ClassLoader.c:136,截取核心,逐字):
 
 ```cpp
 // ClassLoader.c:136-137(截取核心,逐字)
@@ -45,9 +45,9 @@ void * os::Linux::dlopen_helper(const char *filename, char *ebuf,
 }
 ```
 
-标志只有 **`RTLD_LAZY`**——常见资料里的 "RTLD_LAZY|RTLD_GLOBAL" 组合在 jdk11u 里并不存在(把符号变成全局可见会污染之后所有库的符号解析,JDK 刻意不要这个副作用)。失败时 `dlerror()` 的错误文本通过 ebuf 一路带回,变成 `UnsatisfiedLinkError: <库名>: <dlerror 原文>`(jvm.cpp:3458-3466)。
+标志只有 **`RTLD_LAZY`**——常见资料里的 "RTLD_LAZY|RTLD_GLOBAL" 组合在 jdk11u 里并不存在,这里就是单独一个 RTLD_LAZY。失败时 `dlerror()` 的错误文本通过 ebuf 一路带回,变成 `UnsatisfiedLinkError: <库名>: <dlerror 原文>`(jvm.cpp:3461-3468)。
 
-**关键设计 (斜体)**: *"native 库加载"被切成两层: VM 持有 dlopen 的句柄和错误文本(ebuf 通道),JDK 侧持有加载流程(找 JNI_OnLoad、校验版本、回填 Java 字段)。dlopen 本身还牵扯 VM 的栈保护: 若库可能带 execstack(禁用栈保护页),加载会被挪到 safepoint 里的 VMThread 执行、同时修复栈保护页(os_linux.cpp:1884-1927)——这是只有 VM 才能做的活。*
+**关键设计 (斜体)**: *"native 库加载"被切成两层: VM 持有 dlopen 的句柄和错误文本(ebuf 通道),JDK 侧持有加载流程(找 JNI_OnLoad、校验版本、回填 Java 字段)。dlopen 本身还牵扯 VM 的栈保护: 若库带 execstack(或没声明 noexecstack),dlopen 会把栈变成可执行、栈保护页的读保护随之丢失——修复(逐线程重设 guard_memory)必须在 safepoint 里由 VMThread 执行(os_linux.cpp:1883-1927,dll_load_in_vmthread :2126-2152)——这是只有 VM 才能做的活。*
 
 ### JNI_OnLoad: 三件套(找、调、验)
 
@@ -70,7 +70,7 @@ load0 拿到句柄后的流程(ClassLoader.c:354-390,截取核心,逐字):
         }
 ```
 
-- **找**: `findJniFunction`(ClassLoader.c:290-330)依次试 `JNI_OnLoad` 和 `JNI_OnLoad_<库名>`(按库名定制的入口,`buildJniFunctionName`,jni_util_md.c:53;基础符号表来自 jvm_md.h:40 的 `JNI_ONLOAD_SYMBOLS`),对应 unload 侧是 `JNI_OnUnload`;
+- **找**: `findJniFunction`(ClassLoader.c:290-330)找库的初始化入口——普通库只找 `JNI_OnLoad`;JDK **内建库**(isBuiltin,如 libjava 自己)才支持 `JNI_OnLoad_<库名>` 变体(load0 把 cname 只传给 builtin 路径,ClassLoader.c:357-359;`buildJniFunctionName` 把符号拼成 `JNI_OnLoad_<库名>`,jni_util_md.c:53-59;基础符号表是 jvm_md.h:40 的 `JNI_ONLOAD_SYMBOLS`),对应 unload 侧是 `JNI_OnUnload`;
 - **调**: `(*JNI_OnLoad)(jvm, NULL)`——传入 `JavaVM*` 指针,库可以用它拿 JNIEnv、缓存 jclass;
 - **没有入口**: 版本按 1.1 处理(jniVersion = 0x00010001,:365);
 - **验**: `JVM_IsSupportedJNIVersion(jniVersion)` 校验(ClassLoader.c:378-389),不支持就 `UnsatisfiedLinkError: unsupported JNI version 0x%08X required by <库>` 并 `JVM_UnloadLibrary` 回滚——**版本号是库与 VM 之间的握手协议**;
@@ -109,7 +109,7 @@ native 方法本身**不在加载时绑定**。JNI 的机制是**首次调用时
 
 ### 打开与关闭: 两个容易被忽视的细节
 
-`fileOpen`(io_util_md.c:95-122)负责打开: 路径先过平台编码转换(`WITH_PLATFORM_STRING`),Linux 上还**先剥掉尾部的 `/`**(:101-106,注释原文 "Remove trailing slashes, since the kernel won't"),`handleOpen`(:73-93)打开后用 fstat 验证,若是目录直接 `close` + `EISDIR`(:82-86)。关闭侧 `fileDescriptorClose`(io_util_md.c:125-164)有两个关键设计(:137-160,截取核心,逐字):
+`fileOpen`(io_util_md.c:95-122)负责打开: 路径先过平台编码转换(`WITH_PLATFORM_STRING`),Linux 上还**先剥掉尾部的 `/`**(:101-106,注释原文 "Remove trailing slashes, since the kernel won't"),`handleOpen`(:73-93)打开后用 fstat 验证,若是目录直接 `close` + `EISDIR`(:82-86)。关闭侧 `fileDescriptorClose`(io_util_md.c:125-164)有两个关键设计(:137-163,截取核心,逐字):
 
 ```cpp
 // io_util_md.c:137-163(截取核心,逐字)
