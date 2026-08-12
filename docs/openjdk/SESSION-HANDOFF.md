@@ -184,6 +184,20 @@
 - 04-01: 标签数 "~100"(实际 143)
 - **教训**: 凡代码块里的值/编码/常量,写完必须用 sed 逐行对照;数字先数后写
 
+### 6.5 06-oops 域新增经验(2026-08-12,5 篇 30+ 处,接 6.1/6.2)
+1. **规划期"发明"专有名词**(最危险,识别=必 grep 存在性): KlassLayoutHelper、MethodLinker、constantPoolOopDesc、"~20 种 Klass 子类"(实际 7 个)、_indy_bsm/_indy_name/_indy_type 字段——AI 规划时编造"听起来合理"的类/函数/字段名,行号查不出问题,名字本身是假的
+2. **流传说法与源码相反**(常见知识陷阱): SATB"增量更新"(实为 Snapshot-At-The-Beginning 开始时刻快照,05 初稿就写反了)、"OopHandle=OopStorage index"(实为 oop* 封装)、"WeakHandle=OopHandle+weak tag"(实为独立弱处理存储)、"invokevirtual 4 次 deref"(实为 load_klass+lookup_virtual_method 一条 movptr,macroAssembler_x86.cpp:4640-4652)、"is_oop 查 KlassID/Metaspace"(实为 heap 范围+mark 非空两查)
+3. **枚举/位布局是重灾区**: markOop 五种状态位布局全错(真实 locked=0/unlocked=1/monitor=2/marked=3/biased_pattern=101)、KlassID 顺序(Ref=1/Mirror=2)、FieldInfo 槽 4-5 低 2 位 tag(01/10/11)、_init_state 6 态(漏 initialization_error)——凡"枚举顺序/位分配/编号"逐字对照定义,不能凭印象
+4. **深审第 2 轮才抓到的"顺理成章"机制错误**(第 1 轮自查过了还错): vtable 构建"先复制父表再覆写/追加"(初稿写成"长度继承+归位",真实 initialize_from_super→copy_vtable_to,klassVtable.cpp:138-155,注释 :205-206)、SATB 入队路径(线程本地/共享队列,非"满转全局",g1BarrierSet.cpp:62-69)、FastHashCode CAS 失败=膨胀成 monitor 存 hash(非"重试",synchronizer.cpp:760-762)、biased_locking_enter 第一道位测试分流(非"CAS 永不成功",macroAssembler_x86.cpp:1142-1144)、ConstMethod 布局"结构之后"非"固定头之后"
+   - **识别信号**: 正文里"所以/为什么能这么做/自然"开头的推导段最可疑——那是写作时凭直觉补的,必须回源码找依据
+5. **覆盖率缺口**: 03 篇初稿漏 InstanceKlass 仓库(02 篇悬念承诺 4 件事+KP 规划"InstanceKlass 体系+ArrayKlass 体系"只有数组)——**写完对照"上篇悬念承诺话题"逐条勾选**;跨篇悬念行是最可靠的大纲(它承诺了什么就该写什么)
+
+### 6.6 错误根因(为什么"每篇 2-8 处"不可避免)
+1. 大纲是规划期 AI 生成,"像真的"的编造是最危险形态——名字合理、机制自洽,唯独源码里不存在
+2. 写作期大脑默认路径: 大纲说法"合理"→直接写,而不是"每个机制先 grep 再写"(铁律 ③ 的对抗者)
+3. 自查脚本只能抓"写错"(行号/代码块/数字),抓不了"写对但机制是编的"——机制正确性只能靠人工深审,且第 1 轮常被自己的叙述带着走,第 2 轮逐条质疑才有效
+4. 结论: **深审必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑),沉淀要即时(本篇教训进本文件后再写下一篇)
+
 ### 6.3 平台/环境事实(写作时已确认)
 - **jdk11u 源码树只含 x86 平台**(cpu/ 只有 x86,os/ 只有 linux/posix)——不要断言其他平台的实现细节(ARM 等无法验证,写了就是编造)
 - jdk11u 关键位置: flags/ 在 share/runtime/flags/;vmreg.hpp 在 share/code/;os.hpp/os.cpp 在 share/runtime/;assembler 在 share/asm/ + cpu/x86/
