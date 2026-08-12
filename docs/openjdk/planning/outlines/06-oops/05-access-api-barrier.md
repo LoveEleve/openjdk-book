@@ -2,6 +2,17 @@
 
 > 🔴 Deep | 15 KP 中的 1 个核心机制 + OopHandle/WeakHandle
 > 读者处境: `obj.field = new Object()`——JVM 不只是写内存——它在中间插入了 GC barrier。
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/06-oops/05 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"编译期选、零运行时 dispatch"不准确**: 装饰器在编译期组合,但 barrier 函数由 `resolve_barrier()` **运行时解析**(access.inline.hpp:269-270;BarrierSet::AccessBarrier 注释 "automatically resolved at runtime",barrierSet.hpp:155-167);JIT 编译时 barrier 已固化,C2 直接内联生成机器码
+> - **装饰器行号漂移**: accessDecorators.hpp 定义在 :129-137(内存序 MO_*)/:155(AS_RAW)/:182-183(IN_HEAP/IN_NATIVE)/:191-193(IS_ARRAY/IS_NOT_NULL),非 :30-100
+> - **accessBackend.hpp 在 share/oops/ 不在 gc/shared/**: BarrierType 枚举 :60-71,AccessFunction 模板 :126-146
+> - **G1 汇编序列编造**: 真实是 write_ref_field_pre(g1BarrierSet.inline.hpp:36-46,读旧值非空则 enqueue,SATB)+ write_ref_field_post(:48-56,byte_for 取卡,young 卡跳过否则慢路径);"3 条指令 2 cycles"等耗时数字删除
+> - **SATB 是"开始时刻快照"不是"增量更新"**(增量更新是相反策略)
+> - **SATB buffer 大小(1KB)编造**: 只讲机制(线程本地 buffer 满转全局队列,g1BarrierSet.cpp:71)
+> - **OopHandle 不是 OopStorage index**: 就是 `oop*` 封装(oopHandle.hpp:38-55,注释"封装帮助命名+为未来读屏障留位");resolve=NativeAccess<>::oop_load(oopHandle.inline.hpp:31-33)
+> - **WeakHandle 不是"OopHandle+weak tag"**: 是存在**弱处理 OopStorage** 的 oop*(weakHandle.hpp:45-60,"This is the vm version of jweak");强/弱=不同 OopStorage 实例,非槽位 tag
+> - card_shift=9 → card_size=512(cardTable.hpp:231-232);byte_for=base[p>>card_shift](:153-158)
 
 ### 1. Access API — 模板元编程的 Barrier 装饰器
 
