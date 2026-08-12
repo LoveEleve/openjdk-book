@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-12 | 卷 2 写作中: **36/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 24/26: 02/03/04/06/16/38/41 域完结,42 域 1/3) | 上下文已满,本文件为**非常详细交接版**(350+ 行)——新 AI 只读本文件即可继续
+> **状态**: 2026-08-12 | 卷 2 写作中: **37/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 25/26: 02/03/04/06/16/38/41 域完结,42 域 2/3) | 上下文已满,本文件为**非常详细交接版**(350+ 行)——新 AI 只读本文件即可继续
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 42-core-native/02(进程管理)。
+**下一步(唯一,无选择)**: 42-core-native/03(class-io)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移(36 篇无一例外)**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误,见 §6.5-4);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交。
 
@@ -40,7 +40,7 @@
 
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
-第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(24/26: 02/03/04/06/16/38/41 完结,42 域 1/3)
+第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(25/26: 02/03/04/06/16/38/41 完结,42 域 2/3)
 第 3 批(对象/类): 07 → 09 → 17
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
@@ -48,7 +48,7 @@
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 36 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 24):
+**已完成 37 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 25):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -63,11 +63,11 @@
 | 16-codecache | 1-5 | `16-code-cache/` 5 篇(01 115/02 288/03 281/04 183/05 225 行) | ✅ 本会话完成 — **16 域完结** |
 | 38-perfdata | 1-2 | `38-perfdata/01-perfdata.md`(117 行)/02-stat-sampler.md(119 行) | ✅ 本会话完成 — **38 域完结** |
 | 41-zip-jimage | 1-2 | `41-zip-jimage/01-zip.md`(164 行)/02-jimage.md(194 行) | ✅ 本会话完成 — **41 域完结** |
-| 42-core-native | 1 | `42-core-native/01-jni-system.md`(129 行) | ✅ 本会话完成 — 42 域 1/3 |
+| 42-core-native | 1-2 | `42-core-native/01-jni-system.md`(129 行)/02-process.md(264 行) | ✅ 本会话完成 — 42 域 2/3 |
 
-**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);38域02=03bc615(正文+大纲回填)+8769a40(README,38 域完结);41域01=df0b073(正文+大纲回填)+079ba1c(README);41域02=ccd9b08(正文+大纲回填)+a59daa2(README,41 域完结);42域01=d52e3a3(正文+大纲回填)+1245c25(README);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
+**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);38域02=03bc615(正文+大纲回填)+8769a40(README,38 域完结);41域01=df0b073(正文+大纲回填)+079ba1c(README);41域02=ccd9b08(正文+大纲回填)+a59daa2(README,41 域完结);42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(01)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 42-02 前先读 42-01 大纲 ⚠️ 块**(JNU 工具层/属性链路/fastEncoding 均已验证);42-02 写完后回填其 ⚠️ 块。
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(01/02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 42-03 前先读 42-02 大纲 ⚠️ 块**(10 处漂移含 4 处机制错已回填);42-03 写完后回填其 ⚠️ 块。
 
 ---
 
@@ -281,6 +281,13 @@
   - **JNU_NewStringPlatform 按 fastEncoding 分派(:860-876)非 NewStringUTF**: FAST_UTF_8/8859_1/646_US/CP1252+newStringJava 慢路径+NO_ENCODING_YET 抛 InternalError;fastEncoding 由 InitializeEncoding(:793-836)设置,调用点在 System.c:291-294(sun.jnu.encoding,注释 "platform native encoding has not been set up yet");newStringUTF8(:765-780)是 ASCII 扫描优化器非严格解码;**JNU_GetDefaultEncoding 不存在;JNU_GetFieldByName(:1253-1310)无 field cache**
   - 属性链路: Java_java_lang_System_initProperties System.c:166(GetJavaProperties :177,InitializeEncoding :294,file.encoding :377=sun.jnu.encoding,:384);GetJavaProperties 一次性(static sprops+user_dir 缓存,java_props_md.c:407-414);**user.home=getpwuid->pw_dir 非 getenv HOME**(:569-574);os 三件套 uname/ARCHPROPNAME :480-497;getcwd :601-606;nl_langinfo(CODESET) :268-279;separators :608-610
   - **JVM_NativePath Unix no-op**(jvm.cpp:697-701→os::native_path os_posix.cpp:1486-1488);canonicalize_md.c 是 java.io.File 服务(canonicalize :190: realpath 整条 :202-204+逐段缩回重试 :218-240;collapsible :49)
+- **42 域 02 篇(进程管理,大纲漂移 10 处,重点沉淀)**: ProcessImpl_md.c 在 unix/native/libjava/(683 行);childproc.c 400 行;ProcessHandleImpl_unix.c 728 行;ProcessHandleImpl_linux.c 在 **linux/native/libjava/**;jspawnhelper.c 在 **unix/native/jspawnhelper/ 独立目录**
+  - **启动方式**: 非 "Linux vfork / Solaris fork"!Linux 默认 VFORK、BSD/Solaris/AIX 默认 POSIX_SPAWN,FORk 仅属性覆写选项(ProcessImpl.java:90-98);mode=LaunchMechanism.ordinal()+1(:340);文件头 4 策略备忘录 :51-99,"we cannot use posix_spawn ourselves because there's no reliable way to close all inherited fds" :69-71;forkAndExec :499+;管道建 :558-565(fds==-1 才建,五对 in/out/err/childenv/fail);vforkChild :352-369(vfork :362,__attribute_noinline__ :346-348,volatile resultPid 防 gcc 跨 vfork 优化);forkChild :382;spawnChild :391-476(posix_spawn :445,先清 FD_CLOEXEC :436-443 再写 ChildStuff :463-469)
+  - **childProcess(childproc.c:316-400)**: 先 closeSafely 父端副本 :332-338→moveDescriptor stdin/stdout :342-346(:121-130 定义=dup2+close,无临时 dup)→redirectErrorStream dup2(1,2) :348-351→fail 钉 fd3(FAIL_FILENO) :358-359+FD_CLOEXEC :377-378→closeDescriptors :80-119(先关 4,5 让位 opendir,遍历 /proc/self/fd 关 ≥6,**非 F_CLOSEM/close_range**;fallback sysconf(_SC_OPEN_MAX) :365-371)→chdir :374-375→JDK_execvpe :234-308(按父进程 parentPathv 搜 PATH,注释 :252 "We must search PATH (parent's, not child's)";vfork 模式不能改 environ→逐目录 execve :215-219;ENOEXEC→/bin/sh 兜底 :187-204)
+  - **fail pipe 成败协议**: 成功=write 端 FD_CLOEXEC 自动关=父进程 EOF;失败=errno 回传+_exit(-1)(WhyCantJohnnyExec :382-399);父侧 close(fail[1]) :608 后 readFully :634-643(0=成功/sizeof=失败带 errno);posix_spawn 多 alivePing 握手(CHILD_IS_ALIVE=65535,JDK-8223777 glibc 不回报 exec 失败,:579-589/611-632;child :322-327);exec 成功 fd 回写 fds[0..2] :645-647→initStreams(ProcessImpl.java:373-407)+ProcessPipeInputStream processExited 榨干残留(:657-700)
+  - **ProcessHandle(Linux)**: isAlive0(ProcessHandleImpl_unix.c:387-394)=os_getParentPidAndTimings(ProcessHandleImpl_linux.c:74-132:fopen /proc/pid/stat,strchr '('+strrchr ')' 跳过 comm :108-118,sscanf 取 ppid(4)/utime(14)/stime(15)/starttime(22) :122;startTime=bootTime_ms(btime /proc/stat :248-271)+start*1000/CLK_TCK :129);**kill(pid,0) 仅 Solaris/AIX 读 psinfo 后校验**(unix.c:666);getProcessPids0 :341→unix_getChildren :508-615(opendir :546/readdir :570/atoi :576;每候选一次 stat :582;pid==0=全部 :583);getCurrentPid0 :301;waitForProcessExit0 :231(waitpid :245;WIFEXITED→WEXITSTATUS/WIFSIGNALED→128+signum :254-260);destroy0 :312-327=kill+**startTime 比对防 pid 复用**(:320-326,非 kill+waitpid)
+  - **reaper 线程**: ProcessHandleImpl.completion(ProcessHandleImpl.java:123-181)单例化 completions map;守护线程 "process reaper (pid N)" daemon MAX_PRIORITY 128KB 栈(:54,:84-107);ProcessImpl.waitFor 只是 monitor wait(:493-498),exitcode 由 reaper 回调 notifyAll(:389-406);NOT_A_CHILD=-2 时轮询 isAlive0(300ms+30ms 递增,上限 5s)检测 startTime 变化(:149-166);pid 复用防护体系: isAlive startTime 匹配(:388-391)/children filter(:413)/Info.info 清空(:587-598)
+  - 实证: materials/commands/42-process-demo.txt(exitValue=7;destroy→143=128+15 SIGTERM;handle.info cmd=readlink /proc/pid/exe 结果)+42-process-reaper-thread.txt(jstack 见 reaper 线程)
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
@@ -306,9 +313,10 @@
 - [x] **41-zip-jimage/01**(zip)——已完结,df0b073
 - [x] **41-zip-jimage/02**(jimage)——已完结,ccd9b08,**41 域完结**
 - [x] **42-core-native/01**(jni-system)——已完结,d52e3a3
-- [ ] **42-core-native/02**(process)——大纲在 `planning/outlines/42-core-native/02-process.md`
+- [x] **42-core-native/02**(process)——已完结,476c3a9
+- [ ] **42-core-native/03**(class-io)——大纲在 `planning/outlines/42-core-native/03-class-io.md`(42 域完结=第 2 批收官)
 - [ ] 42-core-native/03(class-io)(42 域完结=第 2 批收官)→ 第 3 批 07
-- [ ] 42-core-native/02、03 完成后 = **第 2 批收官**(26/26)
+- [ ] 42-core-native/03(class-io)完成后 = **第 2 批收官**(26/26)
 - [ ] 第 3 批: 07-classfile-classloader(06 域悬念桥接指向它)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -344,8 +352,8 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/42-core-native/02-process.md(大纲,注意 ⚠️ 块)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: fork/exec/ProcessHandle 是否编造;进程相关文件名先 find 验证——ProcessImpl.c/UnixProcess.c 等的实际位置,勿凭记忆)
+1. 读 planning/outlines/42-core-native/03-class-io.md(大纲,注意 ⚠️ 块——02 篇 10 处漂移已回填,03 篇是 42 域收官篇)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: ClassLoader.c 的 defineClass1/findBootstrapClass/JVM_LoadLibrary 行号;io_util.c/io_util.h GET_FD/SET_FD 宏位置;TimeZone_md.c 实际行数与 /etc/timezone 机制;文件名先 find 验证——ClassLoader.c/io_util.c 在 share/native/libjava/,TimeZone_md.c 在 unix/native/libjava/)
 3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
 4. 42 域 3 篇完结后 = **第 2 批收官(26/26)** → 第 3 批 07-classfile-classloader(06 域悬念桥接指向它;07 大纲在 planning/outlines/07-classfile-classloader/)
 ```
