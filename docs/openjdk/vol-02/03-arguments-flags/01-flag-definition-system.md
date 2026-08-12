@@ -174,6 +174,6 @@ flag 的**分类前缀**(product/diagnostic/...)变成 `KIND_*` 位(KIND_DIAGNOS
 
 ## 核心悬念
 
-"flag 的定义体系到齐:一次声明、三次展开(变量/表/约束)、三套宏集合(全局/OS/架构)、9 级 Origin、三道检查关卡。但 `-XX:+UseG1GC` 从**命令行字符串**到 `bool UseG1GC = true` 之间还差一步:字符串怎么被解析、`+`/`-` 前缀、`=value` 语法、JVMFlag::set 怎么分派到 set_bool/set_intx?下一篇:flag 的解析与处理。"
+"flag 的定义体系到齐:一次声明、三次展开(变量/表/约束)、三套宏集合(全局/OS/架构)、9 级 Origin、三道检查关卡。但 `-XX:+UseG1GC` 从**命令行字符串**到 `bool UseG1GC = true` 之间还差一步:字符串怎么被解析、`+`/`-` 前缀、`=value` 语法、`JVMFlag::set_bool`/`set_intx`/`set_ccstr`(jvmFlag.cpp:134/182/266——通过表里的 `_addr` 指针写变量)怎么分派?下一篇:flag 的解析与处理。"
 
 > → [02-flag-processing-and-management.md](02-flag-processing-and-management.md)
