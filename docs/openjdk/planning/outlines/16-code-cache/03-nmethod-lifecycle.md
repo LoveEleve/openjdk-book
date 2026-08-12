@@ -2,6 +2,21 @@
 
 > 🔴 Deep | 5 KP 中的 GC 交互
 > 读者处境: Java 类被重新加载了——旧的编译方法必须失效。但栈上可能还在执行旧代码——sweeper 怎么知道什么时候可以安全回收？
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/16-code-cache/03 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **NMethodSweeper 在 share/runtime/sweeper.{hpp,cpp}**(非 share/code/);sweeper.hpp:35-58 类注释是机制权威(两种操作: mark_active_nmethods 在 safepoint / sweep_code_cache 不在 safepoint 且让位;"at least 3 sweeps")
+> - **大纲 [C++] "make_not_entrant_or_zombie 用 Atomic::cmpxchg CAS" 错**(16-02 已证: Patching_lock 双重检查)——本篇不再抄
+> - **mark_active_nmethods 不自己开 VM op**: 常规挂在 safepoint 收尾的 ParallelSPCleanupTask(ParallelSPCleanupThreadClosure,safepoint.cpp:613-631,do_cleanup_tasks :731;safepoint 同步后 :481 执行);空间告急才 do_stack_scanning→VM_MarkActiveNMethods(sweeper.cpp:256-263,vmOperations.cpp:130)
+> - **MarkActivationClosure(sweeper.cpp:163-174)**: 对活跃 nmethod **set_hotness_counter(reset_val) 重置**(非 +=);not_entrant 且活跃→mark_as_seen_on_stack 设 stack_traversal_mark=traversal_count(nmethod.cpp:989-993 "2 cleaning passes")
+> - **hotness**: reset_val=(ReservedCodeCacheSize<M)?1:(ReservedCodeCacheSize/M)*2(sweeper.cpp:188-193);sweep 时 dec_hotness_counter(possibly_flush :695);淘汰条件 hotness<threshold(threshold=-reset+reverse_free_ratio*NmethodSweepActivity)且 time_since_reset>MinPassesBeforeFlush(:698-716,最终 nm->make_not_entrant() :758);reverse_free_ratio=max_capacity/unallocated(codeCache.cpp:1042-1051,25% 空闲→4)
+> - **触发条件**(possibly_sweep 注释 :327-331 三条): notify 有门槛(reverse_free_ratio>=MAX2(100/StartAggressiveSweepingAt,1.1) 才唤醒,sweeper.cpp:283-291;allocate :483 每次都调);free_percent<=StartAggressiveSweepingAt(10,globals.hpp:1979)强制栈扫描(:373-380);report_state_change 累计>1% 再扫(:558-575);周期 max_wait=ReservedCodeCacheSize/(16*M)(:359-368)
+> - **依赖失效链**(大纲的 "Dependencies::check_all_dependencies" 与 "dependencies.cpp:240-270" 不实): SystemDictionary::add_to_hierarchy→CodeCache::flush_dependents_on(systemDictionary.cpp:1817-1819)→KlassDepChange→mark_for_deoptimization(codeCache.cpp:1148,DepChange::ContextStream+spot_check_dependency_at dependencies.cpp:2047)→VM_Deoptimize→make_marked_nmethods_not_entrant(codeCache.cpp:1259-1266);反向索引 InstanceKlass::add_dependent_nmethod/remove_dependent_nmethod(instanceKlass.cpp:2105-2116)/mark_dependent_nmethods :2103
+> - **uncommon trap**: UncommonTrapBlob codeBlob.hpp:642 ✓;Deoptimization::uncommon_trap_inner deoptimization.cpp:1526;action 编码决定生死(1794-1837: none/maybe_recompile 不失效;reinterpret/make_not_entrant 失效;make_not_compilable 永不编译)
+> - **GC 交互**: CodeCache::gc_prologue() 是空函数(:919),gc_epilogue 只 prune_scavenge_root_nmethods(:921-923);年轻代 Serial/Parallel 走 scavenge_root_nmethods_do(genCollectedHeap.cpp:837)只扫 _scavenge_root_nmethods 链(codeCache.hpp:98,register 条件 detect_scavenge_root_oops codeCache.cpp:772-777),G1 用 per-region strong code roots(register_nmethod g1CollectedHeap.cpp:5012);全堆 blobs_do(genCollectedHeap.cpp:845-848 "We scan the entire code cache");类卸载 G1 走 G1CodeCacheUnloadingTask→CompiledMethod::do_unloading_parallel(compiledMethod.cpp:507-527,g1CollectedHeap.cpp:3415)→do_unloading_oops(nmethod.cpp:1496)→make_unloaded(can_unload nmethod.cpp:1379-1390);**CodeCache::do_unloading(codeCache.cpp:698)在 jdk11u 无调用者**
+> - **flush**: nmethod.cpp:1292-1332(非大纲的 :1611-1644): 清 ExceptionCache→drop_scavenge_root_nmethod→CodeBlob::flush→CodeCache::free(:553-570)→heap deallocate
+> - **应急链**: 分配失败→expand_by(:498)→降级堆(:510-517)→CompileBroker::handle_full_code_cache(compileBroker.cpp:2292-2328: UseInterpreter=true、set_should_compile_new_jobs(stop)或 disable_compilation_forever、report_codemem_full codeCache.cpp:1365 警告+JFR CodeCacheFull);恢复: freed_memory>0 才 set_should_compile_new_jobs(run)(sweeper.cpp:534-547)
+> - sweeper 线程: NearMaxPriority(compileBroker.cpp:803-815,非大纲的 "low priority"),入口 sweeper_loop(sweeper.cpp:265-278,CodeCache_lock wait/notify);sweeper 类注释"四种死法" :48-51
+> - 实证: hotspot.log 64 个 `<make_not_entrant>`(59 个 level3)+49 个 `<uncommon_trap action='make_not_entrant'>`(range_check/class_check);CodeHeap_Analytics sweeper statistics 全 0(2.5min demo 无完整 sweep)
 
 ### 1. "我为什么会死？" — 四种失效场景
 
