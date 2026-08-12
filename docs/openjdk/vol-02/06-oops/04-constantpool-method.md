@@ -62,7 +62,7 @@ class ConstantPool : public Metadata {
 
 **首次调用的完整链路**: 解释器执行 `invokevirtual` → 查 cpCache 条目未解析 → `linkResolver` 解析(类加载/链接/验证)→ 结果写进条目(_f1/_f2/_flags,标记已解析)→ 继续执行。此后每次执行只读 `_f2` 再走 vtable 查表(02 篇的 lookup_virtual_method)。
 
-**关键设计 (斜体)**: *解析只发生一次,结果固化在缓存里——代价(类加载+链接)摊销到整个类生命周期;缓存与常量池分离,还让"解析失败"可以就地记录(标记错误状态),不至于每次调用都重试解析。*
+**关键设计 (斜体)**: *解析只发生一次,结果固化在缓存里——代价(类加载+链接)摊销到整个类生命周期;缓存与常量池分离,还让解析失败可以被就地记录——indy 条目有专门的 `indy_resolution_failed` 位(cpCache.hpp:189,:366),不必每次调用都重试。*
 
 ## 3. Method: 字节码的宿主,四个入口
 
@@ -79,7 +79,7 @@ class ConstantPool : public Metadata {
   volatile address           _from_interpreted_entry; // Cache of _code ? _adapter->i2c_entry() : _i2i_entry
 ```
 
-字节码本身不在这几个字段里——它内联在 `ConstMethod` 对象的尾部(`code_base() = (address)(this+1)`,constMethod.hpp:490): ConstMethod 的固定头(异常表偏移、行号表偏移等)之后紧跟着字节码数组,一次分配,零指针。
+字节码本身不在这几个字段里——它内联在 `ConstMethod` 结构之后:`code_base() = (address)(this+1)` 指向结构体紧邻的字节码(constMethod.hpp:490,注释 :40 "The actual bytecodes are inlined after the end of the ConstMethod struct")。ConstMethod 固定头里只有各区的偏移(异常表、行号表、栈图等),数据区与字节码都在对象本体末尾,一次分配,零指针。
 
 - [C++: Method 是"只读元数据(ConstMethod)+ 可变运行时状态(入口点、编译代码、计数)"的复合: ConstMethod 不可变可共享,入口点字段全部 volatile——编译完成、deopt 都在并发下发生]
 
@@ -92,7 +92,7 @@ class ConstantPool : public Metadata {
 | 编译代码 → 编译代码 | `_from_compiled_entry`(编译完成后更新) |
 | 编译代码 → 解释器 | c2i adapter |
 
-**关键设计 (斜体)**: *"方法被编译"不是一个不可逆事件——`_code` 置上后,`_from_interpreted_entry` 自动从 `_i2i_entry` 换成 i2c 入口,解释器下一次调用就无缝进入编译代码;deopt 时在 safepoint 换回来。方法的"解释执行/编译执行"状态通过替换入口指针切换,调用点(解释器、JIT 生成的代码)永远不用知道方法处于哪个状态。*
+**关键设计 (斜体)**: *"方法被编译"不是一个不可逆事件——`Method::set_code`(method.cpp:1195-1219)在 Patching_lock 保护下依次更新 `_code`、`_from_compiled_entry` 和 `_from_interpreted_entry`(换到 i2c 入口,注释 "Instantly compiled code can execute"),解释器下一次调用就无缝进入编译代码;deopt 时在 safepoint 换回来。方法的"解释执行/编译执行"状态通过替换入口指针切换,调用点(解释器、JIT 生成的代码)永远不用知道方法处于哪个状态。*
 
 ## 4. 计数器与画像: 何时编译、怎么编译
 
