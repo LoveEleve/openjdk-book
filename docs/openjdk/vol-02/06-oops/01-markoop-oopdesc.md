@@ -1,7 +1,7 @@
 # 01. 对象头 — 一个 word,五种身份
 
 > **前置依赖**:[05-cpu-primitives/01 — 原子与内存序](openjdk/vol-02/05-cpu-primitives/01-atomic-and-memory-order.md):CAS 是对象头状态流转的核心原语;上篇 [04-logging/02](openjdk/vol-02/04-logging/02-output-and-configuration.md) 里 GC 日志报的对象变化,观察的正是本篇的对象头
-> → **后续**:[02 — Klass 层次](02-klass-hierarchy.md)
+> → **后续**:[02 — Klass](02-klass-hierarchy.md)
 > 关联域: 18-safepoint(GC 与对象头)、19-sync(锁: 对象头状态机)、25-gc(forwarding 指针)
 
 ## new Object() 的 16 个字节

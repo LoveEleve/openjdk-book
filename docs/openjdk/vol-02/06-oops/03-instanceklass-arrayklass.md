@@ -1,7 +1,7 @@
 # 03. InstanceKlass 与数组 — 元数据仓库与 GC 的两副面孔
 
 > **前置依赖**:[01 — 对象头](01-markoop-oopdesc.md):对象头 union 的"多余"4 字节在这里派上用场;[02 — Klass](02-klass-hierarchy.md):InstanceKlass/ArrayKlass 家族挂在 Klass 层次树上
-> → **后续**:[04 — 常量池与方法](04-constantpool-method.md)
+> → **后续**:[04 — 常量池与解析](04-constantpool-method.md)
 > 关联域: 25-gc(数组遍历/引用处理)、09-memory-core(数组分配)
 
 ## 从类的仓库到数组的两副面孔
@@ -161,6 +161,6 @@ inline void TypeArrayKlass::oop_oop_iterate_impl(oop obj, OopIterateClosure* clo
 
 ## 核心悬念
 
-数组的两副面孔到此分明: 长度字段塞进 union 的"多余"4 字节、维度链沿 higher_dimension 原子延伸、对象数组逐元素过 GC、基本类型数组的遍历是空函数——加上 InstanceKlass 的字段表(每字段 12 字节)与方法表、引用对象的特殊 Klass,对象模型的两大支柱(类与数组)都过了一遍。但数组访问的字节码里藏着下一个问题——`new String[10]` 编译后字节码是 `anewarray #5`,这个 `#5` 是**常量池符号引用**,运行时怎么变成真实的 ObjArrayKlass?下一篇: 常量池与方法——字节码里的编号怎么变成直接指针。
+数组的两副面孔到此分明: 长度字段塞进 union 的"多余"4 字节、维度链沿 higher_dimension 原子延伸、对象数组逐元素过 GC、基本类型数组的遍历是空函数——加上 InstanceKlass 的字段表(每字段 12 字节)与方法表、引用对象的特殊 Klass,对象模型的两大支柱(类与数组)都过了一遍。但数组访问的字节码里藏着下一个问题——`new String[10]` 编译后字节码是 `anewarray #5`,这个 `#5` 是**常量池符号引用**,运行时怎么变成真实的 ObjArrayKlass?下一篇: 常量池与解析——字节码里的编号怎么变成直接指针。
 
 > → [04-constantpool-method.md](04-constantpool-method.md)

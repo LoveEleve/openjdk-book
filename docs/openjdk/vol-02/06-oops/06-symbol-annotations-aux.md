@@ -1,6 +1,6 @@
 # 06. Symbol 与注解 — 让字符串全 JVM 只有一份
 
-> **前置依赖**:[03 — InstanceKlass 与数组](03-instanceklass-arrayklass.md):字段表 FieldInfo 与 FieldStream 的关联;[04 — 常量池与方法](04-constantpool-method.md):Method 是 CompiledICHolder 的一半
+> **前置依赖**:[03 — InstanceKlass 与数组](03-instanceklass-arrayklass.md):字段表 FieldInfo 与 FieldStream 的关联;[04 — 常量池与解析](04-constantpool-method.md):Method 是 CompiledICHolder 的一半
 > → **后续**:[07-classfile-classloader/01 — ClassFile 解析](openjdk/vol-02/07-classfile-classloader/01-classfile-parser.md)
 > 关联域: 11-cds(Symbol 共享归档)、48-utilities(哈希表)
 
