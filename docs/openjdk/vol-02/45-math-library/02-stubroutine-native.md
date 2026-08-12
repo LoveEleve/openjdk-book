@@ -60,7 +60,7 @@ void StubRoutines::initialize1() {
 
 三步:① `BufferBlob::create` 在 CodeCache 里申请一块固定大小的区域(phase 1 是 30000 字节,phase 2 是 46300 字节——stubRoutines_x86.hpp:35-36,注释写着"simply increase if too small (assembler will crash if too small)");② 用这块区域构造 `CodeBuffer`(生成代码的"画布");③ `StubGenerator_generate(&buffer, false)` 跑生成器。`initialize2`(275-288 行)是同样的形状,只是换 `"StubRoutines (2)"` 和 `true`。生成完还有一道哨兵断言:`insts_remaining() > 200`——生成器写完至少还要剩 200 字节,防止将来加了 stub 不加大容量时悄悄越界(注释:assembler 会直接 crash,所以这里主动抓)。
 
-- [C++: `BufferBlob` 是 CodeBlob 的子类——CodeCache 里无方法元数据的"裸代码块";`CodeBuffer` 是生成器的临时缓冲区(指令区/数据区/重定位区),生成完的机器码就在 blob 里,`_code1`/`_code2` 两个静态指针持有它们]
+- [C++: `BufferBlob` 是 `RuntimeBlob` 的子类(codeBlob.hpp:383)——CodeCache 里无方法元数据的"裸代码块";`BufferBlob::create` 在 `CodeCache_lock` 下经 `operator new` 走 `CodeCache::allocate(size, CodeBlobType::NonNMethod)`(codeBlob.cpp:224-237、264-267);`CodeBuffer` 是生成器的临时缓冲区(指令区/数据区/重定位区),生成完的机器码就在 blob 里,`_code1`/`_code2` 两个静态指针持有它们]
 - [x86: `VM_Version_init`(init.cpp:107)在 stubRoutines 之前——stub 生成器会根据 CPU 特性(SSE/AVX 等)生成不同的指令,所以必须等 CPU 探测完]
 
 **关键设计 (斜体)**: *为什么"启动时生成"而不是编译期写好?三个理由都在时间线上:① 依赖运行时探测——VM_Version 的 CPU 特性、UseLibmIntrinsic 等开关,编译期的静态代码做不到;② 依赖运行时初始化——BufferBlob 要进 CodeCache,而 codeCache_init 也是启动期动作;③ 一次生成、全生命周期复用——启动时的一次性成本,换来的是所有 Java 线程、所有 JIT 编译代码直接调用。生成器本质是一个"运行时汇编器":把 C++ 的 `__ mulsd(...)` 调用解释成机器码字节写进 CodeBuffer,2443 行 C++ 代码在启动时"执行"一遍,就得到一份机器码。*
@@ -115,7 +115,7 @@ StubCodeMark 是这段代码的"登记册"(stubCodeGenerator.hpp:34-37、115-129
 // later via an address pointing into it.
 ```
 
-StubCodeMark 是栈上对象:构造时把当前 pc 记为 begin、把 StubCodeDesc 挂进全局链表;析构时记下 end。于是每段生成的 stub 都有名字、起止地址——这个链表的用途非常具体:**crash 栈回溯时把裸地址翻译成名字**(frame.cpp:683-687):
+StubCodeMark 是栈上对象:构造时 `new StubCodeDesc(group, name, pc)` 把描述符挂进全局链表,entry point 定义为 prolog 之后(stubCodeGenerator.cpp:109-115);析构时 `flush()` 并记下 end。于是每段生成的 stub 都有名字、起止地址——这个链表的用途非常具体:**crash 栈回溯时把裸地址翻译成名字**(frame.cpp:683-687),以及在 `PrintStubCode` 下用 Disassembler 解码打印(stubCodeGenerator.cpp:83-101):
 
 ```cpp
 // frame.cpp:683-687(截取核心,逐字)
@@ -236,7 +236,7 @@ Java_java_lang_Float_floatToRawIntBits(JNIEnv *env, jclass unused, jfloat v)
 }
 ```
 
-union 让同一个内存位置有两种"读法"——`u.f` 写进去、`u.i` 读出来,位模式原样,零转换。Double 侧对称(Double.c:51-61,多一步 `jdouble_to_jlong_bits` 处理字节序;canonical NaN 是 `0x7ff8000000000000L`,Double.java:858)。
+union 让同一个内存位置有两种"读法"——`u.f` 写进去、`u.i` 读出来,位模式原样,零转换。Double 侧对称(Double.c:51-61,同构的 union;中间的 `jdouble_to_jlong_bits` 在 unix/windows 是**空宏**——jlong_md.h:87-88、80-81,只是位拷贝的占位符;canonical NaN 是 `0x7ff8000000000000L`,Double.java:858)。
 
 但和 Math.sin 一样,JIT 下这条路也被替换:vmSymbols.hpp:816/822 注册了 `_floatToRawIntBits`/`_doubleToRawLongBits` 的 intrinsic(C2 直接生成位搬运指令,连 JNI 的边界都省了)。
 

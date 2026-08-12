@@ -45,7 +45,7 @@
 | KP | 为什么 🟡 |
 |----|---------|
 | log/exp/tan/pow 多项式 | 类似的逼近方法——tan 比 sin 复杂(tan=sin/cos+特殊处理) |
-| StubRoutines 生成管道 | JVM 启动时 generate_initial→generate_math_stubs→生成 sin/cos/tan/log/exp/pow stubs→StubRoutines::_dsin 等 |
+| StubRoutines 生成管道 | JVM 启动时 stubRoutines_init1(phase 1,universe 前)→StubGenerator_generate→generate_initial 内联生成 sin/cos/tan/log/exp/pow stubs(无 generate_math_stubs 函数 ⚠️写作期修正 2026-08-12)→StubRoutines::_dsin 等 ⚠️另:StrictMath.c 不 dispatch 到 StubRoutines,直接 jsin(fdlibm) |
 
 ### 🟢 Surface (2 KP)
 | KP | 为什么 🟢 |
