@@ -25,7 +25,7 @@
   result = parse_each_vm_init_arg(java_options_args, &patch_mod_javabase, JVMFlag::ENVIRON_VAR);
 ```
 
-`JAVA_TOOL_OPTIONS`(环境变量)、`JAVA_OPTS`、命令行、JIMAGE 资源——**都走同一个解析器,只是 origin 不同**(01 篇的 9 级 Origin 在这里第一次被使用)。解析 `-XX:Flag=value` 时,字符串值按 flag 的类型交给 `JVMFlag::set_bool`/`set_intx`/`set_ccstr`(01 篇已证,经 `_addr` 写变量)。
+`JAVA_TOOL_OPTIONS`、`_JAVA_OPTIONS`(arguments.cpp:3317/3321 的环境变量解析)、命令行、JIMAGE 资源——**都走同一个解析器,只是 origin 不同**(01 篇的 9 级 Origin 在这里第一次被使用)。解析 `-XX:Flag=value` 时,字符串值按 flag 的类型交给 `JVMFlag::set_bool`/`set_intx`/`set_ccstr`(01 篇已证,经 `_addr` 写变量)。
 
 flag 名字怎么找到?`JVMFlag::find_flag`(jvmFlag.cpp:903-923)是**线性扫描**整个 flagTable:
 
@@ -56,7 +56,7 @@ JVMFlag* JVMFlag::find_flag(const char* name, size_t length, bool allow_locked, 
 
 **不用哈希表,就是 O(n) 线性扫**:flag 名可能带别名(use_parallel_old 等 obsolete 别名链,arguments.cpp:539-590 的别名表),线性扫描可以顺着表项继续。还顺带做了两道门:**product 构建里 develop/notproduct 不报告**(908-910)、**locked flag(diagnostic/experimental)未解锁时拒绝**(912-918——解锁靠 `-XX:+UnlockDiagnosticVMOptions`)。
 
-- [C++: 聚合参数互斥也在这里处理:`set_aggressive_opts_flags`(arguments.cpp:1955)——设 UseParallelGC 时联动清理其他 GC 选择(UseConcMarkSweepGC 等),一个 flag 影响一组]
+- [C++: 聚合参数联动:`set_aggressive_opts_flags`(arguments.cpp:1955)——AggressiveOpts/AggressiveUnboxing 触发 EliminateAutoBox/DoEscapeAnalysis/AutoBoxCacheMax 等一组 flag 的联动(FLAG_SET_DEFAULT 保护:用户已设的值不动)]
 
 **关键设计 (斜体)**: *"一个解析器,四种来源"是 origin 体系的第一站:同样的字符串,来源不同,优先级不同(环境变量 < 命令行)。find_flag 的"线性扫 + 顺带解锁检查"把查找、版本过滤、权限检查合成一趟——800+ flag 的线性扫在启动期只跑一次,不值得为此建哈希表。*
 
@@ -111,7 +111,7 @@ void Arguments::set_heap_size() {
 - **MaxRAMPercentage = 25.0**(gc_globals.hpp:337,即 Xmx 默认 ≈ 物理内存 1/4)、MinRAMPercentage = 50.0(341)、InitialRAMPercentage = 1.5625(346,即 1/64)
 - 老 flag(DefaultMaxRAMFraction 等)自动转换:`MaxRAMPercentage = 100.0 / MaxRAMFraction`(1735-1738)
 
-**关键设计 (斜体)**: *ergo 的"自适应"不是魔法,是三个机制的组合:① 公式(线程数 5/8 递减、堆 25% 上限);② **Origin=ERGONOMIC**——用户显式设了 `-XX:ParallelGCThreads=4`(COMMAND_LINE)时,ergo 算出的值被覆盖逻辑挡掉(01 篇的 9 级 Origin 在这里兑现:"用户指定 > 平台自适应");③ 老 flag 的兼容转换——宁可维护转换表,不让老启动脚本失效。*
+**关键设计 (斜体)**: *ergo 的"自适应"不是魔法,是三个机制的组合:① 公式(线程数 5/8 递减、堆 25% 上限);② **"用户指定 > 平台自适应"靠 FLAG_IS_DEFAULT 保护实现**——ergo 只在 flag 还是默认值时才 set(FLAG_SET_ERGO_IF_DEFAULT 宏,globals_extension.hpp:308-312;arguments.cpp 的调用点同样先查 FLAG_IS_DEFAULT),用户显式设过(origin 非 DEFAULT)就不覆盖;③ 老 flag 的兼容转换——宁可维护转换表,不让老启动脚本失效。*
 
 ## 3. 打印:PrintFlagsInitial vs PrintFlagsFinal
 
