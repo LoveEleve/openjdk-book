@@ -144,7 +144,7 @@ void ImageFileReader::get_resource(ImageLocation& location, u1* uncompressed_dat
 }
 ```
 
-- **压缩资源**: `memory_map_image` 时压缩数据直接取 `get_data_address() + offset`(映射区里的地址,**零拷贝进解压器**);否则 `read_at` 读进临时缓冲。输出缓冲 `uncompressed_data` 由**调用方提供**——全程无额外分配(32 位多一次临时缓冲);
+- **压缩资源**: `memory_map_image` 时压缩数据直接取 `get_data_address() + offset`(映射区里的地址,**零拷贝进解压器**);否则 `read_at` 读进临时缓冲。输出缓冲 `uncompressed_data` 由**调用方提供**,但解压器内部还会分配一块临时缓冲、解压完成后 `memcpy` 到调用方缓冲再释放(imageDecompressor.cpp:167-182)——调用方零分配,解压侧一次中间缓冲;
 - **未压缩资源**: 走 `read_at` 读文件(即使 memory_map_image——未压缩分支没有 mmap 捷径)。
 
 ### 资源数据的"快递单": ResourceHeader
