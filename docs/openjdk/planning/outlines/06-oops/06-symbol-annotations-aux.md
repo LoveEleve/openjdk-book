@@ -2,6 +2,17 @@
 
 > 🟡 Working | 15 KP 中的 3 个辅助机制
 > 读者处境: JVM 有成千上万个 "java/lang/String" 引用——怎么不去重 10000 遍？Symbol intern 机制。
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/06-oops/06 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"_hash precomputed hash 字段"编造**: Symbol 无 _hash 字段,是 `short _identity_hash`(symbol.hpp:114)+ identity_hash() 动态计算(:151-155,地址位^长度^前两字节);结构=ATOMIC_SHORT_PAIR(_refcount,_length)(:110-113)+ _body[2] 柔性数组(:115),operator new(size,len) 按长度分配(:133-135),max=2^16-1(:117-120)
+> - **as_C_string 会加 \0**: 注释原文 "null-terminated UTF-8 string"(symbol.hpp:206-208),资源区或调用方 buffer——大纲"不加 \0"错
+> - **_refcount 是原子的**: `volatile short` + 注释 "needs atomic operation"(:111),Atomic::inc/add(symbol.cpp:277-289);PERM_REFCOUNT=-1 永久符号(:99-101)
+> - **ConcurrentHashTable 编造**: SymbolTable 是 `RehashableHashtable<Symbol*, mtSymbol>`(symbolTable.hpp:101,**在 share/classfile/ 非 oops/**),全局 **SymbolTable_lock**(symbolTable.cpp:329-330);StringTable 才是 ConcurrentHashTable(stringTable.hpp:42)——关键设计对比成立
+> - **rehash 表述修正**: 删除=GC 周期 SymbolTable::unlink 摘 refcount()==0(symbolTable.cpp:147-155,:131),非"定期 rehash"
+> - **AnnotationArray 是 Array<u1>(字节)不是 int 数组**(annotations.hpp:38);四份容器 :44-55;parse_annotations 在 classFileParser.cpp:1213
+> - **FieldInfo 无 attributes_count**: 槽 3=initval_index(fieldInfo.hpp:66,与 03 篇一致)——大纲"attributes_count"错
+> - **FieldStream 不含父类**: FieldStreamBase(InstanceKlass*) 遍历本类 java_fields_count(fieldStreams.hpp:102-109)
+> - **CompiledICHolder 字段编造**: 是 `Metadata* _holder_metadata` + `Klass* _holder_klass` + `bool _is_metadata_method`(compiledICHolder.hpp:51-54),非 "_holder_method: Method*";用途=inline cache 辅助对象(:33 注释);"cmp/jne/jmp + 95% 命中"汇编/数字删除
 
 ### 1. Symbol — 全局唯一字符串
 
