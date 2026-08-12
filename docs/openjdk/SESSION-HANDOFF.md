@@ -215,7 +215,7 @@
 3. 自查脚本只能抓"写错"(行号/代码块/数字),抓不了"写对但机制是编的"——机制正确性只能靠人工深审,且第 1 轮常被自己的叙述带着走,第 2 轮逐条质疑才有效
 4. 结论: **深审必须 2 轮**;沉淀要即时(本篇教训进 §6.5/6.7 后再写下一篇)
 
-### 6.7 16-codecache 域经验(01-02 篇,2026-08-12)
+### 6.7 16-codecache 域经验(01-05 篇,2026-08-12)
 - codeBuffer.hpp 在 **share/asm/**: section 枚举 :353-361(SECT_FIRST=0,CONSTS=0/INSTS/STUBS,顺序即最终布局,compute_final_layout codeBuffer.cpp:472 按枚举序紧凑排);Section 类字段 _start/_end/_limit/_locs_start/_locs_end 在 :86-92
 - CodeBlobType :38-46(struct CodeBlobType{enum{...NumTypes=5}});层次: CodeBlob :86 → RuntimeBlob :340(BufferBlob :383/AdapterBlob :424/VtableBlob :437/RuntimeStub :468/SingletonBlob :517/Deopt :554/UncommonTrap :642/Exception :672/Safepoint :703)+ CompiledMethod→nmethod;AOT 在 C 堆(codeBlob.hpp:54-56 注释)
 - CodeCache::allocate :482(降级路径注释 :510-512 "NonNMethod -> MethodNonProfiled -> MethodProfiled");commit :588;get_code_blob_type codeCache.hpp:260-273;SegmentedCodeCache 条件=分层+ReservedCodeCacheSize≥240MB(:61-66 注释)
@@ -245,6 +245,26 @@
   - **ICBuffer 两阶段**: create_transition_stub icBuffer.cpp:172-194(组装: ICStub::set_stub :71-79 写 lea rax,[cached];jmp entry,icBuffer_x86.cpp:52-62)→切换(只改 call 目标指向桩)→safepoint finalize(:50-58 写回两字段,链: update_inline_caches→remove_all stubs.cpp:200→remove_first→stub_finalize :175→ICStubInterface::finalize);桩队列=StubQueue(InlineCacheBufferSize=10K globals.hpp:412),满→VM_ICBufferFull(new_ic_stub :120-143)
   - IC miss: handle_wrong_method_ic_miss(sharedRuntime.cpp:1421-1434)→handle_ic_miss_helper(:1552,CompiledIC_lock :1617): 静态可绑定→reresolve/mono→compute+set_to_monomorphic/否则→set_to_megamorphic(失败 set_to_clean);immediate oop 更新: fix_oop_relocations→oop_Relocation::fix_oop_relocation→oop_addr=pd_address_in_code
 
+- **05 篇(依赖/deopt,16 域收官,大纲漂移 15+ 处,重点沉淀)**:
+  - **dep 类型 11 种赌注**(枚举 12 值含 end_marker,TYPE_LIMIT=12,dependencies.hpp:104-171): evol_method/leaf_type/abstract_with_unique_concrete_subtype/abstract_with_no_concrete_subtype/concrete_with_no_concrete_subtype/unique_concrete_method/abstract_with_exclusive_concrete_subtypes_2/exclusive_concrete_methods_2/unique_implementor/no_finalizable_subclasses/call_site_target_value;concrete_klass 编造不存在;assert_xxx 声明 dependencies.hpp:359-389,assert_common_2 实现 dependencies.cpp:236
+  - 注册侧: new_nmethod nmethod.cpp:512-534(call_site→MethodHandles::add_dependent_nmethod;否则 InstanceKlass::cast(klass)->add_dependent_nmethod;注释 "The slow way is to check every nmethod");赌注本体 dependencies->copy_to(this) nmethod.cpp:760
+  - 对账: spot_check_dependency_at dependencies.cpp:2047-2056(involves_context 筛选)→check_klass_dependency :1984-2026(10 个 case 分派,返回 witness)/check_call_site_dependency :2029
+  - DeoptimizationBlob codeBlob.hpp:554-628: unpack/unpack_with_exception/unpack_with_reexecution :605-607 + C1 in_tls :618-621(注释 :613-617);**deopt 桩调 2 个 C 例程**(sharedRuntime_x86_64.cpp:2845-2858 注释): fetch_unroll_info deoptimization.cpp:139→helper :158(vframe 收集内联链,注释 :180-181)→UnrollBlock :514→汇编铺骨架帧→unpack_frames :623→vframeArray::unpack_to_stack vframeArray.cpp:567;Location location.hpp:45-60(register_number :108/stack_offset :107)
+  - PcDesc 查找: 缓存+radix 二分(find_pc_desc_internal nmethod.cpp:1791-1872,"almost 100% hit rate")
+  - VtableStubs: (is_vtable, vtable_index) 哈希(find_stub vtableStubs.cpp:208-260,VtableStubs_lock);x86-64 receiver=j_rarg0(rdi);load_klass(:83)→lookup_virtual_method(:113)→jmp [rbx+Method::from_compiled_offset](:132);CodeHeap Analytics: aggregate codeHeapState.hpp:106,实证 Reserved 245760/Committed 7488/Unallocated 243224 KB(3%)
+
+
+### 6.8 38-perfdata 域经验(2026-08-12)
+- perfData.hpp 在 **share/runtime/**: 类层次 :97-107(PerfLongConstant alias PerfConstant/PerfLongVariable alias PerfVariable/PerfLongCounter alias PerfCounter/PerfString);Variability V_Constant=1/V_Monotonic=2/V_Variable=3 :255-262;Units 六种 :266-273;PerfData 对象 C 堆+值 _valuep 指向共享区(:289-291);create_entry 8 字节对齐 perfData.cpp:136-138(注释 "align size to assure allocation in units of 8 bytes",共享区满退 C 堆 :141-146)
+- PerfDataEntry 布局(perfMemory.hpp:78-98,公共契约,注释 :55-56 "known by the PerfDataBuffer Java class libraries");Prologue :62-74(magic 0xcafec0c0/版本 2.0/accessible/entry_offset/num_entries);accessible 在 VM 启动完成时置位(management.cpp:205-207);mark_updated→mod_time_stamp(perfMemory.cpp:235-240)
+- **目录权限 0755 非 0700**(make_user_tmp_dir perfMemory_linux.cpp:852-853 注释 "create the directory with 0755 permissions");隔离靠**文件 0600**(create_sharedmem_file :909 S_IRUSR|S_IWUSR);防 symlink is_directory_secure :240/is_file_secure :417;容器 flock :938-942;路径 /tmp/hsperfdata_<user>/<pid>(PERFDATA_NAME perfMemory.cpp:43;容器 /proc/{vmid}/root/tmp :142-146);mmap_create_shared :1056(mmap :1091);attach mmap_attach_shared :1181;unlink delete_shared_memory :1135(remove_file :1145);残留清理 cleanup_sharedmem_files;flock 注释 :938-940
+- 计数器注册: 各子系统 create(CollectorCounters collectorCounters.cpp:43-58 sun.gc.collector.<n>.time/invocations/lastEntryTime/lastExitTime;name_space perfData.cpp:373-377);PerfDataManager 挂列表 _all/_sampled/_constants(:40-42);StatSampler 建 sun.rt.javaCommand(:322-324)/sun.os.hrt.ticks(:356-359);UsePerfData 默认 true(globals.hpp:2419);PerfDataSaveToFile(globals.hpp:2423,save_memory_to_file :82,调用 :1345-1346)
+- 无锁协议: 8 字节对齐 + x86-64 aligned store 原子 + 单调语义容忍旧值(inc/add perfData.hpp:427-430);sample() perfData.cpp:216-220(02 篇展开);实证 jstat-gc.txt 各列=计数器
+- **02 篇(StatSampler,大纲漂移 10+ 处,重点沉淀)**:
+  - StatSampler=PeriodicTask 子类(statSampler.cpp:41-45);engage :78-90 在 Thread::create_vm(thread.cpp:4048);enroll 进 _tasks[](task.cpp:121,max_tasks=10 task.hpp:45-48);WatcherThread::run(thread.cpp:1453-1507,sleep 后 real_time_tick task.cpp:49-71)→execute_if_pending(task.hpp:82-92 累积 delay_time 达 _interval 执行 task());PerfDataSamplingInterval=50ms(globals.hpp:2431);WatcherThread 非 safepoint 参与者注释 task.cpp:65
+  - 采样循环: collect_sample(statSampler.cpp:158-177)→sample_data(_sampled)(:135-143)→item->sample();_sampled=PerfDataManager::sampled()(:69);采样型注册=create_xxx 带 PerfSampleHelper→add_item(p,true)(perfData.cpp:487-503)→_sampled 列表(:318-322);hrt.ticks=HighResTimeSampler(statSampler.cpp:338-342,os::elapsed_counter)
+  - **事件驱动 vs 采样型**: sun.rt.safepointTime/applicationTime/safepoints=RuntimeService::init(runtimeService.cpp:45-68)+safepoint 事件 inc(:87-102);sun.cls.loadedClasses=ClassLoadingService::init(classLoadingService.cpp:87)——都绕过 StatSampler(大纲"sample_xxx 函数采样"编造)
+  - 无"size=0 协议": 就绪信号=accessible(management.cpp:205-207)+magic/版本;目录名 **41-zip-jimage**(非 41-zipjimage),文件 01-zip.md/02-jimage.md
 ### 6.9 41-zip-jimage + 42-core-native 域经验(2026-08-12)
 - **zip_util.c 在 JDK 侧**: /data/workspace/jdk11u/src/java.base/share/native/libzip/zip_util.c(1658 行,纯 C)——不在 hotspot!
 - 打开: ZIP_Open_Generic :772-788(缓存优先 ZIP_Get_From_Cache :798,zfiles 链表+lastModified+refs)→miss→ZIP_Put_In_Cache→readCEN :895;findEND :329-386(END_MAXLEN=0xFFFF+ENDHDR :300,分块倒扫找 PK\005\006)
@@ -261,27 +281,6 @@
   - **JNU_NewStringPlatform 按 fastEncoding 分派(:860-876)非 NewStringUTF**: FAST_UTF_8/8859_1/646_US/CP1252+newStringJava 慢路径+NO_ENCODING_YET 抛 InternalError;fastEncoding 由 InitializeEncoding(:793-836)设置,调用点在 System.c:291-294(sun.jnu.encoding,注释 "platform native encoding has not been set up yet");newStringUTF8(:765-780)是 ASCII 扫描优化器非严格解码;**JNU_GetDefaultEncoding 不存在;JNU_GetFieldByName(:1253-1310)无 field cache**
   - 属性链路: Java_java_lang_System_initProperties System.c:166(GetJavaProperties :177,InitializeEncoding :294,file.encoding :377=sun.jnu.encoding,:384);GetJavaProperties 一次性(static sprops+user_dir 缓存,java_props_md.c:407-414);**user.home=getpwuid->pw_dir 非 getenv HOME**(:569-574);os 三件套 uname/ARCHPROPNAME :480-497;getcwd :601-606;nl_langinfo(CODESET) :268-279;separators :608-610
   - **JVM_NativePath Unix no-op**(jvm.cpp:697-701→os::native_path os_posix.cpp:1486-1488);canonicalize_md.c 是 java.io.File 服务(canonicalize :190: realpath 整条 :202-204+逐段缩回重试 :218-240;collapsible :49)
-### 6.8 38-perfdata 域经验(01 篇,2026-08-12)
-- perfData.hpp 在 **share/runtime/**: 类层次 :97-107(PerfLongConstant alias PerfConstant/PerfLongVariable alias PerfVariable/PerfLongCounter alias PerfCounter/PerfString);Variability V_Constant=1/V_Monotonic=2/V_Variable=3 :255-262;Units 六种 :266-273;PerfData 对象 C 堆+值 _valuep 指向共享区(:289-291);create_entry 8 字节对齐 perfData.cpp:136-138(注释 "align size to assure allocation in units of 8 bytes",共享区满退 C 堆 :141-146)
-- PerfDataEntry 布局(perfMemory.hpp:78-98,公共契约,注释 :55-56 "known by the PerfDataBuffer Java class libraries");Prologue :62-74(magic 0xcafec0c0/版本 2.0/accessible/entry_offset/num_entries);accessible 在 VM 启动完成时置位(management.cpp:205-207);mark_updated→mod_time_stamp(perfMemory.cpp:235-240)
-- **目录权限 0755 非 0700**(make_user_tmp_dir perfMemory_linux.cpp:852-853 注释 "create the directory with 0755 permissions");隔离靠**文件 0600**(create_sharedmem_file :909 S_IRUSR|S_IWUSR);防 symlink is_directory_secure :240/is_file_secure :417;容器 flock :938-942;路径 /tmp/hsperfdata_<user>/<pid>(PERFDATA_NAME perfMemory.cpp:43;容器 /proc/{vmid}/root/tmp :142-146);mmap_create_shared :1056(mmap :1091);attach mmap_attach_shared :1181;unlink delete_shared_memory :1135(remove_file :1145);残留清理 cleanup_sharedmem_files;flock 注释 :938-940
-- 计数器注册: 各子系统 create(CollectorCounters collectorCounters.cpp:43-58 sun.gc.collector.<n>.time/invocations/lastEntryTime/lastExitTime;name_space perfData.cpp:373-377);PerfDataManager 挂列表 _all/_sampled/_constants(:40-42);StatSampler 建 sun.rt.javaCommand(:322-324)/sun.os.hrt.ticks(:356-359);UsePerfData 默认 true(globals.hpp:2419);PerfDataSaveToFile(globals.hpp:2423,save_memory_to_file :82,调用 :1345-1346)
-- 无锁协议: 8 字节对齐 + x86-64 aligned store 原子 + 单调语义容忍旧值(inc/add perfData.hpp:427-430);sample() perfData.cpp:216-220(02 篇展开);实证 jstat-gc.txt 各列=计数器
-- **02 篇(StatSampler,大纲漂移 10+ 处,重点沉淀)**:
-  - StatSampler=PeriodicTask 子类(statSampler.cpp:41-45);engage :78-90 在 Thread::create_vm(thread.cpp:4048);enroll 进 _tasks[](task.cpp:121,max_tasks=10 task.hpp:45-48);WatcherThread::run(thread.cpp:1453-1507,sleep 后 real_time_tick task.cpp:49-71)→execute_if_pending(task.hpp:82-92 累积 delay_time 达 _interval 执行 task());PerfDataSamplingInterval=50ms(globals.hpp:2431);WatcherThread 非 safepoint 参与者注释 task.cpp:65
-  - 采样循环: collect_sample(statSampler.cpp:158-177)→sample_data(_sampled)(:135-143)→item->sample();_sampled=PerfDataManager::sampled()(:69);采样型注册=create_xxx 带 PerfSampleHelper→add_item(p,true)(perfData.cpp:487-503)→_sampled 列表(:318-322);hrt.ticks=HighResTimeSampler(statSampler.cpp:338-342,os::elapsed_counter)
-  - **事件驱动 vs 采样型**: sun.rt.safepointTime/applicationTime/safepoints=RuntimeService::init(runtimeService.cpp:45-68)+safepoint 事件 inc(:87-102);sun.cls.loadedClasses=ClassLoadingService::init(classLoadingService.cpp:87)——都绕过 StatSampler(大纲"sample_xxx 函数采样"编造)
-  - 无"size=0 协议": 就绪信号=accessible(management.cpp:205-207)+magic/版本;目录名 **41-zip-jimage**(非 41-zipjimage),文件 01-zip.md/02-jimage.md
-- **05 篇(依赖/deopt,16 域收官,大纲漂移 15+ 处,重点沉淀)**:
-  - **dep 类型 11 种赌注**(枚举 12 值含 end_marker,TYPE_LIMIT=12,dependencies.hpp:104-171): evol_method/leaf_type/abstract_with_unique_concrete_subtype/abstract_with_no_concrete_subtype/concrete_with_no_concrete_subtype/unique_concrete_method/abstract_with_exclusive_concrete_subtypes_2/exclusive_concrete_methods_2/unique_implementor/no_finalizable_subclasses/call_site_target_value;concrete_klass 编造不存在;assert_xxx 声明 dependencies.hpp:359-389,assert_common_2 实现 dependencies.cpp:236
-  - 注册侧: new_nmethod nmethod.cpp:512-534(call_site→MethodHandles::add_dependent_nmethod;否则 InstanceKlass::cast(klass)->add_dependent_nmethod;注释 "The slow way is to check every nmethod");赌注本体 dependencies->copy_to(this) nmethod.cpp:760
-  - 对账: spot_check_dependency_at dependencies.cpp:2047-2056(involves_context 筛选)→check_klass_dependency :1984-2026(10 个 case 分派,返回 witness)/check_call_site_dependency :2029
-  - DeoptimizationBlob codeBlob.hpp:554-628: unpack/unpack_with_exception/unpack_with_reexecution :605-607 + C1 in_tls :618-621(注释 :613-617);**deopt 桩调 2 个 C 例程**(sharedRuntime_x86_64.cpp:2845-2858 注释): fetch_unroll_info deoptimization.cpp:139→helper :158(vframe 收集内联链,注释 :180-181)→UnrollBlock :514→汇编铺骨架帧→unpack_frames :623→vframeArray::unpack_to_stack vframeArray.cpp:567;Location location.hpp:45-60(register_number :108/stack_offset :107)
-  - PcDesc 查找: 缓存+radix 二分(find_pc_desc_internal nmethod.cpp:1791-1872,"almost 100% hit rate")
-  - VtableStubs: (is_vtable, vtable_index) 哈希(find_stub vtableStubs.cpp:208-260,VtableStubs_lock);x86-64 receiver=j_rarg0(rdi);load_klass(:83)→lookup_virtual_method(:113)→jmp [rbx+Method::from_compiled_offset](:132);CodeHeap Analytics: aggregate codeHeapState.hpp:106,实证 Reserved 245760/Committed 7488/Unallocated 243224 KB(3%)
-
----
-
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
