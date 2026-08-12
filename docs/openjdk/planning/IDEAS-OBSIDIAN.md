@@ -26,18 +26,19 @@
 
 ## 前置条件(后续实施时)
 
-1. 文档链接格式: 项目用 `[文字](路径)`(docsify 格式),Obsidian 图谱认 `[[路径]]`——需批量转换或接受只显示部分关系
-2. 用 Obsidian 打开仓库根目录(`/data/workspace/source-code/openjdk-book/`)
+0. **【定案】不动原文档**: 不做任何批量转换——后续把需要入图谱的文档**整体复制一份**到独立目录(如仓库外 `obsidian-vault/` 或单独分支),在副本上操作(转 wiki-link、建图谱),**现有 docsify 站点与内容零影响**
+1. 文档链接格式: 项目用 `[文字](路径)`(docsify 格式),Obsidian 图谱认 `[[路径]]`——在副本上批量转换,原仓库不动
+2. 用 Obsidian 打开副本目录(`obsidian-vault/`)
 3. 图谱按目录分簇: planning/outlines(48 域)、vol-tools(7 篇)、vol-01-bak(14 章)、materials(素材)
 4. 可考虑: 用 graph view 的 groups 规则按目录着色,或 JSON 预设
 
 ## 替代方案(对比)
 
 - **现有**: codebase-memory MCP 已对源码建知识图谱(函数/调用/类),但那是代码不是文档
-- **轻量**: 不装 Obsidian,写脚本把 md 链接导出成 graphml/json,再用任意图工具渲染
+- **轻量**: 不装 Obsidian,写脚本把 md 链接导出成 graphml/json,再用任意图工具渲染(同样在副本上做)
 - **极致**: 文档关系生成 mermaid graph 嵌入 README
 
 ## 决策点(实施前问)
 
-- 批量转 `[[wiki-link]]` 会影响 docsify 渲染吗?(docsify 不支持 wiki-link,需要验证双格式兼容方案)
-- 图谱粒度: 全仓库 or 仅 planning+vol-tools?
+- 副本同步策略: 复制一次 vs 每次更新后重新复制(或软链/同步脚本)
+- 图谱粒度: 全仓库 or 仅 planning+vol-tools
