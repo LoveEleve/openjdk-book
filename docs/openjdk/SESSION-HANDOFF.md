@@ -40,7 +40,7 @@
 
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
-第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06 → 16 → 38 → 41 → 42   🚧 进行中(7/10,04 域剩 1 篇)
+第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(7/26,04 域剩 1 篇)
 第 3 批(对象/类): 07 → 09 → 17
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
@@ -61,7 +61,7 @@
 | 48-utilities | 3 | `48-utilities/03-stream-exception.md`(150 行) | ✅ 本会话完成+深审 |
 | 48-utilities | 4 | `48-utilities/04-utf8-json-decoder.md`(118 行) | ✅ 本会话完成 — **48 域完结,第 1 批全部完成** |
 | 02-assembler | 1 | `02-assembler/01-codebuffer-abstract-assembler.md`(214 行) | ✅ 本会话完成+深审 |
-| 02-assembler | 2 | `02-assembler/02-x86-register-operand-encoding.md`(217 行) | ✅ 本会话完成+深审 |
+| 02-assembler | 2 | `02-assembler/02-x86-register-operand-encoding.md`(219 行) | ✅ 本会话完成+深审 |
 | 02-assembler | 3 | `02-assembler/03-x86-assembler-instruction-set.md`(185 行) | ✅ 本会话完成+深审 |
 | 02-assembler | 4 | `02-assembler/04-x86-macroassembler-runtime.md`(164 行) | ✅ 本会话完成+深审 — **02 域完结** |
 | 03-arguments-flags | 1 | `03-arguments-flags/01-flag-definition-system.md`(179 行) | ✅ 本会话完成+深审 |
