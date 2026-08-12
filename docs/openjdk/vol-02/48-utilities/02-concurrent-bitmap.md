@@ -95,7 +95,7 @@
         locked = bucket->is_locked();
 ```
 
-`cas_first`(inline:140-153)内部就是 `Atomic::cmpxchg`。为什么插入可以无锁?因为**新节点永远插在桶头,链表其余部分对读者不可变**——读者遍历时看到的要么是旧链要么是新链,绝无中间态。插入和查询都被 `ScopedCS`(213-229)包着:进入时 `GlobalCounter::critical_section_begin`、离开时 `critical_section_end`——这是 JVM 的"读者计数"机制,为第 3 节的安全回收铺路;两者还各自回报链长(`loops > _grow_hint`,870-872 与 937-939 行)决定是否触发 grow。
+`cas_first`(inline:140-152)内部就是 `Atomic::cmpxchg`(带 `is_locked()` 前置检查)。为什么插入可以无锁?因为**新节点永远插在桶头,链表其余部分对读者不可变**——读者遍历时看到的要么是旧链要么是新链,绝无中间态。插入和查询都被 `ScopedCS`(213-229)包着:进入时 `GlobalCounter::critical_section_begin`、离开时 `critical_section_end`——这是 JVM 的 RCU 风格读者协议(每个线程在自己的计数器里声明是否在临界区,globalCounter.cpp:60),为第 3 节的安全回收铺路;两者还各自回报链长(`loops > _grow_hint`,870-872 与 937-939 行)决定是否触发 grow。
 
 **关键设计 (斜体)**: *"插入只动桶头"是这整张表无锁性能的来源:读者从头遍历、插入者 CAS 换头,两者都只碰不可变的链表主体——除了桶头那个指针,没有任何共享可写状态。代价是链表顺序与插入序相反(后进先出),以及链长的反馈要由操作方顺手回报(grow_hint)。JVM 把"并发正确性"拆成最小协议:读者声明自己的存在(critical section),写者决定何时等待(见下节)。*
 
@@ -154,7 +154,7 @@ resize 是同一哲学的大规模版本。过程:拿全局 `_resize_lock`(317-3
 
 `write_synchonize_on_visible_epoch`(300-314)还做了优化:如果没有任何读者见过旧版本(`_invisible_epoch` 检查),可以跳过 write_synchronize。
 
-**关键设计 (斜体)**: *这张表的并发协议可以总结成一句:**读者只声明存在,写者负责等待**。读路径零同步原语(只有 critical section 的计数器),所有"等待读者离开"的成本都记在删除、resize 头上——而这两者远少于查询。write_synchronize 本身是 JVM 全局的"等所有临界区退出"屏障(GlobalCounter),代价与活动读者数相关,所以才会用 invisible_epoch 这种"没人看到就别等"的优化。*
+**关键设计 (斜体)**: *这张表的并发协议可以总结成一句:**读者只声明存在,写者负责等待**。读路径零同步原语(只有临界区进出时的计数器读写),所有"等待读者离开"的成本都记在删除、resize 头上——而这两者远少于查询。write_synchronize 是 RCU 风格屏障:全局计数器发布新版本,然后**遍历所有线程**,逐个等上一代的活跃读者退出临界区(globalCounter.cpp:60-73)——代价与线程数相关,所以才有 invisible_epoch 这种"没人看到就别等"的优化。*
 
 ## 4. BitMap:1 bit 一个标记
 
@@ -219,7 +219,7 @@ bool BitMap::iterate(BitMapClosure* blk, idx_t leftOffset, idx_t rightOffset) {
 - [C++: GC 里位图的典型用法:G1 的并发标记用 **prev/next 两张位图**——`_prev_mark_bitmap`(已完成)与 `_next_mark_bitmap`(构造中),上一轮标记在 prev,新一轮写 next,互不干扰(g1ConcurrentMark.hpp:306-307,域 26 的伏笔);对象地址 >> LogMinObjAlignment 作为 bit 下标,即"1 bit 对应一个最小对象对齐单位"]
 - [x86: par_set_bit 的 CAS 就是 `lock cmpxchg`(05-cpu 篇)——两个线程置同 word 不同 bit,cmpxchg 循环重读再试,不会互相覆盖]
 
-**关键设计 (斜体)**: *位图是"用计算换内存"的极端例子:1 字节变 1 bit,8 倍压缩,代价是 set/test/iterate 都要做移位与掩码。iterate 的 word 级跳过是它的灵魂——GC 标记位图通常稀疏(5-10% 密度),一个 64 位 word 全零就整体跳过,扫描成本接近"已标记对象数"而不是"地址空间大小"。`set_bit` vs `par_set_bit` 的分工还体现了 JVM 的纪律:单线程路径绝不付并发代价,需要并发的地方显式用带前缀的版本。*
+**关键设计 (斜体)**: *位图是"用计算换内存"的极端例子:1 字节变 1 bit,8 倍压缩,代价是 set/test/iterate 都要做移位与掩码。iterate 的 word 级跳过是它的灵魂——GC 标记位图通常稀疏(大多数 word 全零),一个 64 位 word 全零就整体跳过,扫描成本接近"已标记对象数"而不是"地址空间大小"。`set_bit` vs `par_set_bit` 的分工还体现了 JVM 的纪律:单线程路径绝不付并发代价,需要并发的地方显式用带前缀的版本。*
 
 ## 核心悬念
 
