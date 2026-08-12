@@ -147,4 +147,4 @@ void VMError::show_message_box(char *buf, int buflen) {
 
 "输出流的五种子类、异常的两个调试钩子、assert 的 gdb 链路——它们处理的都是'文本'。而 JVM 与外部世界交换的格式不止文本:UTF-8 编码(modified UTF-8 的 0xC0 0x80 陷阱)、JSON(JFR 录制)、ELF 符号(地址到函数名)。下一篇:UTF-8、JSON 与 ELF 解码器——三个格式工具的底层实现。"
 
-> → [04-utf8-json-decoder.md](04-utf8-json-decoder.md):modified UTF-8、JSONWriter、ElfDecoder
+> → [04-utf8-json-decoder.md](04-utf8-json-decoder.md):modified UTF-8、JSON 解析器、ElfFile

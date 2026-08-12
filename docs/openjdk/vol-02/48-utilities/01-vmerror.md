@@ -143,4 +143,4 @@ void os::print_context(outputStream *st, const void *context) {
 
 "hs_err_pid.log 是'崩溃后的慢速串行流水线'——一个线程抢令牌、几十个 STEP 依次写。而 JVM 正常运行时的并发结构完全是另一回事:`String.intern` 的 SymbolTable 要用无锁并发哈希表扛住高并发,GC 要用位图在 1 bit 里标记一个对象的状态。下一篇:ConcurrentHashTable + BitMap——lock-free 查找与位级标记。"
 
-> → [02-concurrent-bitmap.md](02-concurrent-bitmap.md):ConcurrentHashTable 的 per-bucket mutex + CAS resize,BitMap 的位级标记
+> → [02-concurrent-bitmap.md](02-concurrent-bitmap.md):ConcurrentHashTable 的指针嵌入 spinlock 与 redirect 迁移,BitMap 的位级标记

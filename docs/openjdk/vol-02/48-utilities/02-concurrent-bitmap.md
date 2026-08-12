@@ -225,4 +225,4 @@ bool BitMap::iterate(BitMapClosure* blk, idx_t leftOffset, idx_t rightOffset) {
 
 "ConcurrentHashTable 的读者协议(critical section + redirect 跟随)和 BitMap 的位级标记,都是'结构级'的并发工具——而 JVM 里所有诊断输出、错误信息、GC 日志,要经过另一层抽象:输出流(tty/stringStream)与异常系统(Exceptions)。下一篇:输出流与异常——JVM 怎么管理所有输出管道,Exceptions::debug_check_abort 怎么挂调试器。"
 
-> → [03-stream-exception.md](03-stream-exception.md):tty/gclog/stringStream 抽象与异常系统
+> → [03-stream-exception.md](03-stream-exception.md):输出流抽象与异常上报
