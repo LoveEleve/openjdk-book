@@ -98,6 +98,10 @@
        ② 正文引用的 file:line 内容语义(不是存在性)
        ③ 数字自洽(全文 grep 关键数字)
        ④ #7 文字锚(文件名后无行号的引用)
+       ⑤ **跨篇一致性**: 每篇末尾悬念 OUTBOUND 行的描述文字常残留旧大纲错误
+          (实证: 48 域 3 篇的悬念行残留 per-bucket mutex/gclog/JSONWriter,正文深审后没同步)
+          ——深审正文后必须回头核对悬念行
+       ⑥ 交接文档/元文档也要自查(本次就发现 7/10→7/26 的篇数错误)
 3. 发现错误 → 修正文章 → 回填大纲(#15 规则,防止下次抄错)→ 提交
 ```
 
@@ -129,6 +133,7 @@
 2. **行号写作时重新 grep**: 大纲/KP 是规划期产物,行号大量漂移——每篇实测都有 2-8 处漂移
 3. **自查命令**: 文章每个 file:line 逐个 `sed -n`;代码块与源码 diff(脚本: 提取块内行逐一 grep -qF 文章)
 4. **文件名必须 find 验证**: 目录/文件路径凭记忆必错(jdk11u 有重构: flags/ 子目录、share/code/ 等)
+5. **大纲的"篇数"也要重验**: 规划文档的篇数可能过时(第 2 批实际 26 篇: 06-oops=6、16-code-cache=5、42-core-native=3,规划印象中的 "7/10" 是错的)——进度表述以 outlines/ 实际文件数为准
 
 ### 4.4 深审缺陷档案(`/data/workspace/source-code/book/成长之路/tmp-question/training-camp/source-code/issue/源码分析深审缺陷档案.md`,15 类)
 - A 内容层: #1 事实错误 / #2 API 编造 / #3 文件名推断 / #4 跨项目转移 / #5 覆盖率 / #6 跨层不一致
@@ -171,7 +176,7 @@
 ### 6.2 写作期"凭记忆"错误(自查 diff 抓出的真实案例,每篇深审必有)
 - 02-02: REX_WRB 写成 0x4F(实际 0x4D,assembler_x86.hpp:537)
 - 02-03: addsd 的 VEX 编码写成 66 前缀(实际 F2,simd_prefix_and_encode(dst,dst,src,VEX_SIMD_F2,...))
-- 03-02: JAVA_OPTS(实际 _JAVA_OPTIONS,arguments.cpp:3317);set_aggressive_opts_flags 语义(GCC 互斥→AggressiveOpts 联动)
+- 03-02: JAVA_OPTS(实际 _JAVA_OPTIONS,arguments.cpp:3317);set_aggressive_opts_flags 语义(GC 互斥→实际是 AggressiveOpts 联动 EliminateAutoBox/DoEscapeAnalysis 等)
 - 04-01: 标签数 "~100"(实际 143)
 - **教训**: 凡代码块里的值/编码/常量,写完必须用 sed 逐行对照;数字先数后写
 
