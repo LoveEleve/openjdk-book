@@ -135,7 +135,7 @@ void Assembler::jmp(Register entry) {
 - **0xE9 rel32**(5 字节):±2GB
 - **0xFF /r**(2 字节,间接):跳转地址在寄存器里(switch table 的 computed goto)
 
-注释(2188-2192)重申了 01 篇的机制:**前向跳转固定 0xE9 长格式**——生成时不知道目标在哪,先占 5 字节槽,Label 绑定后回填;确定在 256 字节内的才用 `jmpb` 显式短跳。`call`(1530-1552)同构:`0xE8` + rel32 + **relocation 类型参数**——call 到 stub/VM 函数时,重定位记录"这里要填运行时地址",让 CodeBuffer 的 relocate 系统(01 篇)处理。
+注释(2188-2192)重申了 01 篇的机制:**前向跳转固定 0xE9 长格式**——生成时不知道目标在哪,先占 5 字节槽,Label 绑定后回填;确定在 256 字节内的才用 `jmpb` 显式短跳。`call`(1530-1552)同构:`0xE8` + rel32 + **relocation 类型参数**——调用方传 `relocInfo::runtime_call_type`(=6,"call to fixed external routine")或 `opt_virtual_call_type`(=3,"statically bound",relocInfo.hpp:261/264)等,重定位系统(01 篇)据此在最终 nmethod 里填运行时地址。
 
 **关键设计 (斜体)**: *跳转的编码由"距离"决定,而距离在生成时常常未知——于是 JIT 的策略是"前向一律 5 字节,反向/短距才省"。"先占槽后回填"让生成器永远不需要回头重写,代价是每个前向跳转平均浪费 3 字节;method 小分支密集时,`jmpb`/`jccb` 显式短跳是手动的省字节手段。这是 01 篇 Label 补丁系统在指令层面的落地。*
 
