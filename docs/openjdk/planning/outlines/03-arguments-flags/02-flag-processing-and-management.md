@@ -1,63 +1,64 @@
 # 02. 解析 → Ergo → 约束 → jcmd — Flag 的完整生命周期
 
-> 🔴 Deep | 12 KP 中的 4 个处理+管理机制
-> 读者处境: Flag 定义好了——启动时怎么从命令行字符串变成 C++ 值？运行时 jcmd 怎么改？
+> 🔴 Deep | flag 处理与管理
+> 读者处境: Flag 定义好了——启动时怎么从命令行字符串变成 C++ 值?运行时 jcmd 怎么改?
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/03-arguments-flags/02 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **ParallelGCThreads 公式不在 arguments.cpp:3700**——在 `Abstract_VM_Version::nof_parallel_worker_threads`(abstract_vm_version.cpp:366-402,ncpus<=8 → ncpus;否则 8+(ncpus-8)*5/8,注释含 72 CPU→48 的例子;calc_parallel_worker_threads@402 调 (5,8,8);G1 用 FLAG_SET_DEFAULT 落地,g1Arguments.cpp:80)
+> - **堆自适应不是 RAMFraction**——jdk11u 用 **InitialRAMPercentage=1.5625/MaxRAMPercentage=25.0/MinRAMPercentage=50.0**(gc_globals.hpp:337/341/346);废弃的 *RAMFraction 自动转换(arguments.cpp:1735-1747);set_heap_size@1729(phys_mem=MIN2(physical_memory,MaxRAM)@1730-1732)
+> - **"Flag_writelock mutex(jvmFlag.cpp:200)" 不存在**——jdk11u 无此锁,已删除
+> - **"~28 个 flag" 无依据,删除**
+> - find_flag 线性扫 ✓(jvmFlag.cpp:903-923,含 is_constant_in_binary 过滤 + locked flag 解锁检查 912-918);writeableFlags.cpp 在 share/services/(非 runtime/flags)
 
-### 1. 命令行解析 — 三种语法，单遍扫描
+### 1. "命令行解析 — 一个解析器,四种来源"
 
-场景: `-XX:+UseG1GC -Xms4g -XX:ParallelGCThreads=4`——三个 flag，三种语法——一次 parse。
+**parse_each_vm_init_arg**(`arguments.cpp:2380`,origin 参数):
+```
+四种来源同解析器(arguments.cpp:2216-2236): JIMAGE_RESOURCE / ENVIRON_VAR(JAVA_TOOL_OPTIONS) / COMMAND_LINE / ENVIRON_VAR(JAVA_OPTS)
+find_flag(jvmFlag.cpp:903-923): O(n) 线性扫 flagTable + is_constant_in_binary(product 过滤 develop/notproduct) + is_unlocked 检查(diagnostic/experimental 需 -XX:+UnlockDiagnosticVMOptions)
+别名: obsolete/aliased 表(arguments.cpp:539-590)
+聚合互斥: set_aggressive_opts_flags(arguments.cpp:1955)
+```
+- 关键设计: **一个解析器四种来源**——origin 决定优先级;线性扫够用(启动期一次)。
 
-**parse_each_vm_init_arg** (`arguments.cpp:2400`):
-- `-XX:+Flag`: 查 JVMFlag 对象→set_bool(true, ARG)
-- `-XX:-Flag`: set_bool(false, ARG)
-- `-XX:Flag=value`: 字符串→类型转换 (strtol/strtod)→set (ARG)
-- [C++: JVMFlag::flag_from_str("UseG1GC") — O(n) 线性搜索 800+ flag 的全局列表。不用 hash——flag 名可能有别名 (UseParallelGC 同时代表 UseParallelOldGC)——线性搜索可以在别名链上继续。parse 时只解析不验证——约束推迟到 AfterParse phase]
-- 聚合参数互斥: UseParallelGC=true → 自动设 UseConcMarkSweepGC=false (互斥标志)
-- [C++: `Arguments::set_aggressive_opts_flags()` (`arguments.cpp:2950`)——处理 "聚合 flag"——一个 flag 影响多个。UseSerialGC → 设 ParallelGC=false, UseG1GC=false, UseConcMarkSweepGC=false]
+### 2. "Ergonomics — 平台自适应"
 
-**System.setProperty 同步** (`arguments.cpp:3070`):
-- `-Dkey=value` → `Arguments::add_property("key", "value")` → `System::set_property("key", "value")`
-- 所有 `-D` flag 同步到 JVM System Properties——Java 代码通过 `System.getProperty` 读取
+**ParallelGCThreads**(`abstract_vm_version.cpp:366-402`):
+```
+ncpus <= 8 → ncpus;否则 8 + (ncpus-8)*5/8(注释:"diminishing returns... 72 cpu → 48 worker")
+calc_parallel_worker_threads = nof_parallel_worker_threads(5, 8, 8)(402);G1: FLAG_SET_DEFAULT(g1Arguments.cpp:80)
+堆(set_heap_size, arguments.cpp:1729): phys_mem = MIN2(physical_memory, MaxRAM)(1730-1732)
+  MaxHeapSize = phys_mem * MaxRAMPercentage/100(MaxRAMPercentage=25.0, gc_globals.hpp:337)
+  InitialRAMPercentage=1.5625(gc_globals.hpp:346, = 1/64);MinRAMPercentage=50.0(341)
+  废弃 flag 转换: *RAMFraction → 100.0/fraction(arguments.cpp:1735-1747)
+```
+- 关键设计: **公式 + Origin=ERGONOMIC + 兼容转换**三件套——"用户指定 > 平台自适应"由 Origin 保证。
 
-### 2. Ergonomics — 平台自适应
+### 3. "打印:PrintFlagsInitial vs PrintFlagsFinal"
 
-场景: 你没指定 `-XX:ParallelGCThreads`——JVM 自己算。怎么算的？
+**两个开关**(`arguments.cpp:3681-3683` + `3711`):
+```
+PrintFlagsInitial: 解析处打印 + vm_exit(3681-3683);PrintFlagsFinal: ergo 后打印(3711)
+都是 JVMFlag::printFlags(jvmFlag.cpp:1488)
+Initial vs Final 的 diff = ergo 行为审计({ergonomic} 标注)
+```
+- 关键设计: **两拍快照,差异即 ergo 决策**——黑盒自适应的可审计化。
 
-**ParallelGCThreads 公式** (`arguments.cpp:3700`):
-- CPU ≤ 8: GC 线程 = CPU 数
-- CPU > 8: GC 线程 = 8 + (CPU-8) * 5/8
-- [C++: 为什么 8 是阈值？→ empirical: STW GC 在 8 线程以下接近线性加速，超过 8 线程 CPU 饱和 (GC 线程间的 work stealing 竞争)——以上多线程收益递减]
+### 4. "运行时管理:jcmd"
 
-**InitialHeapSize / MaxHeapSize** (`arguments.cpp:3820`):
-- Xms = PhysicalMemory/64 (最少 8MB) → DefaultInitialRAMFraction=64
-- Xmx = Min(PhysicalMemory/4, MaxRAMFraction) → DefaultMaxRAMFraction=4
-- Container 感知覆盖: 如果 cgroup memory_limit 有效，替代 PhysicalMemory
-
-**TieredCompilation**: server class machine (≥2 CPU + ≥2GB RAM) → 自动启用
-
-*关键设计: Ergo 在 parse 之后——因为 Ergo 值 Origin=ERGONOMIC < ARG。用户显式设置 (-XX:ParallelGCThreads=4) 的 Origin=ARG——Ergo 算出的值被 ignore。parse→ergo 两阶段="用户显式指定 > 平台自适应"*
-
-### 3. jcmd 运行时管理
-
-场景: JVM 跑了 3 天——GC 日志太吵——想关掉 PrintGC。不能重启——jcmd。
-
-**jcmd VM.flags** (`writeableFlags.cpp:68-130`):
-- 遍历所有 JVMFlag → format(type+name+value+origin) → outputStream
-- [C++: DiagnosticCommand 框架——jcmd 命令通过 DCmdFactory 查找→DCmd::execute→遍历 800+ flag→format→outputStream→返回结果]
-- PrintFlagsFinal vs PrintFlagsInitial (`arguments.cpp:3100`):
-  - Initial = Ergo 前的值; Final = Ergo 后的值
-  - diff → 揭示 Ergo 悄悄改了哪些 flag (典型 ~28 个)
-  - [C++: `os::print_flag_differences(PrintFlagsInitial, PrintFlagsFinal)`——逐 flag 比较两份输出的字符串。同一 flag 的 "=" 后不同 = Ergo 改动]
-
-**jcmd VM.set_flag** (`jvmFlagWriteableList.cpp:40`):
-- 只有 MANAGEABLE flag 可改——`Flag_writelock` mutex 保护 (`jvmFlag.cpp:200`)
-- [C++: pthread_mutex_lock——修改 flag 时持有写锁，VM 线程读取 flag 时使用读锁。写锁阻塞所有读——修改期间所有 flag 读取被暂停——保证 flag 值的一致性]
-- 为什么不是所有 flag 可写？→ UseG1GC 改变需要重启 GC——运行中切换 GC 算法→所有对象的管理方式需要立即改变→不可能
+**VM.flags / VM.set_flag**(`diagnosticCommand.cpp:241-247` + `writeableFlags.cpp:243-265`):
+```
+PrintVMFlagsDCmd(diagnosticCommand.cpp:241,DCmd 工厂@82)
+WriteableFlags::set_flag(writeableFlags.cpp:243-265): find_flag → is_writeable() 检查 → setter 分派
+  → 只有 MANAGEABLE/product_rw 可改(分类即不变量);UseG1GC 结构性 flag 不可运行中改
+  → set 触发约束/范围检查
+```
+- 关键设计: **"能改"= 行为开关,"不能改"= 结构决策**——分类写死不变量。
 
 ---
 
 ### 核心悬念
 
-**"`-XX:+PrintFlagsFinal` 和 `-XX:+PrintFlagsInitial` 的 diff——是 JVM 调优最快的诊断。"** — Ergo 自动调整了 ~28 个 flag。GC 延迟突然恶化？先跑 diff 检查 ParallelGCThreads 是否因为 docker CPU quota 变化从 8 被调到了 2。800+ flag 的宏体系保证没有一个能绕过类型/范围/约束/Ergo/jcmd 五道关卡。
+**"`-XX:+UseG1GC` 的一生: 四来源解析 → find_flag 线性扫 → set 分派 → ergo(5/8 公式 + 25% 堆)→ PrintFlagsFinal 审计 → jcmd 运行时改。flag 只是'值'——JVM 怎么用它控制输出?`-Xlog:gc*=debug` 的标签体系怎么过滤 60+ 种日志?"** — 下一篇: Logging。
 
-> → domain 4: [Logging — flag 驱动 JVM 行为，但日志怎么控制输出什么？60+ 标签的层次化过滤](../04-logging/01-tag-and-selection.md)
+> → [04-logging/01-tag-and-selection.md](../04-logging/01-tag-and-selection.md)
