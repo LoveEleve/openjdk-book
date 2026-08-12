@@ -120,7 +120,7 @@ x86 用 **ModR/M 字节**描述操作数:Mod(2 位,寻址模式)+ Reg(3 位,寄�
 REX 前缀(0x40-0x4F,assembler_x86.hpp:521-537)把 Reg/RM/Index 各扩出第 4 位:
 
 ```cpp
-// assembler_x86.hpp:521-537(截取核心,逐字)
+// assembler_x86.hpp:521-539(截取核心,逐字)
     REX        = 0x40,
     REX_B      = 0x41,
     REX_X      = 0x42,
@@ -129,7 +129,9 @@ REX 前缀(0x40-0x4F,assembler_x86.hpp:521-537)把 Reg/RM/Index 各扩出第 4 �
     ...
     REX_W      = 0x48,
     ...
-    REX_WRB    = 0x4F,
+    REX_WRB    = 0x4D,
+    REX_WRX    = 0x4E,
+    REX_WRXB   = 0x4F,
 ```
 
 REX.W=64 位操作数、REX.R=Reg 字段第 4 位、REX.B=RM/Base 第 4 位、REX.X=Index 第 4 位。JVM 侧的生成逻辑(assembler_x86.cpp:8340-8357):
@@ -156,7 +158,7 @@ void Assembler::prefix(Register dst, Register src, Prefix p) {
 }
 ```
 
-**规则极简:操作数编码 >= 8 就置对应 REX 位;没有高编号寄存器就不发前缀**("do not generate an empty prefix")。所以 `add %eax, %ebx`(都 < 8)2 字节,`add %r8, %r9`(都 >= 8,加 REX.W 64 位)需要 REX.WRB = 0x4F。
+**规则极简:操作数编码 >= 8 就置对应 REX 位;没有高编号寄存器就不发前缀**("do not generate an empty prefix")。所以 `add %eax, %ebx`(都 < 8)2 字节,`add %r8, %r9`(都 >= 8,加 REX.W 64 位)需要 REX.WRB = 0x4D。
 
 - [x86: 64 位模式下默认操作数是 32 位——`addl %eax,%ebx` 不需要 REX;`addq %r8,%r9` 需要 REX.W(64 位)+ REX.R/B(高编号)——这正是"前缀即补丁":编码格式 40 年不变,信息量靠前缀叠加]
 
