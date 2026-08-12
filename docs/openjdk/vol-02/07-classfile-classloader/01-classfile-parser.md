@@ -39,7 +39,7 @@
 
 - **magic**: `JAVA_CLASSFILE_MAGIC = 0xCAFEBABE`(classFileParser.cpp:93)。它不携带任何信息,是"身份检查"——读 4 字节,不对就直接 `Incompatible magic value %u`;[实证] 里 Hello.class 的头 8 字节 `cafe babe 0000 003d`(materials/commands/07-classfile-header-load.txt): 003d = 61 = JDK 17 的 class 文件版本;
 - **版本**: `verify_class_version`(:4881-4930)放行 `45.*`(Java 1.1 起的怪胎兼容),拒绝 preview 特性版本(需要 `--enable-preview`)、拒绝比当前 JVM 更新的 major(`UnsupportedClassVersionError: compiled by a more recent version of the Java Runtime`)、拒绝 `45` 以下的旧版本;
-- **读取原语**: 全部经 `ClassFileStream`(classFileStream.hpp)——`get_u2_fast`/`get_u4_fast` 调 `Bytes::get_Java_u2/u4`(classFileStream.hpp:102-112)做**大端读取**(class 文件是 big-endian,x86 上自动字节交换);带 `_fast` 后缀的版本不做越界检查,由调用方先 `guarantee_more(n)` 声明"我要读 n 字节"(classFileStream.hpp:88-91);文件读完 `at_eos` 必须是真——多出任何字节都是 `Extra bytes at the end of class file`(:6303-6305)。
+- **读取原语**: 全部经 `ClassFileStream`(classFileStream.hpp)——`get_u2_fast`/`get_u4_fast` 调 `Bytes::get_Java_u2/u4`(classFileStream.hpp:101-112)做**大端读取**(class 文件是 big-endian,x86 上自动字节交换);带 `_fast` 后缀的版本不做越界检查,由调用方先 `guarantee_more(n)` 声明"我要读 n 字节"(classFileStream.hpp:88-91);文件读完 `at_eos` 必须是真——多出任何字节都是 `Extra bytes at the end of class file`(:6314-6316)。
 
 **关键设计 (斜体)**: *"读 2 字节→校验→读 2 字节→校验"的节奏贯穿整个 parse_stream: 每个 section 开头先 guarantee_more 声明边界,读到的东西立刻校验(索引合法性/修饰符合法性/名字合法性),错误就地抛 ClassFormatError。`_fast` 读取器与 guarantee_more 的配合,让 6463 行代码里几乎不需要重复的越界检查。*
 
@@ -58,9 +58,9 @@
 
 ### 条目解析: 一个 tag 一个 case
 
-`parse_constant_pool_entries`(classFileParser.cpp:126-400)把常量池从字节变成 ConstantPool 的槽位。开头有个小技巧(:138): **把 ClassFileStream 按值拷贝一份局部副本**(`const ClassFileStream cfs1 = *stream;`,让 `_current` 能进寄存器),注释说得很直白(:127-136,原文 "It helps the C++ compiler to optimize this function")。然后 `for (index = 1; index < length; index++)` 从 1 开始——**槽 0 保留**(:151 注释 "Index 0 is unused"),每个条目按 tag 分发:
+`parse_constant_pool_entries`(classFileParser.cpp:126-403)把常量池从字节变成 ConstantPool 的槽位。开头有个小技巧(:138): **把 ClassFileStream 按值拷贝一份局部副本**(`const ClassFileStream cfs1 = *stream;`,让 `_current` 能进寄存器),注释说得很直白(:133-137,原文 "It helps the C++ compiler to optimize this function")。然后 `for (index = 1; index < length; index++)` 从 1 开始——**槽 0 保留**(:151 注释 "Index 0 is unused"),每个条目按 tag 分发:
 
-- **引用型**: `Class`→`klass_index_at_put`、`Fieldref`/`Methodref`/`InterfaceMethodref`→class_index+name_and_type_index 两个 u2、`String`→string_index、`NameAndType`→name+signature。规范的 17 种标签里还剩 `Module`/`Package` 两种(只在 module-info 的 Module 属性语境出现),**不经过这个 switch**;
+- **引用型**: `Class`→`klass_index_at_put`、`Fieldref`/`Methodref`/`InterfaceMethodref`→class_index+name_and_type_index 两个 u2、`String`→string_index、`NameAndType`→name+signature。规范的 17 种标签里还剩 `Module`/`Package` 两种,**不经过这个 switch**——它们只被 Module 属性引用,而 module-info 类根本不走标准解析: ACC_MODULE 在 `verify_legal_class_modifiers` 里直接抛 `NoClassDefFoundError: not a class because access_flag ACC_MODULE is set`(:4828-4838);
 - **数字型**: `Integer`/`Float` 各 4 字节,`Long`/`Double` 各 8 字节且**占两个槽位**(:260-264,截取核心,逐字):
 
 ```cpp
@@ -108,7 +108,7 @@
 
 ### parse_fields: 字段变成 FieldInfo,并按类型分桶
 
-`parse_fields`(classFileParser.cpp:1541 起)读每个字段的四元组(access_flags/name_index/signature_index/attributes_count),逐项校验(修饰符/名字/签名合法性,:1552-1564),属性交给 `parse_field_attributes`(ConstantValue、synthetic、泛型签名、注解,:1600 起)。每个字段最终填进 `FieldInfo`(六槽: access/name/sig/constantvalue + 32 位 offset 分高低两槽,共 12 字节——06-03 讲过字段表布局),并做一件关键的事(:1673-1677,截取核心,逐字):
+`parse_fields`(classFileParser.cpp:1541 起)读每个字段的四元组(access_flags/name_index/signature_index/attributes_count),逐项校验(修饰符/名字/签名合法性,:1601/:1609/:1616),属性交给 `parse_field_attributes`(ConstantValue、synthetic、泛型签名、注解,:1295 起,调用在 :1626)。每个字段最终填进 `FieldInfo`(六槽: access/name/sig/constantvalue + 32 位 offset 分高低两槽,共 12 字节——06-03 讲过字段表布局),并做一件关键的事(:1673-1677,截取核心,逐字):
 
 ```cpp
 // classFileParser.cpp:1673-1677(截取核心,逐字)
@@ -119,7 +119,7 @@
     field->set_allocation_type(atype);
 ```
 
-`fac->update` 按字段类型把字段分进**五类分配桶**(oop、byte/boolean/char、short、int、long/double,static 与 nonstatic 各一套,`FieldAllocationType`,classFileParser.cpp:1453-1466)——**这就是 06-03 字段布局的输入**: 后续 `layout_fields`(classFileParser.cpp:3934,:6411 调用)按桶排偏移,oops 在前(long/double 8 字节对齐),static 字段另排到 InstanceMirrorKlass 区域。注意资料里流传的 "FieldLayoutBuilder" 在 jdk11u 里并不存在——布局就在 `ClassFileParser::layout_fields` 里。parse_fields 还会追加 **injected fields**(:1575-1578,`JavaClasses::get_injected`——JVM 内部注入的隐藏字段,如 `java.lang.Class` 的 klass 指针,Java 层看不到)。
+`fac->update` 按字段类型把字段分进**五类分配桶**(oop、byte/boolean/char、short、int、long/double,static 与 nonstatic 各一套,`FieldAllocationType`,classFileParser.cpp:1453-1466)——**这就是 06-03 字段布局的输入**: 后续 `layout_fields`(classFileParser.cpp:3934,:6411 调用)按桶排偏移,顺序由 `FieldsAllocationStyle` 标志决定(globals.hpp:940,默认 1): **默认是 longs/doubles、ints、shorts/chars、bytes、最后 oops 加填充**(注释 classFileParser.cpp:4072)——oop 字段排最后,只有 `FieldsAllocationStyle=0` 才是 oops 在前(注释 :4067),而少数硬编码偏移的核心类(java.lang.Class/ClassLoader/Reference 等)固定走 style 0(:4038-4043);static 字段的偏移另算(`fac->count[STATIC_*]` 汇总成 static_field_size,:3966-3975),实际落在 InstanceMirrorKlass 的静态区。注意资料里流传的 "FieldLayoutBuilder" 在 jdk11u 里并不存在——布局就在 `ClassFileParser::layout_fields` 里。parse_fields 还会追加 **injected fields**(:1575-1578,`JavaClasses::get_injected`——JVM 内部注入的隐藏字段,如 `java.lang.Class` 的 klass 指针,Java 层看不到)。
 
 ### parse_methods: Code 属性的读取
 
@@ -142,14 +142,14 @@
 ```
 
 - native/abstract 方法不允许带 Code,一个方法不允许两个 Code(都是格式错误);
-- 然后读 max_stack/max_locals/code_length——**45.2 以下的老版本用 1+1+2 字节,新版本 2+2+4**(:2485-2492)——之后 code 字节直接取指针跳过(:2502,`code_start = cfs->current()` 不拷贝!);
+- 然后读 max_stack/max_locals/code_length——**45.2 以下的老版本用 1+1+2 字节,新版本 2+2+4**(:2483-2492)——之后 code 字节直接取指针跳过(:2502,`code_start = cfs->current()` 不拷贝!);
 - exception_table、以及 Code 内嵌属性(LineNumberTable/LocalVariableTable/StackMapTable——StackMapTable 的原始字节留着给 Verifier,下一篇)。
 
 ### 类级属性与 InstanceKlass 的诞生
 
 `parse_classfile_attributes`(classFileParser.cpp:3440 起)处理类级属性: SourceFile/SourceDebugExtension/InnerClasses/Synthetic/Signature/EnclosingMethod/RuntimeVisibleAnnotations…,其中两个值得注意——**BootstrapMethods**(:3596,invokedynamic 的引导方法表,Java 7 引入)与 Java 11 的新面孔 **NestHost/NestMembers**(:3640/:3627,嵌套类访问控制)。[实证] 里 javac 17 把字符串拼接编译成 `InvokeDynamic` + BootstrapMethods(StringConcatFactory.makeConcatWithConstants,materials/commands/07-classfile-javap.txt)——拼接的"怎么拼"不在字节码里,而在引导方法的参数里。
 
-解析收尾分两步: `post_process_parsed_stream`(:6310 起)算**传递接口**(`compute_transitive_interfaces`,:6378)、算 **itable 大小**(`klassItable::compute_itable_size`,:6405——06-02 的 itable 在这里被预定)、`layout_fields`(:6411)定字段偏移;然后 `create_instance_klass` → `InstanceKlass::allocate_instance_klass`(:5572)分配对象,`fill_instance_klass`(:5598)填内容(:5609-5612,截取核心,逐字):
+解析收尾分两步: `post_process_parsed_stream`(:6321 起)算**传递接口**(`compute_transitive_interfaces`,:6378)、算 **itable 大小**(`klassItable::compute_itable_size`,:6405——06-02 的 itable 在这里被预定)、`layout_fields`(:6411)定字段偏移;然后 `create_instance_klass` → `InstanceKlass::allocate_instance_klass`(:5572)分配对象,`fill_instance_klass`(:5598)填内容(:5609-5612,截取核心,逐字):
 
 ```cpp
 // classFileParser.cpp:5609-5612(截取核心,逐字)
