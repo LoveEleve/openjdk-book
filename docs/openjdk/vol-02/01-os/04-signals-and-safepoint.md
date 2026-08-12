@@ -155,7 +155,17 @@ si_addr 是序列化页?      → 内存屏障(508-510)
 
 ## 看见:信号处理器的实物
 
-`jcmd <pid> VM.info` 的输出里有一段信号处理器列表(域 02 实测):每个信号一行,显示 JVM 是否注册了 handler——`SIGSEGV` 显示 `JVM_handle_linux_signal` 的地址。下次看到 `kill -3` 打出线程栈、看到 JIT 代码里隐式 null check 不 crash,你就知道背后是同一个函数在按 si_addr 做五次判决。
+`jcmd <pid> VM.info` 的输出里有一段信号处理器列表(域 02 实测):
+
+```
+Signal Handlers:
+   SIGSEGV: javaSignalHandler in libjvm.so, mask=11100100010111111101111111111110,
+            flags=SA_RESTART|SA_SIGINFO, unblocked
+    SIGBUS: javaSignalHandler in libjvm.so, ... flags=SA_RESTART|SA_SIGINFO, unblocked
+   SIGPIPE: javaSignalHandler in libjvm.so, ... flags=SA_RESTART|SA_SIGINFO, unblocked
+```
+
+每行两个要点: handler 名(`javaSignalHandler`——JVM 信号处理入口)和 **flags=SA_RESTART|SA_SIGINFO**——正是本节讲的"带 siginfo 的链式处理"的两个开关。下次看到 `kill -3` 打出线程栈、看到 JIT 代码里隐式 null check 不 crash,你就知道背后是同一个函数在按 si_addr 做五次判决。
 
 ## 核心悬念
 
