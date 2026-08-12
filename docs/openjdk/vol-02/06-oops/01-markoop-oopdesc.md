@@ -92,7 +92,7 @@ mark word 的位分配写死在注释里(markOop.hpp:44-54,逐字):
     }
 ```
 
-`get_next_hash`(synchronizer.cpp:669-703)按 `hashCode` flag 选算法——默认值 5(globals.hpp:875,experimental flag)走 Marsaglia xor-shift(线程私有状态,每线程独立序列);选项 0 是 Park-Miller 全局随机数。生成后 `value &= hash_mask` 截断到 31 位,为 0 就改成 0xBAD 占位(synchronizer.cpp:700-702),保证"0 = 未计算"语义成立。**CAS 失败就走慢路径重试**——mark word 被别的线程动过(加锁、GC),重来。
+`get_next_hash`(synchronizer.cpp:669-703)按 `hashCode` flag 选算法——默认值 5(globals.hpp:875,experimental flag)走 Marsaglia xor-shift(线程私有状态,每线程独立序列);选项 0 是 Park-Miller 全局随机数。生成后 `value &= hash_mask` 截断到 31 位,为 0 就改成 0xBAD 占位(synchronizer.cpp:700-702),保证"0 = 未计算"语义成立。**CAS 失败就膨胀成重量锁**: 注释写明 "we must inflate the header into heavy weight monitor"(synchronizer.cpp:760-762)——mark word 被别的线程动过时,hash 改存进 ObjectMonitor 的 header,之后从 monitor 里读(:764-770),而不是简单重试。
 
 - [C++: 为什么 hash 不直接用对象地址?GC 搬对象,地址会变——hash 必须跟随对象一生不变,只能存进对象自己的头。这也是 `System.identityHashCode` 和 `Object.hashCode()`(可被覆写)的根本区别: 后者是普通方法,前者是 mark word 里的固化值]
 
@@ -144,13 +144,13 @@ void oopDesc::forward_to(oop p) {
 
 `encode_pointer_as_mark(p) = markOop(p)->set_marked()`——就是"指针 | 11"(markOop.hpp:356)。读旧位置时先查 `is_forwarded()`,是就调 `forwardee()` 拿新地址——实现就是 `mark_raw()->decode_pointer()`(oop.inline.hpp:398-400),把低 2 位清掉。**关键设计 (斜体)**: *转发不需要额外字段——对象被搬走后,旧位置的头就是唯一的寻址线索;任何线程(其他 GC 线程、应用线程读引用)走到旧地址都能一步找到新地址,而"转发+年龄"不能并存——搬走的对象已经不需要年龄了,这 8 字节空间恰好腾出来。*
 
-**关键设计 (斜体)**: *五种身份共用一个 word,靠低位位测试区分,没有标志位数组、没有对象级别字段。代价是状态切换必须原子(全部 CAS),而且身份之间互相排斥: mark 里写入 hash 后,对象就与类的偏向原型(含 epoch+年龄+101)不再匹配,`biased_lock_enter` 的 CAS 永不成功——有 hash 的对象再也不会被偏向(identity hash 安装前会先撤销偏向)。内存省下来的每一分,都是语义耦合换的。*
+**关键设计 (斜体)**: *五种身份共用一个 word,靠低位位测试区分,没有标志位数组、没有对象级别字段。代价是状态切换必须原子(全部 CAS),而且身份之间互相排斥: mark 里写入 hash 后,低 3 位不再是 101——`biased_locking_enter` 的第一道位测试(掩低 3 位比 5,macroAssembler_x86.cpp:1142-1144)直接把它分流到普通锁路径,永远不会尝试安装偏向;identity hash 安装前也会先撤销已有偏向。有 hash 的对象与偏向锁从此无缘。内存省下来的每一分,都是语义耦合换的。*
 
 ## 3. 第二个 word: 压缩的类指针
 
 ### 3.1 从 8 字节到 4 字节
 
-`_metadata` 的两种读法对应两种模式。64 位 JVM 上 `UseCompressedOops` 与 `UseCompressedClassPointers` 声明默认都是 false(globals.hpp:228,:232),但堆不超过 32G 时由 ergo 自动打开(arguments.cpp:1640-1644,:1661-1670)——所以常规配置下第二个 word 只占 4 字节,`Klass*` 被编码成"从压缩基址算起的偏移"。
+`_metadata` 的两种读法对应两种模式。64 位 JVM 上 `UseCompressedOops` 与 `UseCompressedClassPointers` 声明默认都是 false(globals.hpp:228,:232),但最大堆不超过 32G 减一页时由 ergo 自动打开(`set_use_compressed_oops`,arguments.cpp:1630-1644;类指针同源,:1661-1670)——所以常规配置下第二个 word 只占 4 字节,`Klass*` 被编码成"从压缩基址算起的偏移"。
 
 ### 3.2 编码与解码
 
@@ -196,7 +196,7 @@ bool oopDesc::is_oop(oop obj, bool ignore_mark_word) {
 }
 ```
 
-两道检查: ① 地址在堆的已分配区域里(`Universe::heap()->is_oop`);② mark word 非空——空只能在 safepoint 外出现(另一线程正在膨胀锁,mark 短暂为 0)。函数定义处的注释写明 "used only for asserts and guarantees"——**生产构建完全编译掉**,零运行时开销。
+两道检查: ① 地址在堆的已分配区域里(`Universe::heap()->is_oop`);② mark word 非空——mark 为空时,只有在 safepoint 外才可能是合法的(另一线程正在膨胀锁,mark 短暂为 0)。函数定义处的注释写明 "used only for asserts and guarantees"——**生产构建完全编译掉**,零运行时开销。
 
 - [C++: 网上资料常写"is_oop 检查 Klass 指针是否在 Metaspace"——jdk11u 的实现没有这步;校验逻辑就这两条,且只在 ASSERT 构建生效]
 
