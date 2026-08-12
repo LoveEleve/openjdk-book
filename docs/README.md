@@ -32,15 +32,13 @@
 * [第六章 — JMX 与火焰图](openjdk/vol-tools/ch06.md) — jconsole MBean 树 + perf 内核采样 + 栈折叠
 * [第七章 — 翻开 JDK 的箱子](openjdk/vol-tools/ch07.md) — jimage 镜像 + jlink 最小运行时 + jdeps 依赖图
 
-## 卷 2 · 运行时深处（写作中，按域规划组织）
+## 卷 2 · 运行时深处（写作中，按域依赖序组织）
 
-> 依据: `planning/outlines/` 48 个域目录、213 个大纲文件；写作顺序按 HANDOFF 阶段 A（工具素材关联最深的域先写）
+> 依据: `planning/outlines/` 48 个域目录、213 个大纲文件；写作顺序 = 48 域依赖拓扑 7 层（见 `planning/knowledge-planning/00-domain-writing-order.md`），从基础域写起
 
-* [32-jfr 域（6 篇大纲）](openjdk/vol-02/32-jfr) — 第一篇: recorder-engine（待写）
-* [28-jvmti 域](openjdk/vol-02/28-jvmti) — 待写
-* [24-frame 域](openjdk/vol-02/24-frame) — 待写
-* [18-safepoint 域](openjdk/vol-02/18-safepoint) — 待写
-* [36-attach 域](openjdk/vol-02/36-attach) — 待写
+* 第 1 批（地基）: 01-os → 05-cpu → 45-math → 48-utils — 未开始
+* 第 2 批（原语）: 02-assembler → 03-flags → 04-logging → 06-oops → 16-codecache → 38-perfdata → 41-zipjimage → 42-core-native — 未开始
+* 第 3-7 批: 见写作顺序文档（07→09→17 → 08→10→19→23→24→31→44 → … → 22→26→35→40→47）
 
 ## 卷 1-bak · 启动（已归档）
 
