@@ -310,6 +310,14 @@
   - **fill_instance_klass** :5598: add_class 挂 CLD :5609、apply_parsed_class_metadata :5632(所有权转移,断言 :5635 起全 NULL)、析构 :6015 失败回收(_klass_to_deallocate 交 CLD safepoint)
   - **classfile_parse_error**(classFileError.cpp:36)=抛 ClassFormatError;classFileStream.hpp: get_u1/u2/u4_fast :95-120(Bytes::get_Java_u2/u4 大端)、guarantee_more :88、at_eos :141
   - 实证: materials/commands/07-classfile-javap.txt(javap -v 常量池/Code/BootstrapMethods)+07-classfile-header-load.txt(hexdump cafe babe 0000 003d 0040;class+load 日志: 平台类 "shared objects file"=CDS 快路径、应用类 file: 走解析)
+- **02 篇(Verifier 与 StackMapTable,大纲漂移 11 处含 3 处编造,重点沉淀)**: verifier.cpp 2913 行/verifier.hpp 460/stackMapTable.cpp 442/stackMapFrame.hpp 297/stackMapTableFormat.hpp/verificationType.hpp 全在 share/classfile/
+  - **验证时机**: 链接阶段非加载时——InstanceKlass::verify_code(instanceKlass.cpp:686)→link_class_impl :790(rewrite_class :793 之前);入口 Verifier::verify(verifier.cpp:140)→ClassVerifier::verify_class(:603,跳 native/abstract/overpass)→verify_method(:630);**verify_code 函数不存在**(大纲编造),验证主体是 verify_method 内的 RawBytecodeStream 线性扫描
+  - **数据结构**: StackMapFrame(stackMapFrame.hpp:43-61,_locals/_stack=VerificationType 数组,_stack_mark 回退);**OperationStack 不存在**(编造);帧匹配=StackMapTable::match_stackmap(stackMapTable.cpp:71-123,注释四组合 :78-87: match=is_assignable_to 核对/update=copy 预计算帧替换——check 不 inference);is_assignable_to(stackMapFrame.cpp:158)/is_assignable_from(verificationType.hpp:267)
+  - **老验证器仍在**: inference_verify(verifier.cpp:274)=dlsym libjava VerifyClassCodesForMajorVersion/VerifyClassCodes(:66-89,libverify check_code.c);**<50 直接走老验证器**(:198-201),≥50 新验证器+<51 才可 failover(NOFAILOVER=51 :58,FailOverToOldVerifier 默认 true globals.hpp:518);BytecodeVerificationLocal=false/Remote=true(globals.hpp:561-564,bootstrap 信任)
+  - **frame_type 7 种**(stackMapTableFormat.hpp:159-165): 0-63 same(:229)/64-127 same_locals_1_stack_item(:334)/**247=same_locals_1_stack_item_extended(:407)非 same_frame_extended**/248-250 chop(251-tag,:484)/**251=same_frame_extended(:276)**/252-254 append(tag-251,:555)/255 full(:660);offset_delta 增量;chop/append 尾部增删
+  - **ITEM 枚举 0-8**(verificationType.hpp:36-46): Top=0/Integer=1/Float=2/Double=3/Long=4/Null=5/UninitializedThis=6/Object=7/**Uninitialized=8(非 NewObject,带 bci=new 指令偏移)**;parse_verification_type(stackMapTable.cpp:184-218): Object 校验 cpool 索引取名字不解析/Uninitialized 校验 NEW_OFFSET 标记(generate_code_data verifier.cpp:1763-1784)
+  - 操作码模拟: new→uninitialized_type(bci)(:1652-1654);invoke 五兄弟统一 verify_invoke_instructions(:2491);verify_stackmap_table :1858;STACKMAP_ATTRIBUTE_MAJOR_VERSION=50(verifier.hpp:39)
+  - 实证: materials/commands/07-classfile-verification-log.txt(-Xlog:verification=info "Verifying class ... with new format" 逐方法)+07-classfile-stackmap-javap.txt(javap StackMapTable: 253 append/16 same/250 chop 三帧演示增量编码)
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
