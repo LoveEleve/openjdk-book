@@ -1,7 +1,7 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-12 | 卷 2 写作中: **27/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 15 篇,06-oops 域完结,16-codecache 域 01 完成) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
-> **接收者: 新 AI —— 只读本文件,按"九、下一步"执行**
+> **状态**: 2026-08-12 | 卷 2 写作中: **27/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 15/26: 02/03/04/06 域完结,16-codecache 域 01 完成) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
+> **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
 
@@ -9,11 +9,11 @@
 
 **项目**: 写一本 OpenJDK 源码分析书("格物致知"),源码树 = jdk11u(`/data/workspace/jdk11u/src/hotspot/`)。
 
-**当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → 深审 → 提交。
+**当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 16-codecache/02(nmethod-structure,编译方法的内部结构——16 域 5 篇: 01 已完,02-05 待写)。
+**下一步(唯一,无选择)**: 16-codecache/02(nmethod-structure,编译方法的内部结构)。
 
-**铁律**: ① 一篇一篇写,写完自查+深审合格再下一篇;② 大纲/KP 的行号是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移**;③ 代码块贴真实源码(截取可,编造不可)——**凭记忆写值必错**;④ 每篇写完整理后做深审。
+**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移(27 篇无一例外)**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误,见 §6.5-4);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交。
 
 ---
 
@@ -30,7 +30,7 @@
 | 本交接文档 | `docs/openjdk/SESSION-HANDOFF.md` | 本文件 |
 
 **git 仓库**: `/data/workspace/source-code/openjdk-book/`(remote: git@github.com:LoveEleve/openjdk-book.git,main 分支,每篇一提交一推送)
-**旧交接文档**(本次会话起点,可参考历史): `/data/workspace/source-code/book/成长之路/tmp-question/training-camp/source-code/analysis/source-analysis/HANDOFF.md`(会话最初读的那份)
+**旧交接文档**(更早会话起点,可参考历史): `/data/workspace/source-code/book/成长之路/tmp-question/training-camp/source-code/analysis/source-analysis/HANDOFF.md`
 
 ---
 
@@ -40,7 +40,7 @@
 
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
-第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(15/26,16 域 1/5)
+第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(15/26: 02/03/04/06 完结,16 域 1/5)
 第 3 批(对象/类): 07 → 09 → 17
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
@@ -52,64 +52,50 @@
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
-| 01-os | 1-4 | `01-os/01-platform-detection.md` 等 4 篇 | ✅ 旧会话完成,本会话抽查修正 2 处(见 §六) |
-| 05-cpu-primitives | 1-2 | `05-cpu-primitives/01-atomic-and-memory-order.md` 等 2 篇 | ✅ 旧会话完成,本会话抽查修正 2 处(见 §六) |
-| 45-math-library | 1 | `45-math-library/01-poly-approximation.md`(315 行) | ✅ 本会话完成+深审 2 轮 |
-| 45-math-library | 2 | `45-math-library/02-stubroutine-native.md`(249 行) | ✅ 本会话完成+深审 2 轮 — **45 域完结** |
-| 48-utilities | 1 | `48-utilities/01-vmerror.md`(146 行) | ✅ 本会话完成+深审 |
-| 48-utilities | 2 | `48-utilities/02-concurrent-bitmap.md`(228 行) | ✅ 本会话完成+深审 |
-| 48-utilities | 3 | `48-utilities/03-stream-exception.md`(150 行) | ✅ 本会话完成+深审 |
-| 48-utilities | 4 | `48-utilities/04-utf8-json-decoder.md`(118 行) | ✅ 本会话完成 — **48 域完结,第 1 批全部完成** |
-| 02-assembler | 1 | `02-assembler/01-codebuffer-abstract-assembler.md`(214 行) | ✅ 本会话完成+深审 |
-| 02-assembler | 2 | `02-assembler/02-x86-register-operand-encoding.md`(219 行) | ✅ 本会话完成+深审 |
-| 02-assembler | 3 | `02-assembler/03-x86-assembler-instruction-set.md`(185 行) | ✅ 本会话完成+深审 |
-| 02-assembler | 4 | `02-assembler/04-x86-macroassembler-runtime.md`(164 行) | ✅ 本会话完成+深审 — **02 域完结** |
-| 03-arguments-flags | 1 | `03-arguments-flags/01-flag-definition-system.md`(179 行) | ✅ 本会话完成+深审 |
-| 03-arguments-flags | 2 | `03-arguments-flags/02-flag-processing-and-management.md`(159 行) | ✅ 本会话完成+深审 — **03 域完结** |
-| 04-logging | 1 | `04-logging/01-tag-and-selection.md`(183 行) | ✅ 本会话完成+深审;后续深审修正 2 处(级别判断方向、多选择器"首个匹配"→"后命中覆盖",2026-08-12 补丁 d1fa856) |
-| 04-logging | 2 | `04-logging/02-output-and-configuration.md`(265 行) | ✅ 本会话完成+深审 2 轮 — **04 域完结** |
-| 06-oops | 1 | `06-oops/01-markoop-oopdesc.md`(207 行) | ✅ 本会话完成+深审 2 轮 |
-| 06-oops | 2 | `06-oops/02-klass-hierarchy.md`(169 行) | ✅ 本会话完成+深审 2 轮 |
-| 06-oops | 3 | `06-oops/03-instanceklass-arrayklass.md`(167 行) | ✅ 本会话完成+深审 2 轮(补 InstanceKlass 仓库章节) |
-| 06-oops | 4 | `06-oops/04-constantpool-method.md`(129 行) | ✅ 本会话完成+深审 2 轮 |
-| 06-oops | 5 | `06-oops/05-access-api-barrier.md`(116 行) | ✅ 本会话完成+深审 2 轮 |
-| 06-oops | 6 | `06-oops/06-symbol-annotations-aux.md`(104 行) | ✅ 本会话完成+深审 2 轮 — **06 域完结** |
-| 16-codecache | 1 | `16-code-cache/01-codeblob-heap.md`(115 行) | ✅ 本会话完成+深审(整体 REVIEW 同日) |
+| 01-os | 1-4 | `01-os/` 4 篇 | ✅ 旧会话完成,抽查修正 |
+| 05-cpu-primitives | 1-2 | `05-cpu-primitives/` 2 篇 | ✅ 旧会话完成,抽查修正 |
+| 45-math-library | 1-2 | `45-math-library/` 2 篇 | ✅ 本会话前完成 — 45 域完结 |
+| 48-utilities | 1-4 | `48-utilities/` 4 篇 | ✅ 本会话前完成 — 48 域完结,第 1 批全部完成 |
+| 02-assembler | 1-4 | `02-assembler/` 4 篇 | ✅ 完成 — 02 域完结 |
+| 03-arguments-flags | 1-2 | `03-arguments-flags/` 2 篇 | ✅ 完成 — 03 域完结 |
+| 04-logging | 1-2 | `04-logging/` 2 篇 | ✅ 完成 — 04 域完结(02 篇 d1fa856) |
+| 06-oops | 1-6 | `06-oops/01-markoop-oopdesc.md`(207 行)…`06-symbol-annotations-aux.md`(104 行) | ✅ 本会话完成 — **06 域完结**(六篇,大纲 60+ 处错误全部回填) |
+| 16-codecache | 1 | `16-code-cache/01-codeblob-heap.md`(115 行) | ✅ 本会话完成 — 16 域 1/5 |
 
-**每篇 commit 号**: 以 git log 为准(最近: 04域02=063ac6e(README)/d1fa856(正文+大纲回填);04域01=56de984/9bf0811/a959b38;03域02=7468c41/d9d44fb/df9f3f8;02域04=a702145/70352ea/385e44f)
+**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04 各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。04 域特别回填: 02 大纲 11 处漂移/编造(dup2 轮转、SIGUSR2 信号轮转、13 种装饰器、LogMessageBuffer 栈缓冲+truncate 均为编造;真实机制见大纲 ⚠️ 块)。
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 16-02 前先读 16-01 大纲 ⚠️ 块**(含 section 枚举位置等已验证事实)。
 
 ---
 
 ## 三、每篇写作流程(严格执行,不可省略)
 
 ```
-1. 读大纲: planning/outlines/<NN>-<域>/<NN>-<篇>.md
+1. 读大纲: planning/outlines/<NN>-<域>/<NN>-<篇>.md(注意 ⚠️ 写作期修正块)
 2. 读 KP: planning/knowledge-planning/<NN>-<域>.md(若大纲信息不足)
-3. 【铁律】验证大纲里所有 file:line —— 逐个 grep/sed 核对,发现漂移用真实行号
-   —— 实测: 大纲几乎每篇都有 2-8 处错误/漂移,绝不可照抄
+3. 【铁律】验证大纲里所有 file:line 与"专有名词存在性"——逐个 grep/sed 核对,发现漂移用真实行号
+   —— 实测: 大纲几乎每篇都有 2-8 处错误/漂移,绝不可照抄;行号对了名字也可能是假的(见 §6.5-1)
 4. 写正文到 vol-02/<NN>-<域>/<NN>-<篇>.md
 5. 自查:
-   - 代码块与源码逐字核对(脚本 diff,sed 对比;省略行必须用 "..." 占位)
-   - 五维检查表(见 §四)
+   - 代码块与源码逐字核对(python 脚本: 提取块内行逐一比对源文件区间)
+   - 所有 file:line 范围验证(脚本: 文件名→目录映射,行号在 [1, 文件行数] 内)
+   - 星号配对(代码 span 剔除后)、文字锚(文件名后无行号)、TODO 残留
    - 工具实证引用必须真实存在(materials/ 里 grep 到才引用)
 6. git add + commit + push(信息: 域/篇/深审修正清单;中文)
 7. 更新 vol-02/README.md 勾选进度(单独 commit)
 ```
 
-**深审流程**(用户每篇都会要求,写完后主动做,不要等):
+**深审流程(写完后主动做 2 轮,不要等用户要求)**:
 ```
-1. 按深审缺陷档案 15 类逐类检查(见 §四)
-2. 重点: ① 写作时"凭记忆"写的任何值/行号/机制描述——回源码核对
-       ② 正文引用的 file:line 内容语义(不是存在性)
-       ③ 数字自洽(全文 grep 关键数字)
-       ④ #7 文字锚(文件名后无行号的引用)
-       ⑤ **跨篇一致性**: 每篇末尾悬念 OUTBOUND 行的描述文字常残留旧大纲错误
-          (实证: 48 域 3 篇的悬念行残留 per-bucket mutex/gclog/JSONWriter,正文深审后没同步)
-          ——深审正文后必须回头核对悬念行
-       ⑥ 交接文档/元文档也要自查(本次就发现 7/10→7/26 的篇数错误)
-3. 发现错误 → 修正文章 → 回填大纲(#15 规则,防止下次抄错)→ 提交
+第 1 轮: 通读全文 + 跑自查脚本(代码块/行号/星号/文字锚/TODO)
+第 2 轮(最重要,专门抓"写对但机制是编的"):
+   ① 写作时"凭记忆/凭直觉"补的机制描述——逐个回源码核对(识别信号: "所以/为什么能/自然"开头的推导段)
+   ② 正文引用的 file:line 内容语义(不是存在性)
+   ③ 数字自洽(全文 grep 关键数字,含默认值/枚举值)
+   ④ #7 文字锚(文件名后无行号的引用)
+   ⑤ 跨篇一致性: 本篇 OUTBOUND 悬念行描述、上篇悬念承诺的话题(逐条对照正文是否覆盖)
+   ⑥ 元文档自查(HANDOFF/README 篇数)
+发现错误 → 修正文章 → 回填大纲(#15 规则)→ 提交
 ```
 
 ---
@@ -117,10 +103,10 @@
 ## 四、方法论体系(写作规范全集)
 
 ### 4.1 WRITING-GUIDELINES.md(`docs/openjdk/WRITING-GUIDELINES.md`,10 条)
-1. 去 AI 味(写的是书,不是文档;无模板标题/无✅❌符号——注意 README 可用 ✅,正文不可)
+1. 去 AI 味(写的是书,不是文档;无模板标题/无✅❌符号——README 可用 ✅,正文不可)
 2. **依赖驱动排序(A 依赖 B,先写 B)** ← 48 域拓扑的依据
 3. 从问题开始(先"为什么"再"是什么")
-4. 禁止前向引用("后面会讲"=结构错了)
+4. 禁止前向引用("后面会讲"=结构错了;跨域导航如"细节在 25-gc 域"可以,本域内不行)
 5. 构造/运行时严格分离
 6. 一个概念改三轮讲不通 → 删除
 7. 说人话(先人话再源码术语)
@@ -128,19 +114,19 @@
 9. 画流程图(时间线/数据流)
 
 ### 4.2 v5 文章格式(每篇固定结构)
-- 头部: `# NN. 标题 — 问题句` + `> **前置依赖**`(链接前文)+ `> → **后续**`(链接下一篇)+ `> 关联域`
+- 头部: `# NN. 标题 — 问题句` + `> **前置依赖**`(链接前文,文本与目标标题一致)+ `> → **后续**`(链接下一篇)+ `> 关联域`
 - 开篇: 场景句(为什么问这个问题)
-- 每机制段落四要素: 场景 → 技术描述(file:line+函数名) → **关键设计 (斜体)**(why)→ 跨层标注([C++:] [x86:] [man N xxx])
+- 每机制段落四要素: 场景 → 技术描述(file:line+函数名) → **关键设计 (斜体)**(why)→ 跨层标注([C++:] [x86:] [man N xxx] [实证:])
 - 结尾: `## 核心悬念`(一段话总结本篇+桥到下一篇)+ `> → [下一篇](...)`
-- 代码块: 首行标注 `// file.cpp:start-end(截取核心/注释/逐字)`
-- 跨篇引用用 `[域 NN 篇 X — 标题](openjdk/vol-02/NN-域/0X-*.md)` 相对路径
+- 代码块: 首行标注 `// file.cpp:start-end(截取核心/注释/逐字)`;标注范围必须与内容精确对应(含闭合括号行)
+- 跨篇引用用相对/`openjdk/vol-02/...` 路径;**链接文本必须与目标文章标题一致**(本会话抓过 3 处不一致)
 
 ### 4.3 书稿代码块纪律(血泪总结,每篇深审都靠它抓错)
-1. **代码块 = 真实源码**: 截取可(省略模板/错误处理,用 "..." 占位),核心语句逐字,**禁止凭记忆写值/编码/常量**
+1. **代码块 = 真实源码**: 截取可(省略模板/错误处理,用 "..." 占位),核心语句逐字,**禁止凭记忆写值/编码/常量/注释**(注释也不能编!抓过 itableOffsetEntry 的编造注释)
 2. **行号写作时重新 grep**: 大纲/KP 是规划期产物,行号大量漂移——每篇实测都有 2-8 处漂移
-3. **自查命令**: 文章每个 file:line 逐个 `sed -n`;代码块与源码 diff(脚本: 提取块内行逐一 grep -qF 文章)
-4. **文件名必须 find 验证**: 目录/文件路径凭记忆必错(jdk11u 有重构: flags/ 子目录、share/code/ 等)
-5. **大纲的"篇数"也要重验**: 规划文档的篇数可能过时(第 2 批实际 26 篇: 06-oops=6、16-code-cache=5、42-core-native=3,规划印象中的 "7/10" 是错的)——进度表述以 outlines/ 实际文件数为准
+3. **自查脚本**: 文章每个 file:line 逐个核对(范围+存在性);代码块与源码逐行 diff(提取块内行逐一 grep -qF)
+4. **文件名必须 find 验证**: 目录/文件路径凭记忆必错(jdk11u 有重构: flags/ 子目录、share/asm/ 的 codeBuffer.hpp 等)
+5. **大纲的"篇数/数字"也要重验**: 规划文档的篇数可能过时(第 2 批实际 26 篇: 06-oops=6、16-code-cache=5、42-core-native=3,规划印象中的 "7/10" 是错的)——进度表述以 outlines/ 实际文件数为准
 
 ### 4.4 深审缺陷档案(`/data/workspace/source-code/book/成长之路/tmp-question/training-camp/source-code/issue/源码分析深审缺陷档案.md`,15 类)
 - A 内容层: #1 事实错误 / #2 API 编造 / #3 文件名推断 / #4 跨项目转移 / #5 覆盖率 / #6 跨层不一致
@@ -156,80 +142,100 @@
 | 素材索引 | `planning/outlines/00-jvm-tools/materials/INDEX.md` | 按域查素材的入口 |
 | JFR 录制 | `materials/jfr-recordings/rec-demo.jfr` 等 10 个 | 事件计数实证 |
 | 命令输出 | `materials/commands/` 115 文件 | jcmd/jstat/jmap 等真实输出 |
-| 卷 T 文章 | `vol-tools/ch01-07.md` | 引用格式: "[卷 T ch05](openjdk/vol-tools/ch05.md)" |
+| 卷 T 文章 | `vol-tools/ch01-07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证。
+**引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证(如 JOL 对象头输出)不要引用,改为布局推导。
 
 ---
 
-## 六、本次会话实战经验(最重要,新 AI 必读)
+## 六、本会话实战经验(最重要,新 AI 必读)
 
-### 6.1 大纲漂移的规律(19 篇全部出现,2-8 处/篇)
-**任何机制描述/行号/值,一律当"线索"而非"事实"**。高频漂移类型:
+### 6.1 大纲漂移的规律(27 篇全部出现,2-8 处/篇)
+**任何机制描述/行号/值/专有名词,一律当"线索"而非"事实"**。高频漂移类型:
 1. **机制编造**(最严重): 大纲把"想当然的实现"写成机制——实证全部是编造:
-   - 02-01: "delayed_nop" 编造(实际是 Label 长格式预发+add_patch_at 回填;delayed 类机制是 DelayedConstant@assembler.cpp:205)
+   - 02-01: "delayed_nop" 编造(实际是 Label 长格式预发+add_patch_at 回填)
    - 02-02: "XMM 16 个" 实为 32 个(jdk11u 支持 AVX-512);"VMReg 负数=栈槽" 实为 stack0 正数
-   - 03-01: "PRODUCT_FLAG 宏" 编造(实际 RUNTIME_FLAGS 14 参巨型宏);"Origin 5 级" 实为 9 级;"GLOBALS_EXTENSION" 实为三宏集合
+   - 03-01: "PRODUCT_FLAG 宏" 编造(实际 RUNTIME_FLAGS 14 参巨型宏);"Origin 5 级" 实为 9 级
    - 04-01: "标签树/父指针/前缀 walk" 编造(实际扁平枚举+子集匹配);"LogLevel Trace=0" 顺序反了(Off=0)
    - 48-02: "per-bucket mutex" 实为指针低 2 位嵌入 spinlock;"双重哈希" 不存在
-   - 48-03: "gclog_or_tty" jdk11u 不存在;"debug_check_abort=消息框" 实为 AbortVMOnException 匹配
+   - 06-01: **markOop 五种状态位布局全错**(真实: 低 2 位 lock: 0=轻量/1=unlocked/2=monitor/3=marked,第 3 位 biased,biased_pattern=101=5;大纲"0/1/2-3/4-5/6-7"全错);"64 位 hash 25 位"实为 31 位
+   - 06-02: **KlassLayoutHelper 类不存在**;"is_instance = lh<0"方向反(实为 lh>0);"~20 种 Klass 子类"实为 7 个;invokevirtual 汇编序列编造(真实 load_klass+lookup_virtual_method 一条 movptr)
+   - 06-04: **MethodLinker 类不存在**(Method::link_method 直接设);"CompileThreshold 默认 10000→C1"错(C1=1500/C2=10000 x86);"_indy_bsm 字段"编造(实际 operands 数组)
+   - 06-05: "OopHandle=OopStorage index"错(实为 oop* 封装);"WeakHandle=tag"错(实为独立弱处理存储);"零运行时 dispatch"不准确(resolve_barrier 运行时解析)
+   - 06-06: "_hash 字段"编造(实为 _identity_hash 短字段+动态算);"AnnotationArray 扁平 int 数组"实为 Array<u1>;"_holder_method: Method*"编造(实为 Metadata*+_is_metadata_method)
+   - 16-01: "CodeCache::allocate :181-210"实为 :482;"NonNMethod ~5MB"实为 32M(x86)
 2. **版本漂移**: 大纲写的是 JDK 8/其他版本的机制:
-   - safepoint_poll: 全局轮询页 → jdk11u 是 thread-local poll(testb thread 偏移的 poll 位)
-   - Math intrinsic: "fsin/fcos" → 64 位是 SSE2 软件多项式(45-01 已证)
-   - 堆自适应: RAMFraction → 已废弃,jdk11u 用 RAMPercentage(gc_globals.hpp)
+   - safepoint_poll: 全局轮询页 → jdk11u 是 thread-local poll
+   - "constantPoolOopDesc 继承 oopDesc" → jdk11u 是 ConstantPool : Metadata
 3. **行号漂移**: 大纲行号与实际差几十到几百行(规划期 2026-08-08 的产物)
-4. **文件名漂移**: jvmFlag 在 share/runtime/flags/(重构);writeableFlags 在 share/services/
+4. **文件名漂移**: jvmFlag 在 share/runtime/flags/;codeBuffer.hpp 在 **share/asm/** 不在 share/code/;symbolTable.hpp 在 **share/classfile/** 不在 share/oops/;CodeHeap 在 **share/memory/heap.hpp**;accessBackend.hpp 在 share/oops/
 
 ### 6.2 写作期"凭记忆"错误(自查 diff 抓出的真实案例,每篇深审必有)
 - 02-02: REX_WRB 写成 0x4F(实际 0x4D,assembler_x86.hpp:537)
-- 02-03: addsd 的 VEX 编码写成 66 前缀(实际 F2,simd_prefix_and_encode(dst,dst,src,VEX_SIMD_F2,...))
-- 03-02: JAVA_OPTS(实际 _JAVA_OPTIONS,arguments.cpp:3317);set_aggressive_opts_flags 语义(GC 互斥→实际是 AggressiveOpts 联动 EliminateAutoBox/DoEscapeAnalysis 等)
+- 02-03: addsd 的 VEX 编码写成 66 前缀(实际 F2)
+- 03-02: JAVA_OPTS(实际 _JAVA_OPTIONS,arguments.cpp:3317)
 - 04-01: 标签数 "~100"(实际 143)
-- **教训**: 凡代码块里的值/编码/常量,写完必须用 sed 逐行对照;数字先数后写
-
-### 6.5 06-oops 域新增经验(2026-08-12,5 篇 30+ 处,接 6.1/6.2)
-1. **规划期"发明"专有名词**(最危险,识别=必 grep 存在性): KlassLayoutHelper、MethodLinker、constantPoolOopDesc、"~20 种 Klass 子类"(实际 7 个)、_indy_bsm/_indy_name/_indy_type 字段——AI 规划时编造"听起来合理"的类/函数/字段名,行号查不出问题,名字本身是假的
-2. **流传说法与源码相反**(常见知识陷阱): SATB"增量更新"(实为 Snapshot-At-The-Beginning 开始时刻快照,05 初稿就写反了)、"OopHandle=OopStorage index"(实为 oop* 封装)、"WeakHandle=OopHandle+weak tag"(实为独立弱处理存储)、"invokevirtual 4 次 deref"(实为 load_klass+lookup_virtual_method 一条 movptr,macroAssembler_x86.cpp:4640-4652)、"is_oop 查 KlassID/Metaspace"(实为 heap 范围+mark 非空两查)
-3. **枚举/位布局是重灾区**: markOop 五种状态位布局全错(真实 locked=0/unlocked=1/monitor=2/marked=3/biased_pattern=101)、KlassID 顺序(Ref=1/Mirror=2)、FieldInfo 槽 4-5 低 2 位 tag(01/10/11)、_init_state 6 态(漏 initialization_error)——凡"枚举顺序/位分配/编号"逐字对照定义,不能凭印象
-4. **深审第 2 轮才抓到的"顺理成章"机制错误**(第 1 轮自查过了还错): vtable 构建"先复制父表再覆写/追加"(初稿写成"长度继承+归位",真实 initialize_from_super→copy_vtable_to,klassVtable.cpp:138-155,注释 :205-206)、SATB 入队路径(线程本地/共享队列,非"满转全局",g1BarrierSet.cpp:62-69)、FastHashCode CAS 失败=膨胀成 monitor 存 hash(非"重试",synchronizer.cpp:760-762)、biased_locking_enter 第一道位测试分流(非"CAS 永不成功",macroAssembler_x86.cpp:1142-1144)、ConstMethod 布局"结构之后"非"固定头之后"
-   - **识别信号**: 正文里"所以/为什么能这么做/自然"开头的推导段最可疑——那是写作时凭直觉补的,必须回源码找依据
-5. **覆盖率缺口**: 03 篇初稿漏 InstanceKlass 仓库(02 篇悬念承诺 4 件事+KP 规划"InstanceKlass 体系+ArrayKlass 体系"只有数组)——**写完对照"上篇悬念承诺话题"逐条勾选**;跨篇悬念行是最可靠的大纲(它承诺了什么就该写什么)
-6. **06 篇新增(2026-08-12,收官篇)**: ① **"语义方向反了"成为独立模式**——大纲常把源码行为写成恰好相反: as_C_string"不加\0"(实际 null-terminated,symbol.cpp:123-127)、_refcount"非 atomic"(实际 volatile+Atomic::inc/add,symbol.cpp:277-289)、SATB"增量更新"(实际开始时刻快照)、"is_oop 查 KlassID"——识别: 带否定词的描述("不/没有/无需")重点核;② **类型编造**: "AnnotationArray 扁平 int 数组"实为 Array<u1>(annotations.hpp:38);③ **跨篇矛盾提前发现**: 06 大纲"FieldInfo 含 attributes_count"与 03 篇已写内容矛盾——以已有文章+源码为准,跨篇一致性从"写时对照"变成"大纲验证时对照";④ SymbolTable 用全局 SymbolTable_lock 而 StringTable 用 ConcurrentHashTable——同域两表一锁一并发,写对比时必查实现
-
-### 6.6 错误根因(为什么"每篇 2-8 处"不可避免)
-1. 大纲是规划期 AI 生成,"像真的"的编造是最危险形态——名字合理、机制自洽,唯独源码里不存在
-2. 写作期大脑默认路径: 大纲说法"合理"→直接写,而不是"每个机制先 grep 再写"(铁律 ③ 的对抗者)
-3. 自查脚本只能抓"写错"(行号/代码块/数字),抓不了"写对但机制是编的"——机制正确性只能靠人工深审,且第 1 轮常被自己的叙述带着走,第 2 轮逐条质疑才有效
-4. 结论: **深审必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑),沉淀要即时(本篇教训进本文件后再写下一篇)
+- 06-02: **vtable 构建机制凭直觉写成"长度继承+逐个归位"**(实际 initialize_vtable 先 initialize_from_super 把父表**整体复制**进子表再覆写/追加,klassVtable.cpp:138-155,注释 :205-206)——这是深审第 2 轮才抓到的
+- 06-02: itableOffsetEntry 代码块里**编造了字段注释**(源码无注释)——#14 违规,自查 diff 抓出
+- **教训**: 凡代码块里的值/编码/常量/注释,写完必须用 sed 逐行对照;数字先数后写;推导段("所以/为什么能")必须回源码找依据
 
 ### 6.3 平台/环境事实(写作时已确认)
 - **jdk11u 源码树只含 x86 平台**(cpu/ 只有 x86,os/ 只有 linux/posix)——不要断言其他平台的实现细节(ARM 等无法验证,写了就是编造)
-- jdk11u 关键位置: flags/ 在 share/runtime/flags/;vmreg.hpp 在 share/code/;os.hpp/os.cpp 在 share/runtime/;assembler 在 share/asm/ + cpu/x86/
-- 常用实证: CodeEntryAlignment=32(globals_x86.hpp:49)、UseLibmIntrinsic 默认 true(globals_x86.hpp:217)、ErrorLogTimeout=2*60(globals.hpp:636)
+- jdk11u 关键位置: flags/ 在 share/runtime/flags/;vmreg.hpp 在 share/code/;os.hpp/os.cpp 在 share/runtime/;assembler 在 share/asm/ + cpu/x86/;codeBuffer.hpp 在 **share/asm/**;symbolTable.hpp/stringTable.hpp 在 **share/classfile/**;CodeHeap 在 **share/memory/heap.hpp**;accessBackend.hpp 在 share/oops/;markOop 在 share/oops/
+- 常用实证: CodeEntryAlignment=32(globals_x86.hpp:49)、UseLibmIntrinsic 默认 true(globals_x86.hpp:217)、ErrorLogTimeout=2*60(globals.hpp:636)、CompileThreshold C1=1500(c1_globals_x86.hpp:43)/C2=10000(c2_globals_x86.hpp:43)、NonNMethodCodeHeapSize=32M(globals.hpp:92)、MaxTenuringThreshold=15(gc_globals.hpp:699)、ObjectAlignmentInBytes=8(globals.hpp:245)、LogMinObjAlignmentInBytes=exact_log2(ObjectAlignmentInBytes)(arguments.cpp:1605)、UnscaledOopHeapMax=4G/OopEncodingHeapMax=32G(globalDefinitions.hpp:517-520,值在 arguments.cpp:1609)、card_shift=9→card_size=512(cardTable.hpp:231-232)
 
 ### 6.4 已完成的交叉引用关系(写作时保持一致性)
-- 45-01(fast_sin)→ 45-02(CodeBuffer/生成管道)→ 48-01(vmError,含 StubCodeDesc 名字链)→ 48-02(并发表/位图)→ 48-03(输出流/异常)→ 48-04(三种格式)
-- 02-01(CodeBuffer/Label)→ 02-02(编码)→ 02-03(指令)→ 02-04(MacroAssembler 运行时)→ 03-01(flag 定义)→ 03-02(flag 生命周期)→ 04-01(日志标签)→ 04-02(输出配置)→ 06-oops
-- 前文引用: 05-cpu-01(原子/屏障)、05-cpu-02(JavaFrameAnchor)、01-os-04(信号/safepoint)
+- 45-01(fast_sin)→ 45-02(CodeBuffer/生成管道)→ 48-01(vmError)→ 48-02(并发表/位图)→ 48-03(输出流/异常)→ 48-04(三种格式)
+- 02-01(CodeBuffer/Label)→ 02-02(编码)→ 02-03(指令)→ 02-04(MacroAssembler 运行时)→ 03-01(flag 定义)→ 03-02(flag 生命周期)→ 04-01(日志标签)→ 04-02(输出配置)
+- **06 域链**: 06-01(对象头,union 高 4 字节"普通对象填充")→ 06-02(Klass/vtable/itable)→ 06-03(InstanceKlass 仓库+数组,**数组 length 占 union 高 4 字节**——与 01 篇呼应)→ 06-04(常量池解析/Method 四入口)→ 06-05(Access API/barrier)→ 06-06(Symbol/注解/FieldStream/CompiledICHolder)→ 07-classfile-classloader/01(第 3 批)
+- **16 域链**: 16-01(CodeBuffer→CodeBlob/CodeHeap)→ 16-02(nmethod 结构)→ 16-03(生命周期)→ 16-04(relocation/IC)→ 16-05(dependencies/deopt)
+- 跨域: 02-01 的 CodeBuffer 是 16-01 的起点(前置依赖已链);06-04 的 Method 四入口与 16 域 nmethod 强相关
+
+### 6.5 06-oops 域新增经验(2026-08-12,6 篇 60+ 处,接 6.1/6.2)
+1. **规划期"发明"专有名词**(最危险,识别=必 grep 存在性): KlassLayoutHelper、MethodLinker、constantPoolOopDesc、"~20 种 Klass 子类"(实际 7 个)、_indy_bsm/_indy_name/_indy_type、_hash 字段、_holder_method——AI 规划时编造"听起来合理"的类/函数/字段名,行号查不出问题,名字本身是假的
+2. **流传说法与源码相反**(常见知识陷阱): SATB"增量更新"(实为 Snapshot-At-The-Beginning 开始时刻快照,05 初稿就写反了)、"OopHandle=OopStorage index"(实为 oop* 封装)、"WeakHandle=OopHandle+weak tag"(实为独立弱处理存储)、"invokevirtual 4 次 deref"(实为 load_klass+lookup_virtual_method 一条 movptr,macroAssembler_x86.cpp:4640-4652)、"is_oop 查 KlassID/Metaspace"(实为 heap 范围+mark 非空两查,oop.cpp:121-137)、"as_C_string 不加 \0"(实为 null-terminated,symbol.cpp:123-127)、"_refcount 非 atomic"(实为 volatile+Atomic::inc/add,symbol.cpp:277-289)、"SymbolTable 用 ConcurrentHashTable"(实为 RehashableHashtable+全局 SymbolTable_lock;StringTable 才是并发哈希)
+3. **枚举/位布局是重灾区**: markOop 五种状态位布局全错(真实 locked=0/unlocked=1/monitor=2/marked=3/biased_pattern=101)、KlassID 顺序(InstanceRef=1/InstanceMirror=2)、FieldInfo 槽 4-5 低 2 位 tag(01 偏移/10 带类型/11 争用组,fieldInfo.hpp:55-62)、_init_state 6 态(漏 initialization_error,instanceKlass.hpp:131-138)——凡"枚举顺序/位分配/编号"逐字对照定义,不能凭印象
+4. **深审第 2 轮才抓到的"顺理成章"机制错误**(第 1 轮自查过了还错): vtable"先复制父表再覆写/追加"(初稿"长度继承+归位")、SATB 入队路径(线程本地/共享队列,非"满转全局",g1BarrierSet.cpp:62-69)、FastHashCode CAS 失败=膨胀成 monitor 存 hash(非"重试",synchronizer.cpp:760-762)、biased_locking_enter 第一道位测试分流(非"CAS 永不成功",macroAssembler_x86.cpp:1142-1144)、ConstMethod 布局"结构之后"非"固定头之后"、find_blob 反查=段映射定位(非二分,heap.cpp:486)、FieldStream 不含父类字段(fieldStreams.hpp:102-109)
+   - **识别信号**: 正文里"所以/为什么能这么做/自然"开头的推导段最可疑——那是写作时凭直觉补的,必须回源码找依据
+5. **覆盖率缺口**: 03 篇初稿漏 InstanceKlass 仓库(02 篇悬念承诺 4 件事+KP 规划"InstanceKlass 体系+ArrayKlass 体系"只有数组)——**写完对照"上篇悬念承诺话题"逐条勾选**;跨篇悬念行是最可靠的大纲(它承诺了什么就该写什么)
+6. **"语义方向反了"独立模式**(06 篇收官): 大纲常把源码行为写成恰好相反——带否定词的描述("不/没有/无需")重点核,先假设它是错的,再去源码找真相
+7. **跨篇矛盾提前发现**: 06 大纲"FieldInfo 含 attributes_count"与 03 篇已写内容矛盾——以已有文章+源码为准;跨篇一致性从"写时对照"前移到"大纲验证时对照"
+8. **同域两表对比必查实现**: SymbolTable(全局锁)vs StringTable(并发哈希)——写对比时两个实现都要验证,不能套一个模板
+
+### 6.6 错误根因(为什么"每篇 2-8 处"不可避免)
+1. 大纲是规划期 AI 生成,"像真的"的编造是最危险形态——名字合理、机制自洽,唯独源码里不存在
+2. 写作期大脑默认路径: 大纲说法"合理"→直接写,而不是"每个机制先 grep 再写"(铁律 ② 的对抗者)
+3. 自查脚本只能抓"写错"(行号/代码块/数字),抓不了"写对但机制是编的"——机制正确性只能靠人工深审,且第 1 轮常被自己的叙述带着走,第 2 轮逐条质疑才有效
+4. 结论: **深审必须 2 轮**;沉淀要即时(本篇教训进 §6.5/6.7 后再写下一篇)
+
+### 6.7 16-codecache 域经验(01 篇,2026-08-12)
+- codeBuffer.hpp 在 **share/asm/**: section 枚举 :353-361(SECT_FIRST=0,CONSTS=0/INSTS/STUBS,顺序即最终布局,compute_final_layout codeBuffer.cpp:472 按枚举序紧凑排);Section 类字段 _start/_end/_limit/_locs_start/_locs_end 在 :86-92
+- CodeBlobType :40-44(struct 含 NumTypes=5);层次: CodeBlob :86 → RuntimeBlob :340(BufferBlob :383/AdapterBlob :424/VtableBlob :437/RuntimeStub :468/SingletonBlob :517/Deopt :554/UncommonTrap :642/Exception :672/Safepoint :703)+ CompiledMethod→nmethod;AOT 在 C 堆(codeBlob.hpp:54-56 注释)
+- CodeCache::allocate :482(降级路径注释 :510-512 "NonNMethod -> MethodNonProfiled -> MethodProfiled");commit :588;get_code_blob_type codeCache.hpp:260-273;SegmentedCodeCache 条件=分层+ReservedCodeCacheSize≥240MB(:61-66 注释)
+- CodeHeap 在 share/memory/heap.hpp:81:allocate heap.cpp:285(search_freelist :291+顺序后备 _next_segment)+deallocate :369(add_to_freelist :617,merge_right 合并);find_start :486(地址右移段大小→segmap 定位,非二分);VirtualSpace 页对齐=ReservedSpace::page_align_size_up(virtualspace.cpp:256)
 
 ---
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
-2. **每篇都做深度 REVIEW**: 用户会要求"按照方法论深度的 REVIEW",写完后**主动自查深审**,不要等
+2. **每篇都做深度 REVIEW(2 轮)**: 用户会要求"按照方法论深度的 REVIEW",写完后**主动自查深审,不要等**
 3. **一篇一篇写**: 不并行、不跳步
 4. **数字/事实必须验证**: 任何带数字的陈述回源码/素材验证,禁止"凭记忆"
 5. **命名混淆注意**: "域 01"与"05 域的第 01 篇"都带 01,表述时写清"域 XX 第 Y 篇"
 6. 中文交流,提交信息用中文
-7. 用户会追问"下一步规划是否合理"——要有自己的判断(如: 先抽查旧会话 01/05 篇再进第 2 批,用户采纳了)
+7. 用户会追问"下一步规划是否合理"——要有自己的判断
+8. **用户会追问"发现的问题都修复了吗/有沉淀吗"**——修复要有 commit 可查,沉淀要即时写进本文件 §6
+9. 链接文本必须与目标文章标题一致(整体 REVIEW 抓过 3 处)
 
 ---
 
 ## 八、待办清单(按优先级)
 
-- [ ] **16-codecache/02**(nmethod-structure)——16 域剩 4 篇(02-05)
-- [ ] 第 2 批剩余: 16-codecache → 38-perfdata → 41-zipjimage → 42-core-native
+- [ ] **16-codecache/02**(nmethod-structure)——大纲在 `planning/outlines/16-code-cache/02-nmethod-structure.md`,16 域第 2 篇
+- [ ] 16-codecache 剩余: 03-nmethod-lifecycle → 04-relocation-ic → 05-dependencies-deopt(16 域完结后 16 域 README 勾选)
+- [ ] 第 2 批剩余域: 38-perfdata → 41-zipjimage → 42-core-native
+- [ ] 第 3 批: 07-classfile-classloader(06 域悬念桥接指向它)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -243,7 +249,7 @@
 | 写作顺序权威依据 | `docs/openjdk/planning/knowledge-planning/00-domain-writing-order.md` |
 | 48 域权威清单 | `docs/openjdk/planning/00-domain-discovery-v3.md` |
 | 每域 KP | `docs/openjdk/planning/knowledge-planning/<NN>-<域>.md` |
-| 每域大纲 | `docs/openjdk/planning/outlines/<NN>-<域>/` |
+| 每域大纲(含 ⚠️ 回填) | `docs/openjdk/planning/outlines/<NN>-<域>/` |
 | 写作指南 | `docs/openjdk/WRITING-GUIDELINES.md` |
 | 深审缺陷档案 | `/data/workspace/source-code/book/成长之路/tmp-question/training-camp/source-code/issue/源码分析深审缺陷档案.md`(15 类) |
 | 卷 2 进度 | `docs/openjdk/vol-02/README.md` |
@@ -251,17 +257,23 @@
 | 工具素材 | `docs/openjdk/planning/outlines/00-jvm-tools/materials/` |
 | JDK 工具 | `/opt/codev/TencentKona/bin/`(17.0.8.1) |
 | GUI 手册 | `docs/openjdk/planning/outlines/00-jvm-tools/GUI-manual.md` |
-| 常用验证命令 | `sed -n 'start,endp' 文件`;`grep -n "函数名" 文件`;`find /data/workspace/jdk11u/src/hotspot -name "文件"`;块 diff 脚本: `sed -n 's,ep' f \| sed 's/^[0-9]*: *//' \| while read l; do grep -qF "$l" 文章 \|\| echo MISS; done` |
+| 自查脚本(代码块/行号/星号/锚) | 见 §三 第 5 步;文件→目录映射表见本文件 §6.3 |
+
+**自查脚本要点**(python,每篇跑):
+- 代码块: `re.findall(r'```cpp\n// (file):(s)-(e)\(...\)\n(.*?)```')` → 逐行比对 `src[s-1:e]`
+- 行号范围: 文件名→目录映射(share/oops/、share/code/、share/asm/、share/classfile/、share/memory/、share/runtime/、share/utilities/、share/gc/g1/、share/gc/shared/、cpu/x86/、make/autoconf/、os/linux/、os/posix/)→ 行号 ∈ [1, 行数]
+- 星号: 剔除代码 span 后 `count('*') % 2 == 0`
+- 文字锚: `(?!:)(file\.(?:cpp|hpp))(?!:\d)` 且文件存在 → 报错补行号
 
 ---
 
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/16-code-cache/01-*.md(大纲)
-2. 验证大纲所有 file:line(按 §六 的漂移规律,重点: CodeCache 分段/CodeHeap 结构/分配器机制是否编造)
-3. 按第三节流程写第一篇 → 自查 → 深审 → 回填大纲 → 提交 → 更新 README
-4. 06 域 6 篇全部完成后 → 16-codecache
+1. 读 planning/outlines/16-code-cache/02-nmethod-structure.md(大纲,注意 ⚠️ 块)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: nmethod 布局字段/oops 表/作用域描述是否编造;nmethod.hpp 在 share/code/)
+3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
+4. 16 域 5 篇全部完成后 → 38-perfdata
 ```
 
-**环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。
+**环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
