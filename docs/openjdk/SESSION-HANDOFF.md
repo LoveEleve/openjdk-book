@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-12 | 卷 2 写作中: **28/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 16/26: 02/03/04/06 域完结,16-codecache 域 2/5 完成) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
+> **状态**: 2026-08-12 | 卷 2 写作中: **29/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 17/26: 02/03/04/06 域完结,16-codecache 域 3/5 完成) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 16-codecache/03(nmethod-lifecycle,生命周期与扫除器)。
+**下一步(唯一,无选择)**: 16-codecache/04(relocation-ic,重定位与内联缓存)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移(27 篇无一例外)**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误,见 §6.5-4);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交。
 
@@ -40,7 +40,7 @@
 
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
-第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(16/26: 02/03/04/06 完结,16 域 2/5)
+第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(17/26: 02/03/04/06 完结,16 域 3/5)
 第 3 批(对象/类): 07 → 09 → 17
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
@@ -60,11 +60,11 @@
 | 03-arguments-flags | 1-2 | `03-arguments-flags/` 2 篇 | ✅ 完成 — 03 域完结 |
 | 04-logging | 1-2 | `04-logging/` 2 篇 | ✅ 完成 — 04 域完结(02 篇 d1fa856) |
 | 06-oops | 1-6 | `06-oops/01-markoop-oopdesc.md`(207 行)/02(168 行)/03(166 行)/04(129 行)/05(116 行)/06(104 行) | ✅ 本会话完成 — **06 域完结**(六篇,大纲 60+ 处错误全部回填) |
-| 16-codecache | 1-2 | `16-code-cache/01-codeblob-heap.md`(115 行)/02-nmethod-structure.md(288 行) | ✅ 本会话完成 — 16 域 2/5 |
+| 16-codecache | 1-3 | `16-code-cache/01-codeblob-heap.md`(115 行)/02-nmethod-structure.md(288 行)/03-nmethod-lifecycle.md(277 行) | ✅ 本会话完成 — 16 域 3/5 |
 
-**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
+**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01、02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 16-03 前先读 16-02 大纲 ⚠️ 块**(入口 IC 机制/状态机/行号均已验证,16-03 的 sweeper 主题注意与 02 篇 nmethodLocker/stack_traversal_mark 部分不重复)。
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01、02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 16-04 前先读 16-03 大纲 ⚠️ 块**(sweeper 机制/依赖失效链/GC 交接均已验证)。
 
 ---
 
@@ -218,6 +218,17 @@
   - **状态机**: 枚举 6 值含 not_used=1(compiledMethod.hpp:188-197)但 never 被赋值(make_not_used→make_not_entrant,nmethod.hpp:342);make_not_entrant_or_zombie 非 CAS——Patching_lock 双重检查(nmethod.cpp:1144+;早退 :1148-1153;锁内复查 :1182-1186)+patch verified entry 5B jmp→handle_wrong_method_stub(:1190-1193,8B Atomic::store nativeInst_x86.cpp:561);转 not_entrant 时 mark_as_seen_on_stack :1212-1214 在状态变更前
   - **布局**: 偏移链在 JIT ctor nmethod.cpp:685-746(_consts_offset=content_offset+total_offset_of(consts) :685,oops=:738 起,顺序 header→reloc→consts→code→stubs(exception/deopt handler 在 stubs 区 :718-722)→oops→metadata→scopes→pcs→deps→handler→nulchk);_scopes_data_offset 字段**声明未使用**(用 CompiledMethod::_scopes_data_begin compiledMethod.hpp:157);ScopeDesc 是 _sender_decode_offset 链非 _parent 指针(scopeDesc.cpp:79-86,sender :152-155,is_top :149);PcDesc 字段 pcDesc.hpp:37-39
   - **其他**: InvocationEntryBci=-1(compilerDefinitions.hpp:44);静态方法 entry==verified(nmethod.cpp:775-776 assert,仅 C2/JVMCI 生效);nmethodLocker 使用点: deoptimization.cpp:1546/jvmtiImpl.cpp:920/sharedRuntime.cpp:1078;can_convert_to_zombie nmethod.cpp:999-1007;实证: jcmd-Compiler.codelist.txt 755 个 nmethod=696 in_use+59 not_entrant(第三列是 state,print_codelist codeCache.cpp:1667-1681)
+- **03 篇(nmethod 生命周期,sweeper,大纲漂移 15+ 处,重点沉淀)**:
+  - NMethodSweeper 在 **share/runtime/sweeper.{hpp,cpp}**;sweeper.hpp:35-58 类注释=机制权威(标记在 safepoint/清扫不在且让位;'at least 3 sweeps');`_traversals` "Stack scan count, also sweep ID"(sweeper.hpp:67)
+  - 标记: 挂 safepoint 收尾 ParallelSPCleanupTask(ParallelSPCleanupThreadClosure safepoint.cpp:613-631,do_cleanup_tasks :731);MarkActivationClosure(sweeper.cpp:163-174)= **set_hotness_counter(reset_val) 重置**(非 +=)+not_entrant 活跃→mark_as_seen_on_stack(nmethod.cpp:989-993);空间告急才 do_stack_scanning→VM_MarkActiveNMethods(sweeper.cpp:256-263)
+  - 清扫: sweep_code_cache 增量(sweeper.cpp:429+),_current 游标;扫完才在下次标记时 _traversals++(:232-238);让位 safepoint handle_safepoint_request :313-324;process_compiled_method :595-686(zombie→flush/not_entrant→can_convert_to_zombie→make_zombie/alive→possibly_flush+清 IC)
+  - hotness: reset_val=(ReservedCodeCacheSize<M)?1:(RC/M)*2(:188-193);dec_hotness_counter(possibly_flush :695,UseCodeCacheFlushing 默认 true globals.hpp:1976);淘汰 hotness<threshold(-reset+reverse_free_ratio*NmethodSweepActivity)且 time_since_reset>MinPassesBeforeFlush(10,globals.hpp:1260)(:698-716,make_not_entrant() :758);reverse_free_ratio=max_capacity/unallocated(codeCache.cpp:1042-1051)
+  - 触发: possibly_sweep 注释三条件 :327-331;notify 有门槛 reverse_free_ratio>=MAX2(100/StartAggressiveSweepingAt,1.1)=10(约 10% 空闲,sweeper.cpp:283-291);non-profiled 堆 ≤10% 强制栈扫描(:373-380);状态变化>1%(:558-575);周期 RC/(16*M)(:359-368)
+  - **依赖失效(反向索引非全量)**: SystemDictionary::add_to_hierarchy→flush_dependents_on(systemDictionary.cpp:1817-1819)→KlassDepChange→mark_for_deoptimization(codeCache.cpp:1148)用 DepChange::ContextStream(dependencies.cpp:2101-2131: 新类→父类链→传递接口)找受影响类→InstanceKlass::mark_dependent_nmethods(instanceKlass.cpp:2103)→DependencyContext::mark_dependent_nmethods(dependencyContext.cpp:62-81)查反向桶+check_dependency_on(spot_check dependencies.cpp:2047)→VM_Deoptimize(vmOperations.cpp:118-128)→make_marked_nmethods_not_entrant(codeCache.cpp:1259-1266);类重定义变体 flush_evol_dependents_on :1292
+  - uncommon trap: UncommonTrapBlob(codeBlob.hpp:642)→Deoptimization::uncommon_trap(deoptimization.cpp:2095,blob 生成 sharedRuntime_x86_64.cpp:3182-3219)→uncommon_trap_inner :1526;action 编码决定生死(deoptimization.cpp:1794-1837: none/maybe_recompile 不失效/reinterpret/make_not_entrant/make_not_compilable)
+  - GC 交接: gc_prologue() **空函数**(codeCache.cpp:919);gc_epilogue 只 prune_scavenge_root_nmethods(:921-923);年轻代 Serial/Parallel=scavenge_root_nmethods_do(genCollectedHeap.cpp:837,链 codeCache.hpp:98,register 条件 detect_scavenge_root_oops :772-777),G1=per-region strong code roots(register_nmethod g1CollectedHeap.cpp:5012);全堆=blobs_do(genCollectedHeap.cpp:845-848);类卸载 G1=G1CodeCacheUnloadingTask→do_unloading_parallel(compiledMethod.cpp:507-527)→do_unloading_oops(nmethod.cpp:1496)→make_unloaded(can_unload :1379-1390);**CodeCache::do_unloading(codeCache.cpp:698)无调用者**
+  - 应急: 分配→notify→expand_by(:498)→降级堆(:510-517)→handle_full_code_cache(compileBroker.cpp:2292-2328:UseInterpreter=true+set_should_compile_new_jobs(stop)/disable_compilation_forever+report_codemem_full codeCache.cpp:1365 警告+JFR);恢复 freed_memory>0(sweeper.cpp:534-547);sweeper 线程 NearMaxPriority(compileBroker.cpp:803-815)
+  - 实证: hotspot.log 64 个 <make_not_entrant>(59 level3)+49 个 <uncommon_trap action='make_not_entrant'>(range_check/class_check);CodeHeap_Analytics sweeper statistics 全 0(2.5min 无完整 sweep)
 
 ---
 
@@ -238,8 +249,9 @@
 ## 八、待办清单(按优先级)
 
 - [x] **16-codecache/02**(nmethod-structure)——已完结,b8c35d8
-- [ ] **16-codecache/03**(nmethod-lifecycle)——大纲在 `planning/outlines/16-code-cache/03-nmethod-lifecycle.md`,16 域第 3 篇
-- [ ] 16-codecache 剩余: 04-relocation-ic → 05-dependencies-deopt(16 域完结后 16 域 README 勾选)
+- [x] **16-codecache/03**(nmethod-lifecycle)——已完结,904eab3
+- [ ] **16-codecache/04**(relocation-ic)——大纲在 `planning/outlines/16-code-cache/04-relocation-ic.md`,16 域第 4 篇
+- [ ] 16-codecache 剩余: 05-dependencies-deopt(16 域完结后 16 域 README 勾选)
 - [ ] 第 2 批剩余域: 38-perfdata → 41-zipjimage → 42-core-native
 - [ ] 第 3 批: 07-classfile-classloader(06 域悬念桥接指向它)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
@@ -276,8 +288,8 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/16-code-cache/03-nmethod-lifecycle.md(大纲,注意 ⚠️ 块;16-02 已回填,见其 ⚠️ 块)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: sweeper 决策/hotness_counter/stack_traversal_mark 机制是否编造;NMethodSweeper 在 share/code/)
+1. 读 planning/outlines/16-code-cache/04-relocation-ic.md(大纲,注意 ⚠️ 块;16-03 已回填,见其 ⚠️ 块)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: relocInfo 16-bit 编码/RelocIterator/CompiledIC 状态机/ICBuffer 是否编造;relocInfo.hpp 在 share/code/)
 3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
 4. 16 域 5 篇全部完成后 → 38-perfdata
 ```

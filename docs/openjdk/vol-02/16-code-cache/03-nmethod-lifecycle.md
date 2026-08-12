@@ -2,7 +2,7 @@
 
 > **前置依赖**:[02 — nmethod 结构](02-nmethod-structure.md):状态机(not_installed→in_use→not_entrant→zombie→unloaded)、`make_not_entrant_or_zombie` 的互斥协议、nmethodLocker 与 `stack_traversal_mark` 的语义都在上一篇;本篇回答"谁在什么时候推进这些状态"
 > → **后续**:[04 — Relocation 与 Inline Cache](04-relocation-ic.md)
-> 关联域: 18-safepoint(sweeper 的标记阶段挂在 safepoint 收尾)、20-vmops(栈扫描是 VM 操作)、22-deopt(uncommon trap 触发失效)
+> 关联域: 18-safepoint(sweeper 的标记阶段挂在 safepoint 收尾)、20-vmops(空间告急时补栈扫描的 `VM_MarkActiveNMethods`)、22-deopt(uncommon trap 触发失效)
 
 ## 代码的"死"不能当场执行
 
@@ -23,7 +23,7 @@ nmethod 变成 not_entrant 的入口有四个(来源见 sweeper.hpp:48-51 的注
 
 ### uncommon trap: 代码自己承认赌输了
 
-C2 编译时会在"赌注"位置插入 uncommon trap 桩——代码执行到这里,说明某个乐观假设(类型预测、空指针不触发、常量不可能变)错了。陷阱被踩中后走进 `UncommonTrapBlob`(codeBlob.hpp:642,注释原文 "currently only used by Compiler 2"),进入 `Deoptimization::uncommon_trap_inner`(deoptimization.cpp:1526)。注意 trap 携带的 **action 编码**决定了这个 nmethod 该不该死(deoptimization.cpp:1794-1837,截取核心,省略注释):
+C2 编译时会在"赌注"位置插入 uncommon trap 桩——代码执行到这里,说明某个乐观假设(类型预测、空指针不触发、常量不可能变)错了。陷阱被踩中后走进 `UncommonTrapBlob`(codeBlob.hpp:642,注释原文 "currently only used by Compiler 2"),它调用 `Deoptimization::uncommon_trap`(deoptimization.cpp:2095,blob 的生成见 sharedRuntime_x86_64.cpp:3182-3219),再进 `uncommon_trap_inner`(:1526)。注意 trap 携带的 **action 编码**决定了这个 nmethod 该不该死(deoptimization.cpp:1794-1837,截取核心,省略注释):
 
 ```cpp
 // deoptimization.cpp:1794-1837(截取核心,省略注释)
@@ -74,10 +74,12 @@ C2 编译时会在"赌注"位置插入 uncommon trap 桩——代码执行到这
 
 清算链是双向的:
 
-- **正向**(nmethod → 它依赖什么): 每个 nmethod 的 dependencies 段记录编译时假设;`CodeCache::flush_dependents_on`(codeCache.cpp:1275)构造 `KlassDepChange`,然后 `mark_for_deoptimization`(codeCache.cpp:1148)遍历全部 nmethod,逐个把新类层次与编译时假设对比(`DepChange::ContextStream` + `spot_check_dependency_at`,dependencies.cpp:2047);
-- **反向**(类 → 谁依赖我): `InstanceKlass` 用 DependencyContext 维护"依赖我的 nmethod 列表",`add_dependent_nmethod`/`remove_dependent_nmethod`(instanceKlass.cpp:2105-2116),失效时 `mark_dependent_nmethods`(instanceKlass.cpp:2103)只查这份反向索引,不用全量扫描。
+- **正向**(nmethod → 它依赖什么): 每个 nmethod 的 dependencies 段记录编译时假设;
+- **反向**(类 → 谁依赖我): `InstanceKlass` 用 DependencyContext 维护"依赖我的 nmethod 列表",`add_dependent_nmethod`/`remove_dependent_nmethod`(instanceKlass.cpp:2105-2116)维护这份索引。
 
-标记完成后 `VM_Deoptimize` 把栈上正在执行这些 nmethod 的帧也退化成解释器帧,然后 `make_marked_nmethods_not_entrant()` 统一收口(codeCache.cpp:1259-1266)。依赖假设的细节(有哪些假设、怎么验证)是 05 篇的主题。
+真正生效的是**反向索引**——`CodeCache::flush_dependents_on`(codeCache.cpp:1275)构造 `KlassDepChange`,`mark_for_deoptimization`(codeCache.cpp:1148)用 `DepChange::ContextStream`(dependencies.cpp:2101)把受影响的类全部找出来——遍历顺序是: 新类本身 → 父类链 → 传递闭包的接口(dependencies.cpp:2101-2131),对每个类直接查反向列表——`InstanceKlass::mark_dependent_nmethods`(instanceKlass.cpp:2103)→ `DependencyContext::mark_dependent_nmethods`(dependencyContext.cpp:62-81)遍历桶,对每个依赖它的 nmethod 调 `check_dependency_on` 逐条验证编译时假设(`spot_check_dependency_at`,dependencies.cpp:2047),命中就标记。**只在受影响类范围内查,不是全量扫描 CodeCache**。类重定义(JVMTI RedefineClasses)走同一框架的变体 `flush_evol_dependents_on`(codeCache.cpp:1292,按"方法演进"语义找受影响者)。
+
+标记完成后 `VM_Deoptimize` 把栈上正在执行这些 nmethod 的帧也退化成解释器帧,然后 `make_marked_nmethods_not_entrant()` 统一收口(vmOperations.cpp:118-128 的 `doit`,实现见 codeCache.cpp:1259-1266)。依赖假设的细节(有哪些假设、怎么验证)是 05 篇的主题。
 
 ## 2. sweeper: 标记与清扫的两阶段协议
 
@@ -136,7 +138,7 @@ public:
 
 `sweeper.hpp:42-47` 注释原文 "sweep_code_cache(): This function is the only place in the sweeper where memory is reclaimed. ... is not called at a safepoint. However, it stops executing if another thread requests a safepoint."。清扫线程 `sweeper_loop`(sweeper.cpp:265-278)平时睡在 `CodeCache_lock` 上,被 `notify` 唤醒后跑 `possibly_sweep` → `sweep_code_cache`:
 
-- **增量遍历**: `_current` 游标记住上次扫到哪(`CompiledMethodIterator`,codeCache.hpp:411),一轮 sweep 从游标继续扫到末尾,扫完 `_traversals++`(sweeper.cpp:232-238);所以"一次完整 sweep"跨多次唤醒;
+- **增量遍历**: `_current` 游标记住上次扫到哪(`CompiledMethodIterator`,codeCache.hpp:411),一轮 sweep 从游标继续扫到末尾;扫完(游标归零)后,下一次 safepoint 标记开始时才 `_traversals++` 开启新一轮(sweeper.cpp:232-238,`_traversals` 的注释原文是 "Stack scan count, also sweep ID",sweeper.hpp:67);所以"一次完整 sweep"跨多次唤醒;
 - **让位 safepoint**: 每处理一个 nmethod 都检查 `SafepointSynchronize::is_synchronizing()`,是就释放锁、`java_suspend_self` 让位(sweeper.cpp:313-324)——清扫再急也不能挡 safepoint;
 - **逐方法裁决**: `process_compiled_method`(sweeper.cpp:595-686)按状态分流:
   - zombie → `flush()`(空间归还);
@@ -165,7 +167,7 @@ bool nmethod::can_convert_to_zombie() {
 hotness 不是"调用频率"——它是"**距离上次在栈上被看到的轮数**":
 
 - 栈扫描看到(活跃)→ `set_hotness_counter(reset_val)` 重置为满血,sweeper.cpp:168;
-- 每轮 sweep 对存活方法 `dec_hotness_counter()` 减 1(sweeper.cpp:695);
+- 开启 `UseCodeCacheFlushing`(默认 true,globals.hpp:1976)时,每轮 sweep 对存活方法 `dec_hotness_counter()` 减 1(sweeper.cpp:695);
 - 满血值 `hotness_counter_reset_val() = (ReservedCodeCacheSize < M) ? 1 : (ReservedCodeCacheSize / M) * 2`(sweeper.cpp:188-193)——CodeCache 越大,满血值越高,方法可以"凉"更久才被牺牲;
 - 淘汰判据(sweeper.cpp:695-707,截取核心,逐字):
 
@@ -192,7 +194,7 @@ hotness 不是"调用频率"——它是"**距离上次在栈上被看到的轮�
 
 `possibly_sweep` 的三个触发条件(注释 sweeper.cpp:327-331 原文 "(1) The code cache is getting full (2) There are sufficient state changes in/since the last sweep (3) We have not been sweeping for 'some time'"):
 
-- **快满**: `CodeCache::allocate` 每次分配都 `NMethodSweeper::notify`(codeCache.cpp:483);空间只剩 10% 以内时强制做一次栈扫描(`free_percent <= StartAggressiveSweepingAt`,sweeper.cpp:373-380,`StartAggressiveSweepingAt=10`,globals.hpp:1979);
+- **快满**: `CodeCache::allocate` 每次分配都 `NMethodSweeper::notify`(codeCache.cpp:483)——但 notify 有门槛: 只有剩余空间低于约 10%(`reverse_free_ratio >= MAX2(100/StartAggressiveSweepingAt, 1.1)`)才真正唤醒,启动初期空间充足时分配不会打扰 sweeper(sweeper.cpp:283-291);另外当 **non-profiled 堆**剩余空间 ≤10% 时会强制补一次栈扫描(`free_percent <= StartAggressiveSweepingAt`,sweeper.cpp:373-380,注释原文 "We force stack scanning only if the non-profiled code heap gets full";`StartAggressiveSweepingAt=10`,globals.hpp:1979);
 - **状态变化足够多**: `report_state_change` 累计字节,超过 ReservedCodeCacheSize 的 1% 就再扫一轮(sweeper.cpp:558-575);
 - **周期兜底**: 距上次清扫的"虚拟时间"超过 `ReservedCodeCacheSize / (16*M)` 轮标记(sweeper.cpp:359-368)——256MB 配置下约 15 轮 safepoint 标记必扫一次。
 
