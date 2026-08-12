@@ -14,7 +14,7 @@
 
 StatSampler 不是独立线程——它是 `PeriodicTask` 的一个子类实例,注册进 WatcherThread 的任务表。链条从 VM 启动开始:
 
-1. `Thread::create_vm` 末尾调 `StatSampler::engage()`(thread.cpp:4048);
+1. `Thread::create_vm` 里调 `StatSampler::engage()`(thread.cpp:4048,与 MemProfiler/JniPeriodicChecker 等一起注册);
 2. `engage`(statSampler.cpp:78-90)创建 `StatSamplerTask(PerfDataSamplingInterval)` 并 `enroll()`——任务表 `_tasks[]` 最多 10 个槽(task.hpp:45-48),间隔参数 `PerfDataSamplingInterval` 默认 **50ms**(globals.hpp:2431):
 
 ```cpp
