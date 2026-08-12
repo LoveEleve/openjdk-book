@@ -11,6 +11,8 @@
 > - **TypeArray GC 直接跳过**: oop_oop_iterate_impl 是**空函数**(typeArrayKlass.inline.hpp:36-40)+ 头文件注释 :89-90 "Since there are no oops in TypeArrayKlasses"
 > - 元素访问: byte_at :92/int_at :125/long_at :158(typeArrayOop.inline.hpp),经 HeapAccess load_at;element_offset :65-69(typeArrayOop.hpp)
 > - 边界检查: 访问模板(templateTable_x86.cpp:769 起 iaload)内置 bounds check;arraylength 模板 :4164-4168 直接读 length 偏移
+> - **深审第 2 轮补充(2026-08-12)**: 本大纲原稿只有数组内容,但 KP 规划 03 篇="InstanceKlass 体系+ArrayKlass 体系"、02 篇悬念也承诺字段表/方法表/InstanceRefKlass——正文已补 §3 InstanceKlass 仓库(字段表 FieldInfo 每字段 6×u2=12 字节,fieldInfo.hpp:38-90;槽 4-5 低 2 位 tag: 01 偏移/10 带类型/11 争用组,:55-62)+ §4 InstanceRefKlass(update_nonstatic_oop_maps 把 referent/discovered 剔出普通 oop-map,instanceRefKlass.cpp:31-70)
+> - 维度链原子创建实为**双锁**(MutexLocker Compile_lock+MultiArray_lock,objArrayKlass.cpp:337-357 注释 "Ensure atomic creation")非 CAS;数组 secondary 接口表=the_array_interfaces_array(arrayKlass.cpp:122)
 
 ### 1. ArrayKlass 层次
 
