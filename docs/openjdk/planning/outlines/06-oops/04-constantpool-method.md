@@ -2,6 +2,17 @@
 
 > 🔴 Deep | 15 KP 中的 2 个核心机制
 > 读者处境: 字节码里 `invokevirtual #23`——#23 是什么？常量池第 23 个条目。解析后变成直接方法指针。
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/06-oops/04 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **ConstantPool 继承 Metadata 不是 oopDesc**(constantPool.hpp:98)——"constantPoolOopDesc"是 JDK8 名字;_tags :106、_cache :107
+> - **klass_at 不是纯 O(1)**: klass_at_impl 未解析时触发 SystemDictionary 查找/类加载(constantPool.hpp:380-383)
+> - **cpCache _f1 语义修正**: 字段访问 _f1=字段持有者(**java.lang.Class 引用**,cpCache.hpp:99 注释)、非虚调用 _f1=Method*、indy/invokehandle _f1=adapter 方法(:108-113);_f2=vtable/itable index 或 final Method* 或 field offset(:114-116)
+> - **invokedynamic appendix 不在 _f2**: appendix(CallSite/MethodType)存在 ConstantPool 的 **resolved_references 数组**(cpCache.hpp:110-112 注释);indy 常量池条目是 operands 数组的 bootstrap specifier(_indy_bsm_offset/_indy_argc_offset/_indy_argv_offset,constantPool.hpp:597-613)——"_indy_bsm/_indy_name/_indy_type 字段"是编造
+> - **MethodLinker 类不存在**: 入口点由 Method::link_method 设置(method.cpp:1077;entry_for_method :1099;set_interpreter_entry :1102 同时设 _i2i/_from_interpreted)
+> - **CompileThreshold 修正**: x86 分层编译 C1=1500(c1_globals_x86.hpp:43)、C2=10000(c2_globals_x86.hpp:43);调用/回边计数在 **MethodCounters**(methodCounters.hpp:51-52)不在 MethodData;OSR 由回边计数触发
+> - MethodData(MDO): Metadata(:1955)、_data :286、bci_to_data :2350、ClassLoaderData 分配(:709);"不独立 GC/100 字节码~400B"编造数字删除
+> - 耗时数字(100µs/3-5ns/20000x)无源码依据,全文未采用
+> - Method 入口点字段: _i2i_entry :103、_from_compiled_entry :106、_code :112、_from_interpreted_entry :113;字节码内联 ConstMethod 尾(code_base=this+1,constMethod.hpp:490)✓
 
 ### 1. ConstantPool — 类的符号引用仓库
 
