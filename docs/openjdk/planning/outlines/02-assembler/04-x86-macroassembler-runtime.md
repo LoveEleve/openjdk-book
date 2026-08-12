@@ -1,70 +1,66 @@
-# 04. MacroAssembler — call_VM / safepoint / AES-NI / Math
+# 04. MacroAssembler — call_VM / safepoint / 压缩 oop / 硬件加速
 
-> 🔴 Deep | 15 KP 中的 2 个运行时机制 + Math/Crypto Intrinsics
-> 读者处境: 单条 x86 指令你会了。call_VM —— 从 JIT 代码调 C++ 函数 —— 怎么做到的？
+> 🔴 Deep | 运行时代码模板
+> 读者处境: 单条指令会了——call_VM(JIT→C++)、safepoint 协作、压缩 oop、AES/SHA 硬件模板。
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/02-assembler/04 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **safepoint_poll 过时**: jdk11u 默认 **thread-local poll**(SafepointMechanism::uses_thread_local_poll,safepointMechanism.hpp:66)——`testb(thread+polling_page_offset, poll_bit)` + jcc(Thread::_polling_page,thread.hpp:346);"全局轮询页 mprotect+SIGSEGV" 是旧机制(备选路径是 cmp32 全局状态,3744-3758)
+> - **第 4 节 fsin 与 45域01 矛盾**: 64 位 Math 是 SSE2 软件多项式(45域01 实证,不用 fsin);本节改写为"Math 真相引用 + AES/SHA 硬件模板"(macroAssembler_x86_aes.cpp:1290行/vaesenc@36-54;macroAssembler_x86_sha.cpp:1525行/sha1rnds4@62)
+> - 行号漂移: call_VM@2311(中间 call 技巧,注释 2581-2589)、call_VM_base@2482(c_rarg0=r15_thread@2517、set_last_Java_frame@2526,注释 5558-5562)、verified_entry@5839(5字节可补丁约束 5842-5847)、generate_stack_overflow_check 在 share/asm/assembler.cpp:121(非 macroAssembler_x86.cpp:2090)、encode_heap_oop@5536/decode@5599(非 2580/2620)
+> - OOPMap 不在 call_VM 内生成(大纲"1690"是注释区);OopMap 是 nmethod 元数据,由编译器关联
 
-### 1. call_VM — JIT→C++ 调用桥
+### 1. "call_VM — JIT→C++ 调用桥"
 
-**Linux SystemV AMD64 传参** (`macroAssembler_x86.hpp:120`):
-- c_rarg0 (RDI), c_rarg1 (RSI), c_rarg2 (RDX), c_rarg3 (RCX), c_rarg4 (R8), c_rarg5 (R9)
-- [x86: SystemV calling convention —— 前 6 个整数参数用寄存器 (RDI~R9)，更多用栈。浮点参数用 XMM0~XMM7。Callee-saved: RBX/RBP/R12-R15 (被调函数保证不破坏)。JIT 代码是 caller —— 必须保存 caller-saved 寄存器 (RAX/RCX/RDX/RSI/RDI/R8-R11/XMM0-XMM15)]
-- [man 2 syscall] [man 7 syscalls]
+**结构**(`macroAssembler_x86.cpp:2311-2325` + `2482-2545` + `2579-2600`):
+```
+call_VM(2311): call(C, none); jmp(E); bind(C); call_VM_helper; ret(0); bind(E)
+  → 中间 call 的 return address 留在栈上: last_java_pc = last_java_sp[-1](注释 2581-2589)
+call_VM_helper(2579): lea(rax, Address(rsp, wordSize))——last_java_sp(2593)
+call_VM_base(2482):
+  → mov(c_rarg0, r15_thread)(2517)——C 函数第一参数永远是 JavaThread
+  → set_last_Java_frame(java_thread, last_java_sp, rbp, NULL)(2526)——进 C 前登记帧(注释 5558-5562: "required to allow proper stack traversal")
+[x86: SystemV:c_rarg0-5 = rdi/rsi/rdx/rcx/r8/r9(assembler_x86.hpp:44/74);callee-saved rbx/rbp/r12-r15]
+```
+- 关键设计: **中间 call** = "调用点即指令位置"——GC 从 last_java_sp[-1] 读 Java pc,无需额外元数据;JavaThread 作第一参数,VM 函数天然知道调用者。
 
-**volatile 寄存器保存** (`macroAssembler_x86.cpp:1620`):
-- C++ 函数可能覆写 RAX/RCX/RDX/RSI/RDI/R8-R11 和 XMM0-XMM15
-- 保存到栈，调 C++，恢复——全部汇编代码，没有 C++ wrapper
+### 2. "safepoint 协作点与栈保护"
 
-**OOPMap** (`macroAssembler_x86.cpp:1690`):
-- 记录哪些寄存器/栈槽持有 OOP——GC safepoint 扫描的根
-- [x86: OOPMap 是编译到代码中的元数据——不是在栈上动态生成。GC 扫描时通过 OOPMap 知道 "这个线程的 R12 存了一个 String 引用"。没有 OOPMap → GC 无法找到活对象 → 回收错误]
+**safepoint_poll**(`macroAssembler_x86.cpp:3744-3758`):
+```
+thread-local poll(默认): testb(thread+polling_page_offset, poll_bit) + jcc notZero slow(1字节 test)
+备选: cmp32(ExternalAddress(state), _not_synchronized) + jcc notEqual
+[thread-local poll = JDK 10+ 演进; Thread::_polling_page(thread.hpp:346);置位 vs mprotect]
+verified_entry(5839): 入口 ≥5 字节(NativeJump::patch_verified_entry 可整体替换,注释 5842-5847)
+generate_stack_overflow_check(assembler.cpp:121): UseStackBanging + StackShadowPages——Java 代码靠 stack banging 检测溢出(注释 123-130)
+```
+- 关键设计: **协作(轮询)与强制(patch)组合**——轮询点 1 字节 testb 零成本;入口 5 字节可替换是类重定义/去优化的前提。
 
-### 2. safepoint_poll + verified_entry
+### 3. "压缩 oop 编解码"
 
-**safepoint_poll = 4 字节** (`macroAssembler_x86.cpp:4249`):
-- `test [polling_page], rax` — 1 cycle 正常，PROT_NONE → SIGSEGV → safepoint
-- [x86: test [mem], reg = 读 mem 但丢弃 reg 值 = 4B。cmp+jne = 7B。4B vs 7B 在每个方法头和 loop back edge 节省 3B * ~1000 个 check point = 节省 3KB——少一次 icache miss]
+**encode/decode**(`macroAssembler_x86.cpp:5536-5548` + `5599-5614`):
+```
+encode_heap_oop(5536): base==NULL → shrq(LogMinObjAlignmentInBytes,默认3)
+  base!=NULL → testq+cmovq(r12_heapbase)+subq+shrq3(null 编成 heapbase!)
+decode_heap_oop(5599): shlq3(+非零 addq r12_heapbase)——jccb 零分支
+r12_heapbase: JIT 全程保留的堆基址寄存器
+```
+- 关键设计: **内存 vs 指令的交换**——32 位指针换 2-3 条编解码指令;null 编成 heapbase 的 cmovq 巧思(06-oops 伏笔)。
 
-**verified_entry** (`macroAssembler_x86.cpp:3420`):
-- check method/klass 一致性 + stack overflow guard
-- [C++: verified_entry 是 JIT 方法的入口屏障——在方法的实际代码之前。如果 klass 指针改变 (redefine class) → 跳转到 runtime 重新解析。正常情况 1 cycle: cmp + jne (预测正确)]
+### 4. "超越函数与硬件密码"
 
-**stack_bang** (`macroAssembler_x86.cpp:2090`):
-- 写栈页 → 触发 page fault → OS 分配栈内存
-- 防止无限递归用尽栈——在栈足够深之前提前触发栈扩展
-
-### 3. OOP 压缩 — narrow_oop 编解码
-
-**encode_heap_oop** (`macroAssembler_x86.cpp:2580`):
-- `shrq $3, rax` → narrow_oop (32-bit)
-- 为什么移 3 位？→ 堆中所有对象都是 8 字节对齐 (对象头后第一个字段)——低 3 位永远是 000
-- [x86: shrq 3 = 逻辑右移 3 位——移除对齐位。shlq 3 = 左移 3 位——恢复对齐位。RISC CPU 用专门的 BITEXTRACT 指令]
-- heap_base: 如果堆 >4GB，narrow_oop 是相对于 heap_base 的偏移——不是绝对地址
-
-**decode_heap_oop** (`macroAssembler_x86.cpp:2620`):
-- `shlq $3, rax; addq heap_base, rax` — 恢复为 64-bit raw pointer
-- [x86: 三步解码——1) shlq 扩展 32→35-bit，2) addq 加堆基址，3) GC 验证指针在堆范围内。正常路径 2 条指令 = 4 cycles]
-
-### 4. Math Intrinsics — fsin/fcos/fyl2x/f2xm1
-
-**超越函数** (`macroAssembler_x86_sin.cpp:454`):
-- sin/cos: fsin/fcos + fyl2x + f2xm1
-- [x86: x87 80-bit extended precision — 为什么不用 SSE？→ SSE 只有 64-bit double，IEEE 754 要求 sine 误差 ≤1 ULP——64-bit 做不到。x87 内部 80-bit (64-bit mantissa) 才满足。代价: x87 需要 `fstp` (store 和 pop) 操作浮点栈——比 SSE 慢但精度够]
-- log/exp: FYL2X (2为底对数) + F2XM1 (2^x-1) (`macroAssembler_x86_log.cpp:545`)
-
-### 5. Crypto Intrinsics — AES-NI / SHA
-
-**AES-NI 5 条指令** (`macroAssembler_x86_aes.cpp:174`):
-- aesenc/aesenclast/aesdec/aesdeclast/aeskeygenassist
-- [x86: AES-NI — 一条指令做一整轮 AES (SubBytes+ShiftRows+MixColumns+AddRoundKey)。vs C AES 库——10-14 轮 * 4 种操作 = 40-56 次 memory access (查 S-box 表)。AES-NI = 0 memory access → constant-time → 消除 cache timing side-channel]
-- [x86: constant-time 密码——不依赖输入数据的执行路径。C 库的 AES (lookup table) 的 S-box 索引依赖密钥+明文→不同的 cache miss 组合→时序分析→密钥泄漏。AES-NI 指令固定 N cycles——不泄漏任何信息]
-
-**SHA-NI** (`macroAssembler_x86_sha.cpp:198`):
-- sha1rnds4/sha256rnds2 — 硬件 hash 轮
+**Math 真相**(引用 45域01): 64 位 SSE2 软件多项式,不用 fsin;x87 仅 32 位残存。
+**AES/SHA**(`macroAssembler_x86_aes.cpp:1290` + `macroAssembler_x86_sha.cpp:1525`):
+```
+aesenc/aesenclast/aesdec/aesdeclast/aeskeygenassist;AVX-512 下 vaesenc(36-54)
+sha1rnds4/sha256rnds2(62 起展开)
+[x86: AES-NI = 一轮 AES 一条指令(零访存);constant-time——查表实现的 cache timing 侧信道消除]
+```
+- 关键设计: **运行时探测 + 代码模板**——UseAESIntrinsics/UseSHA 开关驱动 C2 生成硬件指令序列,Java 层无感知。
 
 ---
 
 ### 核心悬念
 
-**"JVM 调 Math.sin() → 5 条 fsin 指令 → 完整结果——没有 JNI，没有解释器，没有分支。"** — MacroAssembler 让 Java 的 Math API 变成 100% 汇编。safepoint_poll = 4B 的协作点，AES = 0-branch 的硬件适配。这一切建立在 Assembler 的 400+ 条指令之上——给 C1/C2/StubRoutines 提供"建筑机器码的砖块"。
+**"call_VM 桥、thread-local poll、压缩 oop、AES/SHA 模板——MacroAssembler 把'运行时'缝进生成代码。但这一切的前提是开关: UseAESIntrinsics/UseCompressedOops/UseStackBanging——flag 定义在哪、怎么解析、怎么驱动生成?"** — 下一篇: Arguments & Flags。
 
-> → domain 3: [Arguments & Flags — 这些 JVM flag 怎么驱动 Assembler 的代码生成？UseSHA 打开后 C2 调用 StubRoutines::sha_impl()](../03-arguments-flags/01-flag-definition-system.md)
+> → [03-arguments-flags/01-flag-definition-system.md](../03-arguments-flags/01-flag-definition-system.md)
