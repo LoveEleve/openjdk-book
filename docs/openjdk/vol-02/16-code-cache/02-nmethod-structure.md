@@ -24,7 +24,7 @@ C2 花几百毫秒编译一个方法,产物是几 KB 机器码。但如果它只
 
 - `_entry_point` — **带类型检查的入口**。方法代码开头有一段 IC 检查序列: 接收者实际 Klass 与期望 Klass 不符就跳走。调用方还没有把握时走这里;
 - `_verified_entry_point` — **免检入口**。已验证过类型的调用方直连这里,跳过检查直接进入代码;
-- `_osr_entry_point` — **OSR 入口**,从解释器栈上"热替换"进编译代码的中间位置。OSR 的判据是 `_entry_bci != InvocationEntryBci`(nmethod.hpp:63,is_osr_method :270)——普通编译是"从第 0 条字节码进",OSR 是"从第 N 条字节码进"。
+- `_osr_entry_point` — **OSR 入口**,从解释器栈上"热替换"进编译代码的中间位置。OSR 的判据是 `_entry_bci != InvocationEntryBci`(nmethod.hpp:63,is_osr_method :270)——`InvocationEntryBci = -1`,即"这不是 OSR 编译"(compilerDefinitions.hpp:44 注释原文 "i.e., not a on-stack replacement compilation"): 普通编译不带 OSR 目标,OSR 编译的入口才指向"从第 N 条字节码进入"。
 
 静态方法没有接收者要验,两个入口重合: `entry_point() == _verified_entry_point()`(nmethod.cpp:775-776 的 assert)。
 
@@ -120,7 +120,7 @@ instruct CallDynamicJavaDirect(method meth)
 //  - implicit null table array
 ```
 
-机器码(body+桩)之外,还有重定位信息、常量、oop 表、调试信息、异常表、隐式空指针表。所有段不是各自 malloc 的——**它们在同一块 CodeHeap 块里首尾相接**,定位靠 header 里的偏移字段(nmethod.hpp:95-109,12 个 `_xxx_offset`,逐字):
+机器码(body+桩)之外,还有重定位信息、常量、oop 表、调试信息、异常表、隐式空指针表。所有段不是各自 malloc 的——**它们在同一块 CodeHeap 块里首尾相接**,定位靠 header 里的偏移字段(nmethod.hpp:95-109,12 个 `_xxx_offset`,逐字)。唯一的例外: scopes 数据区直接存了地址 `_scopes_data_begin`(compiledMethod.hpp:157),而 `_scopes_data_offset` 这个字段在 jdk11u 里声明了但并未使用。
 
 ```cpp
 // nmethod.hpp:100-109(截取核心,逐字)
@@ -239,7 +239,7 @@ deopt 时手里只有一个 PC(正在执行的机器码地址),要还原出"这�
 - `zombie`(3): 无活跃帧,等 sweeper 收尸;
 - `unloaded`(4): 终态。
 
-状态单调前进,不能回退。注意 `is_in_use()` 的实现是 `_state <= in_use`(nmethod.hpp:321)——把 not_installed(-1) 也算"可用",这依赖枚举按"存活程度"有序的设计: `is_alive()` 则是 `_state < zombie`(:322)。
+状态单调前进,不能回退。注意 `is_in_use()` 的实现是 `_state <= in_use`(nmethod.hpp:321)——把 not_installed(-1) 也算"可用",这依赖枚举按"存活程度"有序的设计: `is_alive()` 则是 `_state < zombie`(:322)。[实证:] `jcmd Compiler.codelist` 每行第三列就是状态(materials/commands/jcmd-Compiler.codelist.txt,格式见 codeCache.cpp:1667-1681 的 `print_codelist`): 755 个 nmethod 里 696 个 in_use(0)、59 个 not_entrant(2)——"判了死刑但还没被扫除器收走"的代码在真实系统里一直存在。
 
 ### 转换: 互斥锁 + 双重检查,不是 CAS
 
