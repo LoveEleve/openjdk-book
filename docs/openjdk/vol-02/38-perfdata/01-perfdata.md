@@ -38,9 +38,9 @@
 
 ### 一个关键的分层: 对象与值分开住
 
-简单把计数器理解成"一块内存"并不完整——**PerfData 对象本身在 C 堆**,它的值 `_valuep` 指向**共享内存区域里的对应位置**(perfData.hpp:289-291,注释原文 "returns the address of the data portion of the item in the PerfData memory region")。共享区里放的是 `PerfDataEntry`(perfMemory.hpp:78-98): 一个固定头(entry_length/name_offset/vector_length/data_type/flags/data_units/data_variability/data_offset)+ 变长 body(name + padding + 数据)。这个布局是**对外契约**——perfMemory.hpp:55-56 注释原文 "The PerfDataPrologue structure is known by the PerfDataBuffer Java class libraries that read the PerfData memory region",jstat 侧的 Java 代码按这个结构解析。
+简单把计数器理解成"一块内存"并不完整——**PerfData 对象本身在 C 堆**,它的值 `_valuep` 指向**共享内存区域里的对应位置**(perfData.hpp:289-291,注释原文 "returns the address of the data portion of the item in the PerfData memory region")。共享区里放的是 `PerfDataEntry`(perfMemory.hpp:78-98): 一个固定头(entry_length/name_offset/vector_length/data_type/flags/data_units/data_variability/data_offset)+ 变长 body(name + padding + 数据)。这个布局是**对外契约**——perfMemory.hpp:74-76 注释原文 "The PerfDataEntry structure defines the fixed portion of an entry in the PerfData memory region. The PerfDataBuffer Java libraries are aware of this structure",jstat 侧的 Java 代码按这个结构解析。
 
-`PerfData::create_entry`(perfData.cpp:125 起)负责在共享区里铺条目: 头 + 名字 + 对齐 + 数据,**数据按 8 字节对齐**(perfData.cpp:151-153,`align = sizeof(jlong) - 1`)。共享区内存不够时退回 C 堆(`_on_c_heap = true`,perfData.cpp:159-161)——没了共享区,jstat 就看不到它,但 JVM 照常工作。
+`PerfData::create_entry`(perfData.cpp:125 起)负责在共享区里铺条目: 头 + 名字 + 对齐 + 数据,**数据按 8 字节对齐**(perfData.cpp:136-138,注释原文 "align size to assure allocation in units of 8 bytes")。共享区内存不够时退回 C 堆(`_on_c_heap = true`,perfData.cpp:141-146)——没了共享区,jstat 就看不到它,但 JVM 照常工作。
 
 ### 谁创建了计数器
 
@@ -76,7 +76,7 @@ Linux 上的共享内存实现是"文件做名字空间的 mmap"(注释 perfMemo
   mapAddress = (char*)::mmap((char*)0, size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
 ```
 
-写进程 `mmap(MAP_SHARED, PROT_READ|PROT_WRITE)`;读进程(jstat)用 `mmap_attach_shared`(perfMemory_linux.cpp:1210 起)只读映射同一文件。两块映射指向同一组物理页——这就是"共享内存"。
+写进程 `mmap(MAP_SHARED, PROT_READ|PROT_WRITE)`;读进程(jstat)用 `mmap_attach_shared`(perfMemory_linux.cpp:1181 起)只读映射同一文件。两块映射指向同一组物理页——这就是"共享内存"。
 
 ### 权限: 目录可以看,文件不能碰
 
@@ -85,7 +85,7 @@ Linux 上的共享内存实现是"文件做名字空间的 mmap"(注释 perfMemo
 - 目录 `/tmp/hsperfdata_<user>` 以 **0755** 创建(perfMemory_linux.cpp:852-853 注释原文 "create the directory with 0755 permissions. note that the directory will be owned by euid::egid")——任何人都能进目录、能列出文件名;
 - 文件 `<pid>` 以 **0600** 创建(`open(filename, O_RDWR|O_CREAT|O_NOFOLLOW, S_IRUSR|S_IWUSR)`,perfMemory_linux.cpp:909)——**只有创建者(同 uid 的 JVM)能读写**。
 
-两个附加防线: 创建/打开前做 `is_directory_secure`(:240)/`is_file_secure`(:417)检查(防 symlink 攻击),以及容器场景的 `flock` 竞争处理——多个容器进程共享 /tmp 且 pid 相同时,只有抢到 `flock` 锁的进程写文件,其余禁用 perfdata(perfMemory_linux.cpp:938-942 注释原文 "we allow only one of them (the winner of the flock() call) to write to the file")。
+两个附加防线: 创建/打开前做 `is_directory_secure`(:240)/`is_file_secure`(:417)检查(防 symlink 攻击),以及容器场景的 `flock` 竞争处理——多个容器进程共享 /tmp 且 pid 相同时,只有抢到 `flock` 锁的进程写文件,其余禁用 perfdata(perfMemory_linux.cpp:938-940 注释原文 "we allow only one of them (the winner of the flock() call) to write to the file")。
 
 **关键设计 (斜体)**: *目录 0755 + 文件 0600 的组合是刻意的: 目录公开是为了让监控工具能发现"有哪些 JVM 在跑"(列目录找 pid 文件),文件私有是为了让数据只有同用户能读;0600 只对 owner 开放,不同用户的 JVM 互相看不见。*
 
@@ -93,7 +93,7 @@ Linux 上的共享内存实现是"文件做名字空间的 mmap"(注释 perfMemo
 
 映射内存的最前面是 `PerfDataPrologue`(perfMemory.hpp:62-74): magic(`0xcafec0c0`)、字节序、主次版本(当前 2.0)、`accessible`(就绪标志)、used/overflow、`entry_offset`(第一条目的偏移)与 `num_entries`。读方先读 prologue,再从 `entry_offset` 起遍历 PerfDataEntry。
 
-文件何时消失: JVM 退出时 `PerfMemory::destroy` → `delete_shared_memory` → `remove_file`(perfMemory_linux.cpp:1136-1146,unlink 掉 backing file)。进程崩溃时文件残留,下次 JVM 启动会 `cleanup_sharedmem_files` 清理过期文件(mmap_create_shared 里的调用)。
+文件何时消失: JVM 退出时 `PerfMemory::destroy` → `delete_shared_memory`(:1135)→ `remove_file`(:1145,unlink 掉 backing file)。进程崩溃时文件残留,下次 JVM 启动会 `cleanup_sharedmem_files` 清理过期文件(mmap_create_shared 里的调用)。
 
 ## 3. 无锁协议: 对齐写 + 单调语义
 
@@ -101,7 +101,7 @@ Linux 上的共享内存实现是"文件做名字空间的 mmap"(注释 perfMemo
 
 两个进程读写同一块内存,为什么不需要锁或原子指令?答案分两层:
 
-1. **写是原子的**: 计数器值 8 字节对齐(create_entry 的对齐逻辑),x86-64 上对齐的 64 位 store 天然原子——`PerfLongVariant::inc/add` 就是 `(*(jlong*)_valuep)++`(perfData.hpp:416-419),普通内存写,没有锁也没有 `Atomic::` 包装;
+1. **写是原子的**: 计数器值 8 字节对齐(create_entry 的对齐逻辑),x86-64 上对齐的 64 位 store 天然原子——`PerfLongVariant::inc/add` 就是 `(*(jlong*)_valuep)++`(perfData.hpp:427-430),普通内存写,没有锁也没有 `Atomic::` 包装;
 2. **读方容忍旧值**: jstat 读到的可能不是最新值(缓存一致性保证最终可见,不保证读到的就是刚写的那次)——但计数器大多是单调的(GC 次数、累计时间),读到稍旧的值没有语义错误。jstat 每秒采一次,本来就不需要纳秒级精确。
 
 ### 边界在哪
