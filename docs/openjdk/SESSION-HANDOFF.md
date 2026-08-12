@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-12 | 卷 2 写作中: **31/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 19/26: 02/03/04/06/16 域完结) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
+> **状态**: 2026-08-12 | 卷 2 写作中: **32/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 20/26: 02/03/04/06/16 域完结,38 域 1/2) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 38-perfdata/01(PerfData 架构)。
+**下一步(唯一,无选择)**: 38-perfdata/02(StatSampler,周期性刷新与同步)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移(27 篇无一例外)**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误,见 §6.5-4);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交。
 
@@ -40,7 +40,7 @@
 
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
-第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(19/26: 02/03/04/06/16 域完结)
+第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(20/26: 02/03/04/06/16 完结,38 域 1/2)
 第 3 批(对象/类): 07 → 09 → 17
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
@@ -61,10 +61,11 @@
 | 04-logging | 1-2 | `04-logging/` 2 篇 | ✅ 完成 — 04 域完结(02 篇 d1fa856) |
 | 06-oops | 1-6 | `06-oops/01-markoop-oopdesc.md`(207 行)/02(168 行)/03(166 行)/04(129 行)/05(116 行)/06(104 行) | ✅ 本会话完成 — **06 域完结**(六篇,大纲 60+ 处错误全部回填) |
 | 16-codecache | 1-5 | `16-code-cache/` 5 篇(01 115 行/02 288 行/03 277 行/04 182 行/05 225 行) | ✅ 本会话完成 — **16 域完结** |
+| 38-perfdata | 1 | `38-perfdata/01-perfdata.md`(117 行) | ✅ 本会话完成 — 38 域 1/2 |
 
-**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
+**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01、02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 38-01 前先读 16-05 大纲 ⚠️ 块**(依赖 11 种/对账链/deopt 两段式均已验证)。
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01、02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 38-02 前先读 38-01 大纲 ⚠️ 块**(计数器模型/文件映射/无锁协议均已验证;02 篇 StatSampler 与 01 篇 sample()/create_sampled_perfdata 部分衔接)。
 
 ---
 
@@ -237,6 +238,13 @@
   - **无 CMPXCHG16B**(大纲编造): 原地补丁=set_destination_mt_safe(nativeInst_x86.cpp:261,前提 Patching_lock/safepoint :265-266)写序三步(①前 2 字节改 jmp rel8 -2 自旋 ②写后 3 字节 ③覆盖前 2 字节;每步 ICache flush);NativeCall :156(size=5,disp_offset=1)/NativeMovConstReg :253(0xB8+REX.W,size=10,data_offset=1+rex)/NativeJump :494(0xe9,5)
   - **ICBuffer 两阶段**: create_transition_stub icBuffer.cpp:172-194(组装: ICStub::set_stub :71-79 写 lea rax,[cached];jmp entry,icBuffer_x86.cpp:52-62)→切换(只改 call 目标指向桩)→safepoint finalize(:50-58 写回两字段,链: update_inline_caches→remove_all stubs.cpp:200→remove_first→stub_finalize :175→ICStubInterface::finalize);桩队列=StubQueue(InlineCacheBufferSize=10K globals.hpp:412),满→VM_ICBufferFull(new_ic_stub :120-143)
   - IC miss: handle_wrong_method_ic_miss(sharedRuntime.cpp:1421-1434)→handle_ic_miss_helper(:1552,CompiledIC_lock :1617): 静态可绑定→reresolve/mono→compute+set_to_monomorphic/否则→set_to_megamorphic(失败 set_to_clean);immediate oop 更新: fix_oop_relocations→oop_Relocation::fix_oop_relocation→oop_addr=pd_address_in_code
+
+### 6.8 38-perfdata 域经验(01 篇,2026-08-12)
+- perfData.hpp 在 **share/runtime/**: 类层次 :97-107(PerfLongConstant alias PerfConstant/PerfLongVariable alias PerfVariable/PerfLongCounter alias PerfCounter/PerfString);Variability V_Constant=1/V_Monotonic=2/V_Variable=3 :255-262;Units 六种 :266-273;PerfData 对象 C 堆+值 _valuep 指向共享区(:289-291);create_entry 8 字节对齐 perfData.cpp:125-186(align=sizeof(jlong)-1 :151-153,共享区满退 C 堆 :159-161)
+- PerfDataEntry 布局(perfMemory.hpp:78-98,公共契约,注释 :55-56 "known by the PerfDataBuffer Java class libraries");Prologue :62-74(magic 0xcafec0c0/版本 2.0/accessible/entry_offset/num_entries);accessible 在 VM 启动完成时置位(management.cpp:205-207);mark_updated→mod_time_stamp(perfMemory.cpp:235-240)
+- **目录权限 0755 非 0700**(make_user_tmp_dir perfMemory_linux.cpp:852-853 注释 "create the directory with 0755 permissions");隔离靠**文件 0600**(create_sharedmem_file :909 S_IRUSR|S_IWUSR);防 symlink is_directory_secure :240/is_file_secure :417;容器 flock :938-942;路径 /tmp/hsperfdata_<user>/<pid>(PERFDATA_NAME perfMemory.cpp:43;容器 /proc/{vmid}/root/tmp :142-146);mmap_create_shared :1056(mmap :1091);attach mmap_attach_shared :1181;unlink delete_shared_memory :1133-1146;残留清理 cleanup_sharedmem_files
+- 计数器注册: 各子系统 create(CollectorCounters collectorCounters.cpp:43-58 sun.gc.collector.<n>.time/invocations/lastEntryTime/lastExitTime;name_space perfData.cpp:373-377);PerfDataManager 挂列表 _all/_sampled/_constants(:40-42);StatSampler 建 sun.rt.javaCommand(:322-324)/sun.os.hrt.ticks(:356-359);UsePerfData 默认 true(globals.hpp:2419);PerfDataSaveToFile(globals.hpp:2423,save_memory_to_file :82,调用 :1345-1346)
+- 无锁协议: 8 字节对齐 + x86-64 aligned store 原子 + 单调语义容忍旧值(inc/add perfData.hpp:416-419);sample() perfData.cpp:216-220(02 篇展开);实证 jstat-gc.txt 各列=计数器
 - **05 篇(依赖/deopt,16 域收官,大纲漂移 15+ 处,重点沉淀)**:
   - **dep 类型 11 种赌注**(枚举 12 值含 end_marker,TYPE_LIMIT=12,dependencies.hpp:104-171): evol_method/leaf_type/abstract_with_unique_concrete_subtype/abstract_with_no_concrete_subtype/concrete_with_no_concrete_subtype/unique_concrete_method/abstract_with_exclusive_concrete_subtypes_2/exclusive_concrete_methods_2/unique_implementor/no_finalizable_subclasses/call_site_target_value;concrete_klass 编造不存在;assert_xxx 声明 dependencies.hpp:359-389,assert_common_2 实现 dependencies.cpp:236
   - 注册侧: new_nmethod nmethod.cpp:512-534(call_site→MethodHandles::add_dependent_nmethod;否则 InstanceKlass::cast(klass)->add_dependent_nmethod;注释 "The slow way is to check every nmethod");赌注本体 dependencies->copy_to(this) nmethod.cpp:760
@@ -267,8 +275,9 @@
 - [x] **16-codecache/03**(nmethod-lifecycle)——已完结,904eab3
 - [x] **16-codecache/04**(relocation-ic)——已完结,ec7599c
 - [x] **16-codecache/05**(dependencies-deopt)——已完结,8a223d2,**16 域完结**
-- [ ] **38-perfdata/01**(perfdata)——大纲在 `planning/outlines/38-perfdata/01-perfdata.md`,38 域第 1 篇
-- [ ] 38-perfdata/02(stat-sampler)(38 域完结后 README 勾选);第 2 批剩余 41-zipjimage → 42-core-native
+- [x] **38-perfdata/01**(perfdata)——已完结,2094349
+- [ ] **38-perfdata/02**(stat-sampler)——大纲在 `planning/outlines/38-perfdata/02-stat-sampler.md`,38 域第 2 篇(38 域完结后 README 勾选)
+- [ ] 第 2 批剩余 41-zipjimage → 42-core-native
 - [ ] 第 2 批剩余域: 38-perfdata → 41-zipjimage → 42-core-native
 - [ ] 第 3 批: 07-classfile-classloader(06 域悬念桥接指向它)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
@@ -305,8 +314,8 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/38-perfdata/01-perfdata.md(大纲,注意 ⚠️ 块)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: PerfData 架构/DataLayout/计数器类型/无锁更新是否编造;perfData.hpp 在 share/runtime/)
+1. 读 planning/outlines/38-perfdata/02-stat-sampler.md(大纲,注意 ⚠️ 块)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: StatSampler 线程/采样周期/同步协议/PerfSampleHelper 是否编造;statSampler.cpp 在 share/runtime/)
 3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
 4. 38 域完结后 → 41-zipjimage → 42-core-native(第 2 批收官)→ 第 3 批 07
 ```
