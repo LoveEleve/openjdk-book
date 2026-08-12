@@ -12,8 +12,8 @@
 | logLevel.hpp + logLevel.cpp | **LogLevel — 六级日志等级**: Trace/Debug/Info/Warning/Error/Off, level优先级比较(<=), LogLevelType枚举, 等级名解析 | High |
 | logSelection.hpp + logSelection.cpp + logSelectionList.hpp + logSelectionList.cpp | **LogSelection — 标签+等级选择器**: "gc*=debug,class+load=info" 解析→LogSelectionList, 支持通配符(*=wildcard), 标签名解析 | High |
 | logOutput.hpp + logOutput.cpp + logOutputList.hpp + logOutputList.cpp | **LogOutput — 多输出目标**: LogOutput(抽象基类, fd/describe/config_string), LogOutputList(多输出链表), decorator装饰器前置+output+后置清理 | High |
-| logFileOutput.hpp + logFileOutput.cpp + logFileStreamOutput.hpp + logFileStreamOutput.cpp | **FileOutput — 文件输出 + 轮转**: LogFileOutput(单文件), LogFileStreamOutput(流式), rotate(日志轮换——size/信号驱动), 文件名模板解析(%p=pid, %t=time) | High |
-| logDecorations.hpp + logDecorations.cpp + logDecorators.hpp + logDecorators.cpp | **LogDecorations — 日志装饰**: 13种装饰(level/tags/time/uptime/uptimemillis/timemillis/timenanos/pid/tid/hostname/decorations), 装饰格式化和缓存 | High |
+| logFileOutput.hpp + logFileOutput.cpp + logFileStreamOutput.hpp + logFileStreamOutput.cpp | **FileOutput — 文件输出 + 轮转**: LogFileOutput(单文件), LogFileStreamOutput(流式), rotate(日志轮换——size 自动/jcmd 手动;jdk11u 无信号驱动), 文件名模板解析(%p=pid, %t=time) | High |
+| logDecorations.hpp + logDecorations.cpp + logDecorators.hpp + logDecorators.cpp | **LogDecorations — 日志装饰**: 12种装饰(level/tags/time/utctime/uptime/timemillis/uptimemillis/timenanos/uptimenanos/pid/tid/hostname), 装饰格式化和缓存 | High |
 | logConfiguration.hpp + logConfiguration.cpp | **LogConfiguration — 运行时重配置**: configure_outputs, parse_log_arguments, 从 -Xlog 参数→LogSelectionList→LogOutput配置, 支持运行时 jcmd 修改 | High |
 | logMessageBuffer.hpp + logMessage.hpp + logMessageBuffer.cpp | **LogMessage — 日志消息缓冲**: LogMessageBuffer(1024B栈上buffer), LogMessage(流式消息构建器), 序列化/异步写入 | Medium |
 | logStream.hpp + logStream.cpp | **LogStream — 异步日志流**: outputStream→LogStream适配, 多行日志的缓冲收集, flush机制 | Medium |

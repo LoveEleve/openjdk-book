@@ -8,22 +8,22 @@
 |:--:|------|:--:|
 | D1 | `LOG_TAGS(gc, region, task, phases, heap)` 宏展开后生成什么？LogTagSet 对象怎么初始化？ | ✅ 01 §2 |
 | D2 | `-Xlog:gc*=debug:gc.log:filesize=10M,filecount=5` 的完整解析流程——selection→output→options | ✅ 01 §3 + 02 §2 |
-| D3 | LogFileOutput 的 rotate 触发——size 怎么检测？signal(SIGUSR2) 怎么触发？ | ✅ 02 §1 |
+| D3 | LogFileOutput 的 rotate 触发——size 怎么检测？有没有信号触发？ | ✅ 02 §1 — size 记账(_current_size>=_rotate_size)+ jcmd rotate 手动;jdk11u 无 SIGUSR2 信号轮转 |
 
 ## 维度 2: 性能工程师
 
 | # | 问题 | 覆盖? |
 |:--:|------|:--:|
 | P1 | LogDecorations 的缓存——每毫秒/纳秒避免 clock_gettime 的开销有多大？ | ✅ 02 §3 |
-| P2 | LogMessageBuffer 的 1024B 栈上缓冲——什么日志会超过 1024B？怎么处理溢出？ | ✅ 02 §3 — >1024B→truncate+MESSAGE_OVERFLOW→`... (truncated)` |
+| P2 | LogMessageBuffer 的 1024B 缓冲——什么日志会超过 1024B？怎么处理溢出？ | ✅ 02 §3 — 溢出按 2 倍 realloc 增长,不 truncate、无 MESSAGE_OVERFLOW(logMessageBuffer.cpp:29-37,96-121;大纲旧稿"truncate+`... (truncated)`"为编造,写作期已修正) |
 | P3 | LogDecorations 缓存优化——避免每条日志调 clock_gettime 的性能收益？ | ✅ 02 §3 |
 
 ## 维度 3: SRE/运维
 
 | # | 问题 | 覆盖? |
 |:--:|------|:--:|
-| S1 | `jcmd <pid> VM.log` 的全部子命令——list/disable/enable/output/decorators/what | ✅ 02 §4 |
-| S2 | `gc.log` 文件过大 → jcmd 切换到新文件——旧文件的最后几条消息会丢失吗？ | ✅ 02 §2 — 无缝切换(旧 output buffer flush) |
+| S1 | `jcmd <pid> VM.log` 的全部选项——output/output_options/what/decorators/disable/list/rotate | ✅ 02 §4(无 enable 子命令;what 任一出现即重配) |
+| S2 | `gc.log` 文件过大 → jcmd 切换到新文件——旧文件的最后几条消息会丢失吗？ | ✅ 02 §1 — rotate 在写信号量保护下 fclose+rename+fopen,排队消息不丢;配置切换下一帧生效 |
 
 ## 维度 4: 架构师
 
@@ -53,4 +53,4 @@
 | 学生 | 2 | 2 | ✅ |
 | **合计** | **12** | **12** | ✅ |
 
-> 1 处初审 ⚠️ 已修复（P2 LogMessageBuffer overflow — 02 §3 已补 truncate+MESSAGE_OVERFLOW）。**12/12 全覆盖。**
+> 2 处初审 ⚠️ 已修复（P2 LogMessageBuffer overflow — 实际是惰性堆分配 1024B+2 倍 realloc 增长,非 truncate;D3 signal(SIGUSR2) — jdk11u 无信号轮转,只有 size 自动 + jcmd rotate 手动）。**12/12 全覆盖。**

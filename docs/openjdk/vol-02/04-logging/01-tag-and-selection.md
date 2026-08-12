@@ -170,9 +170,9 @@ bool LogSelection::selects(const LogTagSet& ts) const {
   };
 ```
 
-注意顺序:**Off=0、Trace=1、Debug=2、Info=3、Warning=4、Error=5**(LOG_LEVEL_LIST 是 Trace/Debug/Info/Warning/Error,55-59)。`level <= 阈值` 才输出——`gc*=debug` 表示 debug 及以上(debug/info/warning/error)输出,off 排除。
+注意顺序:**Off=0、Trace=1、Debug=2、Info=3、Warning=4、Error=5**(LOG_LEVEL_LIST 是 Trace/Debug/Info/Warning/Error,55-59)。选择器里的级别是最低可输出级别:消息级别 **>=** 选择器级别才输出——`gc*=debug` 表示 debug 及更粗(debug/info/warning/error)都输出,off 排除。
 
-- [C++: 多选择器:`-Xlog:gc*=debug:gc.log,gc+heap=trace:stderr`——LogSelectionList 按顺序尝试,第一个命中的选择器决定输出目标与级别(大纲的"首个匹配"语义成立,logConfiguration 里实现)]
+- [C++: 多选择器:`-Xlog:gc*=debug,gc+heap=trace:stderr`——`LogSelectionList::level_for` 逐个尝试,**后命中的覆盖先命中**(logSelectionList.cpp:92-103),对每个 TagSet 取最后命中它的选择器的级别。所以 `-Xlog:gc*=info,safepoint*=off` 里,带 safepoint 的日志被后一个选择器关掉;把 off 写在前面则无效]
 
 **关键设计 (斜体)**: *`gc*` 的真实机制与直觉相反:它不"展开成 12 个子标签",而是"**包含 gc 即命中**"——匹配成本是与标签数线性(每个 LogTagSet 至多 5 个标签的 contains 检查),配置在启动时一次性求值。扁平枚举 + 子集匹配把"查询语法"降维成几十次枚举比较——这就是为什么 `-Xlog` 的配置解析毫秒级完成。*
 

@@ -9,6 +9,7 @@
 > - **LogLevel 顺序反了**: Off=0/Trace=1/Debug=2/Info=3/Warning=4/Error=5(logLevel.hpp:55-59,LOG_LEVEL_LIST 55-59);Default=Warning/Unspecified=Info(64-65)
 > - MaxTags=5 ✓(logTag.hpp:197);LOG_TAGS 宏 6 参检查(181-185)
 > - 注册: LogTagSet 静态初始化插全局链表(logTagSet.cpp:37-51,注释 "called only during static initialization")
+> - **多选择器语义修正**: level_for 逐个尝试、**后命中的覆盖先命中**(logSelectionList.cpp:92-103)——"首个命中决定输出"是错的;`gc*=info,safepoint*=off` 中 off 写在后面才生效
 
 ### 1. "标签 — 扁平编译期枚举"
 
@@ -38,8 +39,8 @@ jcmd VM.log list 遍历 _list
 parse_internal(95-152): "all" 特殊(97-99)/'*' 后缀(strchr,102-107)/'+' 切分(110-138)/from_string(117)/
   fuzzy_match 建议(121-123)/MaxTags 检查(129-135)/重复检查(140-149)
 selects(161-171): 非 wildcard → ntags 必须相等 + 全包含;wildcard → 只要求包含——gc* = "含 gc 即命中"
-LogLevel(55-59): Off=0/Trace=1/Debug=2/Info=3/Warning=4/Error=5;level <= 阈值才输出
-多选择器: -Xlog:gc*=debug:gc.log,gc+heap=trace:stderr——首个命中决定输出(LogSelectionList)
+LogLevel(55-59): Off=0/Trace=1/Debug=2/Info=3/Warning=4/Error=5;选择器级别=最低可输出级别(消息级别 >= 选择器级别才输出)
+多选择器: -Xlog:gc*=debug,gc+heap=trace:stderr——level_for 逐个尝试,后命中覆盖先命中(logSelectionList.cpp:92-103)
 ```
 - 关键设计: **子集匹配 + wildcard 数量豁免**——查询语法降维成枚举比较,配置解析毫秒级;与直觉相反,gc* 不"展开子标签"。
 
