@@ -2,6 +2,14 @@
 
 > 🟡 Working | 采样线程 + header 标记同步
 > 读者处境: JVM 写 PerfData counters、jstat 同时读——**无锁**！Producer 原子写 64-bit→不会 "tear"。header.size=0 标记 "data invalid"——Consumer 轮询直到非零。
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/38-perfdata/02 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"sample_thread_cpu_time()/sample_java_system_properties()/sample_loaded_classes()" 编造函数不存在**: 真实循环 = StatSamplerTask::task(statSampler.cpp:41-45)→collect_sample(:158-177)→sample_data(_sampled)(:135-143)→item->sample();_sampled=PerfDataManager::sampled()(:69)
+> - **"sun.rt.safepointTime/applicationTime 采样更新" 错**: 由 RuntimeService::init 创建(runtimeService.cpp:45-68),safepoint 事件即时 inc(record_safepoint_begin :87-102),非采样;sun.cls.loadedClasses 同理(ClassLoadingService::init classLoadingService.cpp:87)——事件驱动型计数器绕过 StatSampler
+> - **"sun.os.hrt.ticks ← sample_java_system_properties" 错**: hrt.ticks 取数器=HighResTimeSampler(statSampler.cpp:338-342,os::elapsed_counter),由 create_sampled_perfdata(:339-351)创建
+> - **"header.size=0 同步协议" 编造**: Prologue 无 size 字段(01 篇已证);真实就绪信号=accessible 标志(VM 启动完成置位 management.cpp:205-207)+magic/版本校验;无轮询协议;并发模型=结构一次性建成+标量 8 字节原子写+容忍旧值
+# 采样机制(真实): StatSampler=PeriodicTask 子类;engage(statSampler.cpp:78-90)在 Thread::create_vm(thread.cpp:4048);enroll 进 _tasks[](task.cpp:121,max_tasks=10 task.hpp:45-48);WatcherThread::run(thread.cpp:1453-1507)→PeriodicTask::real_time_tick(task.cpp:49-71)→execute_if_pending(task.hpp:82-92,累积 delay_time 达 _interval 执行 task());PerfDataSamplingInterval=50ms(globals.hpp:2431);WatcherThread 非 safepoint 参与者注释 task.cpp:65;采样型注册: create_xxx 带 PerfSampleHelper→add_item(p,true)(perfData.cpp:487-503)→_sampled 列表(:318-322)
+# "扰动 <0.01% CPU" 编造数字已弃;悬念指向错(域39)→41-zip-jimage/01(目录名 41-zip-jimage 非 41-zipjimage,文件 01-zip.md)
 
 ### 1. "StatSampler — WatcherThread 50ms 采样"
 
