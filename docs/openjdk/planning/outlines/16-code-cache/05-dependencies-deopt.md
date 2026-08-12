@@ -2,6 +2,17 @@
 
 > 🔴 Deep | 5 KP 中的安全网
 > 读者处境: C2 编译 `animal.speak()` 时发现只有 Dog 类覆盖了这个方法→直接内联 Dog::speak。但运行时新加载了 Cat 类也覆盖 speak→旧的假设全破。
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/16-code-cache/05 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **dep 类型 10 种→实际 11 种赌注**(枚举 12 个值含 end_marker,TYPE_LIMIT=12,dependencies.hpp:104-171): evol_method(非 evol_declared_methods)/leaf_type/abstract_with_unique_concrete_subtype/abstract_with_no_concrete_subtype/concrete_with_no_concrete_subtype/unique_concrete_method/abstract_with_exclusive_concrete_subtypes_2/exclusive_concrete_methods_2/unique_implementor/no_finalizable_subclasses/call_site_target_value;**concrete_klass 编造不存在**;assert_xxx 声明在 dependencies.hpp:359-389
+# **DependencySignature 编造**: 反向索引是 nmethodBucket 链表(DependencyContext,dependencyContext.hpp:47,16-03 已讲);注册侧见 new_nmethod nmethod.cpp:512-534(按 context 类 InstanceKlass::cast(klass)->add_dependent_nmethod,call_site 走 MethodHandles);注释点明动机 "checking only nmethods which are dependent on those classes. The slow way is to check every nmethod"
+# 对账: spot_check_dependency_at 在 **dependencies.cpp:2047-2056**(非大纲 :340-372);check_klass_dependency :1984-2026 按类型分派 10 个 case + check_call_site_dependency :2029(call_site_target_value);验证函数返回 witness
+# DeoptimizationBlob: codeBlob.hpp:554-628;三入口 unpack/unpack_with_exception/unpack_with_reexecution(:605-607)+C1 的 unpack_with_exception_in_tls(:618-621,注释 :613-617 "Alternate entry point for C1 where the exception and issuing pc are in JavaThread::_exception_oop...");**"deopt 桩不调 C++" 错**: 调两个 C 例程(sharedRuntime_x86_64.cpp:2845-2858 注释 "We call the first C routine, fetch_unroll_info()... push all the new frames. Then we call the C routine unpack_frames()")
+# unpack 流程(与大纲 5 步一致但修正引用): fetch_unroll_info deoptimization.cpp:139→helper :158(vframe::new_vframe+sender() 收集内联链,注释 :180-181)→UnrollBlock :514→汇编铺骨架帧→unpack_frames :623→vframeArray::unpack_to_stack vframeArray.cpp:567;Location(location.hpp:45-60 Where/Type,register_number :108/stack_offset :107)
+# scopeDesc decode_body 在 :59-77 非 :68-100(16-02 已证);PcDesc 查找=缓存+radix 二分(find_pc_desc_internal nmethod.cpp:1791-1872,大纲"二分"基本对)
+# VtableStubs: 按 **(is_vtable, vtable_index)** 哈希缓存非 (klass+itable_index)(find_stub vtableStubs.cpp:208-260,VtableStubs_lock);x86-64 receiver=**j_rarg0(rdi)** 非 rcx;序列 load_klass(rax,j_rarg0)(vtableStubs_x86_64.cpp:83)→lookup_virtual_method(:113)→jmp [rbx+Method::from_compiled_offset](:132);行号 76-134 非大纲 :106-130
+# CodeHeap Analytics: aggregate 声明 codeHeapState.hpp:106;DCmd jcmd Compiler.CodeHeap_Analytics;实证: Reserved 245760/Committed 7488/Unallocated 243224 KB(占用 3%)
+# **悬念指向改**: 16-05 是 16 域收官篇,后续=38-perfdata/01(第 2 批收官),非大纲的 "域 17 Threads"(17 在第 3 批,且 06 域悬念已桥 07)
 
 ### 1. "我的赌注是什么？" — Dependencies 的十种假设
 
