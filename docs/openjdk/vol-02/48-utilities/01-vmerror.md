@@ -78,12 +78,12 @@
     st->print_cr("Native frames: (J=compiled Java code, A=aot compiled Java code, j=interpreted, Vv=VM code, C=native code)");
 ```
 
-每一帧由 `fr.print_on_error(st, buf, buf_size)`(242)打印,再尝试 `Decoder::get_source_info`(246)补充源文件行号。栈怎么走?对 JavaThread 用 `RegisterMap` + `fr.sender(&map)`(259-261)按 Java 帧链回溯;对 C 帧用 `os::get_sender_for_C_frame`(265-266)按帧指针回溯——两种帧的行走规则完全不同,打印时统一成一行。
+每一帧由 `fr.print_on_error(st, buf, buf_size)`(242)打印,再尝试 `Decoder::get_source_info`(246)补充源文件行号——注意这个接口目前只有返回 false 的占位实现(decoder.cpp:135-137),Linux 上不会真打印行号。栈怎么走?对 JavaThread 用 `RegisterMap` + `fr.sender(&map)`(259-261)按 Java 帧链回溯;对 C 帧用 `os::get_sender_for_C_frame`(265-266)按帧指针回溯——两种帧的行走规则完全不同,打印时统一成一行。
 
-- [C++: 地址 → 名字的翻译由 `Decoder`(decoder.cpp:99)完成。Linux 平台是 ELF 解码器(decoder_elf.cpp):直接读 libjvm.so 的 ELF 符号表,解析出 `函数名+偏移`;注意**不是 dladdr**——`Decoder` 自行解析 ELF,不依赖动态链接器的符号查询(还支持在 .so 被 strip 后回退成裸地址)]
+- [C++: 地址 → 名字的翻译由 `Decoder`(decoder.cpp:99)完成。Linux 平台用 `ElfDecoder`(decoder_elf.cpp:38):用自研的 `ElfFile` 直接解析 libjvm.so 的 ELF 符号表,解析出 `函数名+偏移`,C++ 符号再经过 demangle;注意**不是 dladdr**——`Decoder` 不依赖动态链接器的符号查询(在 .so 被 strip 后回退成裸地址)]
 - [man 1 addr2line:libjvm.so 被 strip 时,hs_err 里只有裸地址——用 `addr2line -e libjvm.so 0x...` 手动解析]
 
-**关键设计 (斜体)**: *Decoder 在错误处理中有"安全模式":`Decoder::decode` 内部检查 `os::current_thread_id() == VMError::first_error_tid`(decoder.cpp:100)——只有持有令牌的错误处理线程才做完整的符号解析;其他场景(比如运行时别的线程想解码)走保守路径,避免在崩溃现场再次触发动态库操作。诊断代码自己也要能被诊断,这是"最后一道防线"的自觉。*
+**关键设计 (斜体)**: *Decoder 对"错误处理线程"有特殊待遇,但方向与直觉相反:`Decoder::decode` 检查 `os::current_thread_id() == VMError::first_error_tid`(decoder.cpp:99-108)——**错误处理线程不加锁、用专用实例**;其他线程加 `shared_decoder_lock`、用共享实例。为什么?崩溃线程可能正持有那把解码锁(解码发生在任何地方),错误处理里再去拿就死锁;共享实例的内部状态也可能被崩溃破坏。于是错误处理线程直接绕过锁、用一份独立的 decoder。诊断代码自己也要能被诊断,这是"最后一道防线"的自觉。*
 
 ## 4. 崩溃现场:siginfo、寄存器、code blob
 
@@ -123,7 +123,7 @@ void os::print_context(outputStream *st, const void *context) {
 
 `print_context` 尾部(795-805)打印 `Top of Stack`(sp 起 8 个 slot 的 hex dump,797 行)和 `Instructions:`(pc 附近的原始指令字节,804 行)——RIP 指向的那条指令长什么样,配合 objdump 就能对上源码。
 
-**register info**(761-767)→ `os::print_register_info`(os_linux_x86.cpp:810):"Register to memory mapping"——把每个寄存器的值过一遍 `print_location`:如果值像一个有效指针,就翻译成"指向哪个对象/哪段代码/哪块堆"。
+**register info**(761-767)→ `os::print_register_info`(os_linux_x86.cpp:810):"Register to memory mapping"——把每个寄存器的值过一遍 `print_location`(os.cpp:1077):NULL 直接标出,指向 CodeCache 的显示是哪段代码,指向堆的显示是哪个对象,指向保留区显示未分配。
 
 **code blob**(795-819):如果 RIP 落在 CodeCache 里,打印它属于谁:
 
