@@ -105,7 +105,7 @@ inline oop OopHandle::resolve() const {
 WeakHandle 是存在"弱处理 OopStorage"里的引用(weakHandle.hpp:45-60): 头注释写明 "This is the vm version of jweak"——GC 按弱引用处理槽里的对象,只剩弱引用时槽被清成 NULL,持有方必须判空。按用途选存储: `get_storage()` 依类型返回对应的 OopStorage(weakHandle.cpp:35-39)。
 
 - [C++: 强/弱不是"槽上加 tag",是**不同的 OopStorage 实例**各配一套 GC 策略——弱存储的槽在 GC 清理后置 NULL,`resolve()`/`peek()` 由调用方判空]
-- [C++: 别和 `Handle`(runtime/handles.hpp)混淆: Handle 是栈上临时句柄,构造/析构自动管理;OopHandle/WeakHandle 是元数据里的长期引用,生命周期由拥有者控制]
+- [C++: 别和 `Handle`(handles.hpp:64)混淆: Handle 是栈上临时句柄,构造/析构自动管理;OopHandle/WeakHandle 是元数据里的长期引用,生命周期由拥有者控制]
 
 **关键设计 (斜体)**: *元数据(类镜像、字符串表等)持有的引用不能散落各处让 GC 逐个找——OopStorage 把它们集中到连续的槽区,GC 一次遍历一个存储就处理完所有该类的引用,清理(弱)或更新(强)都是批量操作。引用从"散点"变成"一张表"。*
 

@@ -76,7 +76,7 @@ vtable 从 InstanceKlass 固定头部之后开始,一个 entry 一个 word(方�
 
 ### 4.2 表怎么建: 父类长度打底,逐方法归位
 
-vtable 构建分三步(klassVtable.cpp):
+vtable 构建分三步(klassVtable.cpp:56-120 起):
 
 - `compute_vtable_size_and_num_mirandas`(:56-120): 长度从父类继承(`super->vtable_length()`,:68),逐个方法问 `needs_new_vtable_entry`(:85,需要新 entry 就加一),最后补 miranda 方法(接口抽象方法落入实现类的 vtable,`get_mirandas` 调用在 :93-94);
 - `initialize_from_super`(:138-155): **先把父表整体复制到子表**(`superVtable.copy_vtable_to(table())`,:151)——子表是父表的物理副本;
