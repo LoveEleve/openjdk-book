@@ -67,7 +67,7 @@
 
 每个 flag 在 `flagTable[]`(818 行起)里生成一个条目:`{类型字符串, 名字, 指向变量的指针, 文档, KIND_* 分类}`——`JVMFlag::flags` 指向这张表(jvmFlag.cpp:894),jcmd/PrintFlagsFinal/SA 全靠它。**第三次展开:范围与约束**(`range(8, 256)`/`constraint(...)` 行由调用方的 RANGE/CONSTRAINT 参数接收,第 4 节讲)。
 
-- [C++: 宏体系的核心技巧是"**同一文本,不同参数重放**":RUNTIME_FLAGS 本体不含任何展开逻辑,展开逻辑全在调用方的参数里——globals.cpp 传 MATERIALIZE_* 得到变量,jvmFlag.cpp 传 *_STRUCT 得到表。加一个新 flag = 改一行;漏了哪个展开,编译期直接报错(类型检查在编译期,这正是"为什么不用运行时 JSON config"的答案)]
+- [C++: 宏体系的核心技巧是"**同一文本,不同参数重放**":RUNTIME_FLAGS 本体不含任何展开逻辑,展开逻辑全在调用方的参数里——globals.cpp:58 传 MATERIALIZE_* 得到变量,jvmFlag.cpp:818 传 *_STRUCT 得到表。加一个新 flag = 改一行;漏了哪个展开,编译期直接报错(类型检查在编译期,这正是"为什么不用运行时 JSON config"的答案)]
 
 **关键设计 (斜体)**: *"一行声明,三次展开"让 flag 的三种身份永远同步:① C++ 变量(代码直接读);② JVMFlag 表(工具可见,含类型/文档/分类);③ 约束注册(合法性检查)。三者从同一行文本生成,不可能失同步。类型安全在编译期强制:`-XX:UseG1GC=hello` 在 JVMFlag::set_bool 处失败,而不是运行时才炸。*
 
@@ -116,7 +116,7 @@ ARCH_FLAGS(MATERIALIZE_DEVELOPER_FLAG, \
           range(0, 99)                                                      \
 ```
 
-`UseAVX` 只写在 x86 的 ARCH_FLAGS 里——ARM 平台编译时,**ARCH_FLAGS 由 arm 的 globals_arm.hpp 定义,根本不含 UseAVX**,所以 ARM 的 JVM 里没有这个变量也没有这个表项。平台隔离是**编译期**的,零运行时开销。jvmFlag.cpp 的表生成同样按三套宏展开(818-839+),ARCH 表项带 `KIND_ARCH` 位(812-816)。
+`UseAVX` 只写在 x86 的 ARCH_FLAGS 里(本源码树只含 x86 平台;其他架构编译时由各自的 cpu/<arch>/globals_<arch>.hpp 提供自己的 ARCH_FLAGS,不含 UseAVX)——于是非 x86 的 JVM 里**没有这个变量也没有这个表项**。平台隔离是**编译期**的,零运行时开销。jvmFlag.cpp 的表生成同样按三套宏展开(818-839+),ARCH 表项带 `KIND_ARCH` 位(812-816)。
 
 **关键设计 (斜体)**: *"谁定义宏,谁就拥有这些 flag"——平台文件定义 ARCH_FLAGS/RUNTIME_OS_FLAGS 的内容,share 的代码只负责展开。加平台 flag = 改平台文件;跨平台共享 = 写 VM_FLAGS。这比"运行时读配置文件"的方案好在:不存在的 flag 在编译期就不存在,不可能出现"ARM 上 UseAVX 未定义"的运行时错误。*
 
