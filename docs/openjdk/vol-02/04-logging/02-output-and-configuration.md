@@ -46,9 +46,7 @@ void LogTagSet::log(LogLevelType level, const char* msg) {
 - [C++: `LogOutput` 是抽象基类,两个纯虚 `write`(logOutput.hpp:100-101): 一个收单行字符串,一个收 LogMessageBuffer 迭代器(多行消息)。每个输出目标是一个子类实例——输出类型可扩展,链表与 TagSet 不感知具体输出]
 - [C++: 迭代器带读者计数: 拷贝构造时 `increase_readers()`,析构时 `decrease_readers()`(logOutputList.hpp:100-116)。这解决"边写边改配置"的并发问题,见下]
 
-### 1.3 关键设计 (斜体): *读不锁,配置侧等读者退场*
-
-*配置变更(jcmd 改级别、删除输出)与日志写入并发发生。写路径不持锁: 进入时 `increase_readers()` 把 `_active_readers` 加一(logOutputList.hpp:135-137),退出时减一;删除节点前 `wait_until_no_readers()` 忙等读者数归零(logOutputList.cpp:44-49)——一次 write 的时间极短,忙等几乎不会真的空转;数归零才 `delete`。读不锁、写等读,每条消息的链表遍历零锁开销,热配置又不会留下悬垂指针。*
+**关键设计 (斜体)**: *读不锁,配置侧等读者退场——配置变更(jcmd 改级别、删除输出)与日志写入并发发生。写路径不持锁: 进入时 `increase_readers()` 把 `_active_readers` 加一(logOutputList.hpp:135-137),退出时减一;删除节点前 `wait_until_no_readers()` 忙等读者数归零(logOutputList.cpp:44-49)——一次 write 的时间极短,忙等几乎不会真的空转;数归零才 `delete`。每条消息的链表遍历零锁开销,热配置又不会留下悬垂指针。*
 
 ## 2. 一条消息怎么落盘
 
@@ -77,7 +75,7 @@ int LogFileStreamOutput::write(const LogDecorations& decorations, const char* ms
 
 每行: flockfile(stdio 的递归锁,多线程写同一 `FILE*` 不交错)→ 写装饰 → 写消息加换行 → **fflush** → funlockfile。
 
-**关键设计 (斜体)**: *为什么每行都 fflush,不攒缓冲?因为 JVM 崩溃(segfault、OOM 死循环)时没人保证 C 库缓冲落盘——每行刷新,日志最多丢半行,而不是最后 4KB。代价是每行一次 write 系统调用;日志本就低频高价值,单行一次系统调用开销可忽略。*
+**关键设计 (斜体)**: *为什么每行都 fflush,不攒缓冲?因为 JVM 崩溃(segfault、OOM 死循环)时没人保证 C 库缓冲落盘——每行刷新,日志最多丢半行,而不是最后一块缓冲。代价是每行一次 write 系统调用;日志本就低频高价值,单行一次系统调用开销可忽略。*
 
 - [POSIX: flockfile/funlockfile 是 stdio 的线程锁([man 3 flockfile]),与 JVM 自己的锁无关;os::flockfile 只是薄封装(os_posix.cpp:589-595)]
 - [C++: 装饰排版 `write_decorations` 用 `[%-*s]` 逐个输出,`_decorator_padding` 记录每列历史最大宽度(logFileStreamOutput.cpp:53-73)——列对齐不是手算的,是运行时自动追宽]
@@ -92,7 +90,7 @@ int LogFileStreamOutput::write(const LogDecorations& decorations, const char* ms
 
 两个配套机制:
 
-- **LogMessageBuffer**(logMessageBuffer.hpp:31-53): 一次要打多条、级别可能不同的行(如 GCTraceTime 的时间块),先攒进 buffer 再整体输出。它**不是**"1024B 栈上固定缓冲": 构造时指针全空,首次写入才 `initialize_buffers()` 堆分配 1024B 初始容量(logMessageBuffer.cpp:62-69),溢出按 2 倍 realloc(:29-37,:96-121)——消息再长也不截断,只是多分配一次。行级别不同,输出时按每个输出的阈值过滤行(`skip_messages_with_finer_level`,logMessageBuffer.cpp:71-77)。
+- **LogMessageBuffer**(logMessageBuffer.hpp:31-53): 一次要打多条、级别可能不同的行(如 CDS 归档转储的 `LogMessage(cds)`,filemap.cpp:641 连写两行 "Dumping shared data to file:"),先攒进 buffer 再整体输出。它**不是**"1024B 栈上固定缓冲": 构造时指针全空,首次写入才 `initialize_buffers()` 堆分配 1024B 初始容量(logMessageBuffer.cpp:62-69),溢出按 2 倍 realloc(:29-37,:96-121)——消息再长也不截断,只是多分配一次。行级别不同,输出时按每个输出的阈值过滤行(`skip_messages_with_finer_level`,logMessageBuffer.cpp:71-77)。
 - **LogStream**(logStream.hpp:34-55): `outputStream`(JVM 传统打印体系抽象,GC/JIT/class 加载打印都在用)到 ULF 的适配器。行缓冲 `LineBuffer` 内置 64B 小数组 `_smallbuf`——LogStream 在栈上时,小行直接攒在栈上,超长才 malloc(上限 1M 防泄漏,logStream.cpp:46-78);遇到 `'\n'` 才把整行交给日志管道(logStream.cpp:104-113),析构时把没换行的尾巴打出去(:116-121)。旧代码只需把 `tty->print(...)` 换成 `LogStream` 的写法,大量旧调用点就接进了新体系。
 
 ## 3. 文件输出: 命名、增长与轮转
@@ -161,9 +159,7 @@ jdk11u 里轮转触发只有两个: 自动(size 写满)+ 手动 jcmd。`jcmd <pi
 
 **这里要澄清一个流传很广的版本差异**: 常有人写"kill -USR2 触发日志轮转",但 jdk11u 里 SIGUSR2 只属于 Suspend/Resume 机制(os_linux.cpp:195 `SR_signum = SIGUSR2`),与日志无关。jdk11u 没有信号触发的日志轮转——想切轮转用 jcmd;想外部控制就用系统 logrotate 做 rename 归档,再发一次 `VM.log rotate` 让 JVM 打开新文件。
 
-### 3.6 关键设计 (斜体): *换的是 FILE*,不是 fd*
-
-*另一种常见描述是"内部用 `os::replace_fd`/dup2 原子替换文件描述符"——jdk11u 源码里没有这个调用。轮转实际是 FILE* 级别的关闭 + 重开(fclose/fopen)。文件描述符编号在 reopen 后可能变化,但写路径只认 FILE*,消息在信号量保护下不会落到旧流上;dup2 是为了让 fd **编号**不变的场景准备的,这里不需要。*
+**关键设计 (斜体)**: *换的是 `FILE*`,不是 fd——另一种常见描述是"内部用 `os::replace_fd`/dup2 原子替换文件描述符",jdk11u 源码里没有这个调用。轮转实际是 FILE* 级别的关闭 + 重开(fclose/fopen)。文件描述符编号在 reopen 后可能变化,但写路径只认 FILE*,消息在信号量保护下不会落到旧流上;dup2 是为了让 fd 编号不变的场景准备的,这里不需要。*
 
 ## 4. LogConfiguration: 一个引擎,两个入口
 
@@ -207,7 +203,7 @@ void LogConfiguration::configure_output(size_t idx, const LogSelectionList& sele
 
 配置的本质: **遍历全局 TagSet 链表,对每个 set 求出"这个输出在它上面是什么级别",写进它的 LogOutputList**(logConfiguration.cpp:216-274)。没有独立的"配置对象"——配置就是写进每个 TagSet 的数据结构,日志热路径每次读的就是这些结构,所以配置**下一帧即生效**: 不需要 flush 中间缓冲,不需要重启。
 
-- [C++: 全程持 `ConfigurationLock`(信号量实现的锁,logConfiguration.cpp:55-78)。注释强调持锁期间线程禁止阻塞——配置时可能 new/delete 输出对象,而写路径不持锁,靠 §1.3 的读者计数保证安全]
+- [C++: 全程持 `ConfigurationLock`(信号量实现的锁,logConfiguration.cpp:55-78)。注释强调持锁期间线程禁止阻塞——配置时可能 new/delete 输出对象,而写路径不持锁,靠 §1 的读者计数保证安全]
 - [C++: 多选择器语义: `LogSelectionList::level_for` 逐个尝试,**后命中的覆盖先命中**的(logSelectionList.cpp:92-103)。所以 `-Xlog:gc*=info,safepoint*=off` 里,带 safepoint 的日志被后一个选择器关掉;把 off 写在前面则无效]
 
 ### 4.4 关闭与旧旗标的收编
