@@ -53,7 +53,7 @@ Klass 的常用字段(klass.hpp:128-166):
 
 - `_name`: `Symbol*`——类名,instance 类是 "java/lang/String",数组是 "[I"、"[Ljava/lang/String;";
 - `_super` / `_subklass` / `_next_sibling`: 运行时类层次链表——子类挂在父类的 `_subklass`,`next_sibling` 串兄弟;
-- `_primary_supers[8]` / `_secondary_supers` / `_secondary_super_cache` + `_super_check_offset`: 快速子类型检查的数据(klass.hpp:120-126)。`instanceof` 先查 primary 表(直接祖先,最多 8 个),miss 再查 secondary 缓存——常见情况一到两次比较就出结果;
+- `_primary_supers[8]` / `_secondary_supers` / `_secondary_super_cache` + `_super_check_offset`: 快速子类型检查的数据(klass.hpp:120-126)。`instanceof` 的快速路径按 `super_check_offset` 指向的位置检查——primary 祖先直接比槽位、secondary 类型先比缓存,命中即结束;miss 才进入扫 `_secondary_supers` 数组的慢路径——常见情况一次比较就出结果;
 - `_java_mirror`: `OopHandle`,指向 `java.lang.Class` 实例——`getClass()` 的最后一步;
 - `_prototype_header`: 类级 mark word 原型(含偏向锁 pattern)——上一篇说过,对象初始化时 mark 从它复制(oop.inline.hpp:82-84 `init_mark`)。
 
@@ -80,7 +80,7 @@ vtable 构建分三步(klassVtable.cpp):
 
 - `compute_vtable_size_and_num_mirandas`(:56-120): 长度从父类继承(`super->vtable_length()`,:68),逐个方法问 `needs_new_vtable_entry`(:85,需要新 entry 就加一),最后补 miranda 方法(接口抽象方法落入实现类的 vtable,`get_mirandas` 调用在 :93-94);
 - `initialize_from_super`(:138-155): **先把父表整体复制到子表**(`superVtable.copy_vtable_to(table())`,:151)——子表是父表的物理副本;
-- `initialize_vtable`(:167 起): 遍历本类方法,`update_inherited_vtable`(:368)决定归位方式——**override 父类方法的,在复制来的槽位上覆写为子类方法(不新增槽)**;父类没有的,追加到末尾。注释原文 "if override, replace in copy of super vtable, otherwise append to end"(:205-206)。private/static/`<init>` 不进 vtable(:397-400);final 方法**从不新增 entry**——它要么静态解析,要么覆写被 override 的父类槽位(:402-406)。数组类不引入新槽位(:203-204)。
+- `initialize_vtable`(:167 起): 遍历本类方法,`update_inherited_vtable`(:368)决定归位方式——**override 父类方法的,在复制来的槽位上覆写为子类方法(不新增槽)**;父类没有的,追加到末尾。注释原文 "if override, replace in copy of super vtable, otherwise append to end"(:205-206)。private/static/`<init>` 不进 vtable(:397-400);final 方法**从不新增 entry**——它要么静态解析,要么覆写被 override 的父类槽位(:402-406)。数组类不引入新槽位(:195)。
 
 **关键设计 (斜体)**: *先复制再覆写,比"每个槽位逐个从父表找"更简单——子表建好后就是一份完整自洽的表,方法地址全部就位;override 只需覆盖对应槽位,继承的方法天然就是父表里那些地址,不需要再查父表。*
 
@@ -153,7 +153,7 @@ class itableOffsetEntry {
   };
 ```
 
-`<clinit>` 同步在 `initialize_impl`(instanceKlass.cpp:891): 持 init_lock(ObjectLocker),发现别的线程正在初始化(`is_being_initialized`)且不是自己(`is_reentrant_initialization(self)`,比较 `_init_thread`)就 `waitUninterruptibly` 等锁(:905-955)——**递归初始化**(自己初始化过程中又触发自己的类)直接放行,不递归执行 `<clinit>`。
+`<clinit>` 同步在 `initialize_impl`(instanceKlass.cpp:891): 持 init_lock(ObjectLocker),发现别的线程正在初始化(`is_being_initialized`)且不是自己(`is_reentrant_initialization(self)`,定义在 instanceKlass.hpp:518,就是 `thread == _init_thread`)就 `waitUninterruptibly` 等锁(:905-955)——**递归初始化**(自己初始化过程中又触发自己的类)直接放行,不递归执行 `<clinit>`。
 
 ## 7. InstanceMirrorKlass: Class 对象的 Klass
 
