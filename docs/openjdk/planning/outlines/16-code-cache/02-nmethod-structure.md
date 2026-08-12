@@ -2,6 +2,17 @@
 
 > 🔴 Deep | 5 KP 中的核心数据结构
 > 读者处境: C2 花了几百毫秒编译一个方法，生成了几 KB 的机器码。但这不只是机器码——附带了 8 种元数据让 GC、deopt、JVMTI 都能看懂这段代码。
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/16-code-cache/02 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **入口/IC 机制全部重写**(大纲 [x86] 框与"5 字节 IC call stub"均不实): 未验证入口 = C2 的 MachUEPNode(x86_64.ad:1685-1692): `cmp rax,[j_rarg0+8]; jne ic_miss_stub; nops 对齐`——**期望 Klass 在 rax**,由调用方动态调用点传入并存在 `movq rax,imm64` 的立即数里;调用点 = movq rax,imm64(10B)+call(5B)=15B,即 MachCallDynamicJavaNode::ret_addr_offset(x86_64.ad:574-578,CallDynamicJavaDirect :12834);NativeMovConstReg::instruction_size=10(nativeInst_x86.hpp:264);CompiledIC::_value=get_load_instruction(compiledIC.cpp:171-179),set_data/get_data 读写 mov 立即数
+> - **非优化单态调用走 entry_point(未验证入口),不是 verified_entry_point**(compiledIC.cpp:492-496 compute_monomorphic_entry: optimized→verified/:495 非优化→entry);只有优化/静态绑定直连 verified_entry
+> - IC 状态图 compiledIC.hpp:39-48 ✓ 四态;Megamorphic 走 **VtableStubs 桩**(compiledIC.cpp:218-268)非"走解释器",且缓存值不可靠(注释 compiledIC.cpp:275 "Cannot rely on cached_value");Interpreted 态(c2i 入口+CompiledICHolder)才走解释器(compiledIC.cpp:508-516)
+> - **状态机枚举 6 值非 5**: not_installed=-1/in_use=0/**not_used=1**/not_entrant=2/zombie=3/unloaded=4(compiledMethod.hpp:188-197);not_used 实际不被赋值——make_not_used() 直接 make_not_entrant()(nmethod.hpp:342)
+> - **make_not_entrant_or_zombie 非原子 CAS**: Patching_lock 互斥+双重检查(nmethod.cpp:1144 起,早退 :1148-1153,锁内复查 :1182-1186);转 not_entrant 时 patch verified entry 5 字节 jmp→handle_wrong_method_stub(:1190-1193);mark_as_seen_on_stack :1212-1214;x86-64 用 8 字节 Atomic::store(nativeInst_x86.cpp:561)
+> - 行号漂移: entry_bci 在 **nmethod.hpp:63**(非 :125,is_osr_method :270);set_to_monomorphic 在 compiledIC.cpp:**373-455**(非 :112-131);SECT_CONSTS 枚举在 **codeBuffer.hpp:353-361**(非 :167,16-01 已回填)
+> - 布局顺序: 真实为 header→relocation→consts→code→stubs(含 exception/deopt handler,:718-722)→oops 表→metadata 表→scopes 数据→scopes pcs→dependencies→handler table→null check table;偏移链在 nmethod.cpp:685-746(JIT ctor);consts 在 content 区、代码之前(loadConD movsd [constantaddress] x86_64.ad:6076-6085)
+> - ScopeDesc 无 `_parent` 指针: 是压缩流里的 `_sender_decode_offset` 链(scopeDesc.cpp:79-86;sender :152-155;is_top :149),PcDesc 字段 pcDesc.hpp:37-39
+> - 其余 ✓: nmethod.hpp:91-93 三入口、:95-109 偏移字段(12 个)、:321-325 状态访问(is_in_use=_state<=in_use)、:127-128 Patching_lock、:361-369 oops 索引 0 保留 NULL、:630-669 nmethodLocker(Atomic::inc/dec nmethod.cpp:2035-2049;is_locked_by_vm :438;can_convert_to_zombie nmethod.cpp:999-1007)、compile.cpp:932-937(Verified_Entry=_first_block_size,compile.hpp:608)、output.cpp:89-91(非静态才插 UEP)、UEP nop 注释 x86_64.ad:1696-1697
 
 ### 1. "我有三扇门" — entry points 策略
 
