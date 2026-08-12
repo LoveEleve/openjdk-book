@@ -2,6 +2,13 @@
 
 > 🔴 Deep | 5 KP 中的入口机制
 > 读者处境: JVM 刚编译完一个方法——它要把机器码存在哪里？为什么一个"缓存"需要分成不同类型的堆？
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/16-code-cache/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **codeBuffer.hpp 在 share/asm/ 不在 share/code/**: section 枚举在 :353-361(SECT_FIRST=0,CONSTS=0/INSTS/STUBS,顺序即最终布局,compute_final_layout codeBuffer.cpp:472 按枚举序紧凑排);Section 类字段 _start/_end/_limit/_locs_start/_locs_end 在 :86-92(非 :200-230)
+> - **NonNMethodCodeHeapSize x86 默认 32M**(globals.hpp:92 define_pd_global 32*M),非"~5MB"
+> - **CodeCache::allocate 在 codeCache.cpp:482**(非 :181-210): get_code_heap→heap->allocate(:497)→失败 expand_by→再失败降级路径(注释 :510-512 "NonNMethod -> MethodNonProfiled -> MethodProfiled");commit 在 :588
+> - **find_blob 反查不是二分**: CodeHeap::find_blob_unsafe→find_start(heap.cpp:486)= 地址右移段大小算段号,沿段映射定位
+> - CodeBlobType(:40-44,struct 含 NumTypes=5)✓、层次(RuntimeBlob :340/BufferBlob :383/AdapterBlob :424/VtableBlob :437/RuntimeStub :468/SingletonBlob :517/各单例 blob :554-703)✓、get_code_blob_type(codeCache.hpp:260-273)✓、SegmentedCodeCache 条件(:61-66 注释)✓、CodeHeap 在 share/memory/heap.hpp:81 ✓、VirtualSpace 页对齐=ReservedSpace::page_align_size_up(virtualspace.cpp:256)✓、CodeEntryAlignment=32(globals_x86.hpp:49)✓
 
 ### 1. "我从哪来？" — CodeBuffer 到 CodeBlob 的转译
 
