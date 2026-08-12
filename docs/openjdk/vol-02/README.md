@@ -8,7 +8,7 @@
 
 | 批 | 域 | 状态 |
 |---|---|---|
-| 第 1 批（地基） | 01-os（[01-platform-detection](01-os/01-platform-detection.md) / [02-virtual-memory](01-os/02-virtual-memory.md) / [03-threads-and-sync](01-os/03-threads-and-sync.md) / [04-signals-and-safepoint](01-os/04-signals-and-safepoint.md) 完成 — **01-os 域完结**）；05-cpu-primitives（[01-atomic-and-memory-order](05-cpu-primitives/01-atomic-and-memory-order.md) 完成）/ 05-cpu / 45-math / 48-utils | 进行中 |
+| 第 1 批（地基） | 01-os（[01-platform-detection](01-os/01-platform-detection.md) / [02-virtual-memory](01-os/02-virtual-memory.md) / [03-threads-and-sync](01-os/03-threads-and-sync.md) / [04-signals-and-safepoint](01-os/04-signals-and-safepoint.md) 完成 — **01-os 域完结**）；05-cpu-primitives（[01-atomic-and-memory-order](05-cpu-primitives/01-atomic-and-memory-order.md) / [02-safefetch-and-platform](05-cpu-primitives/02-safefetch-and-platform.md) 完成 — **05 域完结**）/ 05-cpu / 45-math / 48-utils | 进行中 |
 | 第 2 批（原语） | 02-assembler / 03-flags / 04-logging / 06-oops / 16-codecache / 38-perfdata / 41-zipjimage / 42-core-native | 未开始 |
 | 第 3 批（对象/类） | 07-classfile-classloader / 09-memory-core / 17-threads | 未开始 |
 | 第 4 批（执行/帧） | 10-metaspace / 19-sync / 23-stub / 24-frame-stack / 08-interpreter / 31-unsafe / 44-verification | 未开始 |
