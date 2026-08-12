@@ -296,6 +296,21 @@
   - **fd 体系**: GET_FD/SET_FD 宏在 io_util_md.h:53-59(非 io_util.h);IO_fd_fdID 由 FileDescriptor.initIDs 缓存(FileDescriptor_md.c:51-57,GetFieldID "fd" "I" int;**Windows 版 GetLongField+IO_handle_fdID**);io_util.c 无 getFD/setFD 函数(编造);IO_Read/IO_Write=别名宏(io_util_md.h:70-71),EINTR 重试在 handleRead/handleWrite(RESTARTABLE io_util_md.c:166-180);fileOpen 剥尾部斜杠 :101-106;handleOpen 目录→EISDIR :82-86;fileDescriptorClose 先置 -1 再关(:137-143)+0/1/2 重定向 /dev/null(:147-160)
   - **TimeZone 函数名**: getSystemTimeZoneID/getSystemGMTOffsetID=Java_java_util_TimeZone_xxx(TimeZone.c:40/67);TimeZone_md.c 实际函数 findJavaTZ_md :793-850/getPlatformTimeZoneID :251-354/getGMTOffsetID :855-901;链路: user.timezone 属性(TimeZone.java:660-697)→TZ 环境变量(:800-805)→/etc/timezone fgets 一行(:269-285)→/etc/localtime lstat 三态(:288-353: symlink→readlink+getZoneName / 普通文件→findZoneinfoFile :123-195 全目录比对 isFileIdentical :203-243 大小+memcmp,跳过 .开头/ROC/posixrules/localtime :154-176,UTC/GMT 快速路径 :132-147)→GMT;":" 前缀 :809-811+posix/ :814-816;getGMTOffsetID=localtime_r/gmtime_r 比较(:873-880)+strftime %z(:893-898)
   - 实证: 42-classio-tz.txt(容器 TencentOS 无 /etc/timezone、/etc/localtime→Asia/Shanghai 走 readlink 分支)+42-classio-jnionload.txt+已存 jcmd-VM.system_properties.txt:9(user.timezone=Asia/Shanghai)
+### 6.10 07-classfile-classloader 域经验(2026-08-12,01 篇,第 3 批第一篇)
+- **文件位置**: classFileParser.cpp(6463 行)/classFileParser.hpp(553)/klassFactory.cpp/classFileError.cpp/verifier.hpp 全在 **share/classfile/**(classFileStream 在 share/classfile/ 非 utilities!)
+- **01 篇(ClassFile 解析,大纲漂移 12 处含 2 处编造,重点沉淀)**:
+  - **parseClassFile 函数不存在**(编造): 入口链=KlassFactory::create_from_stream(klassFactory.cpp:166-226,JVMTI ClassFileLoadHook :184-188)→ClassFileParser 构造(:5879,**构造内 parse_stream :5995-5997+post_process_parsed_stream**)→create_instance_klass;parse_stream :6074-6308 是主干(magic :6084/版本 :6090-6091/verify_class_version :4881-4930/cp 调用 :6125/access_flags :6130/this_class :6162/super :6252/interfaces :6259/fields :6268/methods :6277/属性 :6293/at_eos :6303 "Extra bytes")
+  - **FieldLayoutBuilder 不存在**(编造): 布局在 ClassFileParser::layout_fields(:3934,:6411 调用);06-03 已讲布局,07-01 只引用
+  - **FieldAllocationType 五类桶非六桶**(classFileParser.cpp:1453-1466): oop/byte(boolean,byte,char)/short/word(int)/double,static+nonstatic 各一套;fac->update :1676
+  - **常量池**: parse_constant_pool_entries :126-400 switch **15 种 tag**(Module/Package 不在,jdk11u 无 JVM_CONSTANT_Module);槽 0 保留 :151;局部按值拷贝 cfs1 :138 助优化;Long/Double 双槽 :256-266(index++ "see JVM book p. 98");Utf8→verify_legal_utf8 :298-301+**SymbolTable 批量分配**(lookup_only :314,new_symbols :323-329,symbol_alloc_batch_size);版本门槛 51/55(verifier.hpp:40-42);第一遍交叉引用 parse_constant_pool :406-500(ClassIndex→unresolved_klass_at_put :490/StringIndex→unresolved_string_at_put :499,**只登记不解析**)
+  - **parse_fields** :1541 起: FieldInfo **六槽**(fieldInfo.hpp:69 field_slots=6,offset 32 位高低两槽=12 字节);injected fields=JavaClasses::get_injected(:1575-1578,CLASS_INJECTED_FIELDS javaClasses.hpp:1562+: java.lang.Class 的 klass/array_klass/oop_size 等);字段属性 parse_field_attributes :1295
+  - **parse_method** :2344: <clinit> 51 起必须显式 static(45.x 自动补,:2366-2379);接口禁 <init> :2381-2383;Code 属性 :2467 起(native/abstract 禁 Code、双 Code 报错;45.2 兼容 1+1+2 :2485-2492;code_start=current() 不拷贝 :2502);StackMapTable 字节留 Verifier
+  - **类级属性** :3440: BootstrapMethods :3596(Java 7)/NestMembers :3627/NestHost :3640(JDK 11)
+  - **post_process_parsed_stream** :6310: 传递接口 :6378、vtable 大小 :6394(klassVtable::compute_vtable_size_and_num_mirandas,06-02 呼应)、itable 大小 :6405、layout_fields :6411
+  - **fill_instance_klass** :5598: add_class 挂 CLD :5609、apply_parsed_class_metadata :5632(所有权转移,断言 :5635 起全 NULL)、析构 :6015 失败回收(_klass_to_deallocate 交 CLD safepoint)
+  - **classfile_parse_error**(classFileError.cpp:36)=抛 ClassFormatError;classFileStream.hpp: get_u1/u2/u4_fast :95-120(Bytes::get_Java_u2/u4 大端)、guarantee_more :88、at_eos :141
+  - 实证: materials/commands/07-classfile-javap.txt(javap -v 常量池/Code/BootstrapMethods)+07-classfile-header-load.txt(hexdump cafe babe 0000 003d 0040;class+load 日志: 平台类 "shared objects file"=CDS 快路径、应用类 file: 走解析)
+
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
