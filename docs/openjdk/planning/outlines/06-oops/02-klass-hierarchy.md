@@ -2,6 +2,18 @@
 
 > 🔴 Deep | 15 KP 中的 2 个核心机制
 > 读者处境: `obj.getClass()` — 它怎么返回 `java.lang.Class`？不是查表——是跟着 oop→Klass* 指针走。
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/06-oops/02 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **KlassLayoutHelper 不存在**(jdk11u): 是 `_layout_helper` 字段(klass.hpp:115,注释 :89-114)——instance 类=正数(对象大小,低 1 位=不能走快速分配),数组=负数(四字节: tag/hsz/ebt/log2(esz)),其余=0;**类型判断方向反了**: `is_instance_klass` = layout_helper_is_instance = `lh > 0`(klass.hpp:372,不是 < 0)
+> - **KlassID 枚举在 :41-47 不是 :65,顺序错**: InstanceKlass=0、InstanceRef=1、InstanceMirror=2、InstanceClassLoader=3、TypeArray=4、ObjArray=5(大纲"Mirror=1/Ref=2"错);用途=devirtualized oop closure dispatching(klass.hpp:117)
+> - **"~20 种 Klass 子类"错**: jdk11u 只有 7 个子类(ArrayKlass 抽象): InstanceKlass/Mirror/Ref/ClassLoader + ArrayKlass→ObjArray/TypeArray
+> - **invokevirtual 汇编序列编造**: 真实=load_klass(解码压缩)+ lookup_virtual_method 一条 movptr(macroAssembler_x86.cpp:4640-4652);vtable 内嵌在 Klass 里(vtable_start_offset = InstanceKlass::header_size()*wordSize,klass.cpp:781-783);解释器路径 templateTable_x86.cpp:3699
+> - **vtable 构建行号漂移**: compute_vtable_size_and_num_mirandas :56-120(get_mirandas :93-94);initialize_vtable :167;update_inherited_vtable :368(private/static/<init> 不占 :397-400;final 不新增 entry :402-406)
+> - **itable**: klassItable(klassVtable.hpp:233+);itableOffsetEntry{Klass* _interface; int _offset}(:236-242,无注释!);initialize_itable :1093-1130(接口先分 index,调用 :1097;终止符 :1125-1127,注释 :1106);invokeinterface :3791(Object 方法 forced-virtual 特判 + private vfinal 特判 + subtype check + lookup_interface_method)
+> - **parse_fields 不在 instanceKlass.cpp**: 在 classFileParser.cpp:1541(ClassFileParser 的职责)
+> - **_init_state 是 6 态不是 5 态**(instanceKlass.hpp:131-138): 多 initialization_error;初始化同步=init_lock + is_reentrant_initialization(_init_thread==self)+ waitUninterruptibly(instanceKlass.cpp:905-955)
+> - **external_name 在 klass.cpp:621**(非 :40-80);InstanceMirrorKlass 静态字段偏移=Class_klass()->size_helper()<<LogHeapWordSize(instanceMirrorKlass.hpp:76-83)✓
+> - -fno-rtti 确认: make/autoconf/flags-cflags.m4:529(TOOLCHAIN_CFLAGS_JVM)
 
 ### 1. Klass — 所有 Java 类的 C++ 模板
 
