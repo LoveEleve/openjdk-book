@@ -17,7 +17,7 @@ uncommit  → 释放物理页,保留地址空间(人走了,椅子撤了,座位�
 release   → 地址空间也还掉(退订)
 ```
 
-这个"四态生命周期"(`os.hpp:296-362` 的接口定义)是全部内存子系统的地基:GC 堆(域 09/26)、Metaspace(域 10)、CodeCache(域 16)全都建立在这四个操作之上。这一篇先把四态讲透,再讲两个优化(大页面、栈保护)。
+这个"四态生命周期"(`os.hpp:339-362` 的接口声明:reserve_memory → commit_memory → uncommit_memory → release_memory)是全部内存子系统的地基:GC 堆(域 09/26)、Metaspace(域 10)、CodeCache(域 16)全都建立在这四个操作之上。这一篇先把四态讲透,再讲两个优化(大页面、栈保护)。
 
 ## 1. reserve vs commit:"预订"和"真的来了"
 
