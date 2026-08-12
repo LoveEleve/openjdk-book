@@ -1,7 +1,7 @@
 # 05. Dependencies 与 Deopt — JIT 的乐观假设与自救
 
 > **前置依赖**:[02 — nmethod 结构](02-nmethod-structure.md):scopes/pcs 段、状态机;[03 — nmethod 生命周期](03-nmethod-lifecycle.md):依赖失效的清算链(DepChange → 反向索引 → VM_Deoptimize)、uncommon trap 的 action;[04 — Relocation 与 Inline Cache](04-relocation-ic.md):megamorphic 的 vtable/itable 桩
-> → **后续**:[38-perfdata/01 — PerfData 架构](openjdk/vol-02/38-perfdata/01-perfdata.md)(第 2 批收官域)
+> → **后续**:[38-perfdata/01 — PerfData 架构](openjdk/vol-02/38-perfdata/01-perfdata.md)(16 域之后的第 2 批下一域)
 > 关联域: 15-c2(编译期收集假设)、22-deopt(本篇主题的完整域)、07-classfile-classloader(类加载触发假设失效)
 
 ## 赌注与安全网
@@ -162,7 +162,7 @@ deopt 桩是手写汇编(x86 的 `generate_deopt_blob`,sharedRuntime_x86_64.cpp:
 
 ### 值在哪: Location 编码
 
-第 4 步填的数据来自 `ScopeValue` 及其子类——描述"这个 Java 局部变量在编译代码里藏在哪"。位置编码在 `Location`(location.hpp:44-60):
+第 4 步填的数据来自 `ScopeValue` 及其子类——描述"这个 Java 局部变量在编译代码里藏在哪"。位置编码在 `Location`(location.hpp:45-60):
 
 ```cpp
 // location.hpp:45-60(截取核心,逐字)
