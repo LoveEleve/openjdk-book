@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-12 | 卷 2 写作中: **34/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 22/26: 02/03/04/06/16/38 域完结,41 域 1/2) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
+> **状态**: 2026-08-12 | 卷 2 写作中: **35/152 篇完成**(第 1 批 12 篇 ✅ 全部完结;第 2 批 23/26: 02/03/04/06/16/38/41 域完结) | 上下文已满,本文件为**非常详细交接版**——新 AI 只读本文件即可继续
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 41-zip-jimage/02(jimage,模块镜像)。
+**下一步(唯一,无选择)**: 42-core-native/01(JNI 工具层与系统属性)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移(27 篇无一例外)**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误,见 §6.5-4);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交。
 
@@ -40,7 +40,7 @@
 
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
-第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(22/26: 02/03/04/06/16/38 完结,41 域 1/2)
+第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   🚧 进行中(23/26: 02/03/04/06/16/38/41 完结)
 第 3 批(对象/类): 07 → 09 → 17
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
@@ -62,11 +62,11 @@
 | 06-oops | 1-6 | `06-oops/01-markoop-oopdesc.md`(207 行)/02(168 行)/03(166 行)/04(129 行)/05(116 行)/06(104 行) | ✅ 本会话完成 — **06 域完结**(六篇,大纲 60+ 处错误全部回填) |
 | 16-codecache | 1-5 | `16-code-cache/` 5 篇(01 115 行/02 288 行/03 277 行/04 182 行/05 225 行) | ✅ 本会话完成 — **16 域完结** |
 | 38-perfdata | 1-2 | `38-perfdata/01-perfdata.md`(117 行)/02-stat-sampler.md(119 行) | ✅ 本会话完成 — **38 域完结** |
-| 41-zip-jimage | 1 | `41-zip-jimage/01-zip.md`(164 行) | ✅ 本会话完成 — 41 域 1/2 |
+| 41-zip-jimage | 1-2 | `41-zip-jimage/01-zip.md`(164 行)/02-jimage.md(194 行) | ✅ 本会话完成 — **41 域完结** |
 
-**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);38域02=03bc615(正文+大纲回填)+8769a40(README,38 域完结);41域01=df0b073(正文+大纲回填)+079ba1c(README);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
+**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);38域02=03bc615(正文+大纲回填)+8769a40(README,38 域完结);41域01=df0b073(正文+大纲回填)+079ba1c(README);41域02=ccd9b08(正文+大纲回填)+a59daa2(README,41 域完结);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01、02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 41-02 前先读 41-01 大纲 ⚠️ 块**(链式哈希/惰性偏移/STORED-DEFLATED 分流均已验证;02 篇 jimage 与 01 篇的对比角度)。
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(01、02)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 42-01 前先读 41-02 大纲 ⚠️ 块**(mmap 语义/MPH/ResourceHeader 均已验证)。
 
 ---
 
@@ -246,6 +246,11 @@
 - readCEN :568 起: **链式哈希非线性探测**(tablelen=(total/2)|1 :694 "Odd -> fewer collisions";entries[i].cenpos/hash :737-739;头插 :742-744);jzcell 只存 hash/next/cenpos 不存名字(zip_util.h:183-187);hashN=31 多项式 :436-441
 - ZIP_GetEntry :1163-1222 三级: **最近释放条目缓存**(zip->cache,zip_util.h:230 "we cache the most recently freed jzentry",ZIP_FreeEntry :1133-1146 延迟释放;查找命中清 cache)+ 链式哈希(先比 hash 再 newEntry 读 CEN 验证名字)+ ZIP_Lock(JVM_RawMonitorEnter :62);**ZIP_FindEntry(:1430-1445)只是包装非慢路径**
 - 读取: ZIP_GetEntryDataOffset :1265-1289 惰性(pos 负数编码 -(locpos+locoff) newEntry :1065;注释 "speeds up javac by a factor of 10");ZIP_ReadEntry :1447-1490 **csize==0→STORED**(newEntry :1062)/csize>0→InflateFully :1365-1428(inflateInit2 -MAX_WBITS 原始 deflate+4096 块+Z_PARTIAL_FLUSH);deflateInit2Wrapper :1581 是压缩侧
+- **02 篇(jimage,大纲漂移 8 处,重点沉淀)**: libjimage 在 /data/workspace/jdk11u/src/java.base/share/native/libjimage/(imageFile.cpp 571 行)
+  - **map_size=memory_map_image?file_size:index_size**(imageFile.hpp:493-497);memory_map_image=sizeof(void*)==8(imageFile.cpp:44)——64 位默认映射整个文件;ImageHeader **28 字节非 32**(7×u4,:322-328);IMAGE_MAGIC=0xCAFEDADA/MAJOR=1(:445-451);index_size=header+table_length*8+locations+strings(:437-441);open :369-412 四段地址计算 :396-413
+  - MPH: ImageStrings::find(imageFile.cpp:75-101)redirect 三态(0 未找到/负=-1-value 直接索引/正=新 seed);**默认 seed=HASH_MULTIPLIER**(imageFile.hpp:174-175,非 DEFAULT_SEED);FNV-1a(:57-68,HASH_MULTIPLIER=0x01000193 :162);算法出处注释 :94-95;verify_location :484-519 必做(module/parent/base/extension)
+  - get_resource(imageFile.cpp:533-566): 压缩分支 memory_map_image 时 get_data_address()+offset 零拷贝(:548-551),未压缩分支**无条件 read_at**(:562-563,非 memcpy);ResourceHeader 29 字节(magic 0xCAFEFAFA+size+uncompressed+name_offset+config_offset+is_terminal,imageDecompressor.cpp:145-164);decompress_resource do-while 剥头支持解压器栈(:142-177);ZipDecompressor :189
+  - 文件结构注释 imageFile.hpp:112-129;实证 jimage-info.txt: 29345 资源/Index 1483476 字节(1.4MB),modules 实测 129557387 字节(约 1.1%)
 ### 6.8 38-perfdata 域经验(01 篇,2026-08-12)
 - perfData.hpp 在 **share/runtime/**: 类层次 :97-107(PerfLongConstant alias PerfConstant/PerfLongVariable alias PerfVariable/PerfLongCounter alias PerfCounter/PerfString);Variability V_Constant=1/V_Monotonic=2/V_Variable=3 :255-262;Units 六种 :266-273;PerfData 对象 C 堆+值 _valuep 指向共享区(:289-291);create_entry 8 字节对齐 perfData.cpp:136-138(注释 "align size to assure allocation in units of 8 bytes",共享区满退 C 堆 :141-146)
 - PerfDataEntry 布局(perfMemory.hpp:78-98,公共契约,注释 :55-56 "known by the PerfDataBuffer Java class libraries");Prologue :62-74(magic 0xcafec0c0/版本 2.0/accessible/entry_offset/num_entries);accessible 在 VM 启动完成时置位(management.cpp:205-207);mark_updated→mod_time_stamp(perfMemory.cpp:235-240)
@@ -290,8 +295,9 @@
 - [x] **38-perfdata/01**(perfdata)——已完结,2094349
 - [x] **38-perfdata/02**(stat-sampler)——已完结,03bc615,**38 域完结**
 - [x] **41-zip-jimage/01**(zip)——已完结,df0b073
-- [ ] **41-zip-jimage/02**(jimage)——大纲在 `planning/outlines/41-zip-jimage/02-jimage.md`,41 域第 2 篇
-- [ ] 第 2 批剩余 42-core-native(收官)→ 第 3 批 07
+- [x] **41-zip-jimage/02**(jimage)——已完结,ccd9b08,**41 域完结**
+- [ ] **42-core-native/01**(jni-system)——大纲在 `planning/outlines/42-core-native/01-jni-system.md`(42 域标题前段将用 "JNI 工具层与系统属性",与 41-02 链接文本一致)
+- [ ] 42-core-native/02(process)、03(class-io)(42 域完结=第 2 批收官)→ 第 3 批 07
 - [ ] 第 2 批剩余域: 38-perfdata → 41-zipjimage → 42-core-native
 - [ ] 第 3 批: 07-classfile-classloader(06 域悬念桥接指向它)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
@@ -328,10 +334,10 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/41-zip-jimage/02-jimage.md(大纲,注意 ⚠️ 块)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: 最小完美哈希/mmap/ImageFile 结构是否编造;jimage.cpp 在 share/classfile/,jimage.hpp 在 share/classfile/)
+1. 读 planning/outlines/42-core-native/01-jni-system.md(大纲,注意 ⚠️ 块)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: JNI 工具层/系统属性/launcher 是否编造;libjava 在 java.base/share/native/libjava/)
 3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
-4. 41 域完结后 → 42-core-native(第 2 批收官)→ 第 3 批 07
+4. 42 域完结后(第 2 批收官)→ 第 3 批 07-classfile-classloader
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
