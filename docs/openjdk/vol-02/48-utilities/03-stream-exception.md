@@ -34,7 +34,7 @@ GC 日志、VM 诊断、assert 信息、hs_err 文件——JVM 里所有的输�
 | `stringStream`(194) | 追加进内部 char[] 缓冲,自动扩容(48 字节小缓冲起步,ostream.cpp:354 起) | 内存里攒字符串,`as_string()`/`base()` 取出 |
 | `fileStream`(234) | `::fwrite` 到 FILE* | 日志文件 |
 | `fdStream`(261) | `open()/write()` 直写 fd,**无缓冲** | 致命错误处理器 |
-| `bufferedStream`(283) | 攒进缓冲(默认 256 字节起步、上限 10MB,292),满了 flush 给子流 | 减少 syscall |
+| `bufferedStream`(283) | 攒进内部缓冲(默认 256 起步、上限 10MB,292),超限调用 `flush()`——但它是 noop(ostream.cpp:1012 注释 "may be a noop"),缓冲最终用 `as_string()` 一次性取出 | 大段输出暂存内存 |
 | `tty`(146,全局指针) | 映射 stdout/stderr | 终端输出 |
 
 `fdStream` 值得单独说——它的注释(257-260)讲得很清楚:
