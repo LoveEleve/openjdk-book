@@ -119,7 +119,7 @@ static VirtualizationType _detected_virtualization;   // :76
 
 ### 两个计数:processor_count 与 active_processor_count
 
-JVM 里有两个"CPU 数",含义完全不同(`os.hpp:232-281`):
+JVM 里有两个"CPU 数",含义完全不同(`os.hpp:232-253`):
 
 ```cpp
 // os.hpp:232-281(截取字段)
@@ -176,7 +176,7 @@ int CgroupSubsystem::active_processor_count() {
 
 - [内核: NUMA(Non-Uniform Memory Access)——每个 socket 有本地内存。访问本地内存约 100ns,远端约 200ns。JVM 用 libnuma 把 heap region 分配到本地 node,GC 扫描时少跨节点访问]
 
-JVM 建立两张映射表(`os_linux.hpp:272-306`):`_cpu_to_node`(核→节点)和 `_nindex_to_node`(节点序号→节点)。而 libnuma 是**运行时动态加载**的,而且按符号版本解析:
+JVM 建立两张映射表(`os_linux.hpp:57-58` 字段 + `:272-306` 相关函数):`_cpu_to_node`(核→节点)和 `_nindex_to_node`(节点序号→节点)。而 libnuma 是**运行时动态加载**的,而且按符号版本解析:
 
 ```cpp
 // os_linux.cpp:3423-3433 —— libnuma 符号按版本加载
