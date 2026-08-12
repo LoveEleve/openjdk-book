@@ -76,12 +76,13 @@ vtable 从 InstanceKlass 固定头部之后开始,一个 entry 一个 word(方�
 
 ### 4.2 表怎么建: 父类长度打底,逐方法归位
 
-vtable 构建分两步(klassVtable.cpp:56-120 算大小,:167 起填充):
+vtable 构建分三步(klassVtable.cpp):
 
 - `compute_vtable_size_and_num_mirandas`(:56-120): 长度从父类继承(`super->vtable_length()`,:68),逐个方法问 `needs_new_vtable_entry`(:85,需要新 entry 就加一),最后补 miranda 方法(接口抽象方法落入实现类的 vtable,`get_mirandas` 调用在 :93-94);
-- `initialize_vtable`(:167): 遍历方法,`update_inherited_vtable`(:368)决定归位方式——**override 父类方法的,复用父类那个 entry(不新增)**;父类没有的,追加新 entry。private/static/`<init>` 不进 vtable(:397-400);final 方法**从不新增 entry**——它要么静态解析,要么复用被 override 的父类 entry(:402-406)。
+- `initialize_from_super`(:138-155): **先把父表整体复制到子表**(`superVtable.copy_vtable_to(table())`,:151)——子表是父表的物理副本;
+- `initialize_vtable`(:167 起): 遍历本类方法,`update_inherited_vtable`(:368)决定归位方式——**override 父类方法的,在复制来的槽位上覆写为子类方法(不新增槽)**;父类没有的,追加到末尾。注释原文 "if override, replace in copy of super vtable, otherwise append to end"(:205-206)。private/static/`<init>` 不进 vtable(:397-400);final 方法**从不新增 entry**——它要么静态解析,要么覆写被 override 的父类槽位(:402-406)。数组类不引入新槽位(:203-204)。
 
-子类继承父类的表,不是"复制一份父类表再改",而是"长度继承 + 逐个归位"——override 的槽位写进子类方法,没 override 的槽位由继承语义自然指向父类方法(entry 是方法地址,父类 entry 里就是父类方法)。
+**关键设计 (斜体)**: *先复制再覆写,比"每个槽位逐个从父表找"更简单——子表建好后就是一份完整自洽的表,方法地址全部就位;override 只需覆盖对应槽位,继承的方法天然就是父表里那些地址,不需要再查父表。*
 
 ### 4.3 invokevirtual: 三条指令
 
