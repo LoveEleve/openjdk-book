@@ -12,10 +12,13 @@
 ```
 1. 读本交接文档
 2. 读 00-domain-discovery-v3.md — 49域权威清单(含域 00 工具层)
-3. 读 outlines/01-os-abstraction/01-platform-detection.md — v5 标准示范文章
-4. 从 §二 每域产出物清单找到任一域 → 读 KP → 读大纲 → 对照方法论展开文章
-5. 文章写作: 每域 KP→大纲→文章 → 参见 §一 方法论 §三 Pipeline
+3. **读 knowledge-planning/00-domain-writing-order.md — 48 域依赖拓扑(写作顺序权威依据,7 层从基础写起)**
+4. 从第 1 批开始: 01-os → 05-cpu → 45-math → 48-utils → ...(完整顺序见拓扑文档)
+5. 每个域: 读 knowledge-planning/0X-*.md(KP)→ 读 outlines/0X-*/(大纲)→ 对照方法论展开文章
+6. 文章写作: 每域 KP→大纲→文章 → 参见 §一 方法论 §三 Pipeline;工具实证引用卷 T 素材库
 ```
+
+> **2026-08-11 结构变更**: 旧 vol-01(启动链叙事 14 章)已归档为 vol-01-bak;卷 2(vol-02/)按域规划组织,写作顺序 = 48 域依赖拓扑(替代旧"阶段 A-D"工具素材优先排序——与依赖驱动方法论冲突,已修正)
 
 ---
 
