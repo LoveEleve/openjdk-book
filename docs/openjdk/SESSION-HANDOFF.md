@@ -191,6 +191,7 @@
 4. **深审第 2 轮才抓到的"顺理成章"机制错误**(第 1 轮自查过了还错): vtable 构建"先复制父表再覆写/追加"(初稿写成"长度继承+归位",真实 initialize_from_super→copy_vtable_to,klassVtable.cpp:138-155,注释 :205-206)、SATB 入队路径(线程本地/共享队列,非"满转全局",g1BarrierSet.cpp:62-69)、FastHashCode CAS 失败=膨胀成 monitor 存 hash(非"重试",synchronizer.cpp:760-762)、biased_locking_enter 第一道位测试分流(非"CAS 永不成功",macroAssembler_x86.cpp:1142-1144)、ConstMethod 布局"结构之后"非"固定头之后"
    - **识别信号**: 正文里"所以/为什么能这么做/自然"开头的推导段最可疑——那是写作时凭直觉补的,必须回源码找依据
 5. **覆盖率缺口**: 03 篇初稿漏 InstanceKlass 仓库(02 篇悬念承诺 4 件事+KP 规划"InstanceKlass 体系+ArrayKlass 体系"只有数组)——**写完对照"上篇悬念承诺话题"逐条勾选**;跨篇悬念行是最可靠的大纲(它承诺了什么就该写什么)
+6. **06 篇新增(2026-08-12,收官篇)**: ① **"语义方向反了"成为独立模式**——大纲常把源码行为写成恰好相反: as_C_string"不加\0"(实际 null-terminated,symbol.cpp:123-127)、_refcount"非 atomic"(实际 volatile+Atomic::inc/add,symbol.cpp:277-289)、SATB"增量更新"(实际开始时刻快照)、"is_oop 查 KlassID"——识别: 带否定词的描述("不/没有/无需")重点核;② **类型编造**: "AnnotationArray 扁平 int 数组"实为 Array<u1>(annotations.hpp:38);③ **跨篇矛盾提前发现**: 06 大纲"FieldInfo 含 attributes_count"与 03 篇已写内容矛盾——以已有文章+源码为准,跨篇一致性从"写时对照"变成"大纲验证时对照";④ SymbolTable 用全局 SymbolTable_lock 而 StringTable 用 ConcurrentHashTable——同域两表一锁一并发,写对比时必查实现
 
 ### 6.6 错误根因(为什么"每篇 2-8 处"不可避免)
 1. 大纲是规划期 AI 生成,"像真的"的编造是最危险形态——名字合理、机制自洽,唯独源码里不存在

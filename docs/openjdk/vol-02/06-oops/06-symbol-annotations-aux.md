@@ -57,7 +57,7 @@ class SymbolTable : public RehashableHashtable<Symbol*, mtSymbol> {
 typedef Array<u1> AnnotationArray;
 ```
 
-每个类的注解存四份(annotations.hpp:44-55): 类注解/字段注解 × 普通/类型注解(`_class_annotations`、`_fields_annotations`、`_class_type_annotations`、`_fields_type_annotations`)。内容由 ClassFileParser 解析 class 文件注解属性时填充(`parse_annotations`,classFileParser.cpp:1213),格式与 class 文件里的注解结构一致(type_index + element_value 对)。
+每个类的注解存四份(annotations.hpp:44-55): 类注解/字段注解 × 普通/类型注解(`_class_annotations`、`_fields_annotations`、`_class_type_annotations`、`_fields_type_annotations`)。内容由 ClassFileParser 解析 class 文件注解属性时填充(`parse_annotations`,classFileParser.cpp:1213,格式注释 "annotations := do(nann:u2) {annotation}"),与 class 文件里的注解结构一致: u2 数量 + 每个注解(type_index + element_value 对)。
 
 **关键设计 (斜体)**: *注解只在反射(`getAnnotations`)时才被解释——运行时行为不需要它们。原样存字节,省掉"解析成对象"的成本和内存;要读时现解,不要时整块跟着类回收。*
 
