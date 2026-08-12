@@ -1,56 +1,60 @@
 # 01. Math.sin 多项式逼近 — Payne-Hanek + fast_sin
 
 > 🔴 Deep | 2443行的软件实现——不是 x87 FSIN
-> 读者处境: `Math.sin(1e100)` — JDK 11 不使用 x87 FSIN 指令(不精确, 80-bit→64-bit rounding 误差)——而是 `macroAssembler_x86_sin.cpp:2443行` 的软件实现: Payne-Hanek argument reduction + 多项式逼近→double 精度(53-bit)→C2 intrinsic 调用 StubRoutines::_dsin→~40 cycles。
+> 读者处境: `Math.sin(1e100)` — JDK 11 不使用 x87 FSIN 指令(不精确, 80-bit→64-bit rounding 误差)——而是 `macroAssembler_x86_sin.cpp:2443行` 的软件实现: 三档参数归约(Cody-Waite π/32 双倍双精度 + 大参数 Payne-Hanek)+ Ctable 查表 + 双通道多项式 → double 精度(53-bit)→C2 intrinsic 调用 StubRoutines::_dsin。
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/45-math-library/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - 主路径归约是 **π/32 的 Cody-Waite 三段拆分(P_1/P_2/P_3)**,不是 Payne-Hanek;Payne-Hanek 仅在 |x| ≥ 90112 时于 fast_sin 内部(64 位版 516-836 行)使用 PI_INV_TABLE 多字乘法
+> - `libm_reduce_pi04l`(1225-1670)是 **32 位 x87 π/4 归约**(供 32 位 tan),不是 64 位 Payne-Hanek
+> - 多项式是 **4 项 SC_1..SC_4 双通道(SSE2 packed)**,不是 9-13 项 Taylor;且无 Q0-Q3 象限翻转(Ctable 64 项覆盖整个 2π)
+> - "~40 cycles"/"最大误差 < 1 ULP" 无源码依据,已删除
+> - `_P_2` 是 π/32 归约拆分常量,不是多项式系数
 
-### 1. "Payne-Hanek argument reduction"
+### 1. "参数归约:三档分级"
 
-场景: `sin(1e100)` — double 的指数位>~20→`1e100 / (2π)` 有 ~80 位的小数精度需求→无法用 double 直接计算 `x % (π/2)`→Payne-Hanek 用 extended-precision(160-bit) 做 `x * 2/π` → 提取小数部分→精确到 ~1e-16。
+场景: `sin(1e100)` — double 的指数位>~20→`1e100 / (2π)` 有 ~80 位的小数精度需求→无法用 double 直接计算 `x % (π/2)`→超大参数用 Payne-Hanek 做 `x * 2/π` → 提取小数部分。
 
-**libm_reduce_pi04l** (`macroAssembler_x86_sin.cpp:1225-1670`):
-```
-MacroAssembler::libm_reduce_pi04l(eax, ecx, edx, ebx, esi, edi, ebp, esp) (line 1225):
-  输入: xmm0 = double x (超大角度)
-  → 提取 x 的 exponent + mantissa
-  → 乘法 x * (2/π) 用 extended precision(160-bit, 5个32-bit word)
-  → 小数部分: 最低4 bits 决定象限(quadrant 0-3)
-  → 剩余: 约减后的 [-π/2, π/2] 范围的参数 x_reduced
-[C++: macroAssembler_x86_sin.cpp:1225-1670——Payne-Hanek 是 1983 年论文——避免 catastrophic cancellation 对于大输入]
-[x86: 160-bit 乘法用 32-bit imul 在 5 个 GPR 中——edx:eax=lo, ecx=mid, ebx=mid2, esi=hi, edi=carry]
-```
-- 源码: `macroAssembler_x86_sin.cpp:1225-1450` (pi04l reduction main) + `macroAssembler_x86_sin.cpp:1450-1670` (fractional part extraction → quadrant)
-
-- 关键设计: **为什么不用 fprem** — x87 的 `fprem`(partial remainder) 指令只能用 64-bit mantissa→对于超大角度(1e100)精度不够→last few bits of quadrant calculation wrong→sin 符号错误。Payne-Hanek 用 software 160-bit→永远正确。
-
-### 2. "fast_sin — 多项式评估"
-
-场景: argument reduction 后→x_reduced 在 [-π/4, π/4] 范围内→用 9-13 项多项式逼近 sin(x_reduced)→`sin(x) = P(x) = c₁x + c₃x³ + c₅x⁵ + ...`(odd powers only for sin)。
-
-**fast_sin** (`macroAssembler_x86_sin.cpp:381-600`):
+**fast_sin 的三档分级**(`macroAssembler_x86_sin.cpp:381`):
 ```
 MacroAssembler::fast_sin(xmm0...xmm7, eax, ebx, ecx, edx, tmp1...tmp4) (line 381):
-  → quotient = argument_reduction(xmm0) → quadrant(0/1/2/3)
-  → x_reduced = xmm0(now [-π/4, π/4])
-  → x² = x_reduced * x_reduced
-  → 多项式评估(Horner's method):
-      P(x) = a1*x + a3*x³ + a5*x⁵ + a7*x⁷ + a9*x⁹
-           = x * (a1 + x² * (a3 + x² * (a5 + x² * (a7 + x² * a9))))
-  → 根据 quadrant 符号处理:
-      Q0: sin(x) = +P(x)
-      Q1: sin(x) = +cos(P(x)) → sin(π/2-x)=cos(x)
-      Q2: sin(x) = -P(x)
-      Q3: sin(x) = -cos(P(x))
-[C++: macroAssembler_x86_sin.cpp:381——多项式系数精确到 double(53-bit)——最大误差 < 1 ULP]
-[x86: Horner's method 用 vfmadd213sd(FMA) 或 vmovsd+vmulsd——8个 XMM registers in parallel]
+  → andl 0x7FFF0000 取指数位, cmpl 0x10C50000 + 无符号 above(418) + 有符号 greater(502) 分三档
+  → 主路径(771 ≤ 指数 ≤ 1039, 即 2^-252 ≤ |x| < 90112):
+      N = round(32/π·x)(PI32INV = 0x40245F306DC9C883, line 336-339; ±0.5 舍入 + cvttsd2sil)
+      r = x − N·(P_1 + P_2 + P_3)(Cody-Waite 三段拆分, 每段 32/32/53 位尾数)
+      M = N mod 64 → Ctable(196-301, 64 项 × 4 double = 2KB, 覆盖 2π)
+      表项: σ(2的幂) + C_hl + S_hi/S_lo(2×53 位)
+      SC_1..SC_4 双通道多项式(313-316 等; 与 fdlibm k_sin.c S1 的 0xBFC55555 同源)
+      补偿求和(k_0..k_3, corr)
+  → 大参数(指数 > 1039): 内联 Payne-Hanek(516-836):
+      PI_INV_TABLE(318-329, 41 个 32 位字, 与 fdlibm two_over_pi 24 位字重打包同源)
+      尾数拆 21+32 位, 与 7 个连续表字 imulq 交叉乘(32×32→64 无截断), 2^32 错位累加
+      余数换算为 π/4 单位 → 复用主路径 Ctable+多项式尾部(684-706)
+  → 小参数(指数 < 771): 次正规 x·(1-2^-53)(ALL_ONES, line 506) / 2^55 技巧(line 509-514)
+  → 特例: ±0 → ±0, Inf/NaN → NaN(line 838-840)
+[C++: macroAssembler_x86_sin.cpp:381——文件头注释 39-177 是完整算法描述]
+[x86: 64 位代码纯 SSE2(line 179-180 "at most SSE2 compliant"); 32 位路径用 x87 但也不用 FSIN]
 ```
-- 源码: `macroAssembler_x86_sin.cpp:381-500` (fast_sin → quadrant + polynomial) + `macroAssembler_x86_sin.cpp:500-600` (quadrant sign handling)
 
-- 关键设计: **Horner's method** 最小化乘法次数——`x*(a1 + x²*(a3 + ...))`——只需 O(n) 次乘法(非 O(n²))。**多项式系数在 StubRoutines 数据区** — `movdqu(xmm6, ExternalAddress(P_2))` (`macroAssembler_x86_sin.cpp:427`) 从 CodeCache 数据段加载预计算常量(P_1/P_2/P_3/SC_1-4/Ctable 等)——编译期固定、运行时不可变。**象限处理** — sin 在 Q0/Q2→符号从 sin(x) 得到, Q1/Q3→符号从 cos(x) 得到。
+- 关键设计: **为什么不用 fprem/FSIN** — x87 内部 80 位扩展精度(64 位尾数),fprem 对 π 的表示精度锁死;超大角度象限位错误;StrictMath 要求 fdlibm 位级语义(StrictMath.java javadoc)→ 软件实现,纯 SSE2。
+
+### 2. "Ctable 查表 + 双通道多项式评估"
+
+场景: 归约后→r 在 [-π/64, π/64] 范围内→sin(B+r) 展开: sin(B)/cos(B) 查表(64 项覆盖 2π, 无需象限翻转), r 的部分用 4 项 SC 多项式(SSE2 packed 双通道同时算 sin/cos 修正)。
+
+```
+多项式结构(头注释 113-129): sincospols = SC_1 + SC_2·r² + SC_3·r⁴ + SC_4·r⁶
+  pols = sincospols · (S_hi·r² | (C_hl+σ)·r³)   ← 双通道
+  补偿求和(131-164): hi + med + pols + corr, 残差 k_0..k_3
+[C++: SC_1 第一通道 0xBFC5555555555555 = -1/6 = fdlibm k_sin.c:62 S1 高 32 位——同源证据]
+[x86: mulpd/addpd 双通道并行, 495-497 unpckhpd 收第二条通道]
+```
+
+- 关键设计: **表 + 多项式混合**: 4 项多项式(非 9-13 项 Taylor)就把修正压进 double 末位(ULP 量级)——表 2KB 换掉一半浮点指令。σ 取 2 的幂、S_hi/S_lo 双精度表示、残差显式存储——全部围绕"灾难性消减"防御。
 
 ---
 
 ### 核心悬念
 
-**"Math.sin(1e100): Payne-Hanek argument reduction(160-bit extended precision→[-π/4,π/4])→fast_sin 多项式评估(Horner's method, 9-13 terms, max error <1 ULP)→quadrant sign→double result。2443行软件实现→不是 x87 FSIN(不精确)。"** — 下一篇: StubRoutines 生成管道 + JNI wrapper。
+**"Math.sin(1e100): 三档归约(主路径 Cody-Waite π/32 + 大参数 Payne-Hanek)→Ctable 查表→双通道多项式→double 结果。2443行软件实现→不是 x87 FSIN。** — 下一篇: StubRoutines 生成管道 + JNI wrapper。
 
 > → [02-stubroutine-native.md](02-stubroutine-native.md)

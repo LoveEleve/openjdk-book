@@ -6,7 +6,7 @@
 
 | Source File | Inferred Mechanism | Confidence |
 |------------|-------------------|------------|
-| macroAssembler_x86_sin.cpp (2443行) | **sin 多项式逼近**: Payne-Hanek argument reduction(range reduce large double→small [-π/4,π/4]) + 多项式评估(9-13项 Taylor series)→double result, SIMD 优化 | High |
+| macroAssembler_x86_sin.cpp (2443行) | **sin 多项式逼近**: 三档分级归约(主路径 π/32 的 Cody-Waite 三段拆分 P_1/P_2/P_3 + |x|≥90112 时内联 Payne-Hanek 多字乘法)+ Ctable 查表(64 项覆盖 2π)+ SC_1..SC_4 双通道多项式 + 补偿求和, SSE2 优化 ⚠️写作期修正(2026-08-12): 原"9-13项 Taylor"实为 4 项 SC 系数; 原"Payne-Hanek 在 libm_reduce_pi04l"实为 32 位 x87 π/4 归约; 无 Q0-Q3 象限翻转 | High |
 | macroAssembler_x86_cos.cpp (884行) | **cos 多项式逼近**: 同 sin 的 Payne-Hanek reduction + cos-specific 多项式 | High |
 | macroAssembler_x86_tan.cpp (2139行) | **tan 多项式逼近**: Payne-Hanek reduction + 分离 sin/cos 评估→sin/cos→优化 `tan = sin/cos` | High |
 | macroAssembler_x86_log.cpp/log10.cpp/exp.cpp/pow.cpp | **log/log10/exp/pow 多项式**: 类似逼近——自然对数/指数/幂函数 | High |
@@ -26,8 +26,7 @@
 ### P2 (2-4文件)
 | KP | 出现文件 |
 |----|---------|
-| sin/cos/tan 多项式逼近 | macroAssembler_x86_sin/cos/tan.cpp(3文件) |
-| log/exp 多项式逼近 | macroAssembler_x86_log/log10/exp/pow.cpp(4文件) |
+| sin/cos/tan 多项式逼近 | macroAssembler_x86_sin/cos/tan.cpp(3文件) || log/exp 多项式逼近 | macroAssembler_x86_log/log10/exp/pow.cpp(4文件) |
 | StubRoutines 生成 + JNI wrapper | stubRoutines.cpp, StrictMath.c |
 
 ### P3 (=1文件)
