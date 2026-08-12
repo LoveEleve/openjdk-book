@@ -91,7 +91,7 @@ void MacroAssembler::safepoint_poll(Label& slow_path, Register thread_reg, Regis
 }
 ```
 
-jdk11u 的默认路径是 **thread-local poll**(safepointMechanism.hpp:66):每个线程对象里有一个轮询字段(`Thread::_polling_page`,thread.hpp:346,"Thread local polling page"),`testb(thread + polling_page_offset, poll_bit)`——**1 字节的 test + 1 次条件跳**,正常路径零开销;要停线程时,JVM 置这个线程的 poll 位,线程在下一个入口/回边看到位被置 → 走 slow_path(handshake 或 safepoint)。备选路径(非 thread-local)是 `cmp32` 全局状态。
+jdk11u 的默认路径是 **thread-local poll**(safepointMechanism.hpp:66):每个线程对象里有一个轮询字段(`Thread::_polling_page`,thread.hpp:346,"Thread local polling page"),`testb(thread + polling_page_offset, poll_bit)`——一条 testb(编码 0xF6+ModRM+disp+imm8,4 字节,assembler_x86.cpp:4896-4902)+ 一次条件跳(poll_bit = 8,safepointMechanism.hpp:61),正常路径无分支惩罚;要停线程时,JVM 置这个线程的 poll 位,线程在下一个入口/回边看到位被置 → 走 slow_path(handshake 或 safepoint)。备选路径(非 thread-local)是 `cmp32` 全局状态。
 
 - [C++: thread-local poll 是 JDK 10+ 的演进(之前的全局轮询页靠 mprotect 页面权限 + SIGSEGV);置位 vs 改页权限,把"停线程"从系统调用级降为普通内存写——01-os/04 篇的轮询机制在这里看到 jdk11u 的真实形态]
 
@@ -138,7 +138,7 @@ void MacroAssembler::encode_heap_oop(Register r) {
 }
 ```
 
-两种模式:① **零基址压缩**(`narrow_oop_base() == NULL`):堆从地址 0 开始,压缩 = `shrq(r, LogMinObjAlignmentInBytes)`(默认 3,对象 8 字节对齐,低 3 位恒 0);② **基址偏移压缩**:先 `testq + cmovq(r12_heapbase)`(null 变成 heap base 编码——用 heapbase 代表 null!)+ `subq(r12_heapbase)` + `shrq 3`。`r12_heapbase` 是 JIT 全程保留的堆基址寄存器。解码 `decode_heap_oop`(5599-5614)对称:`shlq 3`(+ 非零时 `addq r12_heapbase`)。
+两种模式:① **零基址压缩**(`narrow_oop_base() == NULL`):堆从地址 0 开始,压缩 = `shrq(r, LogMinObjAlignmentInBytes)`(默认 3 = exact_log2(ObjectAlignmentInBytes),arguments.cpp:1605;对象 8 字节对齐,低 3 位恒 0);② **基址偏移压缩**:先 `testq + cmovq(r12_heapbase)`(null 变成 heap base 编码——用 heapbase 代表 null!)+ `subq(r12_heapbase)` + `shrq 3`。`r12_heapbase` 是 JIT 全程保留的堆基址寄存器。解码 `decode_heap_oop`(5599-5614)对称:`shlq 3`(+ 非零时 `addq r12_heapbase`)。
 
 - [C++: 压缩的数学:zero-based 模式 = 地址 >> 3(绝对);heapbase 模式 = (地址 - heap_base) >> 3(相对)。选择取决于堆能否放回 32 位地址空间(06-oops 域会展开完整决策)]
 
