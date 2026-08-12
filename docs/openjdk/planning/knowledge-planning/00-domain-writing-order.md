@@ -44,7 +44,7 @@
 | 20 | VM Operations | 17, 18 | VM 操作依赖线程暂停(18) |
 | 27 | JNI | 17, 24 | JNI 帧与句柄(24),线程绑定(17) |
 | 30 | JVM Entry Points | 08, 02 | 各模块入口桩,解释器/汇编概念 |
-| 32 | JFR | 06, 17, 18, 24 | 事件写对象(06)、thread-local(17)、安全点采样(18)、栈采样(24) |
+| 32 | JFR | 06, 13, 17, 18, 24 | 事件写对象(06)、thread-local(17)、安全点采样(18)、栈采样(24)、编译事件需 JIT 概念(13,弱) |
 | 34 | NMT | 01, 09 | 内存跟踪,虚拟内存(01)+堆内存(09) |
 | 36 | Attach | 01, 17 | attach socket(01)+ listener 线程(17) |
 | 37 | Heap Dumper | 06, 09, 18 | 遍历 oop(06)、堆(09)、STW dump(18) |
@@ -61,7 +61,7 @@
 | 22 | Deoptimization | 15, 24 | 撤销 C2 优化假设(15),重建帧(24) |
 | 26 | G1 GC | 09, 18, 25 | G1 是 GC 框架(25)的实现 |
 | 35 | Diagnostic Commands | 33, 36 | dcmd 走 JMX(33)+ attach(36) |
-| 40 | Launcher | 27, 41 | java 命令调 JNI(27)、读模块镜像(41) |
+| 40 | Launcher | 03, 27, 41 | java 命令解析参数(03)、调 JNI(27)、读模块镜像(41) |
 | 47 | Instrumentation | 07, 28 | 类重定义(07),实现走 JVMTI(28) |
 
 **循环处理说明**: 06↔07(klass 由类文件创建、类加载器又是 oop)、17↔19(锁在线程上、线程用锁)——教学惯例: 06 先于 07(先对象模型再类加载),17 先于 19(先线程再同步)。
@@ -72,7 +72,7 @@
 层 0(地基,4):   01-os, 05-cpu, 45-math, 48-utils
 层 1(原语,8):   02-assembler, 03-flags, 04-logging, 06-oops, 16-codecache, 38-perfdata, 41-zipjimage, 42-core-native
 层 2(对象/类/线程,3):  07-classfile-classloader, 09-memory-core, 17-threads
-层 3(执行/帧/锁,7):   08-interpreter, 10-metaspace, 19-sync, 23-stub, 24-frame-stack, 31-unsafe, 44-verification
+层 3(执行/帧/锁,7):   10-metaspace, 19-sync, 23-stub, 24-frame-stack, 08-interpreter, 31-unsafe, 44-verification
 层 4(VM 核心,13):     11-cds, 12-ci, 13-jit, 18-safepoint, 20-vmops, 27-jni, 30-jvm-entry, 32-jfr, 34-nmt, 36-attach, 37-heapdump, 39-runtime-mon, 46-sa
 层 5(JIT/GC 主体,8):  14-c1, 15-c2, 21-shared-runtime, 25-gc-framework, 28-jvmti, 29-method-handles, 33-jmx, 43-nio-net
 层 6(上层应用,5):    22-deopt, 26-g1, 35-dcmd, 40-launcher, 47-instrumentation
@@ -84,7 +84,7 @@
 第 1 批(地基):     01 → 05 → 45 → 48
 第 2 批(原语):     02 → 03 → 04 → 06 → 16 → 38 → 41 → 42
 第 3 批(对象/类):  07 → 09 → 17
-第 4 批(执行/帧):  08 → 10 → 19 → 23 → 24 → 31 → 44
+第 4 批(执行/帧):  10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心):  11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC):   14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层):     22 → 26 → 35 → 40 → 47
