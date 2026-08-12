@@ -105,7 +105,7 @@ inline void Prefetch::write(void *loc, intx interval) {
 // of the instruction fetch path.
 ```
 
-x86 的指令缓存**自动一致**(自修改代码:JIT 生成 nmethod 后,下次跳转自动取到新指令,配合 clflush 清旧代码)。ARM 则必须显式 `ISB`(指令同步屏障)+ `DSB`(数据同步屏障)——**同一个接口,一个平台 no-op、一个平台两条指令**——又是"语义接口 + 平台实现"的模式。
+x86 的指令缓存**自动一致**——`ICache::flush` 走默认实现(no-op),JIT 生成 nmethod 后,下一次跳转自动取到新指令。ARM 则必须显式 `ISB`(指令同步屏障)+ `DSB`(数据同步屏障)——**同一个接口,一个平台 no-op、一个平台两条指令**——又是"语义接口 + 平台实现"的模式。
 
 ### TSC:rdtsc 与高精度计时
 
