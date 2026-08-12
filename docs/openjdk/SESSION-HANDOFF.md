@@ -346,7 +346,7 @@
 
 ```
 1. 读 planning/outlines/42-core-native/02-process.md(大纲,注意 ⚠️ 块)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: fork/exec/ProcessHandle 是否编造;ProcessImpl 在 java.base/unix/native/libjava/)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律,重点: fork/exec/ProcessHandle 是否编造;进程相关文件名先 find 验证——ProcessImpl.c/UnixProcess.c 等的实际位置,勿凭记忆)
 3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
 4. 42 域 3 篇完结后 = **第 2 批收官(26/26)** → 第 3 批 07-classfile-classloader(06 域悬念桥接指向它;07 大纲在 planning/outlines/07-classfile-classloader/)
 ```
