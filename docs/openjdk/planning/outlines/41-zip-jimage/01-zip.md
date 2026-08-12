@@ -2,6 +2,16 @@
 
 > 🔴 Deep | ZIP 访问全管道
 > 读者处境: `ClassLoader.getResourceAsStream("com/foo/Bar.class")` — 这个 class 文件是藏在 your-app.jar 里面的。JVM 怎么在几毫秒内从几 MB 的 JAR 中定位并读出 500 字节的 class？
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/41-zip-jimage/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"线性探测 h=(h+1)%total" 编造**: 真实是**链式哈希**(readCEN zip_util.c:742-744 `entries[i].next = table[hsh]; table[hsh] = i` 头插;ZIP_GetEntry :1163-1222 沿 next 链,先比 32 位 hash 再 newEntry 读 CEN 验证名字)+ **最近释放条目缓存**(zip->cache,zip_util.h:230 "we cache the most recently freed jzentry",ZIP_FreeEntry :1133-1146 延迟释放)+ **ZIP_Lock**(JVM_RawMonitorEnter,:62)锁
+> - **"慢路径 ZIP_FindEntry 遍历 entries[] 线性扫描" 编造**: ZIP_FindEntry(:1430-1445)只是 ZIP_GetEntry 的包装(返回 size/nameLen)
+> - **"if method==DEFLATED" 错**: 判据是 **csize==0 → STORED**(newEntry :1062 `csize = (CENHOW(cen)==STORED) ? 0 : CENSIZ(cen)`;ZIP_ReadEntry :1457-1478);DEFLATED 走 InflateFully(:1365-1428): inflateInit2(&strm,-MAX_WBITS) 原始 deflate + 4096 块 ZIP_Read + inflate(Z_PARTIAL_FLUSH)
+> - **deflateInit2Wrapper(:1581)是压缩侧**,inflate 不走它(大纲把它放 Read 小节错)
+> - **ZIP_Open_Generic(:772-788)有缓存层**: ZIP_Get_From_Cache(:798,zfiles 链表+lastModified+refs)→miss→ZIP_Put_In_Cache→readCEN(:895);findEND :329-386(END_MAXLEN=0xFFFF+ENDHDR :300,扫描上限);ENDTOT 是 2 字节(entries 超 65535 时 knownTotal 递归 readCEN :713)
+> - hashN=31 多项式(:436-441,与 String.hashCode 同款);tablelen=(total/2)|1(:694 注释 "Odd -> fewer collisions")✓
+> - ZIP_GetEntryDataOffset 惰性计算 ✓(:1265-1289,pos 负数编码 -(locpos+locoff) newEntry :1065,注释 "speeds up javac by a factor of 10")
+> - 源码位置: **/data/workspace/jdk11u/src/java.base/share/native/libzip/zip_util.c**(JDK 侧非 hotspot,1658 行)
 
 ### 1. "ZIP_Open — parse Central Directory → hash table"
 
