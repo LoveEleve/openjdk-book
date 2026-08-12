@@ -2,6 +2,15 @@
 
 > 🔴 Deep | 15 KP 中的 2 个数组体系机制
 > 读者处境: `new int[10]` 和 `new String[10]`——JVM 内部用的是完全不同的数组 Klass——GC 的对待方式也完全不同。
+>
+> ⚠️ 写作期修正(2026-08-12, vol-02/06-oops/03 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **`_length` 不是 C++ 字段**(arrayOop.hpp:73-79 注释): 压缩模式占 union 高 4 字节(offset 12=klass_gap_offset_in_bytes,length_offset_in_bytes :76-79)——正好利用 01 篇说的"普通对象填充位";非压缩时在 sizeof(arrayOopDesc) 后。header=16B(压缩),long/double 数组 header 再对齐(header_size :122-127,element_type_should_be_aligned :68-70)
+> - **维度链**: _dimension/_higher_dimension/_lower_dimension(arrayKlass.hpp:41-43);高维 Klass 沿链原子创建(array_klass_impl,objArrayKlass.cpp:331-349);基本类型数组最低维=Universe 全局单例(universe.hpp:276;create_klass 调用 universe.cpp:334-337);数组是 Object/Cloneable/Serializable 子类型(compute_is_subtype_of,arrayKlass.cpp:116-120)
+> - **obj_at/obj_at_put 走 Access API**(objArrayOop.inline.hpp:47-57): HeapAccess<IS_ARRAY>::oop_load_at/oop_store_at——写引用触发 GC barrier;不是裸指针运算
+> - **GC 遍历对象数组**: oop_oop_iterate_elements 逐元素 Devirtualizer::do_oop(objArrayKlass.inline.hpp:38-46)——大纲"读 compressed oop→decode→验证 Klass→mark"的"验证 Klass"是编造,真实就是逐元素交闭包
+> - **TypeArray GC 直接跳过**: oop_oop_iterate_impl 是**空函数**(typeArrayKlass.inline.hpp:36-40)+ 头文件注释 :89-90 "Since there are no oops in TypeArrayKlasses"
+> - 元素访问: byte_at :92/int_at :125/long_at :158(typeArrayOop.inline.hpp),经 HeapAccess load_at;element_offset :65-69(typeArrayOop.hpp)
+> - 边界检查: 访问模板(templateTable_x86.cpp:769 起 iaload)内置 bounds check;arraylength 模板 :4164-4168 直接读 length 偏移
 
 ### 1. ArrayKlass 层次
 
