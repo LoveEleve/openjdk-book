@@ -34,7 +34,7 @@
 
 ## 卷 2 · 运行时深处（写作中，按域依赖序组织）
 
-> 依据: `planning/outlines/` 48 个域目录、213 个大纲文件；写作顺序 = 48 域依赖拓扑 7 层（见 `planning/knowledge-planning/00-domain-writing-order.md`），从基础域写起
+> 依据: `planning/outlines/` 48 个域目录、213 个 md 文件(152 篇正文大纲)；写作顺序 = 48 域依赖拓扑 7 层（见 `planning/knowledge-planning/00-domain-writing-order.md`），从基础域写起
 
 * 第 1 批（地基）: 01-os → 05-cpu → 45-math → 48-utils — 未开始
 * 第 2 批（原语）: 02-assembler → 03-flags → 04-logging → 06-oops → 16-codecache → 38-perfdata → 41-zipjimage → 42-core-native — 未开始
