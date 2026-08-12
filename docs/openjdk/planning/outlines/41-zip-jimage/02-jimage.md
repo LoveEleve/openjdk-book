@@ -7,7 +7,8 @@
 > - **"map_size() = min(file_size, index_size) 最小化映射" 错**: 实际 `map_size = memory_map_image ? _file_size : _index_size`(imageFile.hpp:493-497);`memory_map_image = sizeof(void*)==8`(imageFile.cpp:44)——**64 位默认映射整个文件**(零拷贝资源读取),32 位才只映射索引
 > - **"DEFAULT_SEED" 编造**(仅注释出现): 默认 seed 就是 HASH_MULTIPLIER(imageFile.hpp:174-175 `hash_code(string)` → `hash_code(string, HASH_MULTIPLIER)`);HASH_MULTIPLIER=0x01000193 FNV-1a 变体(imageFile.cpp:57-68)
 > - **"未压缩分支 memcpy" 编造**: get_resource(imageFile.cpp:533-566)未压缩分支**无条件 read_at 系统调用**;压缩分支 memory_map_image 时 `get_data_address()+offset` 从 mmap 零拷贝读(:548-551)
-> - **"首字节 magic 检测压缩类型" 错**: 压缩资源带 29 字节 ResourceHeader(magic 0xCAFEFAFA/size/uncompressed_size/name_offset/config_offset/is_terminal,imageDecompressor.cpp:145-164);decompress_resource 用 do-while **剥头循环支持解压器栈**(:142-177);ZipDecompressor :189
+> - **"首字节 magic 检测压缩类型" 错**: 压缩资源带 29 字节 ResourceHeader(magic 0xCAFEFAFA/size/uncompressed_size/name_offset/config_offset/is_terminal,imageDecompressor.hpp:56-64);decompress_resource 用 do-while **剥头循环支持解压器栈**(:142-177);ZipDecompressor :189
+> - **"零额外内存分配" 错**: decompress_resource 内部 `new u1[uncompressed_size]` 分配中间缓冲,解压完 memcpy 到调用方缓冲再 delete(imageDecompressor.cpp:167-182)——调用方零分配,解压侧一次中间缓冲
 > - ImageFileReader::open :369-412 流程 ✓(openReadOnly→size→28 字节 ImageHeader 校验(7×u4,:322-328)→index_size→mmap→四段地址计算 :396-413);IMAGE_MAGIC=0xCAFEDADA/MAJOR_VERSION=1(imageFile.hpp:445-451);index_size=header+table_length*8+locations+strings(:437-441)
 > - MPH: ImageStrings::find imageFile.cpp:75-101(redirect 三态: 0=未找到/负=-1-value 直接索引/正=新 seed 重算);算法出处注释 "A Practical Minimal Perfect Hashing Method"(imageFile.hpp:94-95);verify_location :484-519 必做(module/parent/base/extension 四段比对)
 > - 文件结构注释 imageFile.hpp:112-129(Redirect s4+Offsets u4+Attribute Data+Strings,偏移 0=空串);实证 jimage-info.txt: 29345 资源/表长 29345/Index 1483476 字节(1.4MB,占 123.5MB 镜像约 1.1%,modules 实测 129557387 字节)
