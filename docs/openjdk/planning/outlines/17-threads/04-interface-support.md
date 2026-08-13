@@ -2,6 +2,15 @@
 
 > 🔴 Deep | 4 KP 中的状态守卫
 > 读者处境: 线程执行 Java→VM 转换——这一瞬间发生了线程状态变更、内存屏障、safepoint 检查。如果状态写错了→GC 在错误的状态扫描栈→VM crash。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/17-threads/04 已按真实源码成文~190 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"ThreadInVMfromJava(interfaceSupport.inline.hpp:68-78) 用 trans_and_fence" 错**: 真实 :224-237——构造 `trans_from_java(_thread_in_vm)`(:227,Java→VM 不阻塞);析构=enable_stack_yellow_reserved_zone 恢复(:230-232)+**trans** 回(:233)+handle_special_runtime_exit_condition(:235)
+> - **"ThreadInNativeFromVM 类名" 不存在(编造)**: VM→native 的守卫是 **ThreadToNativeFromVM**(:277-294)——make_walkable(:283)+trans_and_fence 出(:284)+special condition(:286),析构 trans_from_native 回(:290);大纲把方向写反了
+> - **"ThreadBlockInVM 析构调 cross_modify_fence" 编造**: :297-309 无任何 fence;真实特点=**make_walkable(:302,注释 'Once we are blocked vm expects stack to be walkable')**+trans_and_fence(:303/:306);jdk11u 无 cross_modify_fence 于此处
+> - **变体(大纲未提)**: ThreadInVMForHandshake(:185-222,03 篇 Handshake 上下文: 构造 make_walkable+set _thread_in_vm :215,析构 transition_back 恢复原状态 :188-204);ThreadInVMfromJavaNoAsyncException(:315-337,不处理异步异常——处理就得 deopt,注释 :325-330,只处理挂起 :334-335)
+> - **"_suspend_flags 位值" 对**(thread.hpp:259-271): external_suspend=0x20000000/ext_suspended=0x40000000/deopt_suspend=0x10000000/has_async_exception=0x1/critical_native_unlock=0x2/trace_flag=0x4;注释避开符号位(:260-261,CR 6398077);**java_suspend_self 在 thread.cpp:2415-2461**(大纲 "thread.cpp:1507-1536" 错): walkable 断言(:2424-2426)/SR_lock(:2428)/**双层 wait**(外层 while is_external_suspend 等请求清空 :2451,内层 while is_ext_suspended 等 resume :2456-2457,注释 'change the stack out from under it' :2442-2450)
+> - **宏落点(大纲"转换点"示例多为编造)**: 真实=JNI_ENTRY 宏套 ThreadInVMfromNative(interfaceSupport.inline.hpp:515-522)/JRT_ENTRY 套 ThreadInVMfromJava(:468-474)/IRT_ENTRY 套 ThreadInVMfromJavaNoAsyncException(:460-466);JRT_ENTRY 用于 InterpreterRuntime::monitorenter 等运行时服务
+> - 悬念指向域 18 Safepoint(safepoint 怎么叫所有线程停住)✓
 
 ### 1. "RAII 是我最好的朋友" — 四种守卫类
 
