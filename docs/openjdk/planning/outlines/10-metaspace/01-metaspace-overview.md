@@ -2,6 +2,15 @@
 
 > 🔴 Deep | 9 KP 中的 3 个核心机制
 > 读者处境: `-XX:MaxPermSize=256m` 在 Java 8 消失了——类元数据去哪了？Metaspace——native memory，不在 Java heap——由 OS 直接管理。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/10-metaspace/01 已按真实源码成文~105 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"四层 Metaspace → MetaspaceArena → ChunkManager → VirtualSpaceList" 中 MetaspaceArena 是 JDK15+ 名字**: jdk11u 对应层=**ClassLoaderMetaspace**(metaspace.hpp:237,per CLD,含 **两个 SpaceManager** _vsm/_class_vsm :256-257,allocate :1572 按 mdtype 分流)+**SpaceManager**(spaceManager.hpp:43);真实链=L1 Metaspace::allocate(metaspace.cpp:1366-1414: mdtype 分流 :1378→loader_data->metaspace_non_null()->allocate :1386→失败 satisfy_failed_metadata_allocation(触发 GC 重试,注释"prevent premature expansion") :1396→OOM report→**zero 初始化** :1413)/L2 ClassLoaderMetaspace/L3 SpaceManager::allocate_work(spaceManager.cpp:429-448: current_chunk()->allocate :441→grow_and_allocate :173,**humongous 不设为当前 chunk** :204-210 注释)/L4 ChunkManager(chunkManager.hpp:44)+VirtualSpaceList::get_new_chunk(virtualSpaceList.cpp:341: current_virtual_space->get_chunk_vs→expand)
+> - **"8 种大小分级 Specialized(1KB)→Humongous(>4MB)" 错**: jdk11u 是 **4 类**(metaspaceCommon.hpp:95-101 ChunkIndex): Specialized=128 words(:36)/Small=512 words(:39,class 256 :38)/Medium=8K words(:41,class 4K :40)/Humongous(>Medium);class 与 non-class 大小不同(:134-149)
+> - **"MetaspaceSize ~20MB" 错(JDK8 旧值)**: jdk11u 默认=ScaleForWordSize(4*M)=4M*13/10≈**5.2MB**(globals.hpp:41 ScaleForWordSize 定义/:97);语义注释=**GC 触发阈值**("Initial threshold (in bytes) at which a garbage collection is done to reduce Metaspace usage" :1816-1819)非"高水位";MaxMetaspaceSize 默认 max_uintx(:1821);CompressedClassSpaceSize 1G(range 1M-3G,:1825)
+> - **阈值机制**: _capacity_until_GC(metaspace.cpp:71 volatile)+inc_capacity_until_GC(:142)+MetaspaceGC::compute_new_size(:235 自适应,MinMetaspaceFreeRatio/MaxMetaspaceFreeRatio);Metaspace 的"GC"=借 Full GC safepoint 做 class unloading(ClassLoaderDataGraph::do_unloading,07-05 讲过),归还 native memory 本身不需要 GC
+> - **class space**: 建立=Metaspace::allocate_metaspace_compressed_klass_ptrs(metaspace.cpp:1074+,断言 UseCompressedClassPointers);独立地址范围→narrowKlass decode=base+(index<<shift),shift=0 时一次 add
+> - **"metaspace.hpp:50-150 / metaspace.cpp:100-400/400-600/500-700" 全部漂移**: Metaspace 类在 metaspace.hpp:94(AllStatic)/ClassLoaderMetaspace :237;metaspace.cpp 1872 行
+> - 悬念指向 02-chunk-metablock-allocation.md(标题 "02. Chunk/Metablock——~500B 的 Klass 怎么在 Chunk 中快速分配")✓
 
 ### 1. 为什么换？— PermGen 的三个致命缺陷
 
