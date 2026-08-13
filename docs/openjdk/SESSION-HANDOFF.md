@@ -179,7 +179,7 @@
 | 命令输出 | `materials/commands/` 140+ 文件 | jcmd/jstat/jmap 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材**(详见 §二 commit 清单,共 9 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt
+**本会话新增素材**(详见 §二 commit 清单,共 10 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
