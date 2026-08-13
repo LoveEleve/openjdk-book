@@ -282,14 +282,15 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
-### 6.28 44-02(VerificationType 类型系统,第 4 批收官,大纲 7 处漂移含 2 处机制编造,2026-08-13)
+### 6.28 44-02(VerificationType 类型系统,第 4 批收官,大纲 7 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"Top vs Bogus 不同" 错**: top_type()=bogus_type() 别名(verificationType.hpp:130-131 注释 "alias");from_tag ITEM_Top->bogus(:33-45);bogus 放行=is_assignable_from 的 equals||is_bogus;帧构造全槽 bogus(stackMapFrame.cpp:43,46)
 - **"slot N+1=Top" 半对**: 文件规范如此,内存解析时 to_category2_2nd() 转 Long_2nd/Double_2nd(stackMapTable.cpp:300-307);内部 16 个类型=9 tag+4 签名窄化+2 次槽+Bogus
 - **is_assignable_from 伪代码全错**(大纲): "Top->true" 编造;"is_subclass_of(actual)" 方向反;Uninitialized 靠 equals(同 bci)
 - **"Byte/Char 来自 i2b" 错**: 窄化类型来自**方法签名**(change_sig_to_verification_type stackMapFrame.cpp:115-118);i2b/i2c/i2s 模拟推 integer_type(verifier.cpp:1481-1488)
 - **pop 只弹一槽**(stackMapFrame.cpp:199),category2 次槽自然落 _stack_size 之外,非"扣两槽"
 - **悬念指向错**: 大纲 "->域 45 Math" 错(45 已完结);44-02=第 4 批收官,下一域 11-cds(第 5 批第一域)
-- **实证**: 08-verificationtype-javap.txt(javap -v locals=[ long, long ] 双槽);**写作期血泪**: 块内代码凭记忆混入不存在的 check_end_stack/bogus type 注释(grep 零命中)——必须逐行回源码,任何"记忆中的代码"都要验证存在性
+- **实证**: 08-verificationtype-javap.txt + 原始字节 `fd 00 05 04 04 04`(append+delta5+**number_of_locals=4**+2 个 ITEM_Long——槽数是类型项两倍=long 双槽,次槽文件不写类型项隐式 Top,HotSpot 展开 Long/Long_2nd);**写作期血泪**: 块内代码凭记忆混入不存在的 check_end_stack/bogus type 注释(grep 零命中)——必须逐行回源码,任何"记忆中的代码"都要验证存在性
+- **第 3 轮 REVIEW 修正 2 处**: ①实证解读修正: [ long, long ] 是 2 个 long 变量(loop 的 sum+i)的类型项列表,双槽的证据是 number_of_locals=4 vs 类型项 2 个——"每个 long 占两槽"不能从 javap 显示直接读出;②11-cds 链接文本修正(副标题 "序列化 1000+ 核心类到 archive")
 
 ### 6.27 44-01(ClassVerifier 类型检查引擎,大纲行号全对(07-02 已验过 verifier.cpp),补充机制 7 条 + 第 3 轮 REVIEW,2026-08-13)
 - **VerificationType 真 union**: Symbol* 指针或编码数据(verificationType.hpp:48-62);低 2 位 TypeMask 顶层类别(Reference/Primitive/Uninitialized/TypeQuery)+第二字节类别(Category1/2/2_2nd)+高字节基本类型 descriminator;BciMask=0xffff<<8(Uninitialized 存 new 的 bci),BciForThis=(u2)-1(UninitializedThis);Query 类型=pop_stack 的通配符

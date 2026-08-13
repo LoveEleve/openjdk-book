@@ -1,14 +1,14 @@
 # 02. 验证器的类型宇宙 — VerificationType 类型系统
 
 > **前置依赖**:[44-class-verification/01 — ClassVerifier 类型检查引擎](01-verifier.md):union 编码与 is_assignable_from 判定树已拆,本篇补上类型系统的另一半——文件格式与内部实现的映射;[07-classfile-classloader/02 — Verifier 与 StackMapTable](openjdk/vol-02/07-classfile-classloader/02-verifier-stackmap.md):StackMapTable 的文件格式是输入的来源
-> → **后续**:[11-cds/01 — CDS 全景 + Dump](openjdk/vol-02/11-cds/01-cds-overview-dump.md):第 4 批收官,第 5 批从 CDS 开始(大纲的"下一域 45 Math"是错的——45 域早已在第 1 批完结)
+> → **后续**:[11-cds/01 — 序列化 1000+ 核心类到 archive](openjdk/vol-02/11-cds/01-cds-overview-dump.md):第 4 批收官,第 5 批从 CDS 开始(大纲的"下一域 45 Math"是错的——45 域早已在第 1 批完结)
 > 关联域: 07-classfile(StackMapTable)、44-01(验证引擎)、06-oops(Symbol)、13-jit(验证结果消费)
 
 ## 文件里的 9 个 tag,内存里的 16 个类型
 
 StackMapTable 文件里只有 9 种验证类型 tag(ITEM_Top..Uninitialized),但验证器内存里的 `VerificationType` 远不止这些: 扩展的 Boolean/Byte/Short/Char、双槽的 `Long_2nd`/`Double_2nd`、以及那个神秘的 `Bogus`。这一篇拆两个世界的映射: 文件 tag 怎么变成内部类型、`Top` 在实现里到底是什么、双槽的次槽怎么跟踪、以及 `is_assignable_from` 面对这些类型时的完整语义。
 
-[实证:] 带 long 局部变量的方法,StackMapTable 里每个 long 占两个槽(08-verificationtype-javap.txt: `locals = [ long, long ]`)——但验证器内部这两个槽是**不同**的类型(Long 与 Long_2nd),文件与内存的差异就在这一篇的 §2。
+[实证:] 带 long 局部变量的方法,StackMapTable 的 append 帧原始字节是 `fd 00 05 04 04 04`(LongVar.class): `fd`=append、`00 05`=偏移差、**`04`=number_of_locals(4 个槽)**、`04 04`=两个 ITEM_Long 类型项——槽数是类型项数的两倍,正是 long 的双槽(次槽在文件里**不写类型项**,隐式 Top;javap 显示 `locals = [ long, long ]`,08-verificationtype-javap.txt)。而验证器解析时把 4 个槽展开成 Long/Long_2nd/Long/Long_2nd——文件与内存的差异就在这一篇的 §2。
 
 ## 1. 两个世界: 文件的 9 个 tag,内部的扩展类型
 
@@ -146,4 +146,4 @@ VerificationType VerificationType::from_tag(u1 tag) {
 
 下一站换赛道: 从"运行时怎么执行/验证字节码"转到"启动时怎么加速"——CDS(Class Data Sharing)把 1000+ 核心类序列化进归档文件,JVM 启动时直接映射而非重新解析。第 5 批(VM 核心)从这里开始。
 
-> → [11-cds/01 — CDS 全景 + Dump](openjdk/vol-02/11-cds/01-cds-overview-dump.md)
+> → [11-cds/01 — 序列化 1000+ 核心类到 archive](openjdk/vol-02/11-cds/01-cds-overview-dump.md)
