@@ -12,11 +12,11 @@ Java 8 及以前,`public class` 意味着任何人都能 new、能反射。Java 
 
 ### ModuleEntryTable: 一张模块表,一个 java.base 特例
 
-模块是全局注册的: `ModuleEntryTable : Hashtable<Symbol*, mtModule>`(moduleEntry.hpp:208)——key 是模块名。每个表有一个**静态的 java.base 条目**(`_javabase_module`,moduleEntry.hpp:216)——模块系统的心脏,很多检查以它为特例(见 §3 的 can_read)。
+模块按加载器注册: 每个 `ClassLoaderData` 持有一张 `ModuleEntryTable : Hashtable<Symbol*, mtModule>`(classLoaderData.hpp:252,注释 "The modules defined by the class loader";moduleEntry.hpp:208)——key 是模块名。每个表有一个**静态的 java.base 条目**(`_javabase_module`,moduleEntry.hpp:216),在启动早期就预置好(moduleEntry.hpp:198-206 注释: 模块系统初始化前加载的类,它们的 PackageEntry 要能指向 java.base)——模块系统的心脏,很多检查以它为特例(见 §3 的 can_read)。
 
 ### ModuleEntry: 模块的"档案"
 
-每个模块一个 `ModuleEntry : HashtableEntry<Symbol*, mtModule>`(moduleEntry.hpp:63)。流传说法里的 "_exports 字段"并不存在——**导出信息不在这里**,它属于包(§2)。档案的字段是(moduleEntry.hpp:66-77,截取核心,逐字):
+每个模块一个 `ModuleEntry : HashtableEntry<Symbol*, mtModule>`(moduleEntry.hpp:63)。流传说法里的 "_exports 字段"并不存在——**导出信息不在这里**,它属于包(§2)。档案的字段是(moduleEntry.hpp:65-77,截取核心,逐字):
 
 ```cpp
 // moduleEntry.hpp:65-77(截取核心,逐字)
