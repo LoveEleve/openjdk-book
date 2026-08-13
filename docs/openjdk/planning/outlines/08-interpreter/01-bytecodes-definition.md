@@ -15,6 +15,7 @@
 > - **"stack_effect(opc,bci) 与 _unknown_depth" 编造**: 函数与值都不存在;depth 恒静态(invoke 系 depth=-1 近似 pop receiver,invokestatic/invokedynamic=0);"栈顶类型由上下文决定"由 result_type=T_ILLEGAL 表达(cpp:289-291 Note 2 注释)
 > - **"编译后全在 .data 零开销" 半对**: 数组初始在 .bss,启动 initialize() 一次填完,之后只读;"编译时预计算"应说"启动时预填充"
 > - **长度机制(大纲未提)**: 变长仅三条=wide(读第二字节查 _lengths 高 4 位)/tableswitch(align_up(bcp+1,4) 对齐,长=(补齐)+(3+hi-lo+1)*4,cpp:97-114)/lookupswitch(长=(补齐)+(2+2*npairs)*4,cpp:119-124);breakpoint 不在 special_length_at case 里(返 0),普通迭代器经 code_at 伪装成原指令(bytecodes.hpp:369-374),raw_special_length_at 才给 1(:151-158);迭代器先 length_for 查固定长、0 才 length_at(bytecodeStream.hpp:205-207);实测 76 条固定长全对 + lookupswitch 对齐(实证 08-bytecodes-javap.txt)
+> - **第 3 轮 REVIEW 补充(2026-08-13)**: ①is_aload 逐个点名=枚举不连续(_aload=25 与 _aload_0=42 间隔 16 个成员),**与"被重写"无关**;②_aload_0 can_trap=true 与运行时快速化闭环: aload_0 模板按下一字节 patch 成 fast_aload_0/fast_*access_0(templateTable_x86.cpp:973,注释 "rewriting in interpreter");getfield 解析后 patch fast_igetfield(:2929);③verifier.cpp:754 真实语义=store 指令在异常处理器覆盖区内时,先按 JVM 规范"进入类型状态"校验 handler 目标(局部变量加入之前),非"检查覆盖区";④正文"六张表"实为 6 数组(含 _java_code),注意点 3 条
 
 ### 1. Bytecodes — 静态定义表
 

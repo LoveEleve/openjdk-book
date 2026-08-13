@@ -89,7 +89,7 @@
 - `24-frame-demo.txt`(jstack 两行 at/codelist 双版本 nmethod/三 CodeHeap 1098 blobs/PrintInterpreter 271 codelets)
 - `24-inline-demo.txt` **v2**(Temurin 11: 编译日志 qux inline 7 次 + SIGQUIT 转储/jcmd/JFR 三路径都只有 main + 对照 NoInlineDemo 4 层)
 - `24-deopt-demo.txt`(PrintCompilation: total C1+C2→传 Circle→made not entrant×2→OSR→重编译)
-- `08-bytecodes-javap.txt`(BcDemo 五方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
+- `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
 
 **已回填的大纲 ⚠️ 块**(写作期修正,防下次抄错): 45/48/02/03/04/06/16/38/41/42/07/09/17/10/19 + 本会话 **23-01(6 条)/23-02(11 条+第 3 轮 4 条)/23-03(10 条)/24-01(10 条)/24-02(6 条+第 3 轮+第 4 轮)/24-03(9 条+第 3 轮)**。
 
@@ -282,7 +282,7 @@
 - **"stack_effect(opc,bci)/_unknown_depth" 编造**: 不存在;depth 恒静态(invoke 系 -1=近似 pop receiver,invokestatic/indy=0);"栈顶类型由上下文决定"由 result_type=T_ILLEGAL 表达(cpp:289-291 Note 2)
 - **变长只有三条**: wide(读第二字节查高 4 位)/tableswitch(align_up(bcp+1,4),长=(补齐)+(3+hi-lo+1)*4)/lookupswitch(长=(补齐)+(2+2*npairs)*4);**breakpoint 不在 special_length_at case(返 0)**,普通迭代器经 code_at 伪装成原指令(hpp:369-374),只有 raw_special_length_at 给 1(:151-158);迭代器先 length_for 固定长、0 才 length_at(bytecodeStream.hpp:205-207)
 - **实证方法论**: javap 偏移差=def 表 format 长度,可脚本全量核对(76 条固定长全对;方法边界 return 行会算出负差需过滤);lookupswitch 对齐可用偏移链证明(1→4 对齐→44,43 字节);正则陷阱: def 表名字匹配写死 "bytecode" 前缀导致零命中
-- 实证: 08-bytecodes-javap.txt(Temurin 11 javac/javap,BcDemo 五方法: 常量/局部变量/算术/if/lookupswitch/invoke/indy/new/数组;invokedynamic #11,0 5 字节、bipush 42 2 字节、iinc 2,1 3 字节)
+- 实证: 08-bytecodes-javap.txt(Temurin 11 javac/javap,BcDemo 六方法: 构造器+常量/局部变量/算术/if/lookupswitch/invoke/indy/new/数组;invokedynamic #11,0 5 字节、bipush 42 2 字节、iinc 2,1 3 字节)
 
 ---
 
