@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **70/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 18: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **71/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 19: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加要求再 REVIEW)** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 31-unsafe/02(WhiteBox + Forte,大纲 `planning/outlines/31-unsafe-whitebox/02-whitebox-forte.md`,31 域共 2 篇: 01 ✅/02-whitebox-forte)。
+**下一步(唯一,无选择)**: 44-verification/01(验证器,大纲 `planning/outlines/44-verification/01-*.md`,第 4 批最后一域)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,65 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训);⑧ **用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)**
 
@@ -43,13 +43,13 @@
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26)
 第 3 批(对象/类): 07(7/7) → 09(3/3) → 17(4/4)   ✅ 第 3 批完结(14 篇)
-第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(4/4 完结)** → **31(1/2)** → 44   🚧 进行中
+第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(4/4 完结)** → **31(2/2 完结)** → 44   🚧 进行中
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 70 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 18):
+**已完成 71 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 19):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -73,7 +73,7 @@
 | **23-stub** | 1-3 | `23-stub/01-stub-entry.md`(128)/02-arraycopy.md(313)/03-crypto-math.md(306) | ✅ **23 域完结(本会话)** |
 | **24-frame** | 1-3 | `24-frame/01-physical-frame.md`(238)/02-virtual-frame.md(151)/03-deopt-gc-scan.md(268) | ✅ **24 域完结(本会话)** |
 | **08-interpreter** | 1-4 | `01-bytecodes-definition.md`(308)/02(330)/03-interpreter-runtime.md(244)/04-linkresolver-rewriter.md(269) | ✅ **08 域完结(本会话)** |
-| **31-unsafe** | 1-2 | `31-unsafe-whitebox/01-unsafe-api.md`(151) | 🚧 31 域 1/2(本会话) |
+| **31-unsafe** | 1-2 | `31-unsafe-whitebox/01-unsafe-api.md`(151)/02-whitebox-forte.md(132) | ✅ **31 域完结(本会话)** |
 
 ### 本会话 6 篇的 commit 清单(23-stub/02 起,按 git log 为准)
 
@@ -87,6 +87,7 @@
 **08-interpreter/03(InterpreterRuntime)**: 正文 1d2807d → 大纲回填 8523d0d(⚠️ 8 条)→ README 3c9e272(68/152,08 域 3/4)→ 下一步 08-interpreter/04
 **08-interpreter/04(LinkResolver + Rewriter)**: 正文 050eb2d → 大纲回填 61b4df7(⚠️ 10 条)→ README 587e62e(69/152,**08 域完结**)→ 下一步 31-unsafe/01
 **31-unsafe/01(Unsafe 底层 API)**: 正文 f902593 → 大纲回填 0ccf408(⚠️ 9 条)→ README 9780838(70/152,31 域 1/2)→ 下一步 31-unsafe/02
+**31-unsafe/02(WhiteBox + Forte)**: 正文 5b9a5d1 → 大纲回填 e53a138(⚠️ 6 条)→ README 92e0b00(71/152,**31 域完结**)→ 下一步 44-verification/01
 
 **本会话新增素材(全部 gitignore 不入库,在 materials/commands/)**:
 - `23-arraycopy-bench.txt`(UseAVX 0/2/3 各档 arraycopy/fill 吞吐 + PrintFlagsFinal 附注: UseFastStosb=false/UseXMMForObjInit=true)
@@ -278,6 +279,12 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
+### 6.26 31-02(WhiteBox + Forte,31 域收官,大纲 6 处漂移含 2 处机制编造,2026-08-13)
+- **"WB_ENTRY 简化版 JVM_ENTRY" 错**: WB_ENTRY=JNI_ENTRY+ClearPendingJniExcCheck(whitebox.inline.hpp:33-37);WhiteBoxAPI diagnostic flag(globals.hpp:2600);JVM_RegisterWhiteBoxMethods 双门控(flag+null loader,:2348-2361);方法表 178 条(:2114-2342);WB_FullGC :1321-1330(soft_ref 清+collect wb_full_gc+G1 复位)/WB_G1IsHumongous :422-429(非 G1 抛异常)
+- **"Forte——JFR 用" 错(重要)**: JDK11 JFR 采样器(jfrThreadSampler.cpp)不用 AsyncGetCallTrace,用 **os::SuspendedThreadTask**(:114 OSThreadSampler extends os::SuspendedThreadTask)+ucontext;handshake 也零引用(后续版本才接入);AGCT 是外部 profiler 的导出符号(jvm_sym.ver:6)
+- **AGCT 机制(大纲未提)**: 错误码 ticks_*(forte.cpp:50-60:-1 无 CLASS_LOAD/-2 GC/-3..-6 不可得不可遍历/-7 未知/-8 退出/-9 deopt);入口检查 :523-556;三族两路分派 :570-628;find_initial_Java_frame :296-330;vframeStreamForte forte_next :116;ThreadInAsgct 重入(thread.hpp:784);jmethodID 类加载时预分配(信号处理器不能拿锁)
+- **实证方法论**: 最小 WhiteBox 兼容类(bootclasspath/a 加载,方法表注册对缺失方法打 NoSuchMethodError Warning 不影响);不开 flag→UnsatisfiedLinkError(注册层门控);开 flag→heapOopSize 4/isGCSupported true/g1IsHumongous 4MB true/fullGC done(08-whitebox-demo.txt);native 方法签名必须与方法表 JNI 签名一致(getVMPageSize 是 ()I 非 ()J)
+
 ### 6.25 31-01(Unsafe 底层 API,31 域开篇,大纲 9 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **CAS 单路径错(JDK8 形态)**: 大纲的 `jint* addr=(jint*)(p+offset); Atomic::cmpxchg` 是 JDK8 旧版;JDK11 双路径=obj==NULL→RawAccess(堆外) / obj!=NULL→HeapAccess::atomic_cmpxchg_at(堆内带 GC barrier,06-05 access API);index_oop_from_field_offset_long(unsafe.cpp:122-135,p==NULL 返裸地址);assert_field_offset_sane
 - **行号全漂**: unsafe.cpp 1122 行;CAS :876-938/Park :939-955/Unpark :960-984/AllocateInstance :365-368/defineAnonymousClass0 :830-862(impl :741)/方法表 :1035-1109/JVM_RegisterJDKInternalMiscUnsafeMethods :1116-1121;UNSAFE_ENTRY=JVM_ENTRY(:64-70,interfaceSupport.inline.hpp:558-566 ThreadInVMfromNative)
@@ -399,7 +406,7 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/31-unsafe-whitebox/02-whitebox-forte.md(注意 ⚠️ 块——31-01 大纲已回填 9 条,02 大概率同样漂移;01 篇悬念指向它: WhiteBox 测试后门与 Forte 栈采样)
+1. 读 planning/outlines/44-verification/(注意 ⚠️ 块——31 域两篇大纲均已回填,44 大概率同样漂移;31-02 篇悬念指向 32-jfr,但第 4 批顺序是 44-verification 先写)
 2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;重点: interpreterRuntime.cpp 的各类入口(resolve_ldc/resolve_invoke/new/throw...)、模板侧 call_VM 的调用点(templateTable.cpp:71-116 断言 calls_vm)、interp_masm 的 call_VM 封装(macroAssembler 层 JavaFrameAnchor/safepoint 处理)、JavaCalls/SharedRuntime 桥、safepoint 入口(InterpreterRuntime::at_safepoint,02 篇第 6 段生成)、invoke 的 resolve 流程;与 02 篇的 dispatch/轮询点/calls_vm 位呼应要在文中体现;03 大纲标题 = InterpreterRuntime,正文标题按 v5 格式)
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);容器后台进程用 wrapper 脚本管理;pgrep 用方括号;转储用 kill -3;jcmd attach 挂起时换 kill -3;class 版本注意 javac/java 同版本;javap -c 偏移差可与 def 表脚本核对(见 08-bytecodes-javap.txt)
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
