@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **71/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 19: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **72/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 20: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加要求再 REVIEW)** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 44-class-verification/01(字节码验证引擎,大纲 `planning/outlines/44-class-verification/01-verifier.md`,标题 "01. 字节码验证引擎 — ClassVerifier + StackMapTable",44 域共 2 篇: 01-verifier/02-verification-type)。
+**下一步(唯一,无选择)**: 44-class-verification/02(VerificationType 类型系统,大纲 `planning/outlines/44-class-verification/02-verification-type.md`,44 域共 2 篇: 01 ✅/02-verification-type;写完后第 4 批完结)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,65 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训);⑧ **用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)**
 
@@ -43,13 +43,13 @@
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26)
 第 3 批(对象/类): 07(7/7) → 09(3/3) → 17(4/4)   ✅ 第 3 批完结(14 篇)
-第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(4/4 完结)** → **31(2/2 完结)** → 44   🚧 进行中
+第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(4/4 完结)** → **31(2/2 完结)** → **44(1/2)**   🚧 进行中
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 71 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 19):
+**已完成 72 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 20):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -74,6 +74,7 @@
 | **24-frame** | 1-3 | `24-frame/01-physical-frame.md`(238)/02-virtual-frame.md(151)/03-deopt-gc-scan.md(268) | ✅ **24 域完结(本会话)** |
 | **08-interpreter** | 1-4 | `01-bytecodes-definition.md`(308)/02(330)/03-interpreter-runtime.md(244)/04-linkresolver-rewriter.md(269) | ✅ **08 域完结(本会话)** |
 | **31-unsafe** | 1-2 | `31-unsafe-whitebox/01-unsafe-api.md`(151)/02-whitebox-forte.md(132) | ✅ **31 域完结(本会话)** |
+| **44-class-verification** | 1-2 | `44-class-verification/01-verifier.md`(316) | 🚧 44 域 1/2(本会话) |
 
 ### 本会话 6 篇的 commit 清单(23-stub/02 起,按 git log 为准)
 
@@ -88,6 +89,7 @@
 **08-interpreter/04(LinkResolver + Rewriter)**: 正文 050eb2d → 大纲回填 61b4df7(⚠️ 10 条)→ README 587e62e(69/152,**08 域完结**)→ 下一步 31-unsafe/01
 **31-unsafe/01(Unsafe 底层 API)**: 正文 f902593 → 大纲回填 0ccf408(⚠️ 9 条)→ README 9780838(70/152,31 域 1/2)→ 下一步 31-unsafe/02
 **31-unsafe/02(WhiteBox + Forte)**: 正文 5b9a5d1 → 大纲回填 e53a138(⚠️ 6 条)→ README 78063ea(71/152,**31 域完结**)→ 下一步 44-class-verification/01
+**44-class-verification/01(ClassVerifier)**: 正文 f510ced → 大纲回填 8c22eb0(⚠️ 7 条,大纲行号全对,补充机制为主)→ README 31ffc0e(72/152,44 域 1/2)→ 下一步 44-class-verification/02
 
 **本会话新增素材(全部 gitignore 不入库,在 materials/commands/)**:
 - `23-arraycopy-bench.txt`(UseAVX 0/2/3 各档 arraycopy/fill 吞吐 + PrintFlagsFinal 附注: UseFastStosb=false/UseXMMForObjInit=true)
@@ -278,6 +280,14 @@
 - **第 3 轮 REVIEW**: ①"已入栈旧帧走到栈顶才 deopt"错——uncommon trap 只拆当前帧;其它帧由 **deopt_dependents(deoptimization.cpp:800-803)→Threads::deoptimized_wrt_marked_nmethods(thread.cpp:4625)→逐帧 should_be_deoptimized 当场拆(:2847-2858)**,下次 safepoint 全量拆;②made not entrant=uncommon trap 的 action 直接标(:1794-1825 Action_make_not_entrant/reinterpret),非依赖系统;③C 堆原因=源码注释(deoptimization.cpp:1209-1211 "Since the Java thread being deoptimized will eventually adjust it's own stack...")
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
+
+### 6.27 44-01(ClassVerifier 类型检查引擎,大纲行号全对(07-02 已验过 verifier.cpp),补充机制 7 条,2026-08-13)
+- **VerificationType 真 union**: Symbol* 指针或编码数据(verificationType.hpp:48-62);低 2 位 TypeMask 顶层类别(Reference/Primitive/Uninitialized/TypeQuery)+第二字节类别(Category1/2/2_2nd)+高字节基本类型 descriminator;BciMask=0xffff<<8(Uninitialized 存 new 的 bci),BciForThis=(u2)-1(UninitializedThis);Query 类型=pop_stack 的通配符
+- **is_assignable_from 判定树**(verificationType.hpp:267-298): 相同/bogus 通过;Query 按类别;Boolean/Byte/Char/Short 接受 int(宽化);引用对引用→is_reference_assignable_from(verificationType.cpp:79-116: null→任何引用/同名/Object 全通过/数组组件递归 is_component_assignable_from(基本类型必须相同)/其余 resolve_and_check_assignability **会触发类解析**,CDS 下 add_verification_constraint 推迟)——07-02 "只认名字" 与 "判子类要解析" 两层区分
+- **Uninitialized 生命周期**: new→uninitialized_type(bci)(verifier.cpp:1652-1654);verify_invoke_init(verifier.cpp:2371-2420: UninitializedThis 只能调本类/超类 <init>;普通 Uninitialized 校验 bci 处确为 new;initialize_object 全帧替换 stackMapFrame.cpp:57-70;try 块内先验证异常处理器路径以未初始化结束)
+- **invoke 四层检查**(verifier.cpp:2600-2655): invokedynamic 3/4 字节必须 0;<init> 只能 invokespecial;invokespecial 类可赋值(匿名类 host 特例);参数从后往前 pop_stack 匹配
+- **VerifyError 路径**: verify_error 只记录(verifier.cpp:1978-1993),Verifier::verify 尾部 THROW_MSG_(:239);failover(:184-192,版本<51);TypeOrigin :97/ErrorContext :147;aload 模拟=verify_aload(:2832-2837 get_local reference_check,实证消息的出处)
+- **实证**: 08-verifier-demo.txt(iload_0→aload_0 一字节修改: 默认 VerifyError "Bad local variable type"+Reason+Current Frame 转储; -Xverify:none 照跑 result=3);注意改 class 文件时类名不能改(文件与类名匹配)
 
 ### 6.26 31-02(WhiteBox + Forte,31 域收官,大纲 6 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"WB_ENTRY 简化版 JVM_ENTRY" 错**: WB_ENTRY=JNI_ENTRY+ClearPendingJniExcCheck(whitebox.inline.hpp:33-37);WhiteBoxAPI diagnostic flag(globals.hpp:2600);JVM_RegisterWhiteBoxMethods 双门控(flag+null loader,:2348-2361);方法表 178 条(:2114-2342);WB_FullGC :1321-1330(soft_ref 清+collect wb_full_gc+G1 复位)/WB_G1IsHumongous :422-429(非 G1 抛异常)
