@@ -6,13 +6,13 @@
 
 ## 一个高频调用,启动时就备好的汇编
 
-`System.arraycopy(src, 0, dst, 0, 1000000)` 是 JDK 内部的高频调用: 集合扩容、字符串拼接、流拷贝,一天被调上亿次。手写 for 循环让 C2 向量化也能拷贝,为什么还要专门的桩?因为桩在启动时就把最宽的向量拷贝循环生成了,编译代码到它只是**一条 call**;而 C2 展开手写循环受类型信息与编译时间限制,常常退化。实测同一台机器上,1K 数组 arraycopy 比 C2 编译后的手写循环快 3.2 倍([实证: materials/commands/23-arraycopy-bench.txt])。这一篇拆开这套桩: 入口表怎么组织、向量化怎么分级、重叠怎么安全、对象数组为什么不能裸拷、fill 为什么比 copy 还快。
+`System.arraycopy(src, 0, dst, 0, 1000000)` 是 JDK 内部的高频调用: 集合扩容、字符串拼接、流拷贝,一天被调上亿次。手写 for 循环让 C2 向量化也能拷贝,为什么还要专门的桩?因为桩在启动时就把最宽的向量拷贝循环生成了,编译代码到它只是**一条 call**;而手写循环即使被 C2 向量化,也受别名分析限制、要和边界检查混在一起,指令序列不如启动时预生成的专用桩。实测同一台机器上,1K 数组 arraycopy 比 C2 编译后的手写循环快 3.2 倍([实证: materials/commands/23-arraycopy-bench.txt])。这一篇拆开这套桩: 入口表怎么组织、向量化怎么分级、重叠怎么安全、对象数组为什么不能裸拷、fill 为什么比 copy 还快。
 
 ## 1. 入口表: 一个 arraycopy,四宽两向十几个桩
 
 ### 为什么不是"一个桩"
 
-arraycopy 的参数只有 src/dst/位置/长度,但底层要按**元素宽度**挑最快的拷贝循环——byte 数组一次能拷 64 字节,引用数组一次只能拷 8 字节(还得处理 GC 屏障)。于是入口不是函数而是**一张表**,声明在 stubRoutines.hpp:126-137(截取核心,逐字):
+arraycopy 的参数只有 src/dst/位置/长度,但底层要按**元素宽度**挑最快的拷贝循环——byte 数组一次能拷 64 字节;引用数组每个元素 4/8 字节(看压缩 oop 开关),走同一套向量循环,但拷贝前后必须处理 GC 屏障。于是入口不是函数而是**一张表**,声明在 stubRoutines.hpp:126-137(截取核心,逐字):
 
 ```cpp
 // stubRoutines.hpp:126-137(截取核心,逐字)
@@ -52,7 +52,7 @@ arraycopy 的参数只有 src/dst/位置/长度,但底层要按**元素宽度**�
                                                                            "jbyte_arraycopy");
 ```
 
-**关键设计 (斜体)**: *disjoint 桩先生成,`entry` 记下它内部的"Entry:"标签;conjoint 桩把 disjoint 入口当 nooverlap_target 传给 overlap 测试——无重叠直接跳进 disjoint 主体。所以 conjoint 桩 = overlap 测试 + disjoint 桩,不是两套拷贝循环。arrayof_* 更极端: 生成函数的 aligned 参数标注 "ignored"(stubGenerator_x86_64.cpp:1462-1463),12 个 arrayof 入口全部别名到普通入口(stubGenerator_x86_64.cpp:2945-2962,注释 "We don't generate specialized code for HeapWord-aligned source arrays")——x86 上对齐假设换不来更快的代码。*
+**关键设计 (斜体)**: *disjoint 桩先生成,`entry` 记下它内部的"Entry:"标签;conjoint 桩把 disjoint 入口当 nooverlap_target 传给 overlap 测试——无重叠直接跳进 disjoint 主体。所以 conjoint 桩 = overlap 测试 + disjoint 桩,不是两套拷贝循环。arrayof_* 更极端: 生成函数的 aligned 参数标注 "ignored"(stubGenerator_x86_64.cpp:1456,conjoint 版 :1563 同),12 个 arrayof 入口全部别名到普通入口(stubGenerator_x86_64.cpp:2945-2962,注释 "We don't generate specialized code for HeapWord-aligned source arrays")——x86 上对齐假设换不来更快的代码。*
 
 ### 调用方怎么挑: 类型×对齐×方向的三维矩阵
 
@@ -89,7 +89,7 @@ StubRoutines::select_arraycopy_function(BasicType t, bool aligned, bool disjoint
 1. UseUnalignedLoadStores(SSE2+ 机器默认自动开,vm_version_x86.cpp:1294-1295): 决定用可不对齐的 movdqu/vmovdqu,还是退化为 movq;
 2. UseAVX: 启动期 CPUID 探测写入(默认 3,globals_x86.hpp:121;探测甚至用一段 SEGV 测试验证 YMM/ZMM 跨信号处理能否恢复,vm_version_x86.cpp:363-368)。
 
-UseAVX > 2(机器有 AVX-512)时,stub 里**同时嵌两条循环**,运行时按长度分派(stubGenerator_x86_64.cpp:1255-1282,截取核心,逐字):
+UseAVX > 2(机器有 AVX-512)时,stub 里**同时嵌两条循环**,运行时按长度分派(stubGenerator_x86_64.cpp:1255-1283,截取核心,逐字):
 
 ```cpp
 // stubGenerator_x86_64.cpp:1255-1283(截取核心,逐字)
@@ -153,7 +153,7 @@ UseAVX > 2(机器有 AVX-512)时,stub 里**同时嵌两条循环**,运行时按�
 | 4M | 39.5 | 39.6 | 40.2 | 44.7(0.9x) |
 | 32M | 21.4 | 22.0 | 21.7 | 24.3(0.9x) |
 
-三条结论: ①小数组(缓存驻留)是桩的舞台,1K 时比 C2 向量化的手写循环快 3.2 倍——"3x 加速"的出处;②SSE2→AVX2 的宽度收益在 1K 时 +24%(55→68 GB/s),64K 以上被抹平(77 vs 78);③4M/32M 越界缓存后两者都是内存带宽瓶颈,指令宽度毫无意义。桩的设计者知道这一点,所以分级只在值得的地方生效。
+三条结论: ①小数组(缓存驻留)是桩的舞台,1K 时比 C2 向量化的手写循环快 3.2 倍——"3x 加速"的出处;②SSE2→AVX2 的宽度收益在 1K 时 +24%(55→68 GB/s),64K 以上被抹平(77 vs 78);③4M/32M 数据超出缓存后两者都趋同于内存带宽瓶颈,指令宽度毫无意义。桩的设计者知道这一点,所以分级只在值得的地方生效。
 
 ## 3. 重叠: conjoint 必须倒着拷
 
@@ -217,11 +217,11 @@ C2 展开 System.arraycopy 时,只有两个偏移都是常量且 `src_off >= dst
     bs->arraycopy_prologue(_masm, decorators, type, from, to, count);
 ```
 
-G1 下 prologue 是 SATB 预写屏障: 先检查本线程标记是否进行中(satb_mark_queue_active),只有并发标记阶段才动作——把目标范围内**被覆盖的旧引用**整段入 SATB 队列(整段一次运行时调用 write_ref_array_pre_oop_entry,g1BarrierSetAssembler_x86.cpp:44);epilogue 是卡表标记(:1950)——06-05 的 Access API 在这里以汇编形式落地。uninit 变体(`_oop_arraycopy_uninit` 等)给"紧耦合的新分配数组"用: 目标内容还没初始化,没有旧引用可入队,prologue 整个跳过(gen_write_ref_array_pre_barrier 里 dest_uninitialized 直接 return,g1BarrierSetAssembler_x86.cpp:47-48)——C2 在分配+拷贝合并时选它(ReduceBulkZeroing 路径,macroArrayCopy.cpp:302-325)。
+G1 下 prologue 是 SATB 预写屏障: 先检查本线程标记是否进行中(satb_mark_queue_active),只有并发标记阶段才动作——把目标范围内**被覆盖的旧引用**整段入 SATB 队列(整段一次运行时调用 write_ref_array_pre_oop_entry,压缩 oop 下换 _narrow_ 版,g1BarrierSetAssembler_x86.cpp:44);epilogue 是卡表标记(:1950)——06-05 的 Access API 在这里以汇编形式落地。uninit 变体(`_oop_arraycopy_uninit` 等)给"紧耦合的新分配数组"用: 目标内容还没初始化,没有旧引用可入队,prologue 整个被 `if (!dest_uninitialized)` 守卫跳过(g1BarrierSetAssembler_x86.cpp:46-48)——C2 在分配+拷贝合并时选它(ReduceBulkZeroing 路径,macroArrayCopy.cpp:302-325)。
 
 ### checkcast: 逐元素验类型,失败报数退出
 
-两个数组元素类型不同且不能静态证明子类型时,走 checkcast 桩(generate_checkcast_copy,stubGenerator_x86_64.cpp:2293): 逐元素 load oop → 空值直接过 → load_klass → 子类型检查(generate_type_check :2258,fast path 用超级类缓存偏移 ckoff),循环主体(stubGenerator_x86_64.cpp:2421-2427,截取核心,逐字):
+两个数组元素类型不同且不能静态证明子类型时,走 checkcast 桩(generate_checkcast_copy,stubGenerator_x86_64.cpp:2293): 逐元素 load oop → 空值直接过 → load_klass → 子类型检查(generate_type_check :2258,fast path 用超级类缓存偏移 ckoff),循环主体(stubGenerator_x86_64.cpp:2420-2427,截取核心,逐字):
 
 ```cpp
 // stubGenerator_x86_64.cpp:2420-2427(截取核心,逐字)
