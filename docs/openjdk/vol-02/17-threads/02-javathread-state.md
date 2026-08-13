@@ -37,7 +37,7 @@ enum JavaThreadState {
 流传的"0-6 五个状态"是错的——真实是**五个真状态 + 每个状态的 +1 trans 状态**,且值间隔 2。文件头的注释是钥匙: "Given a state, the xxxx_trans state can always be found by adding 1"。五个真状态的语义:
 
 - `_thread_new`(2): 刚构造、还没就绪;
-- `_thread_in_native`(4): 在 JNI native 代码里——**safepoint 不用等它**(没有 Java 帧可扫);
+- `_thread_in_native`(4): 在 JNI native 代码里——safepoint 不阻塞 native 执行本身,但认定它"安全"有条件: 没有残留的 Java 帧,或帧可 walk(safepoint_safe,safepoint.cpp:765-766——JNI 从 Java 调用进入时锚点还在,GC 要能走它);
 - `_thread_in_vm`(6): 在 VM 内部执行——**safepoint 必须等它**到安全点(它在碰 VM 数据结构);
 - `_thread_in_Java`(8): 在解释器/编译代码里——safepoint 等它到轮询点;
 - `_thread_blocked`(10): 阻塞在 monitor/sleep/park——已在安全位置。
@@ -73,7 +73,7 @@ enum JavaThreadState {
 
 三拍:
 
-1. **先写 trans 状态 `from + 1`**(:120): 让 safepoint 发起者看到"这个线程正在从 X 往 Y 转换"——奇数 trans 状态就是给它的信号: 别急,等我到 Y;
+1. **先写 trans 状态 `from + 1`**(:120): 让 safepoint 发起者看到"这个线程正在从 X 往 Y 转换"——奇数 trans 状态是给它的信号: 别急,等我到 Y。反过来,safepoint 的 block 检查里 trans 状态出现即异常(fatal "Deadlock in safepoint code. Should have called back to the VM before blocking",safepoint.cpp:889-896)——trans 本应是瞬时的,停留太久说明转换方与 safepoint 互相等锁;
 2. **serialize_thread_state**(:122): 保证新状态被 safepoint 线程看到(见下);
 3. **`SafepointMechanism::block_if_requested(thread)`**(:124): **safepoint 检查点就嵌在转换里**——若 safepoint 进行中,线程在这里自己阻塞;然后才写终态 `to`(:125)。
 
