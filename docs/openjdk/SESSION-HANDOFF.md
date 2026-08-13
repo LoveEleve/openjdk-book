@@ -446,6 +446,14 @@
   - **实证方法论教训**: ①容器后台进程在 bash 工具调用结束被杀——用 wrapper 脚本单次调用内完成(start→sleep→采集→kill);②pgrep/pkill -f 模式匹配到 bash 自身命令行导致自杀/超时——用方括号技巧 [I]nlineDemo;③jcmd attach 在 Temurin 11 挂起——用 kill -3(SIGQUIT)转储,输出走进程 stdout,不需 attach;④JDK 版本匹配: Kona17 javac 编译的 class(61)不能跑 JDK 11(55)——实证 JDK 用哪个 javac 就用哪个 java;⑤echo 文本含中文括号会触发 bash 语法错误
   - **第 4 轮 REVIEW(锚点 pc 精确定位)**: 机制闭环——①遍历起点=锚点帧(thread_linux_x86.cpp:55-58 pd_get_top_frame 优先 anchor;JFR JDK11=suspend+ucontext 但 anchor walkable 时不用 ucontext);②锚点 pc=最近 Java→VM 转换点=**C2 插在循环回边的安全点轮询点**;③**显示哪层由轮询点所在方法决定**: InlineDemo2 轮询点在 main 循环(main 段)→1 层;NoInlineDemo 轮询点在 big 循环(big 不内联,top/mid 也都不内联=grep 0)→物理链 4 层;内联的 bar/baz/qux 无循环无轮询点→锚点永不落内联代码;④JFR ucontext 路径(JDK14+ 信号采样)用真实 pc,但内联纯算术段无 PcDesc→pc_desc_at NULL→回退 nmethod 方法(main)(vframe.inline.hpp:139-189);⑤轮询点必有 PcDesc(GC 需要)→轮询点 scope 稳定可解析
   - 悬念→24-frame/03(Deopt 重建+GC 扫描)
+- **24-03(Deopt 重建 + GC 扫描,24 域收官,大纲 9 处漂移含 2 处机制编造,2026-08-13)**:
+  - **"StackValue 用 union" 错(编造)**: 三独立字段 _type/_integer_value/_handle_value(stackValue.hpp:31-53),非 union——scalar replaced oop 需同时记 Handle+标记(**_integer_value 兼作 scalar-replaced 标记**);T_CONFLICT=**死槽**(vframeArray.cpp:130 "A dead local. Will be initialized to null/zero."),非"保守扫描"
+  - **"MonitorChunk _monitors[0] 柔性数组" 错(编造)**: NEW_C_HEAP_ARRAY BasicObjectLock(monitorChunk.cpp:30-34);链挂 JavaThread::_monitor_chunks(thread.hpp:1023);oops_do :42-46
+  - **行号全漂移**: vframeArrayElement :50/vframeArray :121 字段 :131-146;fill_in vframeArray.cpp:60-109;create_stack_value stackValue.cpp:37(取址 :48-55: 寄存器→reg_map->location,栈→unextended_sp+offset;窄化+解码 :60-110);unpack_on_stack :171-202;RegisterMap registerMap.hpp:52-66/x86 版仅 pd_location hook
+  - **deopt 主链**: uncommon trap→fetch_unroll_info(deoptimization.cpp:139)→helper(:158)→create_vframeArray(:310/:1169,set_vframe_array_head :315)→unpack_frames(:623);unpack_on_stack 三态入口(SynchronizationEntryBCI→deopt_entry/reexecute→deopt_reexecute_entry/否则→deopt_continue_after_entry :187-220)
+  - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件(JDK14+ 才有);deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B)
+  - 实证: materials/commands/24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
+  - 悬念→08-interpreter(字节码执行)
 
 ---
 
