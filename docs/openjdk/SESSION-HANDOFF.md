@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-12 | 卷 2 写作中: **43/152 篇完成**(第 1 批 12 ✅ + 第 2 批 26 ✅ 收官;第 3 批进行中: 07 域 5/7) | 上下文已满,本文件为**非常详细交接版**(350+ 行)——新 AI 只读本文件即可继续
+> **状态**: 2026-08-12 | 卷 2 写作中: **44/152 篇完成**(第 1 批 12 ✅ + 第 2 批 26 ✅ 收官;第 3 批进行中: 07 域 6/7) | 上下文已满,本文件为**非常详细交接版**(350+ 行)——新 AI 只读本文件即可继续
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 07-classfile-classloader/06(JPMS Modules)。
+**下一步(唯一,无选择)**: 07-classfile-classloader/07(javaClasses 核心类镜像,07 域收官)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-8 处机制错误或行号漂移(36 篇无一例外)**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误,见 §6.5-4);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交。
 
@@ -41,14 +41,14 @@
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26,**第 2 批收官**)
-第 3 批(对象/类): 07(5/7) → 09 → 17   🚧 进行中
+第 3 批(对象/类): 07(6/7) → 09 → 17   🚧 进行中
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 43 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 5):
+**已完成 44 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 6):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -64,11 +64,11 @@
 | 38-perfdata | 1-2 | `38-perfdata/01-perfdata.md`(117 行)/02-stat-sampler.md(119 行) | ✅ 本会话完成 — **38 域完结** |
 | 41-zip-jimage | 1-2 | `41-zip-jimage/01-zip.md`(164 行)/02-jimage.md(194 行) | ✅ 本会话完成 — **41 域完结** |
 | 42-core-native | 1-3 | `42-core-native/01-jni-system.md`(129 行)/02-process.md(264 行)/03-class-io.md(228 行) | ✅ 本会话完成 — **42 域完结,第 2 批收官** |
-| 07-classfile-classloader | 1-5 | `07-classfile-classloader/01-classfile-parser.md`(169 行)/02-verifier-stackmap.md(210 行)/03-symbol-string-table.md(229 行)/04-system-dictionary.md(141 行)/05-classloader-hierarchy.md(152 行) | ✅ 本会话完成 — 第 3 批进行中 |
+| 07-classfile-classloader | 1-6 | `07-classfile-classloader/01-classfile-parser.md`(169 行)/02-verifier-stackmap.md(210 行)/03-symbol-string-table.md(229 行)/04-system-dictionary.md(141 行)/05-classloader-hierarchy.md(152 行)/06-jpms-modules.md(140 行) | ✅ 本会话完成 — 第 3 批进行中 |
 
-**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);38域02=03bc615(正文+大纲回填)+8769a40(README,38 域完结);41域01=df0b073(正文+大纲回填)+079ba1c(README);41域02=ccd9b08(正文+大纲回填)+a59daa2(README,41 域完结);42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
+**每篇 commit 号**: 以 git log 为准。本会话关键: 04域02=d1fa856(正文)+fbd6d14(深审2);06域01=cb28960+5f4d58b;06域02=f20797f+bd66244+2cada2f;06域03=0731946+f1dd337+c2bdeec;06域04=fa40087+b1600c8;06域05=6b736da+8f8476b;06域06=2ec7fa5+dbeab71;06 整体 REVIEW=5ad9741;16域01=be980da+db3f944;16域02=b8c35d8(正文+大纲回填)+a4e5d71(README);16域03=904eab3(正文+大纲回填)+6fa855b(README);16域04=ec7599c(正文+大纲回填)+d66674f(README);16域05=8a223d2(正文+大纲回填)+58b1aa9(README,16 域完结);38域01=2094349(正文+大纲回填)+2bd7af9(README);38域02=03bc615(正文+大纲回填)+8769a40(README,38 域完结);41域01=df0b073(正文+大纲回填)+079ba1c(README);41域02=ccd9b08(正文+大纲回填)+a59daa2(README,41 域完结);42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填);终检=aa93828(交接文档篇数修正)+b2c7a1c(2 处文字锚)。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(三篇)/07(01-05)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 07-06 前先读 07-05 大纲 ⚠️ 块(9 处漂移含 4 处机制错已回填: C++ load_class 委派/loadZipJar/ClassLoaders C++ 名/_keep_alive;三层在 Java 层)。**
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(三篇)/07(01-06)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 07-07(07 域收官)前先读 07-06 大纲 ⚠️ 块(10 处漂移含 3 处编造已回填: _exports/_uses/is_exported_to 不存在;导出在包级 PackageEntry)。**
 
 ---
 
@@ -372,7 +372,8 @@
 - [x] **07-classfile-classloader/03**(symbol-string-table)——已完结,c65d49c
 - [x] **07-classfile-classloader/04**(system-dictionary)——已完结,1ea098c
 - [x] **07-classfile-classloader/05**(classloader-hierarchy)——已完结,3db4402
-- [ ] **07-classfile-classloader/06**(jpms-modules)——大纲在 `planning/outlines/07-classfile-classloader/06-jpms-modules.md`
+- [x] **07-classfile-classloader/06**(jpms-modules)——已完结,4a23fde
+- [ ] **07-classfile-classloader/07**(javaclasses-core-mirrors,07 域收官)——大纲在 `planning/outlines/07-classfile-classloader/07-javaclasses-core-mirrors.md`
 - [ ] 42-core-native/03(class-io)(42 域完结=第 2 批收官)→ 第 3 批 07
 - [ ] 42-core-native/03(class-io)完成后 = **第 2 批收官**(26/26)
 - [ ] 第 3 批: 07 域 02-07 篇(09-memory-core/17-threads 随后)
@@ -410,10 +411,10 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/07-classfile-classloader/06-jpms-modules.md(大纲,注意 ⚠️ 块——05 篇 9 处漂移已回填)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: ModuleEntry/PackageEntry/modules.cpp 实际行号与模块图/可读性/导出检查,Java 侧 ModuleLayer/ModuleDescriptor 链;文件名先 find 验证——modules.cpp/moduleEntry.hpp 在 share/classfile/)
+1. 读 planning/outlines/07-classfile-classloader/07-javaclasses-core-mirrors.md(大纲,注意 ⚠️ 块——06 篇 10 处漂移已回填;本篇是 07 域收官篇)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: javaClasses.cpp 的 compute_offsets/静态偏移字段(06-03 已见过 java.lang.Class 的 injected fields),String/Class/Thread 镜像字段;文件名先 find 验证——javaClasses.cpp/hpp 在 share/classfile/)
 3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
-4. 第 3 批顺序: 07(7 篇)→ 09 → 17
+4. 07 域 7 篇完结后 → 第 3 批 09-memory-core
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
