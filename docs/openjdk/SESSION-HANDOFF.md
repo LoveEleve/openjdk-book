@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加要求再 REVIEW)** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 44-verification/01(验证器,大纲 `planning/outlines/44-verification/01-*.md`,第 4 批最后一域)。
+**下一步(唯一,无选择)**: 44-class-verification/01(字节码验证引擎,大纲 `planning/outlines/44-class-verification/01-verifier.md`,标题 "01. 字节码验证引擎 — ClassVerifier + StackMapTable",44 域共 2 篇: 01-verifier/02-verification-type)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,65 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训);⑧ **用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)**
 
@@ -87,7 +87,7 @@
 **08-interpreter/03(InterpreterRuntime)**: 正文 1d2807d → 大纲回填 8523d0d(⚠️ 8 条)→ README 3c9e272(68/152,08 域 3/4)→ 下一步 08-interpreter/04
 **08-interpreter/04(LinkResolver + Rewriter)**: 正文 050eb2d → 大纲回填 61b4df7(⚠️ 10 条)→ README 587e62e(69/152,**08 域完结**)→ 下一步 31-unsafe/01
 **31-unsafe/01(Unsafe 底层 API)**: 正文 f902593 → 大纲回填 0ccf408(⚠️ 9 条)→ README 9780838(70/152,31 域 1/2)→ 下一步 31-unsafe/02
-**31-unsafe/02(WhiteBox + Forte)**: 正文 5b9a5d1 → 大纲回填 e53a138(⚠️ 6 条)→ README 92e0b00(71/152,**31 域完结**)→ 下一步 44-verification/01
+**31-unsafe/02(WhiteBox + Forte)**: 正文 5b9a5d1 → 大纲回填 e53a138(⚠️ 6 条)→ README 78063ea(71/152,**31 域完结**)→ 下一步 44-class-verification/01
 
 **本会话新增素材(全部 gitignore 不入库,在 materials/commands/)**:
 - `23-arraycopy-bench.txt`(UseAVX 0/2/3 各档 arraycopy/fill 吞吐 + PrintFlagsFinal 附注: UseFastStosb=false/UseXMMForObjInit=true)
@@ -406,7 +406,7 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/44-verification/(注意 ⚠️ 块——31 域两篇大纲均已回填,44 大概率同样漂移;31-02 篇悬念指向 32-jfr,但第 4 批顺序是 44-verification 先写)
+1. 读 planning/outlines/44-class-verification/01-verifier.md(注意 ⚠️ 块——31 域两篇大纲均已回填,44 大概率同样漂移;08-02 篇拆过的 verifier 谓词(verifier.cpp:754 is_store_into_local)与本篇呼应)
 2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;重点: interpreterRuntime.cpp 的各类入口(resolve_ldc/resolve_invoke/new/throw...)、模板侧 call_VM 的调用点(templateTable.cpp:71-116 断言 calls_vm)、interp_masm 的 call_VM 封装(macroAssembler 层 JavaFrameAnchor/safepoint 处理)、JavaCalls/SharedRuntime 桥、safepoint 入口(InterpreterRuntime::at_safepoint,02 篇第 6 段生成)、invoke 的 resolve 流程;与 02 篇的 dispatch/轮询点/calls_vm 位呼应要在文中体现;03 大纲标题 = InterpreterRuntime,正文标题按 v5 格式)
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);容器后台进程用 wrapper 脚本管理;pgrep 用方括号;转储用 kill -3;jcmd attach 挂起时换 kill -3;class 版本注意 javac/java 同版本;javap -c 偏移差可与 def 表脚本核对(见 08-bytecodes-javap.txt)
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
