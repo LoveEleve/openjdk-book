@@ -400,6 +400,6 @@ void java_lang_Class::create_mirror(Klass* k, Handle class_loader,
 
 ## 核心悬念
 
-07 域以 javaClasses 收官: 镜像模式把核心 Java 类的实例变成"偏移已知的普通堆对象"——String 的 value/coder/hash 三个偏移撑起压缩编码与去重,C2 把 `value_offset` 直接编进机器码;Thread 的 eetop 是 JavaThread* 双向指针,is_alive/jstack 全靠镜像访问器零反射读取;Class 的 7 个注入字段与可变大小镜像把 Klass 元数据藏进普通对象。你大概注意到了本节反复出现的词——`allocate_instance`、`oop_size`、`Universe::fixup_mirrors`: 镜像的创建与修复挂在**堆**上,`Class_klass` 的实例、静态字段、空数组都分配在 Universe 管理的堆里。但堆本身是谁在启动时创建的?`Universe::genesis`——JVM 的"宇宙大爆炸"。下一篇: Universe 与 CollectedHeap——镜像对象分配在哪、堆怎么诞生。
+07 域以 javaClasses 收官: 镜像模式把核心 Java 类的实例变成"偏移已知的普通堆对象"——String 的 value/coder/hash 三个偏移撑起压缩编码与去重,C2 把 `value_offset` 直接编进机器码;Thread 的 eetop 是 JavaThread* 双向指针,is_alive/jstack 全靠镜像访问器零反射读取;Class 的 7 个注入字段与可变大小镜像把 Klass 元数据藏进普通对象。你大概注意到了本节反复出现的词——`allocate_instance`、`oop_size`、`Universe::fixup_mirrors`: 镜像的创建与修复挂在**堆**上,`Class_klass` 的实例、静态字段、空数组都分配在 Universe 管理的堆里。但堆本身是谁、在什么时候创建的?答案是启动早期的 `universe_init` 建堆、`Universe::genesis` 在堆上造第一批对象——JVM 的"宇宙大爆炸"。下一篇: Universe 与 CollectedHeap——堆怎么诞生、第一批对象是什么。
 
 > → [09-memory-core/01 — Universe + CollectedHeap](openjdk/vol-02/09-memory-core/01-universe-heap.md)
