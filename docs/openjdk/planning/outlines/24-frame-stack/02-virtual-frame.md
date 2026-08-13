@@ -11,6 +11,7 @@
 > - **栈轨迹消费者**: JFR(jfrStackTrace.cpp:135 vframeStreamSamples : vframeStreamCommon)与 Thread.print(thread.cpp:3417 vframeStream vfst)都是 vframeStream 消费;jstack"每行一方法"=迭代器输出
 > - 实证: materials/commands/24-inline-demo.txt(-Xlog:jit+inlining=debug 显示 baz/qux/bar 层层 inline @1/@19 偏移 vs jcmd Thread.print 只有 InlineDemo.main 一行——内联层不出现为物理帧)
 > - **第 3 轮 REVIEW 修正(2026-08-13)**: 实证升级为 **OpenJDK 11 Temurin 11.0.32(与 jdk11u 同版本)+ SIGQUIT 转储/jcmd Thread.print/JFR 三路径**,四证据都只有 main 一行;对照 NoInlineDemo(不内联)正常 4 层——**Kona 17/21 与 Temurin 11 行为一致,非 Kona 特改**;机制=**锚点 pc**(线程转储起点 last_Java_pc 停在最近 Java→VM 转换点,scope=main)+**内联纯算术段无 PcDesc**(JFR 采样 pc 反查回退到 nmethod 方法);消费者分两条路: 线程转储走 vframe::sender 链(print_stack_on thread.cpp:3247、dumpThreads threadService.cpp:645-662),JFR 走 vframeStreamSamples(jfrStackTrace.cpp:135)——**"jstack 是 vframeStream 消费者"是错的**;内联帧现身前提=PcDesc 命中(内联段含调用点/安全点),如 StringBuilder 内联帧
+> - **第 4 轮 REVIEW(2026-08-13,锚点 pc 精确定位)**: 锚点 pc=最近 Java→VM 转换点=**C2 插在循环回边的安全点轮询点**;显示哪层由**轮询点所在方法**决定(InlineDemo2 轮询点在 main 循环→1 层;NoInlineDemo 轮询点在 big 循环→物理链 4 层,top/mid 均未内联);内联纯算术无循环无轮询点→锚点永不落内联代码;JFR JDK11=suspend+ucontext 但 **pd_get_top_frame 优先锚点帧**(thread_linux_x86.cpp:55-58);ucontext 路径 pc_desc_at NULL 回退(vframe.inline.hpp:139-189)
 
 ### 1. "物理帧 vs 源级帧" — frame→vframe 双层
 
