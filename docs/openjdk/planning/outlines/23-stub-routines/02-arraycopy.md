@@ -2,6 +2,18 @@
 
 > 🔴 Deep | 2 KP 中的性能核心
 > 读者处境: `System.arraycopy(src, 0, dst, 0, 1000000)` — JIT 生成 intrinsics(向量化 memcpy)还不够好——JVM 在启动时预生成了手写汇编桩，用 SSE/AVX 达到 ~3x 加速。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/23-stub/02 已按真实源码成文 313 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"14 种变体/16 入口" 错**: 真实=stubRoutines.hpp:126-167 三组: conjoint 6(_jbyte/_jshort/_jint/_jlong/_oop/_oop_uninit_arraycopy,:128-132)+disjoint 6(:133-137)+**arrayof 12 别名(大纲没提,生成时 aligned 参数 "ignored" stubGenerator_x86_64.cpp:1462-1463,全部别名到普通入口 :2945-2962)**+可选 3(checkcast×2/unsafe/generic :154-157);8 个生成函数=4 宽(byte/short/int_oop/long_oop)×2 向(:1473/:1576/:1676/:1792/:1884/:1980/:2081/:2177),入口 generate_arraycopy_stubs :2866
+> - **"generate_disjoint_copy/generate_conjoint_copy" 函数不存在(编造)**: 实际按宽度拆分 8 个;conjoint 桩=array_overlap_test(:1173-1191,to<=from 或 to>=end 无重叠)+跳入 disjoint 内部 entry(先生成 disjoint 存 entry,:2875-2878),重叠走 copy_bytes_backward(:1354-1451,同套向量化)
+> - **"rep_movsb/ERMSB 分级" 全错(编造)**: jdk11u x86 全目录无 rep_movsb(grep 零命中);真实分级=生成期 UseAVX 定档(CPUID 探测,vm_version_x86.cpp:363-368 用 SEGV 测试 YMM/ZMM 跨信号恢复;UseAVX 默认 3 globals_x86.hpp:121;UseUnalignedLoadStores 默认开 :1294-1295): evmovdqul 512 位 64B→vmovdqu×2 256 位 64B→movdqu×4 128 位 64B→movq×4 32B;唯一运行时分支=AVX3Threshold(globals_x86.hpp:224 默认 4096)在 copy_bytes_forward :1255-1282
+> - **"std; rep_movsb; cld 倒序" 错(编造)**: 倒序=copy_bytes_backward 同套向量循环;负计数技巧 :1507-1509(end=from+count*8-8,negptr 后寻址 [end+count*8-56] 省指针更新)
+> - **"fill 用 rep_stosb" 错**: fill 桩(generate_fill :1756→MacroAssembler::generate_fill macroAssembler_x86.cpp:7447,先广播 dword :7469-7482,<8 字节逐元素 :7484)纯向量(vpbroadcastd+evmovdqul/vmovdqu,AVX3Threshold 门控 :7554-7576;SSE2 pshufd+movdqu 32B);**rep_stosb(ERMS,UseFastStosb,默认 false 自动开 vm_version_x86.cpp:1471-1479)属 C2 ClearArray 对象清零**(x86_64.ad:11257→clear_mem macroAssembler_x86.cpp:6012-6020)
+> - **"_zero_aligned_words 是汇编桩" 错**: 是 C++ Copy::zero_to_words(stubRoutines.cpp:110),从不被 x86 生成器覆盖,全树无调用者——遗留入口
+> - **"stubRoutines.hpp:128-157" 漂移**: :126-127 注释;conjoint :128-132;disjoint :133-137;arrayof :139-152;可选 :154-157;fill/zero :159-167;select_arraycopy_function 在 stubRoutines.cpp:522(映射: boolean→jbyte :536-543,char→jshort :544-550,float→jint,int 同,double→jlong,对象→oop 带 uninit)
+> - **"stubGenerator_x86_64.cpp:600-900/900-1100/1100-1300" 行号全漂移**: array_overlap_test :1173;copy_bytes_forward :1246;copy_bytes_backward :1354;8 生成函数 :1473-2177;generate_fill :1756
+> - **JIT 分派补充(大纲未提)**: C2=LibraryCallKit::inline_arraycopy(library_call.cpp:4743)→ArrayCopyNode→宏展开 generate_arraycopy(macroArrayCopy.cpp:278)→basictype2arraycopy(:216-244,常量偏移 src_off>=dst_off 判 disjoint)→select_arraycopy_function→make_leaf_call(:1100 叶子调用);C1=emit_arraycopy(c1_LIRAssembler_x86.cpp:3049,类型未知→generic);**解释器=JVM_ArrayCopy(jvm.cpp:324-340)→klass()->copy_array(typeArrayKlass.cpp:126)不用桩**;oop 变体 barrier 包夹(prologue=SATB 预屏障整段入队 g1BarrierSetAssembler_x86.cpp:44,uninit 跳过;epilogue=卡表标记);checkcast 失败返 -1^K(:2430-2438)
+> - 实证: materials/commands/23-arraycopy-bench.txt(AMD EPYC 9K65,TencentKona 17,UseAVX 0/2/3 各档独立 JVM,byte[]): 1K arraycopy 55.0→68.3 GB/s(SSE2→AVX2 +24%),手写循环 21.2 GB/s=**3.2x**;64K 78.3 vs 40.1=2.0x;4M/32M 带宽瓶颈≈1.0x;64K fill AVX2/3 137-139 vs SSE2 85.8 GB/s
 
 ### 1. "14 种变体" — arraycopy entry table
 
@@ -73,6 +85,6 @@ _zero_aligned_words — jlong 对齐零填充(heap 清零用)
 
 ### 核心悬念
 
-**"arraycopy stub 根据 CPU feature 自动选 best path——ERMSB→AVX-512→AVX2→SSE2→rep_movsb。conjoint 路径用 backward copy 处理 overlap。fill 用 rep_stosb 或向量化。全部是手写 x86 汇编放进 _code2。"** — 但 AES 加密和 SHA 哈希是怎么加速的？下一篇: Crypto。
+**"arraycopy stub 根据 CPU feature 生成期选 best 宽度——SSE2→AVX2→AVX-512(唯一运行时分支 AVX3Threshold=4096)。conjoint 路径用 array_overlap_test 判重叠、重叠走倒序。fill 纯向量(rep_stosb 属 C2 ClearArray 清零)。全部是手写 x86 汇编放进 _code2。"** — 但 AES 加密和 SHA 哈希是怎么加速的？下一篇: Crypto。
 
 > → [03-crypto-math.md](03-crypto-math.md)
