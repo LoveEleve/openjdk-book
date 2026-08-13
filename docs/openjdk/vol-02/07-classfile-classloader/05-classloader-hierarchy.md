@@ -30,7 +30,7 @@ java.sql.Driver.class.loader = ...PlatformClassLoader
 
 ### bootstrap 的实际加载: C++ 侧 ClassLoader::load_class
 
-Bootstrap 没有 Java 方法可调——hotspot 直接干活: `ClassLoader::load_class`(classLoader.cpp:1406 起)。07-04 已经见过它的一半(模块可见性检查);后半是真正的文件来源查找: `--patch-module` 条目 → jimage 模块镜像(41 域的 jimage!)→ `-Xbootclasspath/a` 追加路径与 classpath entries。而 **CDS 共享类**(`load_shared_class`)在这之前就拦了一道——它在 `SystemDictionary::load_instance_class` 里先查(07-04 的 :1472),归档里有的类根本不进 `ClassLoader::load_class`。注意 JDK 11 里已经没有 rt.jar——JDK 8 时代的 `loadZipJar` 与 "Bootstrap 扫描 rt.jar" 的说法都随模块化消失了,只剩 `-Xbootclasspath/a` 的追加语义(classLoader.cpp:957)。
+Bootstrap 没有 Java 方法可调——hotspot 直接干活: `ClassLoader::load_class`(classLoader.cpp:1406 起)。07-04 已经见过它的一半(模块可见性检查);后半是真正的文件来源查找: `--patch-module` 条目 → jimage 模块镜像(41 域的 jimage!)→ `-Xbootclasspath/a` 追加路径与 classpath entries。而 **CDS 共享类**(`load_shared_class`)在这之前就拦了一道——它在 `SystemDictionary::load_instance_class` 里先查(07-04 的 :1468),归档里有的类根本不进 `ClassLoader::load_class`。注意 JDK 11 里已经没有 rt.jar——JDK 8 时代的 `loadZipJar` 与 "Bootstrap 扫描 rt.jar" 的说法都随模块化消失了,只剩 `-Xbootclasspath/a` 的追加语义(classLoader.cpp:957)。
 
 **关键设计 (斜体)**: *"三层"里只有两层是对象,Bootstrap 是"不是加载器的加载器"——它没有 parent(实证里 platform.parent=null 正是"parent 是 bootstrap 时表现为 null"的约定,BuiltinClassLoader.java:157-158),也走不了 Java 的 loadClass。委托链到它就到头,接下来的活交给 C++。*
 
@@ -113,8 +113,8 @@ CLD 的生死由 GC 判定。`ClassLoaderDataGraph::do_unloading`(classLoaderDat
 ```
 
 - **活的 CLD**: 清理 `deallocate_list`(解析失败/冗余的中间元数据,07-01 的 `_klass_to_deallocate` 就在这里被释放),类重定义时顺带 `purge_previous_versions`;
-- **死的 CLD**: `unload()` 释放所有 Klass/Method 与 Metaspace,然后从链表摘除——"类卸载"在 JVM 里的实际动作就是这个;
-- **`is_alive()`**(classLoaderData.cpp:696)的判定链: Java 层类加载器对象是否还活着 + 是否有 JNI 强引用 + **`_keep_alive` 计数**——注意 `_keep_alive` 不是大纲里流传的"JNI 引用"通用机制,它**专属于匿名类**(classLoaderData.cpp:285-300,注释原文: 匿名类解析期间、出现在模块修复列表期间需要保持存活;普通加载器靠 Java 层强引用,`inc/dec_keep_alive` 只对 `is_anonymous()` 生效)。Lambda 表达式生成的类就靠这个计数撑过定义窗口。
+- **死的 CLD**: `unload()`(classLoaderData.cpp:597)标记卸载、清残留的 deallocate 列表、通知 JVMTI,随后 Metaspace 整批归还,CLD 从全局链表摘除——"类卸载"在 JVM 里的实际动作就是这个;
+- **`is_alive()`**(classLoaderData.cpp:696-701)只有两个条件: **`keep_alive()` 计数**(bootstrap 加载器与"未完成定义的匿名类")或 **`_holder` 弱句柄未清**(Java 层加载器对象还活着)。注意 `_keep_alive` 不是流传的"JNI 强引用"通用机制——它**专属于匿名类**(classLoaderData.cpp:285-300,注释原文: 匿名类解析期间、出现在模块修复列表期间需要保持存活;普通加载器靠 Java 层强引用,`inc/dec_keep_alive` 只对 `is_anonymous()` 生效)。Lambda 表达式生成的类就靠这个计数撑过定义窗口。
 
 **关键设计 (斜体)**: *CLD 把"加载器"翻译成"元数据集合": GC 判断加载器对象死活,CLD 决定整批 Klass 的去留——类卸载是"一荣俱荣、一损俱损"的批量操作。匿名类的 keep-alive 计数是这个模型里唯一的例外: 没有 Java 对象可依,就自己计数保命。*
 
