@@ -6,7 +6,7 @@
 
 ## 一个物理帧,三层方法,怎么数?
 
-[实证:] 同一个程序四种证据(24-inline-demo.txt,OpenJDK 11 Temurin 11.0.32 与 jdk11u 源码同版本;main→bar→baz→qux 三层调用): ①编译日志里 `InlineDemo2::baz inline` → `qux inline` → `bar inline` 层层嵌套——C2 把三层方法内联进了 main 的编译单元(@ 11 调用点);②SIGQUIT 线程转储、③`jcmd Thread.print`、④JFR 采样栈——**三条路径都只有 `InlineDemo2.main` 一行**。而对照实验(NoInlineDemo: big 过大不内联)同版本 JDK 正常显示 big→mid→top→main 四层——**栈遍历路径没问题,差异全在"是否内联"**。为什么内联层看不见,不是"vframe 不展开",而是两个现实约束: 线程转储的遍历起点是**锚点 pc**(last_Java_pc,停在最近一次 Java→VM 转换点,scope 是 main);JFR 的采样 pc 虽真实,但**内联的纯算术代码段没有 PcDesc**(无安全点/调用点),pc→scope 反查失败就回退到 nmethod 的方法(main)。内联帧能现身的前提: 内联代码段里含调用点/安全点(有 PcDesc)——JFR 栈里常见的 StringBuilder 内联帧就是这种。物理帧只有一个(内联 = 机器码嵌入),这一半是确定的;虚拟层展开的可见性则取决于 pc 能否映射到内联 scope。这一篇拆 vframe: 展开机制本身长什么样。
+[实证:] 同一个程序四种证据(24-inline-demo.txt,OpenJDK 11 Temurin 11.0.32 与 jdk11u 源码同版本;main→bar→baz→qux 三层调用): ①编译日志里 `InlineDemo2::baz inline` → `qux inline` → `bar inline` 层层嵌套——C2 把三层方法内联进了 main 的编译单元(@ 11 调用点);②SIGQUIT 线程转储、③`jcmd Thread.print`、④JFR 采样栈——**三条路径都只有 `InlineDemo2.main` 一行**。而对照实验(NoInlineDemo: big 过大不内联)同版本 JDK 正常显示 big→mid→top→main 四层——**栈遍历路径没问题,差异全在"是否内联"**。为什么内联层看不见,不是"vframe 不展开",而是两条硬约束: ①**遍历起点是锚点帧**——线程转储(safepoint 采样)与 JFR(JDK 11 优先锚点,thread_linux_x86.cpp:55-58)都从 anchor 的 sp/fp/pc 出发,而锚点 pc = 最近一次 Java→VM 转换点 = **C2 插在循环回边的安全点轮询点**;②**轮询点决定显示哪层**——InlineDemo2 的轮询点插在 main 的循环回边(main 代码段,内联的 bar/baz/qux 无循环无轮询点)→ scope=main → 只有 1 层;对照组 NoInlineDemo 的轮询点插在 big 的循环回边(big 不内联,有独立物理帧)→ 从 big 走物理帧链 → 4 层。JFR 的 ucontext 路径(锚点不可用,JDK 14+ 信号采样)用真实 pc,但**内联的纯算术代码段没有 PcDesc**(无安全点/调用点),pc→scope 反查失败仍回退到 nmethod 的方法(main)。内联帧能现身的前提: 内联代码段里含调用点/安全点(有 PcDesc)——JFR 栈里常见的 StringBuilder 内联帧就是这种。物理帧只有一个(内联 = 机器码嵌入),这一半是确定的;虚拟层展开的可见性则取决于锚点/采样 pc 能否映射到内联 scope。这一篇拆 vframe: 展开机制本身长什么样。
 
 ## 1. vframe: 物理帧的"源级切片"
 
