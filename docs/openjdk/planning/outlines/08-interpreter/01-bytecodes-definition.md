@@ -2,6 +2,19 @@
 
 > 🔴 Deep | 13 KP 中的 2 个核心机制
 > 读者处境: `javap -c` 的每行是一个 opcode。256 条——每条有 format/length/stack effect。这些不是运行时 switch——是**编译时预计算**的静态数组。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/08-interpreter/01 已按真实源码成文 308 行,本大纲为规划期产物,机制描述以文章为准):
+> - **行号全漂移**: Code 枚举 bytecodes.hpp:38-307(_illegal=-1 起);数组声明 :339-346;def() 实现 bytecodes.cpp:167-185;initialize() :278-567;special_length_at :90-137;大纲 "hpp:100-500/cpp:60-200" 全错
+> - **"5 个静态数组 names/lengths/formats/flags/depths" 错**: 6 个数组=_name/_result_type/_depth/_lengths/_java_code/_flags(hpp:339-346),**无 _format 数组**——format 字符串由 compute_flags(cpp:206-276)编译成 _flags 位;_lengths 一字节两用(低 4 位短长/高 4 位 wide 长,hpp:397-398);_flags=512 槽双页(低 256 普通/高 256 wide,hpp:345,432-435)
+> - **"def(_nop, "nop", "b", 1, 0, T_ILLEGAL, true)——宏展开 9 数组" 错**: 是 C++ 静态函数(7/8 参数: code,name,format,wide_format,result_type,depth,can_trap[,java_code]),非宏;nop 实为 T_VOID/can_trap=false;239 条 def 调用,启动一次填充后只读
+> - **"Format: b=1B signed byte/c=1B CP index/i=2B/j=4B branch offset" 全错**: 真实语义(cpp:188-204 注释)=b 是 opcode 本身、c=signed constant、i=local index、j=**2B CP cache index**、k=CP index、o=branch offset(ifeq "boo" 2B/goto_w "boooo" 4B)、_=忽略、w=wide 前缀;大写=原生字节序(实际只有 J 出现,cpp:244 注释);指令长度=format 字符串字符数;变长 format=""
+> - **"256 条(255=impdep2)" 错**: 枚举=203 个成员(0x00-0xCA,含规范保留的 wide 0xC4/breakpoint 0xCA)+36 条私有 fast 系列(hpp:249-303,fast 29+return_register_finalizer+invokehandle+nofast 4+shouldnotreachhere)=number_of_codes 239;0xCB-0xFF 未分配区不定义
+> - **"Load/Store ~60 条;short forms 6 种×4=24" 错**: 5 类型(iload/lload/fload/dload/aload)×(1 基本+4 short)=25 load+对称 25 store=50 条;short 5×4=20
+> - **"opcode upper 4 bits 编码分组,分组让 dispatch 用查表" 编造**: opcode 段布局(常量/局部变量/算术/控制流/引用)是 JVM 规范历史安排;HotSpot 分组=**区间谓词函数**(hpp:415-429: is_aload 点名/is_const 区间/is_return 区间/is_invoke),真实消费者: verifier.cpp:754、templateInterpreter.cpp:254、deoptimization.cpp:705-722;dispatch 不用分组
+> - **"flags 在 bytecodes.cpp:100-150;can_trap=false 的 bytes 不影响循环结构(loop optimization)" 编造**: Flags 枚举在 hpp:310-336(_bc_can_trap/_bc_can_rewrite+格式位);can_trap 真实消费者=GenerateOopMap::do_exception_edge(generateOopMap.cpp:1178,决定"异常边"→解释器 OopMap 栈图,24-01 oopMapCache 链)+ciTypeFlow.cpp:2171;C1 自建 _can_trap 表(c1_GraphBuilder.cpp:2976-3034,清单剔 return/monitorexit,"monitor pairing proved that they succeed")
+> - **"stack_effect(opc,bci) 与 _unknown_depth" 编造**: 函数与值都不存在;depth 恒静态(invoke 系 depth=-1 近似 pop receiver,invokestatic/invokedynamic=0);"栈顶类型由上下文决定"由 result_type=T_ILLEGAL 表达(cpp:289-291 Note 2 注释)
+> - **"编译后全在 .data 零开销" 半对**: 数组初始在 .bss,启动 initialize() 一次填完,之后只读;"编译时预计算"应说"启动时预填充"
+> - **长度机制(大纲未提)**: 变长仅三条=wide(读第二字节查 _lengths 高 4 位)/tableswitch(align_up(bcp+1,4) 对齐,长=(补齐)+(3+hi-lo+1)*4,cpp:97-114)/lookupswitch(长=(补齐)+(2+2*npairs)*4,cpp:119-124);breakpoint 不在 special_length_at case 里(返 0),普通迭代器经 code_at 伪装成原指令(bytecodes.hpp:369-374),raw_special_length_at 才给 1(:151-158);迭代器先 length_for 查固定长、0 才 length_at(bytecodeStream.hpp:205-207);实测 76 条固定长全对 + lookupswitch 对齐(实证 08-bytecodes-javap.txt)
 
 ### 1. Bytecodes — 静态定义表
 
