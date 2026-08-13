@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加要求再 REVIEW)** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 08-interpreter(字节码执行——24 域三个域的消费方)。
+**下一步(唯一,无选择)**: 08-interpreter/01(Bytecodes——256 条 JVM 字节码的定义表,大纲 `planning/outlines/08-interpreter/01-bytecodes-definition.md`,08 域共 4 篇: 01-bytecodes-definition/02-template-interpreter/03-interpreter-runtime/04-linkresolver-rewriter)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,65 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训);⑧ **用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)**
 
@@ -291,7 +291,7 @@
 
 - [x] 第 1 批 12 篇 + 第 2 批 26 篇 + 第 3 批 14 篇(01/05/45/48/02/03/04/06/16/38/41/42/07/09/17 域)——✅ 完结
 - [x] 第 4 批: 10-metaspace(3/3)/19-sync(4/4)/23-stub(3/3)/24-frame(3/3)——✅ 完结(commit 见 §二)
-- [ ] **08-interpreter**(字节码执行)——**下一篇**;大纲在 `planning/outlines/08-interpreter/`;24-03 篇悬念指向它
+- [ ] **08-interpreter/01**(bytecodes)——**下一篇**;大纲 `planning/outlines/08-interpreter/01-bytecodes-definition.md`(08 域 4 篇: 01-bytecodes-definition/02-template-interpreter/03-interpreter-runtime/04-linkresolver-rewriter);24-03 篇悬念指向它
 - [ ] 08 域完结后 → 31-unsafe → 44-verification(第 4 批收尾)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -332,7 +332,7 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/08-interpreter/ 的大纲(注意 ⚠️ 块——24 域三篇大纲均已回填(01 十条/02 六条+两轮 REVIEW/03 九条+一轮 REVIEW),08 大概率同样漂移;24-03 篇悬念指向它: 解释器怎么执行字节码)
+1. 读 planning/outlines/08-interpreter/01-bytecodes-definition.md(注意 ⚠️ 块——24 域三篇大纲均已回填(01 十条/02 六条+两轮 REVIEW/03 九条+一轮 REVIEW),08 大概率同样漂移;24-03 篇悬念指向它: 解释器怎么执行字节码)
 2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: templateTable.cpp/bytecodeInterpreter 的分派机制、解释器帧布局(24-01 已铺垫 offsets: frame_x86.hpp:60-73)、Interpreter::_code codelet(24-01 实证 271 个/PrintInterpreter)、oopMapCache 计算器(24-01 已铺垫 per-Klass InstanceKlass::_oop_map_cache)、模板表(templateTable.hpp:141 contains)、deopt 的 deopt_reexecute_entry/continue_after_entry 入口模板(24-03 铺垫);与 24 域三篇的呼应要在文中体现)
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);容器后台进程用 wrapper 脚本管理;pgrep 用方括号;转储用 kill -3;jcmd attach 挂起时换 kill -3;class 版本注意 javac/java 同版本
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
