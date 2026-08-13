@@ -2,6 +2,18 @@
 
 > 🟡 Working | 10 KP 中的 4 个分配器机制
 > 读者处境: JVM 的 C++ 代码从不直接调 `malloc/free`。GC marking 用 Arena (bump-pointer Chunk)，JIT compile 用 ResourceArea (per-thread Mark/Release)，生产分配用 AllocateHeap (NMT tracked)，debug 加 GuardedMemory (canary)。四种分配器——四个不同场景。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/09-memory-core/03 已按真实源码成文~150 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"ChunkPool::take_chunk/give_chunk" 不存在(编造)**: 真实=ChunkPool::allocate(arena.cpp:75-88,ThreadCritical 锁内取,空才 os::malloc)/free(:91-103,挂回池头);**ChunkPool 不是单全局池,是四个静态池**(arena.cpp:49-52 _large/_medium/_small/_tiny,初始化 :126-129,规格=32K/10K/1K/256+aligned_overhead);ChunkPoolCleaner(arena.cpp:169-181)5 秒 PeriodicTask→clean()=每池 free_all_but(5)(:140-146)
+> - **"Chunk 默认 32KB 且 _first 就是它" 错**: Chunk 规格枚举 arena.hpp:55-70(**故意比 2^k 略小防 buddy 合并**): tiny=256-slack/init=1K-slack/medium=10K-slack/size=32K-slack;**首个 chunk 是 init_size**(Arena 构造 arena.cpp:244-251),32K 是后续默认;Arena 字段=_first/_chunk(当前)/_hwm/_max(arena.hpp:102-104),无 _last
+> - **Amalloc**(arena.hpp:144-159): ARENA_ALIGN(16 字节,:37-41)→check_for_overflow→`_hwm+x>_max`?grow:bump;grow(arena.cpp:360-383)len=MAX2(x,32K)→new Chunk→**Chunk::operator new 按长度匹配四池否则 os::malloc**(arena.cpp:198-216),operator delete 按规格还池(:218-228)
+> - **Afree**(arena.hpp:202-210): 通常 NOP,仅 `ptr+size==_hwm` 时回退水位;真正释放=析构 destruct_contents(arena.cpp:309-323)→_first->chop()(:230-239)逐 delete
+> - **"ResourceMark dtor=回指针 _top=_saved_top" 半对**: reset_to_mark(resourceArea.hpp:128-149)回滚 _chunk/_hwm/_max **且 _chunk->next_chop()(:135)归还 mark 后新增的 chunk**(流传漏了还块);存档 _chunk/_hwm/_max/_size_in_bytes(:82-96);allocate_bytes(resourceArea.inline.hpp:31-43)ASSERT 下 nesting 检查(无 ResourceMark 分配→fatal "memory leak")
+> - **"rollback(0) full reset" 不存在(编造)**: 无此函数;ResourceArea : Arena(resourceArea.hpp:44),per-thread(thread.hpp:506),编译器线程 bias_to(mtCompiler)(thread.cpp:3447)
+> - **"AllocateHeap NMT 64B header" 错**: **MallocHeader=16 字节**(mallocTracker.hpp:246,assert sizeof==sizeof(void*)*2 :263),调用栈**不内嵌**——_pos_idx/_bucket_idx 指向 MallocSiteTable,get_stack 索引查回(mallocTracker.cpp:92-94);AllocateHeap(allocation.cpp:39-49)=os::malloc+EXIT_OOM 才 vm_exit
+> - **"GuardedMemory canary 0xBAADF00D/0xDEADBEEF" 编造**: 守卫=GUARD_SIZE 16 字节填充 **badResourceValue(0xAB)**(globalDefinitions.hpp:1012,Guard::build/verify guardedMemory.hpp:96-112);**guarded_malloc 函数不存在**——用法=wrap_copy/free_copy(guardedMemory.cpp:31-54)+verify_guards(guardedMemory.hpp:212);GuardedMemory : StackObj(:83)
+> - **大纲场景"GC marking bitmap 用 Arena"不准**: G1 标记 bitmap 用 G1CMBitMap(独立 mapper);GC 的真实 Arena/ResourceArea 用户=并发标记任务的临时结构(g1ConcurrentMark.cpp:833 等 4 处 ResourceMark)
+> - 悬念指向 10-metaspace/01-metaspace-overview.md(标题 "01. Metaspace — 类的元数据怎么分配+回收: VirtualSpaceNode→ChunkManager→Metablock",jdk11u 无 MetaspaceArena——那是 JDK15+ 术语,悬念已收敛到 Metablock)
 
 ### 1. Arena — Chunk-based bump-pointer 分配器
 
