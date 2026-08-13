@@ -6,7 +6,7 @@
 
 ## 一个 Java 对象,两个世界的握手
 
-`Thread.currentThread()` 返回的 `Thread` 对象,jstack 能从它打出线程名、`#1` 这种线程 ID、`daemon`、`prio=5`、`java.lang.Thread.State: RUNNABLE`——这些信息不是反射读出来的,jstack 直接**按字段偏移**从对象里取: 名字是 obj_field、线程 ID 是 long_field、状态是 int_field。String 也一样: JIT 编译 `"hello".length()` 时,不是调用 Java 方法,而是把 `value` 数组和 `coder` 的偏移直接编进机器码。支撑这一切的是一个叫 `javaClasses` 的 C++ 模块——每个核心 Java 类一个 `java_lang_XXX` 镜像类。这是 07 域的收官篇,类加载链路的最后一环: 类加载完了,核心类的**实例**怎么被 JVM 高频操作。
+`Thread.currentThread()` 返回的 `Thread` 对象,jstack 能从它打出线程名、`#1` 这种线程 ID、`daemon`、`prio=5`、`java.lang.Thread.State: RUNNABLE`——这些信息不是反射读出来的,jstack 直接**按字段偏移**从对象里取: 名字是 obj_field、线程 ID 是 long_field、状态是 int_field。String 也一样: JIT 编译 `"hello".length()` 时,不需要任何反射——方法内联后就是读 `value` 数组长度、读 `coder` 字段,偏移直接编进机器码。支撑这一切的是一个叫 `javaClasses` 的 C++ 模块——每个核心 Java 类一个 `java_lang_XXX` 镜像类。这是 07 域的收官篇,类加载链路的最后一环: 类加载完了,核心类的**实例**怎么被 JVM 高频操作。
 
 ## 1. 镜像模式: 预计算的字段偏移
 
@@ -25,7 +25,7 @@ class java_lang_String : AllStatic {
   static bool initialized;
 ```
 
-`value_offset`/`hash_offset`/`coder_offset` 就是 `java.lang.String` 三个字段在堆对象里的字节偏移。任何 VM 代码想读 String 的 value 数组:`obj->obj_field(value_offset)`;想判断编码:`byte_field(coder_offset)`。Java 层没有 `String.length()` 的 JVM 版本,VM 自己就是这么看的。
+`value_offset`/`hash_offset`/`coder_offset` 就是 `java.lang.String` 三个字段在堆对象里的字节偏移。任何 VM 代码想读 String 的 value 数组:`obj->obj_field(value_offset)`;想判断编码:`byte_field(coder_offset)`。VM 不调 Java 层的 `String.length()`,自己直接读。
 
 ### 偏移怎么算: 启动时 find_local_field 一次
 
@@ -87,7 +87,7 @@ static void compute_offset(int &dest_offset,
   java_lang_Class::compute_offsets();
 ```
 
-String/Class 是"一切的基础"——异常消息、类加载、反射全都直接操作它们的实例,所以不等全部类加载,先算这两个。
+String/Class 是"一切的基础"——它们是最早加载的 well-known 类(Object/String/Class 三兄弟),加载完就能用,所以立刻算: 这之后才有异常、类加载、反射等一切依赖 String 表示与 Class 镜像的操作。
 
 - **其余 29 个镜像在 `javaClasses_init` 里算**——`JavaClasses::compute_offsets`(javaClasses.cpp:4463-4482)把 PART2 的类(System/Thread/Throwable/ClassLoader/…)全部算完,然后调 `AbstractAssembler::update_delayed_values()`。这最后一行揭示了一个时序问题: 模板解释器的机器码在 `interpreter_init`(init.cpp:117)就生成了,**早于** `javaClasses_init`(:125)算偏移——模板生成时若要用偏移,得先留占位,偏移算好后再 `update_delayed_values` 统一替换(jdk11u 的模板表代码没有实际使用这个延迟常量机制,但补丁通道保留着)。C2 则是另一条路: 编译方法时偏移早已算好,直接编进机器码——**不是每次运行时算,而是代码生成时把启动期算好的 int 直接嵌进去**。
 
@@ -97,7 +97,7 @@ String/Class 是"一切的基础"——异常消息、类加载、反射全都�
 
 ### value/coder/hash: 一个对象三块信息
 
-String 的堆布局: `value`(byte[] 或 char[],07-01 的解析与 07-03 的创建)、`coder`(1 字节编码标志)、`hash`(缓存的 hashCode)。编码标志两个值(javaClasses.hpp:107-111): `CODER_LATIN1 = 0`、`CODER_UTF16 = 1`——这就是 Java 9 压缩字符串(CompactStrings)的存储端: Latin-1 字符串每个字符 1 字节,UTF-16 每个 2 字节。`is_latin1` 就是一次 `byte_field(coder_offset)` 比较(javaClasses.inline.hpp:67-73,截取核心,逐字):
+String 的堆布局: `value`(**永远是 byte[]**——Java 9 压缩字符串的存储端;Latin-1 每字符 1 字节,UTF-16 每字符 2 字节即数组长度翻倍,07-01 的解析与 07-03 的创建)、`coder`(1 字节编码标志)、`hash`(缓存的 hashCode)。编码标志两个值(javaClasses.hpp:107-111): `CODER_LATIN1 = 0`、`CODER_UTF16 = 1`——这就是 CompactStrings 的核心: 存 1 字节还是 2 字节,由 coder 决定。`is_latin1` 就是一次 `byte_field(coder_offset)` 比较(javaClasses.inline.hpp:67-73,截取核心,逐字):
 
 ```cpp
 // javaClasses.inline.hpp:67-73(截取核心,逐字)
@@ -185,7 +185,7 @@ void StringDedupTable::deduplicate(oop java_string, StringDedupStat* stat) {
 }
 ```
 
-细节都在镜像访问器上: `value()`(javaClasses.inline.hpp:52-56)读数组、`is_latin1()` 定编码、`hash()` 用**缓存的 hash 字段**(:62-66——`private int hash` 本是 Java 层 `String.hashCode()` 的缓存(String.java:156),VM 去重时先查缓存、算完写回,一个字段两个世界共用)、找到相同数组后 `set_value()` 把原数组替换掉(去重数组本身,多个 String 共享同一个 char 数组)。
+细节都在镜像访问器上: `value()`(javaClasses.inline.hpp:52-56)读数组、`is_latin1()` 定编码、`hash()` 用**缓存的 hash 字段**(:62-66——`private int hash` 本是 Java 层 `String.hashCode()` 的缓存(String.java:156),VM 去重时先查缓存、算完写回,一个字段两个世界共用)、找到相同数组后 `set_value()` 把原数组替换掉(去重数组本身,多个 String 共享同一个 value 数组)。
 
 [C++: `lookup_or_add` 把 value 数组本身(而非 String)作为去重 key——两个内容相同的 "hello" 的 value 数组内容相同,hash 相同,后到的被替换成先到的数组。]
 
@@ -320,7 +320,7 @@ jstack 行尾还有两列 ID(Thread::print_on,thread.cpp:900-926): `tid=0x...` �
   macro(java_lang_Class, source_file,            object_signature,  false) \
 ```
 
-宏参数最后一个 `false` 是 `may_be_java`——表示这些字段**不是** Java 源文件里的字段,是 JVM 在解析 `java.lang.Class` 时**注入**的(07-01 的 `parse_fields` 调 `JavaClasses::get_injected`,classFileParser.cpp:1575-1578,注入后它们和其他字段一样参与布局——所以 Java 层的 `Class` 对象比 `java.lang.Class` 的 Java 源码里看到的字段多)。整个注入字段家族在 `ALL_INJECTED_FIELDS`(javaClasses.hpp:1562-1569): Class 7 个 + ClassLoader 1 个 + ResolvedMethodName 2 个 + MemberName/CallSiteContext/StackFrameInfo/Module 各 1 个,共 14 个。
+宏参数最后一个 `false` 是 `may_be_java`——表示这些字段**不是** Java 源文件里的字段,是 JVM 在解析 `java.lang.Class` 时**注入**的(07-01 的 `parse_fields` 调 `JavaClasses::get_injected`,classFileParser.cpp:1563-1566,注入后它们和其他字段一样参与布局——所以 Java 层的 `Class` 对象比 `java.lang.Class` 的 Java 源码里看到的字段多)。整个注入字段家族在 `ALL_INJECTED_FIELDS`(javaClasses.hpp:1562-1569): Class 7 个 + ClassLoader 1 个 + ResolvedMethodName 2 个 + MemberName/CallSiteContext/StackFrameInfo/Module 各 1 个,共 14 个。
 
 注入字段的偏移不走 `find_local_field`(那查不到)而是查 `_injected_fields` 表(javaClasses.cpp:85-87),真正的查找在 `InjectedField::compute_offset`(javaClasses.cpp:4558-4568,截取核心,逐字):
 
@@ -359,7 +359,7 @@ Klass* java_lang_Class::as_Klass(oop java_class) {
 }
 ```
 
-`klass` 注入字段存的是 **Klass\* 指针本身**(`metadata_field` 直接读指针宽度)——不是流传说法里的"压缩 Klass* 再 decode"。压缩类指针(UseCompressedClassPointers)作用于 Klass 之间的指针,而镜像里的 klass 字段以全宽指针存储,`metadata_field` 走 HeapAccess 一次加载即可(oop.hpp:163)。
+`klass` 注入字段存的是 **Klass\* 指针本身**(`metadata_field` 直接读指针宽度)——不是流传说法里的"压缩 Klass* 再 decode"。压缩类指针(UseCompressedClassPointers)是另一套机制(对象头与 Metaspace 里类型指针的窄化),不作用于镜像字段——`metadata_field` 走 HeapAccess 一次加载即可(oop.hpp:163)。
 
 `getClass()` 的完整链路正好把两个方向串起来(Object.java:72 的 native 声明 → JNI 的 `GetObjectClass`,jni.cpp:1292-1300): `obj->klass()` 拿 Klass,再 `k->java_mirror()` 拿镜像——两个方向,四个访问器,一次 Java 方法调用都没有。
 
@@ -392,7 +392,7 @@ void java_lang_Class::create_mirror(Klass* k, Handle class_loader,
     java_lang_Class::set_klass(mirror(), k);
 ```
 
-`allocate_instance`(instanceMirrorKlass.cpp:48-56)按目标类算大小——注释说得很清楚: "Since mirrors can be variable sized because of the static fields, store the size in the mirror itself."——**镜像把自己的大小存进注入字段 `oop_size`**,`set_oop_size`(javaClasses.cpp:1279-1281)/`set_static_oop_field_count`(:1289-1291)在创建时写入,GC 读 `InstanceMirrorKlass::oop_size`(:58-60)时再取出来。一个对象自己报告自己的大小,这是 JVM 里少数几个"自描述大小"的对象。静态字段的初始值也在这里统一写入(`initialize_static_field`,javaClasses.cpp:744-789,按字段类型写镜像偏移)。
+`instance_size`(instanceMirrorKlass.cpp:40-46)按目标类的静态字段数算镜像大小——`size_helper() + static_field_size()`;`allocate_instance`(:48-56)按这个大小分配,注释说得很清楚: "Since mirrors can be variable sized because of the static fields, store the size in the mirror itself."——**镜像把自己的大小存进注入字段 `oop_size`**,`set_oop_size`(javaClasses.cpp:1279-1281)/`set_static_oop_field_count`(:1289-1291)在创建时写入,GC 读 `InstanceMirrorKlass::oop_size`(:58-60)时再取出来。一个对象自己报告自己的大小,这是 JVM 里少数几个"自描述大小"的对象。静态字段的初始值也在这里统一写入(`initialize_static_field`,javaClasses.cpp:744-789,按字段类型写镜像偏移)。
 
 镜像创建后还有补丁列表: `_fixup_mirror_list`——某些类加载太早(Class 还没就绪),镜像先挂在待补丁列表,`resolve_well_known_classes` 里 `Universe::fixup_mirrors`(systemDictionary.cpp:2023)统一补齐;基本类型的镜像(int.class 等)由 `create_basic_type_mirror` 特造。模块字段则由 `set_mirror_module_field` 写入——07-06 那个"ModuleEntry 握着 java.lang.Module 弱句柄"的镜像在这里完成另一头: Class 对象也握着它的 Module。
 

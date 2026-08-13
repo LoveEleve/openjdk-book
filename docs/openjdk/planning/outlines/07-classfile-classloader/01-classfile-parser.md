@@ -10,7 +10,7 @@
 > - **FieldAllocationType 五类桶**: oop/byte(boolean,byte,char)/short/word(int)/double(对齐 long/double),static+nonstatic 各一套(classFileParser.cpp:1453-1466,fac->update :1676)——"六桶"是错的
 > - **常量池 tag 数**: parse_constant_pool_entries(:126)switch 处理 **15 种 tag**(Class/Fieldref/Methodref/InterfaceMethodref/String/MethodHandle/MethodType/Dynamic/InvokeDynamic/Integer/Float/Long/Double/NameAndType/Utf8);规范 17 种里的 Module/Package **jdk11u 无 JVM_CONSTANT_Module**(不经过此 switch);Long/Double 双槽 :256-266(index++ "see JVM book p. 98");Utf8→verify_legal_utf8 :298-301+**SymbolTable 批量分配**(lookup_only :314+new_symbols :323-329,06-06 的 SymbolTable 直接服务于此);版本门槛 MethodHandle/MethodType/InvokeDynamic≥51、Dynamic≥55(verifier.hpp:40-42)
 > - **第一遍交叉引用**: parse_constant_pool :406 起逐槽校验(Fieldref 的 klass/name_and_type 合法 :446-455),ClassIndex→unresolved_klass_at_put :490、StringIndex→unresolved_string_at_put :499——**只登记不解析**(06-04 运行期解析主题)
-> - **parse_fields**(:1541 起): FieldInfo **六槽**(fieldInfo.hpp:69 field_slots=6: access/name/sig/constantvalue+offset 32 位高低两槽=12 字节);injected fields=JavaClasses::get_injected(:1575-1578,CLASS_INJECTED_FIELDS javaClasses.hpp:1562+: java.lang.Class 的 klass/array_klass/oop_size 等,JVM 隐藏字段);字段属性 parse_field_attributes :1295(ConstantValue/synthetic/泛型签名/注解)
+> - **parse_fields**(:1541 起): FieldInfo **六槽**(fieldInfo.hpp:69 field_slots=6: access/name/sig/constantvalue+offset 32 位高低两槽=12 字节);injected fields=JavaClasses::get_injected(:1563-1566,CLASS_INJECTED_FIELDS javaClasses.hpp:216-223: java.lang.Class 的 klass/array_klass/oop_size 等,JVM 隐藏字段——行号 07-07 REVIEW 修正);字段属性 parse_field_attributes :1295(ConstantValue/synthetic/泛型签名/注解)
 > - **parse_method**(:2344): <clinit> 51 起必须显式 static(45.x 自动补,:2366-2379,否则 "Method <clinit> is not static")、接口禁 <init>(:2381-2383);Code 属性 :2467 起(native/abstract 禁 Code、双 Code 报错;max_stack/max_locals/code_length 45.2 兼容 1+1+2 :2485-2492;code_start=cfs->current() **不拷贝** :2502);StackMapTable 原始字节留 Verifier(parse_stackmap_table,下一篇)
 > - **类级属性**: parse_classfile_attributes :3440;SourceFile/InnerClasses/Synthetic/Signature/EnclosingMethod/注解;BootstrapMethods :3596(Java 7)/NestMembers :3627/NestHost :3640(JDK 11)
 > - **post_process_parsed_stream**(:6321 起): 传递接口 compute_transitive_interfaces :6378、vtable 大小 :6394(klassVtable::compute_vtable_size_and_num_mirandas,06-02)、itable 大小 :6405、layout_fields :6411
@@ -42,7 +42,7 @@
 **parse_fields** (`classFileParser.cpp:1541-1740`):
 - 每字段四元组(access_flags/name_index/signature_index/attributes_count)→校验(修饰符/名字/签名,:1552-1564)→parse_field_attributes(:1295 起: ConstantValue/synthetic/泛型签名/注解)
 - FieldInfo 六槽(fieldInfo.hpp:69 field_slots=6: access/name/sig/constantvalue+offset 高低两槽=12 字节);fac->update 按类型分五类桶(FieldAllocationType :1453-1466)
-- injected fields(JavaClasses::get_injected,:1575-1578)——java.lang.Class 的 klass 等 JVM 隐藏字段
+- injected fields(JavaClasses::get_injected,:1563-1566)——java.lang.Class 的 klass 等 JVM 隐藏字段
 - 字段布局(offset 计算)在 layout_fields(:3934,:6411 调用)——06-03 已讲,本域不重复
 
 **parse_methods** (`classFileParser.cpp:2959`):

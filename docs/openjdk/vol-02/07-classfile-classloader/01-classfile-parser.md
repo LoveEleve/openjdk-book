@@ -119,7 +119,7 @@
     field->set_allocation_type(atype);
 ```
 
-`fac->update` 按字段类型把字段分进**五类分配桶**(oop、byte/boolean/char、short、int、long/double,static 与 nonstatic 各一套,`FieldAllocationType`,classFileParser.cpp:1453-1466)——**这就是 06-03 字段布局的输入**: 后续 `layout_fields`(classFileParser.cpp:3934,:6411 调用)按桶排偏移,顺序由 `FieldsAllocationStyle` 标志决定(globals.hpp:940,默认 1): **默认是 longs/doubles、ints、shorts/chars、bytes、最后 oops 加填充**(注释 classFileParser.cpp:4072)——oop 字段排最后,只有 `FieldsAllocationStyle=0` 才是 oops 在前(注释 :4067),而少数硬编码偏移的核心类(java.lang.Class/ClassLoader/Reference 等)固定走 style 0(:4038-4043);static 字段的偏移另算(`fac->count[STATIC_*]` 汇总成 static_field_size,:3966-3975),实际落在 InstanceMirrorKlass 的静态区。注意资料里流传的 "FieldLayoutBuilder" 在 jdk11u 里并不存在——布局就在 `ClassFileParser::layout_fields` 里。parse_fields 还会追加 **injected fields**(:1575-1578,`JavaClasses::get_injected`——JVM 内部注入的隐藏字段,如 `java.lang.Class` 的 klass 指针,Java 层看不到)。
+`fac->update` 按字段类型把字段分进**五类分配桶**(oop、byte/boolean/char、short、int、long/double,static 与 nonstatic 各一套,`FieldAllocationType`,classFileParser.cpp:1453-1466)——**这就是 06-03 字段布局的输入**: 后续 `layout_fields`(classFileParser.cpp:3934,:6411 调用)按桶排偏移,顺序由 `FieldsAllocationStyle` 标志决定(globals.hpp:940,默认 1): **默认是 longs/doubles、ints、shorts/chars、bytes、最后 oops 加填充**(注释 classFileParser.cpp:4072)——oop 字段排最后,只有 `FieldsAllocationStyle=0` 才是 oops 在前(注释 :4067),而少数硬编码偏移的核心类(java.lang.Class/ClassLoader/Reference 等)固定走 style 0(:4038-4043);static 字段的偏移另算(`fac->count[STATIC_*]` 汇总成 static_field_size,:3966-3975),实际落在 InstanceMirrorKlass 的静态区。注意资料里流传的 "FieldLayoutBuilder" 在 jdk11u 里并不存在——布局就在 `ClassFileParser::layout_fields` 里。parse_fields 还会追加 **injected fields**(:1563-1566,`JavaClasses::get_injected`——JVM 内部注入的隐藏字段,如 `java.lang.Class` 的 klass 指针,Java 层看不到)。
 
 ### parse_methods: Code 属性的读取
 

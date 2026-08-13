@@ -115,7 +115,7 @@ oop StringTable::do_intern(Handle string_or_null_h, jchar* name,
   }
 ```
 
-- **没现成对象就造一个**: `java_lang_String::create_from_unicode`(javaClasses.cpp:263-285)——`CompactStrings` 开启时先检测是否纯 Latin-1,是则创建 `byte[]` value,否则 `char[]`(这就是为什么 JDK 9+ 的 "abc" 的 value 只占 16+3 字节而非 16+6——数组头 16 字节,06-03 讲过);
+- **没现成对象就造一个**: `java_lang_String::create_from_unicode`(javaClasses.cpp:263-285)——`CompactStrings` 开启时先检测是否纯 Latin-1(`UNICODE::is_latin1`),决定 `coder` 与数组长度: **value 永远是 `byte[]`**(String.java:140),Latin-1 每字符 1 字节、UTF-16 长度翻倍每字符 2 字节(basic_create,javaClasses.cpp:252-253)——这就是为什么 JDK 9+ 的 "abc" 的 value 只占 16+3 字节而非 16+6(数组头 16 字节,06-03 讲过);
 - **插入前先做字符串去重**(:365-367,`deduplicate_string`,注释: 入表后就不能再 dedup,否则会破坏对 intern 字面量的编译期优化)——这是 JDK 8u20 的 String Deduplication 特性在 intern 路径上的落点;
 - **插入走 `get_insert_lazy`**: ConcurrentHashTable 的懒插入,带 rehash 预警(桶不平衡时置 `_needs_rehashing`)。
 
