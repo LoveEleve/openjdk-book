@@ -34,7 +34,7 @@ Symbol* SymbolTable::lookup(const char* name, int len, TRAPS) {
 
 - **先无锁查,再上锁插**: 读路径(Symbol 不会被删除,GC 清理在 safepoint)直接查桶;只有 miss 才 `MutexLocker(SymbolTable_lock)` 拿全局锁做 `basic_add`;
 - **hash 与 String 同源**: `hash_symbol`(:286-290)默认用 `java_lang_String::hash_code`(与 String 对象的 hashCode 算法一致),开启交替哈希时用 `AltHashing::halfsiphash_32`——两个 intern 表共用同一套 hash,`String.intern()` 才能直接和常量池里的内容对上;
-- **回收在 GC 周期**: 06-06 讲过 `unlink` 摘掉 `refcount()==0` 的符号——细节是 `buckets_unlink` 遍历桶、`bulk_free_entries` **批量释放**(symbolTable.cpp:147-155),refcount 归零的 Symbol 在 Metaspace 里被整批归还。`rehash_table`(:184)是另一回事: 换交替哈希种子、把活条目搬进新表,不是回收。
+- **回收在 GC 周期**: 06-06 讲过 `unlink` 摘掉 `refcount()==0` 的符号——细节是 `buckets_unlink` 遍历桶、`bulk_free_entries` **批量释放**(symbolTable.cpp:147-155),refcount 归零的 Symbol 在 Metaspace 里被整批归还。`rehash_table`(:184)是另一回事: 建新表、把活条目搬过去、换新全局种子(注释 "Then rehash with a new global seed"),不是回收。
 
 **关键设计 (斜体)**: *"先查后锁"让命中路径完全无锁——而 SymbolTable 的命中率极高(类名/方法名被反复查)。全局锁只在插入时短暂持有,代价可接受。这条设计与 StringTable 的并发哈希形成对照: Symbol 的访问频率虽高但极短,而 String.intern 是用户可触发的热点,且要配合 GC 做清理——两种负载,两种结构。*
 
