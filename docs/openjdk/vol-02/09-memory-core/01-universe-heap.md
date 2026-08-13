@@ -60,8 +60,8 @@ jint Universe::initialize_heap() {
 ```
 
 - **`create_heap`(:752-755)只 new 出 CollectedHeap 的 C++ 对象**,选择权在 GCConfig: `GCConfig::arguments()->create_heap()`(gcConfig.cpp:237;`create_heap` 是 GCArguments 的纯虚函数,gcArguments.hpp:41)。典型配置(server-class 机器)走 G1: `G1Arguments::create_heap`(g1Arguments.cpp:151-153)= `create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()`——`new G1CollectedHeap` + 配一个策略对象;
-- **GC 怎么被选中**: `GCConfig::select_gc`(gcConfig.cpp:146-183)——`-XX:+UseG1GC/UseSerialGC/...` 显式指定优先;一个都没给时 `select_gc_ergonomically`(:102-114)按机器挑: **server-class 机器(≥2 核且≥2GB 内存等)默认 UseG1GC,否则 UseSerialGC**;
-- **`_collectedHeap->initialize()`(:767)才做重活**: G1 的 `initialize`(g1CollectedHeap.cpp:1533 起)检查对齐后 `Reserve the maximum`——**这里才真正 reserve 虚拟地址空间**。所以大纲式的"new 出 G1CollectedHeap 就拿到堆"是错的: new 只是搭了个 C++ 空壳,虚拟内存是 initialize 阶段的事(02 篇的 VirtualSpace 就是在管这块区域)。
+- **GC 怎么被选中**: `GCConfig::select_gc`(gcConfig.cpp:146-183)——`-XX:+UseG1GC/UseSerialGC/...` 显式指定优先;一个都没给时 `select_gc_ergonomically`(:102-114)按机器挑: **server-class 机器(至少 2 个处理器、内存 ≥2GB-256MB 余量,多核包机器还需 ≥2 个物理包,os.cpp:1709-1741)默认 UseG1GC,否则 UseSerialGC**;
+- **`_collectedHeap->initialize()`(:767)才做重活**: G1 的 `initialize`(g1CollectedHeap.cpp:1533 起)检查对齐后 `Reserve the maximum`——**这里才真正 reserve 虚拟地址空间**。new 只是搭了个 C++ 空壳,虚拟内存是 initialize 阶段的事(02 篇的 VirtualSpace 就是在管这块区域)。
 
 之后 `universe_init` 建符号表(:734-735 `SymbolTable::create_table()`/`StringTable::create_table()`)、预置 6 个方法缓存(LatestMethodCache,:715-720——VM 内部高频调用的 Java 方法指针缓存,如 `Unsafe.throwIllegalAccessError`),堆就绪。
 
@@ -99,7 +99,7 @@ jint Universe::initialize_heap() {
 
 ### 第一步是数组 Klass,不是 Object
 
-genesis 的第一个实质动作是 `compute_base_vtable_size()`(:331)再 `TypeArrayKlass::create_klass` ×8——**基本类型数组的 Klass 反而先于任何普通类**。注释点破原因: "without that we cannot create the array klasses"。`compute_base_vtable_size`(:1115-1117)= `ClassLoader::compute_Object_vtable()`——先算出 Object 的 vtable 长度,因为数组类的方法表长度继承自 Object(06-02 讲过 vtable 从 Klass 头之后开始、数组不引入新方法);没有这个数字,数组 Klass 连尺寸都定不下来。8 个 Klass 存进 `_typeArrayKlassObjs[T_xxx]` 索引表(:343-350),并各有一个具名访问器(`_boolArrayKlassObj`/`_intArrayKlassObj`…)。
+genesis 的第一个实质动作是 `java_lang_Class::allocate_fixup_lists()`(:328——07-07 的 mirror 补丁列表在这里就绪),然后 `compute_base_vtable_size()`(:331)再 `TypeArrayKlass::create_klass` ×8——**基本类型数组的 Klass 反而先于任何普通类**。注释点破原因: "without that we cannot create the array klasses"。`compute_base_vtable_size`(:1115-1117)= `ClassLoader::compute_Object_vtable()`——先算出 Object 的 vtable 长度,因为数组类的方法表长度继承自 Object(06-02 讲过 vtable 从 Klass 头之后开始、数组不引入新方法);没有这个数字,数组 Klass 连尺寸都定不下来。8 个 Klass 存进 `_typeArrayKlassObjs[T_xxx]` 索引表(:343-350),并各有一个具名访问器(`_boolArrayKlassObj`/`_intArrayKlassObj`…)。注意引导期数组 Klass 的 super 先不挂(Object 还没加载,arrayKlass.cpp:93 在 `is_bootstrapping()` 时置 NULL),vtable 构建也在引导期跳过、由 `reinitialize_vtable_of` 后补(klassVtable.cpp:103-110,universe_post_init 时补)。
 
 ### Metaspace 的空数组与"空数组预分配"的真相
 
@@ -127,7 +127,7 @@ genesis 的第一个实质动作是 `compute_base_vtable_size()`(:331)再 `TypeA
 
 之后 genesis 把 8 个基本类型数组 Klass 初始化(`initialize_basic_type_klass` ×8,:387-394;定义 :306-317: super 设为 Object、挂入类层次链表),再建 `_objectArrayKlassObj`(:414-415,`Object[]` 的 Klass,从 `Object_klass()->array_klass(1)` 来),还有两个 intern 字符串 `"null"` 与 `"-2147483648"`(:368-369)——`_the_null_string` 是编译器/运行时处理 "null" 字面量的规范对象(ciEnv 直接复用它,ciEnv.cpp:322-325),`_the_min_jint_string` 是 `Integer.MIN_VALUE` 的字符串(ciEnv.cpp:330)。
 
-**关键设计 (斜体)**: *genesis 的依赖顺序是"自底向上"的: 数组 Klass(依赖 Object 的 vtable 尺寸)→ 核心类(Klass 存在)→ 镜像(依赖 Class 已加载)→ 基本类型数组 Klass 挂层次(依赖 Object 类在)。每一步都只依赖上一步已经就位的东西——而 `_bootstrapping` 标志让引导期的半成品状态合法化。*
+**关键设计 (斜体)**: *genesis 的依赖顺序是"自底向上"的: 数组 Klass(依赖 Object 的 vtable 尺寸)→ 核心类(Klass 存在)→ 镜像(依赖 Class 已加载)→ 基本类型数组 Klass 挂层次(依赖 Object 类在)。每一步都只依赖上一步已经就位的东西——而 `_bootstrapping` 标志(注释 "true during genesis",universe.hpp:209)把"半成品"显式化: 数组 Klass 先不挂 super、vtable 先不建,全靠这个标志让引导期的部分初始化合法化,之后再由 reinitialize_vtable_of 补齐。*
 
 ## 3. Universe: 全局唯一仓库
 
@@ -138,7 +138,7 @@ genesis 的第一个实质动作是 `compute_base_vtable_size()`(:331)再 `TypeA
 - `the_array_interfaces_array()`(:327)/`the_empty_int_array()`(:362)——genesis 的空数组;
 - `non_oop_word()`(universe.cpp:656-672): 一个"保证不像任何 oop"的哨兵值——`os::non_memory_address_word() | 1`: 低位置 1 让它绝不对齐到 oop 的 4 字节边界,高位用 OS 提供的非内存地址字,高位低位都不像真 oop(注释 :657-666)。最典型的用途是**内联缓存的"空目标"占位**: compiledIC 的 data 槽存 non_oop_word 表示"还没有目标"(compiledIC.cpp:61-63 判定 `data == non_oop_word` 即无目标,:120 清缓存时写入)。
 
-预分配的另一类对象在 `universe_post_init`(universe.cpp:1002 起): 6 个**提前造好的 OutOfMemoryError 实例**(:1020-1029,heap/metaspace/class_metaspace/array_size/gc_overhead_limit/realloc_objects 各一)+ `_delayed_stack_overflow_error_message`(:1032-1034)。设计动机直白: **OOM 发生时往往已经没有空间再分配异常对象了**——`gen_out_of_memory_error`(universe.cpp:615-650)的机制是: 错误对象用一个池(上限 `PreallocatedOutOfMemoryErrorCount`)存着,抛出时从池里取一个、把当前错误消息搬过去、填上栈帧返回(:625-641)——池用尽才退回新分配(比如 `out_of_memory_error_java_heap()`,universe.hpp:370)。
+预分配的另一类对象在 `universe_post_init`(universe.cpp:1002 起): 6 个**提前造好的 OutOfMemoryError 实例**(:1020-1029,heap/metaspace/class_metaspace/array_size/gc_overhead_limit/realloc_objects 各一)+ `_delayed_stack_overflow_error_message`(:1032-1034)。设计动机直白: **OOM 发生时往往已经没有空间再分配异常对象了**——`gen_out_of_memory_error`(universe.cpp:615-650)的机制是: 另有一池预分配错误(`_preallocated_out_of_memory_error_array`,:1084,容量 `PreallocatedOutOfMemoryErrorCount`),抛出时优先从池里取一个、把当前错误消息搬过去、填上栈帧返回(:623-641);池用尽就退回 6 个默认 OOME 之一(比如 `out_of_memory_error_java_heap()`,universe.hpp:370)——全程不触发新的异常对象分配。
 
 ## 4. CollectedHeap: 所有 GC 堆的公共接口
 
@@ -193,7 +193,7 @@ oop MemAllocator::allocate() const {
       obj = initialize(mem);
 ```
 
-- **TLAB 内快路径**: `allocate_inside_tlab`(:284-295)从当前线程的 TLAB 里 `tlab.allocate(_word_size)`——一次指针 bump,不碰 GC;TLAB 剩余不足时 `allocate_inside_tlab_slow`(:297 起)权衡: **剩余超过 `refill_waste_limit` 就整块作废不划算,放弃慢路径直接走 TLAB 外分配**(:309-311);剩余少到可以丢弃,才作废旧 TLAB、`_heap->allocate_new_tlab(min, requested, &actual)`(:324)换新的;
+- **TLAB 内快路径**: `allocate_inside_tlab`(:284-295)从当前线程的 TLAB 里 `tlab.allocate(_word_size)`——一次指针 bump,不碰 GC;TLAB 剩余不足时 `allocate_inside_tlab_slow`(:297 起)权衡: **剩余空间还很多(超过 `refill_waste_limit`),把整个 TLAB 作废太浪费,于是放弃换新、直接走 TLAB 外分配**(:309-311);剩余少到可以丢弃,才作废旧 TLAB、`_heap->allocate_new_tlab(min, requested, &actual)`(:324)换新的;
 - **TLAB 外慢路径**: `allocate_outside_tlab`(:270-281)调 `_heap->mem_allocate(_word_size, &overhead_limit)`——G1 的实现是巨对象直接 `attempt_allocation_humongous`(g1CollectedHeap.cpp:404),普通对象 `attempt_allocation`(:407);
 - 分配成功后 `initialize`(:373 处调用)填对象头: mark 复制 Klass 的 `prototype_header`(偏向锁模式),`release_set_klass` 发布 klass 指针(:396-408,`MemAllocator::finish`)——**先 mark 后 klass,release store 让并发 GC 能看到完整对象**。
 
