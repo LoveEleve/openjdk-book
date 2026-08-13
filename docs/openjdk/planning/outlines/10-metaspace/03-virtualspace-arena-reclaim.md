@@ -9,6 +9,7 @@
 > - **expand_by**(virtualSpaceNode.cpp:467-493): 先算 uncommitted(:472-474 不够返回 false)→commit=MIN2(preferred,uncommitted)→virtual_space()->expand_by(:478,09-02 的三段);initialize(:500-526)断言对齐 commit_alignment(:506-508)+initialize_with_granularity(:516,special Node 整块预提交 :511);get_chunk_vs(:494)→take_from_committed(:369,padding chunk :76)
 > - **"Node 默认大小 _reserve_size(1MB)" 未验证**: 实际 VirtualSpaceSize/预留按需(create_new_virtual_space virtualSpaceList.cpp:306);大纲"小 Node 因为 ClassLoader 可能很快卸载"为规划推理
 > - **CDS(概要,细节 11 域)**: preload_and_dump(metaspaceShared.cpp:1632)/initialize_shared_spaces(:2100)/map_shared_spaces(:2034);"metaspaceShared.cpp:200-500/700-1000" 行号漂移(文件 2184 行)
+> - **第 3 轮 REVIEW 补充**: CDS 映射默认**只读**(_read_only,filemap.cpp:902-905,JVMTI can_modify_any_class 才放宽 :891-905)——"redefine 时 COW"为推测已删;Metaspace::commit_alignment 默认=page_size(metaspace.cpp:1248)
 > - 悬念指向域 11 CDS(第 5 批,archive 生成/校验/映射)✓
 
 ### 1. VirtualSpaceNode — mmap reserve + 按需 commit
