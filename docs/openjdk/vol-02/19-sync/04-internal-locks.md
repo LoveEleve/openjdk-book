@@ -88,13 +88,13 @@ Monitor 的锁**不是 pthread_mutex**——它是自研的(mutex.hpp:122-136,�
 
 ### wait/notify: 队列操作,底层才碰条件变量
 
-`notify`(mutex.cpp:663-701): 从 `_WaitSet` 取头,**CAS push 到 cxq**(:679-687,与 ObjectMonitor 的 INotify 同构);`notify_all`(:703-708)循环 notify。`wait`(mutex.cpp:1064 起): 断言 rank(不能持 special 级锁 wait,:1082-1088)→ `set_owner(NULL)`(:1100)→ safepoint 检查版的走 ThreadBlockInVM(:1111)→ `IWait`。**pthread_cond 只出现在最底层**: PlatformEvent(os_posix.hpp:170-190)的 `_event` permit(-1/0/1)+ `pthread_mutex_t _mutex` + `pthread_cond_t _cond`——ParkEvent 们最终在这上面睡。所以流传的"Monitor 的条件变量用 pthread_cond 实现"要精确成: **Monitor 的队列是自研的,队列成员(ParkEvent)的睡眠才用 pthread_cond**。
+`notify`(mutex.cpp:663-701): 从 `_WaitSet` 取头,**CAS push 到 cxq**(:679-687,与 ObjectMonitor 的 INotify 同构);`notify_all`(:703-708)循环 notify。`wait`(mutex.cpp:1064 起): 断言 rank(不能持 special 级锁 wait,:1082-1088)→ `set_owner(NULL)`(:1095)→ safepoint 检查版的走 ThreadBlockInVM(:1103)→ `IWait`(:1112)。**pthread_cond 只出现在最底层**: PlatformEvent(os_posix.hpp:170-190)的 `_event` permit(-1/0/1)+ `pthread_mutex_t _mutex` + `pthread_cond_t _cond`——ParkEvent 们最终在这上面睡。所以流传的"Monitor 的条件变量用 pthread_cond 实现"要精确成: **Monitor 的队列是自研的,队列成员(ParkEvent)的睡眠才用 pthread_cond**。
 
 ## 3. MutexLocker RAII
 
 获取/释放的 RAII 三兄弟在 mutexLocker.hpp:
 
-- **`MutexLocker`**(:183-207): 构造 lock、析构 unlock——但**special 级锁不许用它**(断言 :187,因为 MutexLocker 默认带 safepoint 检查,special 锁不能有 safepoint 检查);
+- **`MutexLocker`**(:183-207): 构造 lock、析构 unlock——但**special 级锁不许用它**(断言 :187;MutexLockerEx 的注释把理由说透: "Mutexes with rank special or lower should not do safepoint checks",:229);
 - **`MutexLockerEx`**(:224): 带 `no_safepoint_check` 参数——special 锁与"已知在 safepoint"场景用它;
 - **`MonitorLockerEx`**(:251): MutexLockerEx 加 `wait()`(:271-275)。
 
