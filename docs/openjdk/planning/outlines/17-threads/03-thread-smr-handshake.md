@@ -2,6 +2,15 @@
 
 > 🔴 Deep | 4 KP 中的并发安全
 > 读者处境: 线程 A 拿着线程 B 的 JavaThread*——但 B 已退出。如果 A 继续用 B 的指针→use-after-free。JVM 的 Thread-SMR 怎么防止这种 crash？
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/17-threads/03 已按真实源码成文~170 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"ThreadsListHandle(threadSMR.hpp:37-84)" 错**: :37-84 是文件头注释的用法示例;ThreadsListHandle 类在 **:272**(包 SafeThreadsListPtr :200——注释原话 "叶子场景用稳定 hazard ptr,嵌套场景用引用计数" :198-200);ThreadsList 在 :158(_threads 数组/_next_list,_length)
+> - **"acquire_stable_list(threadSMR.hpp:120-121)"**: :120-121 是 fast/nested path 声明;无锁快路径本体=SafeThreadsListPtr::acquire_stable_list_fast_path(threadSMR.cpp:384-427): **发布 tagged(:402-403)→重读 _java_thread_list 校验(:408-411)→cmpxchg 去 tag(:416-421)**;全局指针 _java_thread_list volatile(threadSMR.hpp:108)+xchg_java_thread_list(:139)
+> - **tagged 语义(大纲"tag 表示已扫描"错)**: tagged=**未验证**,扫描方看到 tagged 会 **CAS 置 NULL 使其失效**(ScanHazardPtrGatherProtectedThreadsClosure,threadSMR.cpp:256-266 "This exchange attempts to invalidate the hazard ptr"),读者输掉竞争就重试;untagged=稳定受保护(线程被 AddThreadHazardPointerThreadClosure 收进表 :270-271);tag 技巧 thread.hpp:162-170(最低位)
+> - **"smr_delete: 把 thread 加入 to_delete_list" 错**: **_to_delete_list 装的是旧 ThreadsList 快照**(threadSMR.hpp:116),不是线程;smr_delete(threadSMR.cpp:944-1010)=delete_lock+set_delete_notify(Atomic::inc :937-939)→**is_a_protected_JavaThread(:966)**→没人保护 break→`delete thread`(:1006);被保护→delete_lock wait(:993-997)等 release_stable_list 唤醒
+> - **读者释放双检查**: release_stable_list(threadSMR.cpp:471 起,:500-509 无锁读 delete_notify,false 直接返回,true 才 release_stable_list_wake_up(:897))
+> - **Handshake**: HandshakeState(handshake.hpp:55-101:_operation volatile :57/_semaphore :59/_thread_in_process_handshake :60);HandshakeClosure :36-45;process_self_inner(handshake.cpp:417-434):trywait 或 wait_with_safepoint_check→load_acquire→**先 clear_handshake 再 do_handshake**(:430)→signal;try_process_by_vmThread(:481-516):has_operation(:486)→possibly_vmthread_can_process(:491)→**claim_handshake_for_vmthread=_semaphore.trywait+复查(:470-479,大纲"CAS 独占"错)**→vmthread_can_process(:505)→do→clear→_success;Handshake::execute(:381-389)ThreadLocalHandshakes→VM_HandshakeAllThreads
+> - 悬念指向 04-interface-support.md(标题 "04. interfaceSupport——线程状态转换的 RAII 守卫")✓
 
 ### 1. "你保护我的指针" — Thread-SMR hazard pointer
 
