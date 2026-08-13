@@ -278,7 +278,7 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
-### 6.25 31-01(Unsafe 底层 API,31 域开篇,大纲 9 处漂移含 2 处机制编造,2026-08-13)
+### 6.25 31-01(Unsafe 底层 API,31 域开篇,大纲 9 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **CAS 单路径错(JDK8 形态)**: 大纲的 `jint* addr=(jint*)(p+offset); Atomic::cmpxchg` 是 JDK8 旧版;JDK11 双路径=obj==NULL→RawAccess(堆外) / obj!=NULL→HeapAccess::atomic_cmpxchg_at(堆内带 GC barrier,06-05 access API);index_oop_from_field_offset_long(unsafe.cpp:122-135,p==NULL 返裸地址);assert_field_offset_sane
 - **行号全漂**: unsafe.cpp 1122 行;CAS :876-938/Park :939-955/Unpark :960-984/AllocateInstance :365-368/defineAnonymousClass0 :830-862(impl :741)/方法表 :1035-1109/JVM_RegisterJDKInternalMiscUnsafeMethods :1116-1121;UNSAFE_ENTRY=JVM_ENTRY(:64-70,interfaceSupport.inline.hpp:558-566 ThreadInVMfromNative)
 - **"getUnsafe 检查 caller" 半对**: jdk.internal.misc.getUnsafe() 无检查(模块封闭);sun.misc.getUnsafe() 才有(@CallerSensitive+Reflection.getCallerClass+VM.isSystemDomainLoader,抛 SecurityException("Unsafe"));名字检查非能力检查(反射拿 theUnsafe 可绕,实证)
@@ -286,7 +286,8 @@
 - **方法表 40 条**("~200 方法" 虚高);C2 intrinsic 接线注释 :1112-1115
 - **park/unpark**: Parker 是 01-os/03 拆过的原语(19 域是 ParkEvent,两套);Unpark 走 ThreadsListHandle(17-03 SMR,线程死亡静默跳过);"幽灵 unpark"=类型稳定内存复用
 - **defineAnonymousClass JDK11 无 deprecated 标记**(JDK15 JEP371 后废弃)
-- **实证**: 08-unsafe-demo.txt(getUnsafe SecurityException/String.value offset 12=CAS 成功/allocateInstance x=0/pageSize 4096/addressSize 8);用 --add-opens java.base/sun.misc=ALL-UNNAMED;static final 在 static 块用限定名赋值 javac 报错(非限定名 OK)
+- **实证**: 08-unsafe-demo.txt(getUnsafe SecurityException/String.value offset 12=CAS 成功/allocateInstance x=0/pageSize 4096/addressSize 8);**JDK11 默认 --illegal-access=permit 下反射非导出包仅告警仍可用**(不带 --add-opens 实测通过,JDK16+ 才需 --add-opens);static final 在 static 块用限定名赋值 javac 报错(非限定名 OK)
+- **第 3 轮 REVIEW 修正 4 处**: ①反射拿 theUnsafe 补条件(JDK11 permit 过渡模式可用,JDK16+ 强封装需 --add-opens);②assert_field_offset_sane p==NULL 时断言体整体跳过(unsafe.cpp:105-118,堆外不校验);③defineAnonymousClass **JDK17 已移除**(实测 Temurin 17 src.zip 零命中,defineHiddenClass 取代),非"JDK15 标记废弃"笼统说法;④"JDK8 旧形态"软化(勿凭记忆断言具体版本)、putOrdered 内存序表述精确化
 
 ### 6.24 08-04(LinkResolver + Rewriter,08 域收官,大纲 10 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"getstatic → fast_agetfield/putstatic → fast_aputfield" 编造**: getstatic/putstatic 无 fast 版本(01 篇枚举无);fast_agetfield 来自 _getfield;Rewriter 对字段/方法指令只换 CP→cpCache 索引(rewrite_member_reference rewriter.cpp:168-183,get_Java_u2→cp_entry_to_cp_cache→put_native_u2 = 01 篇 bJJ 大写 J 的来源),不改指令字节

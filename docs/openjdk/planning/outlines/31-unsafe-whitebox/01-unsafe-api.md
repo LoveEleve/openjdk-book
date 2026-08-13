@@ -11,7 +11,7 @@
 > - **"~200 方法" 错**: 方法表 `jdk_internal_misc_Unsafe_methods` 实为 40 条(unsafe.cpp:1035-1109)
 > - **JIT intrinsic 接线(大纲未提)**: 注释 unsafe.cpp:1112-1115 "The optimizer looks at names and signatures to recognize individual functions"——C2 按名字+签名认领 intrinsic(13-jit 域)
 > - **park/unpark(大纲细节补全)**: Parker 是 per-thread 等待原语(01-os/03 拆过 futex 实现,**与 19 域 monitor 等待的 ParkEvent 是两套东西**);Unpark 用 ThreadsListHandle+cv_internal_thread_to_JavaThread(线程已死静默跳过,17-03 SMR);"幽灵 unpark"(target 终止后 Parker 类型稳定内存被复用)注释原话
-> - **defineAnonymousClass**: JDK11 **无 deprecated 标记**(JDK15 JEP371 Hidden Classes 后废弃);host class 提供访问上下文,Lambda metafactory 使用
+> - **defineAnonymousClass**: JDK11 **无 deprecated 标记**;**JDK17 已移除**(实测 Temurin 17 src.zip 零命中,JEP371 Hidden Classes 的 defineHiddenClass 取代);host class 提供访问上下文,Lambda metafactory 使用
 > - **实证**: 08-unsafe-demo.txt(getUnsafe SecurityException/反射取 theUnsafe/String.value offset=12(mark 8+压缩 klass 4)/CAS 成功/allocateInstance x=0/pageSize 4096/addressSize 8)
 
 ### 1. "CAS — 原子比较并交换"

@@ -31,7 +31,7 @@ JDK 11 的实现类是 `jdk.internal.misc.Unsafe`(java.base 模块内部包,`jdk
     }
 ```
 
-`@CallerSensitive` + `Reflection.getCallerClass()` 拿到调用者的类,`VM.isSystemDomainLoader` 检查它是否由**引导类加载器**(系统域)加载——只有 JDK 自己的类能通过,普通应用类直接抛 `SecurityException("Unsafe")`。但这是**名字检查,不是能力检查**: 反射拿 `theUnsafe` 字段照样能用(JDK 测试的惯用手法,实证里就是这么拿到的)——所以这个检查防的是"误用",不是"绕过"。
+`@CallerSensitive` + `Reflection.getCallerClass()` 拿到调用者的类,`VM.isSystemDomainLoader` 检查它是否由**引导类加载器**(系统域)加载——只有 JDK 自己的类能通过,普通应用类直接抛 `SecurityException("Unsafe")`。但这是**名字检查,不是能力检查**: 反射拿 `theUnsafe` 字段照样能用(JDK 测试的惯用手法,实证里就是这么拿到的——JDK 11 默认的 `--illegal-access=permit` 过渡模式下反射非导出包仅告警、仍可用;JDK 16+ 强封装后需 `--add-opens`)。所以这个检查防的是"误用",不是"绕过"。
 
 **关键设计 (斜体)**: *Unsafe 的权限模型是"JDK 内部信任"而非"沙箱": jdk.internal.misc 靠模块系统封闭, sun.misc 靠 caller 检查拦截误用。方法本身不做任何安全检查——`getObject(obj, offset)` 不校验 offset 是否真的指向字段、不校验类型——这正是"Unsafe"名字的由来。*
 
@@ -39,7 +39,7 @@ JDK 11 的实现类是 `jdk.internal.misc.Unsafe`(java.base 模块内部包,`jdk
 
 ### JDK 11 的签名与分派
 
-大纲常写的实现("`jint* addr = (jint*)((address)p + offset); return Atomic::cmpxchg(x, addr, e) == e;`")是 JDK 8 的旧形态。JDK 11 的 `Unsafe_CompareAndSetInt` 是**双路径**(unsafe.cpp:907-918,截取核心,逐字):
+大纲照抄的实现("`jint* addr = (jint*)((address)p + offset); return Atomic::cmpxchg(x, addr, e) == e;`")是早期 JDK(JDK 8 时代)的形态。JDK 11 的 `Unsafe_CompareAndSetInt` 是**双路径**(unsafe.cpp:907-918,截取核心,逐字):
 
 ```cpp
 // unsafe.cpp:907-918(截取核心,逐字)
@@ -58,7 +58,7 @@ UNSAFE_ENTRY(jboolean, Unsafe_CompareAndSetInt(JNIEnv *env, jobject unsafe, jobj
 - **obj == NULL**: 目标是**堆外地址**(offset 就是裸地址)——`RawAccess<>::atomic_cmpxchg` 直接对指针做原子操作,无 GC 参与;
 - **obj != NULL**: 目标是**堆内字段**——`HeapAccess<>::atomic_cmpxchg_at` 走 access API(06-05 拆过),**带 GC barrier**(G1 的 SATB/卡表标记等会在这个入口被触发)——同一个 CAS 语义,堆内堆外两条实现。
 
-**关键设计 (斜体)**: *对堆内字段做 CAS 如果绕过 barrier,GC 的引用追踪就会漏掉并发写入的引用——所以堆内路径必须走 HeapAccess,堆外路径没有引用语义、走 RawAccess。这个"同一 API 双实现"的边界,就是 Unsafe 能同时服务并发工具(堆内字段)与堆外内存库(off-heap)的原因。`assert_field_offset_sane`(:914)在 debug 构建校验 offset 在对象内,release 构建零检查。*
+**关键设计 (斜体)**: *对堆内字段做 CAS 如果绕过 barrier,GC 的引用追踪就会漏掉并发写入的引用——所以堆内路径必须走 HeapAccess,堆外路径没有引用语义、走 RawAccess。这个"同一 API 双实现"的边界,就是 Unsafe 能同时服务并发工具(堆内字段)与堆外内存库(off-heap)的原因。`assert_field_offset_sane`(:914,定义 :105-118)在 debug 构建校验 offset 在对象内——**p 为 NULL(堆外)时断言体整体跳过**,只有堆内路径才校验;release 构建零检查。*
 
 ### 方法家族与 JIT 认领
 
@@ -72,7 +72,7 @@ UNSAFE_ENTRY(jboolean, Unsafe_CompareAndSetInt(JNIEnv *env, jobject unsafe, jobj
 // individual functions.
 ```
 
-**解释器走 JNI 注册的入口;编译器(C2)按"名字+签名"直接认领成 intrinsic**(如 `getObject` → 内联的载荷指令),不再经过 JNI 调用——这是 13-jit 域 intrinsics 机制的接线点。`getObject`/`putObject` 的 volatile 变体与 `putOrdered*` 对应 x86 的不同内存序指令(load-acquire/store-release/store 无锁前缀),模板在编译期选好。
+**解释器走 JNI 注册的入口;编译器(C2)按"名字+签名"直接认领成 intrinsic**(如 `getObject` → 内联的载荷指令),不再经过 JNI 调用——这是 13-jit 域 intrinsics 机制的接线点。`getObject`/`putObject` 的 volatile 变体与 `putOrdered*` 对应 x86 的不同内存序指令(volatile 读写在 x86 上是普通 mov + 屏障或 lock 前缀,putOrdered 是 store-store 语义的普通 store),C2 在编译期按语义生成。
 
 ## 3. park/unpark: permit 语义,与 wait/notify 不同
 
@@ -140,7 +140,7 @@ UNSAFE_ENTRY(jobject, Unsafe_AllocateInstance(JNIEnv *env, jobject unsafe, jclas
 
 ### defineAnonymousClass: Lambda 的类工厂
 
-`Unsafe_DefineAnonymousClass0`(unsafe.cpp:830-862)→ `Unsafe_DefineAnonymousClass_impl`(:741 起): 把字节数组交给类解析器生成**匿名类**——没有名字、只能通过返回的 `Class` 引用访问,host class 提供访问上下文(Lambda 表达式经由 metafactory 把合成的实现类按此方式生成)。JDK 15 的隐藏类(Hidden Classes,JEP 371)落地后它被标记废弃;JDK 11 里还没有 deprecated 标记,但演进方向已定——Lambda 的合成类迟早从"匿名类"迁到"隐藏类"。
+`Unsafe_DefineAnonymousClass0`(unsafe.cpp:830-862)→ `Unsafe_DefineAnonymousClass_impl`(:741 起): 把字节数组交给类解析器生成**匿名类**——没有名字、只能通过返回的 `Class` 引用访问,host class 提供访问上下文(Lambda 表达式经由 metafactory 把合成的实现类按此方式生成)。JDK 15 的隐藏类(Hidden Classes,JEP 371)引入 `defineHiddenClass` 后它被废弃,**JDK 17 的 Unsafe 里已没有 defineAnonymousClass**(实测 Temurin 17 源码零命中);JDK 11 里还没有 deprecated 标记,但演进方向已定——Lambda 的合成类从"匿名类"迁到"隐藏类"。
 
 ## 核心悬念
 
