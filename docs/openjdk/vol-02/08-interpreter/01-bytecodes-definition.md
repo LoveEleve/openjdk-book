@@ -47,7 +47,7 @@
   static jchar       _flags         [(1<<BitsPerByte)*2]; // all second page for wide formats
 ```
 
-`_name` 助记符、`_result_type` 栈顶结果类型、`_depth` 栈深变化、`_lengths` 长度、`_java_code` 重写前的原始指令、`_flags` 位标志。注意两点:
+`_name` 助记符、`_result_type` 栈顶结果类型、`_depth` 栈深变化、`_lengths` 长度、`_java_code` 重写前的原始指令、`_flags` 位标志。注意三点:
 
 - **没有 `_format` 数组**。大纲/规划里常写的"format 表"不存在——格式字符串在初始化时被 `compute_flags` 预编译成 `_flags` 里的位组合(第三节),运行时查的是位而不是字符串。
 - `_lengths` 一个字节塞两个长度: 低 4 位是短格式长度,高 4 位是 wide 格式长度(`length_for` = `_lengths[code] & 0xF`,`wide_length_for` = `_lengths[code] >> 4`,bytecodes.hpp:397-398)。`goto_w` 有 5 个字符("boooo"),低 4 位最大 15,放得下。
@@ -94,7 +94,7 @@ void Bytecodes::def(Code code, const char* name, const char* format, const char*
   def(_iconst_2            , "iconst_2"            , "b"    , NULL    , T_INT    ,  1, false);
 ```
 
-**关键设计 (斜体)**: *`_aload_0` 在表里的 can_trap 是 true(bytecodes.cpp:336,注释 "rewriting in interpreter")——它执行时可能被重写成 `_fast_aload_0` 后"顺带"触发一次重写,trap 位不是单纯的"会不会抛异常"。这类细节只能逐条写在 def 里,所以注释才说"didn't use static array initializers ... so we can do additional consistency checks and init-code is independent of actual bytecode numbering"(bytecodes.cpp:282-284)。*
+**关键设计 (斜体)**: *`_aload_0` 在表里的 can_trap 是 true(bytecodes.cpp:336,注释 "rewriting in interpreter")——它的模板会按下一个字节把指令本身 patch 成 `_fast_aload_0`/`_fast_*access_0`(templateTable_x86.cpp:973),trap 位不是单纯的"会不会抛异常"。这类细节只能逐条写在 def 里,所以注释才说"didn't use static array initializers ... so we can do additional consistency checks and init-code is independent of actual bytecode numbering"(bytecodes.cpp:282-284)。*
 
 ## 3. format 字符串: 指令布局的语言
 
@@ -274,7 +274,7 @@ C1 编译器并不直接用这张表——它维护自己的 `_can_trap` 数组,
   def(_fast_bgetfield      , "fast_bgetfield"      , "bJJ"  , NULL    , T_INT    ,  0, true , _getfield       );
 ```
 
-重写发生在两个不同阶段,别混淆: **类加载期** Rewriter 把类文件里的 CP 索引批量换成 cpCache 索引并翻转字节序(08-04 的主题);**运行时**解释器解析完一条指令后还会把指令字节本身替换成 fast 形态(`getfield` → `fast_igetfield`),后续执行不再重复解析。def 表里 `getfield` 的 format 就是 `bJJ`(大写 J = 原生字节序),因为这张表描述的是**内存形态**(Rewriter 之后的形态),不是类文件形态;CDS 归档时则把字节码恢复成 `_nofast_*` 形态,保证归档的字节码与运行时可重写版一致(bytecodes.hpp:290-302 注释)。compute_flags 里大写分支目前实际只会遇到 `J` 一种(bytecodes.cpp:244 注释 "actually, only the 'J' case happens currently")——因为只有 cpCache 索引被重写成原生序。
+重写发生在两个不同阶段,别混淆: **类加载期** Rewriter 把类文件里的 CP 索引批量换成 cpCache 索引并翻转字节序(08-04 的主题);**运行时**解释器解析完一条指令后还会把指令字节本身替换成 fast 形态——`getfield` 首次执行发现 cpCache 未解析,调 VM 解析后模板就把指令 patch 成 `fast_igetfield`(templateTable_x86.cpp:2929 的 `patch_bytecode(Bytecodes::_fast_igetfield, ...)`),后续执行不再重复解析。def 表里 `getfield` 的 format 就是 `bJJ`(大写 J = 原生字节序),因为这张表描述的是**内存形态**(Rewriter 之后的形态),不是类文件形态;CDS 归档时则把字节码恢复成 `_nofast_*` 形态,保证归档的字节码与运行时可重写版一致(bytecodes.hpp:290-302 注释)。compute_flags 里大写分支目前实际只会遇到 `J` 一种(bytecodes.cpp:244 注释 "actually, only the 'J' case happens currently")——因为只有 cpCache 索引被重写成原生序。
 
 **关键设计 (斜体)**: *`_java_code` 这张"回到原始指令"的表是三条机制的地基: 迭代器 `java_code()` 归一后查长度、OopMap 断言验证 trap 一致性、调试器/字节码追踪把 fast 形态还原成人类认识的指令。表与表之间靠它互相校验。*
 
@@ -297,7 +297,7 @@ C1 编译器并不直接用这张表——它维护自己的 `_can_trap` 数组,
   static bool        is_invoke      (Code code)    { return (_invokevirtual <= code && code <= _invokedynamic); }
 ```
 
-`is_return` = `_ireturn <= code <= _return`(区间判定),`is_aload` 则逐个点名(因为 `_aload_0` 被重写后不在连续段里)。这类谓词是验证器与编译器的公共判断工具: 验证器用 `is_store_into_local` 检查异常处理器覆盖区(verifier.cpp:754),模板生成器用 `is_invoke` 把调用指令单独领走处理(templateInterpreter.cpp:254),deopt 重建 vframeArray 时用 `is_invoke` 识别调用点——调用指令的 debug info 是"执行前"状态的,参数大小必须直接查 invoke 的 descriptor,而普通指令走 `falls_through` 推下一条的栈图(deoptimization.cpp:705-722,与 24-03 的 unpack 同源)。它们依赖的是**枚举的排序约定**——`is_const` 能写区间,是因为 0x01-0x14 恰好连续。load/store 家族实数: 5 种类型(iload/lload/fload/dload/aload)×(1 条基本 + 4 条 short 形式)= 25 条 load,对称 25 条 store——共 50 条,不是"~60 条"。
+`is_return` = `_ireturn <= code <= _return`(区间判定),`is_aload` 则逐个点名——因为 `_aload`(25)与 `_aload_0`(42)之间隔着 iload_0 到 dload_3 共 16 个枚举成员,写不了区间。这类谓词是验证器与编译器的公共判断工具: 验证器在 store 指令处用 `is_store_into_local` 判断"这条会改变类型状态的指令是否在异常处理器覆盖区内"——若是,先用 JVM 规范要求的进入类型状态校验 handler 目标(verifier.cpp:754,校验必须在局部变量加入之前做);模板生成器用 `is_invoke` 把调用指令单独领走处理(templateInterpreter.cpp:254),deopt 重建 vframeArray 时用 `is_invoke` 识别调用点——调用指令的 debug info 是"执行前"状态的,参数大小必须直接查 invoke 的 descriptor,而普通指令走 `falls_through` 推下一条的栈图(deoptimization.cpp:705-722,与 24-03 的 unpack 同源)。它们依赖的是**枚举的排序约定**——`is_const` 能写区间,是因为 0x01-0x14 恰好连续。load/store 家族实数: 5 种类型(iload/lload/fload/dload/aload)×(1 条基本 + 4 条 short 形式)= 25 条 load,对称 25 条 store——共 50 条,不是"~60 条"。
 
 ## 核心悬念
 
