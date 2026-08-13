@@ -3,6 +3,14 @@
 > 🔴 Deep | 逐方法 type-check bytecode
 > 读者处境: `ClassLoader.loadClass("MaliciousClass")` — 在 JVM 定义 class 之前, Verifier 检查每个方法的字节码——operand stack 类型必须正确、branch target 必须有效、局部变量类型必须匹配 StackMapTable。类型错误→VerifyError——防止类型混淆攻击(integer→object pointer→crash JVM)。
 
+> ⚠️ 写作期修正(2026-08-13, vol-02/44-class-verification/01 已按真实源码成文 316 行;大纲行号这次全对(140/603/630/677/1858,07-02 写作期已验证过 verifier.cpp),本篇补充机制细节为主):
+> - **大纲缺机制(本篇补充)**: VerificationType 真 union(Symbol* 指针/编码数据,verificationType.hpp:48-62,低 2 位 TypeMask 顶层类别+第二字节类别 1/2/2_2nd+高字节基本类型 descriminator+Query 类型(BciMask 0xffff<<8,Uninitialized 的 bci 段,BciForThis=(u2)-1));is_assignable_from 判定树(verificationType.hpp:267-298: 相同/bogus 通过、Query 按类别、Boolean/Byte/Char/Short 接受 int、引用对引用进 is_reference_assignable_from:79-116(null→任何引用/同名/Object 全通过/数组组件递归/is_component_assignable_from 基本类型必须相同/其余 resolve_and_check_assignability **会触发类解析**,CDS 下可推迟))
+> - **Uninitialized 生命周期(大纲未提)**: new→uninitialized_type(bci)(verifier.cpp:1652-1654);invokespecial <init>→verify_invoke_init(verifier.cpp:2371-2420: UninitializedThis 只允许调本类/超类 <init>;普通 Uninitialized 校验 bci 处确为 new 指令;initialize_object 全帧替换 stackMapFrame.cpp:57-70;try 块内 <init> 先验证异常处理器路径以未初始化状态结束)
+> - **invoke 四层检查(大纲未提)**: verifier.cpp:2600-2655: ①invokedynamic 3/4 字节必须 0 ②<init> 只能 invokespecial("Illegal call to internal method") ③invokespecial 类可赋值(匿名类 host 特例) ④参数按签名从后往前 pop_stack 匹配
+> - **VerifyError 产生路径(大纲未提)**: verify_error 只记录(verifier.cpp:1978-1993: _exception_type/_error_context/_message),Verifier::verify 尾部统一 THROW_MSG_(:239);failover 老验证器(:184-192,版本<51 且 FailOverToOldVerifier);TypeOrigin :97/ErrorContext :147(verifier.hpp)
+> - **实证**: 08-verifier-demo.txt(把 iload_0 改 aload_0: 默认→VerifyError "Bad local variable type"/Reason "Type integer (current frame, locals[0]) is not assignable to reference type"/Current Frame 转储; -Xverify:none→加载成功 result=3);aload 模拟=verify_aload(verifier.cpp:2832-2837,get_local reference_check)
+
+
 ### 1. "Verifier::verify — 入口"
 
 场景: `ClassFileParser` 解析完 class → `Verifier::verify(klass, mode)`→决定是否需要验证→`ClassVerifier::verify_class()`→`verify_method()` 逐方法验证。
