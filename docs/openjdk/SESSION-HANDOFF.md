@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 17-threads(第 3 批第三个域)——09 域已完结(第 3 批第 2 个域收官)。
+**下一步(唯一,无选择)**: 17-threads/02(JavaThread 状态机——线程怎么告诉 JVM"我不能被 safepoint")。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,44 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训)。
 
@@ -42,14 +42,14 @@
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26,第 2 批收官)
-第 3 批(对象/类): 07(7/7) → 09(3/3) → 17   🚧 进行中(17 下一篇)
+第 3 批(对象/类): 07(7/7) → 09(3/3) → 17(1/4)   🚧 进行中(17 域 02 下一篇)
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 48 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 10):
+**已完成 49 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 11):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -66,9 +66,10 @@
 | 41-zip-jimage | 1-2 | `41-zip-jimage/` 2 篇 | ✅ 41 域完结 |
 | 42-core-native | 1-3 | `42-core-native/01-jni-system.md`(129 行)/02-process.md(264 行)/03-class-io.md(228 行) | ✅ **42 域完结,第 2 批收官** |
 | 07-classfile-classloader | 1-7 | `07-classfile-classloader/01`~`07` | ✅ **07 域完结(7 篇,第 3 批第 1 个域收官)** |
-| 09-memory-core | 1-3 | `09-memory-core/01`(222 行)/02(240 行)/03(150 行) | ✅ **09 域完结(第 3 批第 2 个域收官)** |
+| 09-memory-core | 1-3 | `09-memory-core/01`(222 行)/02(240 行)/03(150 行) | ✅ **09 域完结** |
+| 17-threads | 1 | `17-threads/01-thread-hierarchy.md`(191 行) | 🚧 17 域进行中(1/4) |
 
-**每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07/09 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官)+a487eac(第 3 轮深度 REVIEW 跨篇联动: String.value 永远 byte[] 修正 07-03、get_injected 行号 1563-1566 修正 07-01);**09域01=fb31f7b(正文+大纲回填)+791540e(README)+4b8b16c(第 3 轮 REVIEW)+f0b7b93(大纲同步);09域02=bf19c20(正文)+9eed025(大纲 ⚠️ 块 12 条)+81f8b56(README)+1727df9(第 3 轮 REVIEW);09域03=3593c9b(正文,09 域收官)+58c5e34(大纲 ⚠️ 块 10 条)+cb0dae2(README,48/152,第 3 批第 2 个域收官)**。各域 README/HANDOFF commit 见 git log。
+**每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07/09 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官)+a487eac(第 3 轮深度 REVIEW 跨篇联动: String.value 永远 byte[] 修正 07-03、get_injected 行号 1563-1566 修正 07-01);**09域01=fb31f7b(正文+大纲回填)+791540e(README)+4b8b16c(第 3 轮 REVIEW)+f0b7b93(大纲同步);09域02=bf19c20(正文)+9eed025(大纲 ⚠️ 块 12 条)+81f8b56(README)+1727df9(第 3 轮 REVIEW);09域03=3593c9b(正文,09 域收官)+58c5e34(大纲 ⚠️ 块 10 条)+cb0dae2(README)+4cb5120(第 3 轮 REVIEW: GuardedMemory=jniCheck 客户)+d6a3ef7(大纲同步);17域01=bec47da(正文,191 行,第 3 批第三个域开篇)+dc76829(大纲 ⚠️ 块 9 条)+bb94c20(README,49/152)**。各域 README/HANDOFF commit 见 git log。
 
 **已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(三篇)/07(01-07)/09(01)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 09-memory-core/02 前先读 09-01 大纲 ⚠️ 块(15 条,重点是时序/空数组语义/分配链)与 09-02 大纲;09-01 悬念承诺: G1CollectedHeap::initialize(:1533+)里 Reserve the maximum 的虚拟内存机制(ReservedSpace reserve + commit)是 09-02 的主角。**
 
@@ -321,6 +322,14 @@
   - **GuardedMemory canary=badResourceValue 0xAB 非 0xBAADF00D/0xDEADBEEF**(globalDefinitions.hpp:1012,Guard::build/verify :96-112);GUARD_SIZE=16;**guarded_malloc 不存在**——wrap_copy/free_copy(guardedMemory.cpp:31-54)+verify_guards(:212)
   - **大纲"GC marking bitmap 用 Arena"不准**: G1 bitmap 是 G1CMBitMap(独立 mapper);GC 真实用户=并发标记任务 ResourceMark(g1ConcurrentMark.cpp:833/1548/1578/1835)
   - 悬念→10-metaspace/01(jdk11u **无 MetaspaceArena**(JDK15+ 术语),结构=VirtualSpaceNode→ChunkManager→Metablock)
+- **17-01(Thread 层次体系,第 3 批第三个域开篇,大纲 9 处漂移含 3 处机制错)**:
+  - **Thread 基类**(thread.hpp:115): TLS _thr_current(:122)/_gc_data(:129)/**SMR hazard ptr 字段(:157-182,ThreadsList* volatile 在基类)**/_polling_page(:346)/_tlab(:348)/omFreeList-omInUseList(:369-373)/_suspend_flags(:204-243 external suspend+async exception 合并)/_rcu_counter(:315,GlobalCounter=读侧 critical_section_begin 记全局 counter+写侧 write_synchronize,globalCounter.hpp:30-42);operator new→allocate(mtThread) C-Heap(:185-191)
+  - **Thread::current() 三兄弟**(thread.hpp:794-817 inline): current=current_or_null+assert;current_or_null=compiler TLS;current_or_null_safe=**library TLS**(threadLocalStorage.hpp:41-48,信号 handler 全平台走它,:31-36 注释);定义 thread.cpp:171
+  - **启动四段(大纲"thread.cpp:120-150"全错)**: ①JavaThread 构造 os::create_thread(thread.cpp:1758,pthread_create os_linux.cpp:1007,挂起)②Thread::start(:488-502)=**java_lang_Thread::set_thread_status(RUNNABLE)**(07-07 镜像)+os::start_thread③thread_native_entry(os_linux.cpp:770+): 栈边界 :772/initialize_thread_current :789/**set_thread_id 存 nid :794**/父子握手 :810-819(置 INITIALIZED+notify+wait,os::start_thread os.cpp:884-890 SR_lock 置 RUNNABLE 唤醒)④call_run(thread.cpp:370-401 虚 run,:389-390 run 后可能自删)→JavaThread::run(:1818+ transition_and_fence _thread_new→_thread_in_vm :1832)→thread_entry(jvm.cpp:2844 JavaCalls 虚调 Thread.run())
+  - **JavaThread**(thread.hpp:952): _next :957(Threads 列表)/_threadObj :960/_anchor :984(JavaFrameAnchor)/_deopt_nmethod :995/_vframe_array_head :996/_vm_result+_2 :1015-1016/_monitor_chunks :1023/_pending_async_exception :1034/_thread_state :1038/_safepoint_state :1040;**CompilerThread : JavaThread(:2129)——编译器线程是 Java 线程!(流传"非 Java 线程"错)**
+  - **NonJavaThread(:819)**: _next :822+Iterator :840;NamedThread(:857)子类=VMThread(vmThread.hpp:114)/ConcurrentGCThread(concurrentGCThread.hpp:31)/WorkerThread(:885);**WatcherThread : NonJavaThread(:902)非 NamedThread**,name="VM Periodic Task Thread"(:923);Thread::oops_do 只碰 JNI 活跃句柄/句柄区/异常(thread.cpp:876-884)
+  - **OSThread(osThread.hpp:56)**: _start_proc/_start_parm(:58-59)/_state=ThreadState *hint*(:60)/_interrupted 必须 jint(:61,:63-67 注释)/_thread_id=pthread_t 可查 /proc(platform 段);**"OSThread._start_thread_lock" 不存在**
+  - 悬念→02-javathread-state(状态机: 线程怎么告诉 JVM"我不能被 safepoint")
 
 ---
 
@@ -343,8 +352,9 @@
 
 - [x] 第 1 批 12 篇 + 第 2 批 26 篇(02/03/04/06/16/38/41/42 域全完结)——✅ 收官
 - [x] **07-classfile-classloader/01-07**(classfile-parser/verifier-stackmap/symbol-string-table/system-dictionary/classloader-hierarchy/jpms-modules/**javaclasses-core-mirrors**)——✅ 07 域完结,commit 见 §二
-- [x] **09-memory-core/01-03**(universe-heap/virtualspace/arena-resourcearea)——✅ **09 域完结(第 3 批第 2 个域收官)**,commit 见 §二
-- [ ] **17-threads**(第 3 批第三个域)——大纲在 `planning/outlines/17-threads/`;09 域悬念已指向 10-metaspace(第 4 批),17 域接续第 3 批对象/类主题
+- [x] **09-memory-core/01-03**——✅ 09 域完结,commit 见 §二
+- [x] **17-threads/01**(thread-hierarchy)——✅ 完成,commit 见 §二
+- [ ] **17-threads/02**(javathread-state,JavaThread 状态机)——大纲在 `planning/outlines/17-threads/02-javathread-state.md`;01 篇悬念指向它(transition_and_fence/状态机"我不能被 safepoint")
 - [ ] 09 域 3 篇完结后 → 17-threads
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -381,10 +391,10 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/17-threads/ 的大纲(第 3 批第三个域;注意 ⚠️ 块——09 域 3 篇已回填 37 条,17 域大概率同样漂移;先 ls 17-threads 目录确认篇数)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;17 域涉及 thread.cpp/hpp、javaThread.cpp、threads.cpp(Threads 列表/VMThread)、threadSMR 等,文件名先 find 验证;本会话已深挖 thread.cpp 行号 3000+ 段(jstack print_on)与 1088-1102(create_initial_thread),可复用)
+1. 读 planning/outlines/17-threads/02-javathread-state.md(大纲,注意 ⚠️ 块——17-01 已回填 9 条,02 大概率同样漂移;01 篇的悬念指向它: transition_and_fence/状态机"我不能被 safepoint")
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: JavaThreadState 枚举(thread.hpp 或 threadState 相关)、ThreadStateTransition/transition_and_fence(interfaceSupport.inline.hpp)、frame::metadata 与 _thread_in_native 等状态语义;01 篇已确认 thread.cpp:1832 transition_and_fence(_thread_new,_thread_in_vm) 是入口锚点)
 3. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 MAPPINGS/HS_MAP;注意 ART 变量改回当前文件)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
-4. 17 域完结后 → 第 4 批 10-metaspace(09 域悬念指向它)
+4. 17 域 4 篇完结后 → 第 4 批 10-metaspace(09 域悬念指向它)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
