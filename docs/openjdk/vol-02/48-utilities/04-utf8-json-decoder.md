@@ -1,7 +1,7 @@
 # 04. 三种格式工具 — modified UTF-8、JSON 解析、ELF 符号
 
 > **前置依赖**:[48-utilities/01 — vmError 引擎](01-vmerror.md):Decoder/ElfDecoder 的名字链——本篇拆它的底层 ELF 解析;48-utilities/02 — 并发数据结构
-> → **后续**:第 2 批 [02-assembler](openjdk/vol-02/02-assembler/01-*.md):MacroAssembler——45-02 的代码生成器就站在它肩上
+> → **后续**:[02-assembler/01 — CodeBuffer 与 AbstractAssembler](openjdk/vol-02/02-assembler/01-codebuffer-abstract-assembler.md):MacroAssembler——45-02 的代码生成器就站在它肩上
 > 关联域: 07-classfile(CONSTANT_Utf8_info)、13-jit(CompilerDirectives)、06-oops(字符串压缩)、23-stub
 
 ## 三种"格式",三个工具
@@ -115,4 +115,4 @@ bool ElfFile::is_elf_file(Elf_Ehdr& hdr) {
 
 "第 1 批(地基)收尾:OS、CPU、数学库、工具类——JVM 的地基全部就位。第 2 批从 **02-assembler** 开始:45-02 篇那个'把 C++ 的 `__ mulsd(...)` 调用解释成机器码'的生成器,它的底层是 assembler 抽象——`MacroAssembler` 如何成为 JVM 的'运行时汇编器',指令编码、重定位、CodeBuffer 的内存模型,这些是 JIT 编译器的地基。"
 
-> → 第 2 批 [02-assembler](openjdk/vol-02/02-assembler/01-*.md):MacroAssembler、指令编码与 CodeBuffer
+> → 第 2 批 [02-assembler/01 — CodeBuffer 与 AbstractAssembler](openjdk/vol-02/02-assembler/01-codebuffer-abstract-assembler.md):MacroAssembler、指令编码与 CodeBuffer

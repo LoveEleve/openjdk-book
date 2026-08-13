@@ -65,7 +65,7 @@
 | 38-perfdata | 1-2 | `38-perfdata/` 2 篇 | ✅ 38 域完结 |
 | 41-zip-jimage | 1-2 | `41-zip-jimage/` 2 篇 | ✅ 41 域完结 |
 | 42-core-native | 1-3 | `42-core-native/01-jni-system.md`(129 行)/02-process.md(264 行)/03-class-io.md(228 行) | ✅ **42 域完结,第 2 批收官** |
-| 07-classfile-classloader | 1-6 | `07-classfile-classloader/01-classfile-parser.md`(169 行)/02-verifier-stackmap.md(210 行)/03-symbol-string-table.md(229 行)/04-system-dictionary.md(141 行)/05-classloader-hierarchy.md(152 行)/06-jpms-modules.md(140 行) | ✅ 第 3 批进行中(6/7) |
+| 07-classfile-classloader | 1-6 | `07-classfile-classloader/01-classfile-parser.md`(169 行)/02-verifier-stackmap.md(216 行)/03-symbol-string-table.md(212 行)/04-system-dictionary.md(134 行)/05-classloader-hierarchy.md(125 行)/06-jpms-modules.md(131 行) | ✅ 第 3 批进行中(6/7) |
 
 **每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);各域 README/HANDOFF commit 见 git log。
 

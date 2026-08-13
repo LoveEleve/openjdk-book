@@ -1,7 +1,7 @@
 # 02. RegisterMap + JavaFrameAnchor — GC 怎么找到栈上的引用？
 
 > **前置依赖**：[01 — 原子与屏障](01-atomic-and-memory-order.md)：机器层原语；[01-os/03 — 线程](openjdk/vol-02/01-os/03-threads-and-sync.md)：线程栈
-> → **后续**：域 06 [OOPs — 对象模型](openjdk/vol-02/06-oops/01-object-model.md)
+> → **后续**:[06-oops/01 — 对象头](openjdk/vol-02/06-oops/01-markoop-oopdesc.md)
 > 关联域: 24-frame(栈遍历)、25-gc(根扫描)、15-c2(寄存器分配)
 
 ## GC 根扫描的一道难题:R12 里到底是 String 还是 int?
@@ -118,4 +118,4 @@ x86 的指令缓存**自动一致**——`ICache::flush` 走默认实现(no-op),
 
 "GC 怎么知道 R12 是 String 而不是 int?——JIT 编译时 C2 寄存器分配器生成的信息,配合 RegisterMap 的位置表和帧的 oop map。" 编译器知道每个寄存器的最终用途;JavaFrameAnchor 桥接 JNI 边界的栈帧切换——没有它,GC 在 native 调用中找不到 Java 的栈上引用。域 1-5 的全部基础设施——OS、汇编、配置、日志、原子操作——现在汇入一个更大的问题:**Java 对象到底是什么?**
 
-> → 域 06 [OOPs — oopDesc / Klass / markOop / compressedOop](openjdk/vol-02/06-oops/01-object-model.md)
+> → 域 06 [01 — 对象头](openjdk/vol-02/06-oops/01-markoop-oopdesc.md)
