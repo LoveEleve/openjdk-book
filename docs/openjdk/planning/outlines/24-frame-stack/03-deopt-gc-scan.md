@@ -12,6 +12,7 @@
 > - **StackValue::create_stack_value**(stackValue.cpp:37): Location 取址=寄存器→reg_map->location(VMReg),栈→unextended_sp+stack_offset(:48-55);窄化 int_in_long/float_in_dbl、narrowoop 解码(:60-110);StackValueCollection(stackValueCollection.hpp:30-50)带类型化访问器
 > - **RegisterMap**: _location[reg_count]+_location_valid 位图+_update_map(registerMap.hpp:52-66);location/set_location :90-109;与 OopMap 配合=sender_for_compiled_frame 里 OopMapSet::update_register_map+oopmapreg_to_location(frame_x86.cpp:476,01 篇)
 > - 实证: materials/commands/24-deopt-demo.txt(PrintCompilation: total 268ms C1+C2→270ms 传 Circle→C1 made not entrant→OSR→C2 made not entrant→重编译;**JDK11 JFR 无 jdk.Deoptimization 事件**);PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag 仅 debug 版
+> - **第 3 轮 REVIEW 修正(2026-08-13)**: ①"已入栈旧帧走到栈顶才 deopt"错——uncommon trap 只拆当前帧;其它帧由 **deoptimize_dependents(deoptimization.cpp:800-803)→Threads::deoptimized_wrt_marked_nmethods(thread.cpp:4625)→逐帧 should_be_deoptimized 当场 deopt(:2847-2858)**,下次 safepoint 全量拆;②C 堆原因=源码注释(deoptimization.cpp:1209-1211 "Since the Java thread being deoptimized will eventually adjust it's own stack, the vframeArray ... allocated in the C heap");③made not entrant 由 **uncommon trap 的 action** 直接标(deoptimization.cpp:1794-1825 Action_make_not_entrant/reinterpret),非依赖系统
 
 ### 1. "vframeArray — deopt 的核心数据结构"
 
