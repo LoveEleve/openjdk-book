@@ -2,7 +2,7 @@
 
 > **前置依赖**:[09-memory-core/02 — VirtualSpace](openjdk/vol-02/09-memory-core/02-virtualspace.md):VirtualSpace 之上"谁把区域切成可复用小块"就是这一篇;[09-memory-core/01 — Universe + CollectedHeap](openjdk/vol-02/09-memory-core/01-universe-heap.md):genesis 里就有 `ResourceMark rm`(universe.cpp:322);[07-classfile-classloader/01 — ClassFile 解析](openjdk/vol-02/07-classfile-classloader/01-classfile-parser.md):解析器是 ResourceArea 的大户(classFileParser.cpp 41 处 ResourceMark/ResourceArea)
 > → **后续**:[10-metaspace/01 — Metaspace 概览](openjdk/vol-02/10-metaspace/01-metaspace-overview.md)(类元数据怎么分配+回收)
-> 关联域: 09-memory-core(内存管理)、10-metaspace、16-code-cache、28-jvmti(JFR/JVMTI 也大量用 ResourceArea)
+> 关联域: 09-memory-core(内存管理)、10-metaspace、16-code-cache
 
 ## JVM 的 C++ 代码从哪拿内存
 
@@ -12,7 +12,7 @@
 
 ### 场景: 一堆短命对象,一次性丢弃
 
-G1 并发标记的每个任务循环要存临时结构(一个标记阶段就是一层 ResourceMark,g1ConcurrentMark.cpp:833),C2 编译要存 IR 节点图——单个分配很快,但数量多、生命周期短、而且**不需要逐个 free**——scope 一结束整批作废。Arena 就是为这种模式设计的: 大块内存切成 Chunk,分配只在 Chunk 里 bump 指针,释放=整批销毁 Arena。
+G1 并发标记的每个 worker 任务函数以一层 `ResourceMark` 打底(G1CMConcurrentMarkingTask::work,g1ConcurrentMark.cpp:833),C2 编译要存 IR 节点图——单个分配很快,但数量多、生命周期短、而且**不需要逐个 free**——scope 一结束整批作废。Arena 就是为这种模式设计的: 大块内存切成 Chunk,分配只在 Chunk 里 bump 指针,释放=整批销毁 Arena。
 
 ### Chunk: 四种规格的内存块
 
@@ -38,7 +38,7 @@ Chunk 是 Arena 的基本单位(arena.hpp:45-89),四种规格定义在枚举里(
   };
 ```
 
-注意两个细节: 规格**故意比 2^k 略小**(注释: 防止 buddy 式 malloc 的尺寸合并行为);`init_size`(1K-slack)是**第一个** chunk,32K-slack 是**后续默认** chunk——流传的"第一个 Chunk 就是 32KB"是错的(Arena 构造用 init_size,arena.cpp:244-251)。
+注意两个细节: 规格**故意比 2^k 略小**(注释原话: "guard against buddy-system style malloc implementations"——2^k 尺寸在 buddy 式分配器里有特殊合并/切分行为,略小一点让块走普通槽位);`init_size`(1K-slack)是**第一个** chunk,32K-slack 是**后续默认** chunk——流传的"第一个 Chunk 就是 32KB"是错的(Arena 构造用 init_size,arena.cpp:244-251)。
 
 ### Amalloc: 对齐 + 溢出检查 + bump
 
@@ -136,12 +136,12 @@ char* AllocateHeap(size_t size,
 
 它只是 `os::malloc` 的包装 + 失败策略(默认 OOM 直接 vm_exit,可换 RETURN_NULL)。NMT 的记账是 `os::malloc` 内部的事: 每个分配前垫一个 **16 字节的 `MallocHeader`**(mallocTracker.hpp:246,`assert(sizeof(MallocHeader) == sizeof(void*) * 2)` :263,内嵌 size/flags 与两个索引);**分配点调用栈并不内嵌**——`_pos_idx`/`_bucket_idx` 指向 `MallocSiteTable` 的槽位,`get_stack` 按索引查回调用栈(mallocTracker.cpp:92-94)。所以 `jcmd VM.native_memory detail` 能按 MEMFLAGS 与调用栈拆账,代价是每块 16 字节 + 一张全局调用栈表。配套的 `ReallocateHeap`/`FreeHeap` 同理,都是 os::realloc/os::free 的薄包装。
 
-## 4. GuardedMemory: debug 专属的 canary
+## 4. GuardedMemory: 裸指针的 canary 守卫
 
-`GuardedMemory`(guardedMemory.hpp:83)只在 debug 用途: 分配时在用户数据**前后各放一个 16 字节守卫**(`GUARD_SIZE = 16`,guardedMemory.hpp:96-98),守卫内容是 **`badResourceValue`(0xAB,globalDefinitions.hpp:1012)**——流传说法里的"0xBAADF00D/0xDEADBEEF"是 glibc MALLOC_CHECK_ 的值,JVM 没用。`Guard::verify()`(guardedMemory.hpp:107-112)逐字节核对,`verify_guards()`(guardedMemory.hpp:212)一头一尾各查一次: 头坏=underflow、尾坏=overflow。配套的 `wrap_copy`/`free_copy`(guardedMemory.cpp:31-54)负责包/拆: `wrap_copy` 分配 `get_total_size(len)` 外层块、把用户数据拷进守卫中间;`free_copy` 先 verify 再释放,守卫被踩坏会在此时暴露。
+`GuardedMemory`(guardedMemory.hpp:83)给"裸指针"加守卫,它的真实用户不是 debug 专属,而是 **jniCheck 模式**(-Xcheck:jni 打开时 JNI 层的参数/返回检查,jniCheck.cpp:384 用 `wrap_copy` 包数组元素、:395/:422-433 检查后 `free_copy`;`get_tag` 还能把原始指针存进守卫头): 分配时在用户数据**前后各放一个 16 字节守卫**(`GUARD_SIZE = 16`,guardedMemory.hpp:96-98),守卫内容是 **`badResourceValue`(0xAB,globalDefinitions.hpp:1012)**——流传说法里的"0xBAADF00D/0xDEADBEEF"是 glibc MALLOC_CHECK_ 的值,JVM 没用。`Guard::verify()`(guardedMemory.hpp:107-112)逐字节核对,`verify_guards()`(guardedMemory.hpp:212)一头一尾各查一次: 头坏=underflow、尾坏=overflow。配套的 `wrap_copy`/`free_copy`(guardedMemory.cpp:31-54)负责包/拆: `wrap_copy` 分配 `get_total_size(len)` 外层块、把用户数据拷进守卫中间;`free_copy` 先 verify 再释放,守卫被踩坏会在此时暴露。
 
 ## 核心悬念
 
-四种分配器到齐,09 域收官: Arena 用 Chunk + bump 把"一次分配整批释放"做到极致(Chunk 四规格防 buddy 合并、ChunkPool 四池 + 5 秒清算);ResourceArea 把它变成 per-thread 的栈式生命周期(ResourceMark 存档回滚 + next_chop 还块);AllocateHeap 是带 NMT 追踪的生产 malloc(16 字节头 + 调用栈表索引);GuardedMemory 用 0xAB 守卫在 debug 下抓越界。但有一个大客户一直没登场: **类元数据**——InstanceKlass、ConstantPool、Method 这些 07 域讲过的东西住在哪?它们既不在堆上(不是 Java 对象)也不在这些 Arena 里(生命周期与类一样长,不可整批回滚)——它们住在 **Metaspace**: VirtualSpaceNode → ChunkManager → Metablock 的专门世界。下一篇: Metaspace——类的元数据怎么分配与回收。
+四种分配器到齐,09 域收官: Arena 用 Chunk + bump 把"一次分配整批释放"做到极致(Chunk 四规格防 buddy 特殊行为、ChunkPool 四池 + 5 秒清算);ResourceArea 把它变成 per-thread 的栈式生命周期(ResourceMark 存档回滚 + next_chop 还块);AllocateHeap 是带 NMT 追踪的生产 malloc(16 字节头 + 调用栈表索引);GuardedMemory 用 0xAB 守卫抓越界(-Xcheck:jni 的 jniCheck 就是它的客户)。但有一个大客户一直没登场: **类元数据**——InstanceKlass、ConstantPool、Method 这些 07 域讲过的东西住在哪?它们既不在堆上(不是 Java 对象)也不在这些 Arena 里(生命周期与类一样长,不可整批回滚)——它们住在 **Metaspace**: VirtualSpaceNode → ChunkManager → Metablock 的专门世界。下一篇: Metaspace——类的元数据怎么分配与回收。
 
 > → [10-metaspace/01 — Metaspace 概览](openjdk/vol-02/10-metaspace/01-metaspace-overview.md)
