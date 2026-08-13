@@ -24,7 +24,7 @@ ObjectMonitor 的头文件注释把约束写得明明白白(objectMonitor.hpp:76
 //   the proper functioning of the VM.
 ```
 
-- **`_header` 必须在 offset 0**(:76): markOop 的 lock bits=11 时,剩余位存的是 **指向 ObjectMonitor 的指针**(带 tag 2)。GC/锁代码拿到这个指针后要"把它当 markOop 读 hash/age"——而 displaced markOop 就存在 `_header` 里。如果 _header 不在 offset 0,从 markOop 视角读到的就不是它;
+- **`_header` 必须在 offset 0**(:76): markOop 的 lock bits=10(`monitor_value=2`,markOop.hpp:152;注意 11 是 `marked_value=3`,GC markSweep 用,别混)时,剩余位存的是 **指向 ObjectMonitor 的指针**(带 tag 2)。GC/锁代码拿到这个指针后要"把它当 markOop 读 hash/age"——而 displaced markOop 就存在 `_header` 里。如果 _header 不在 offset 0,从 markOop 视角读到的就不是它;
 - **不能继承、不能有虚函数**(:79-80): 一有虚函数表,对象布局就带 vptr,_header 就不在 offset 0 了——所以整个类全是无虚函数的字段。
 
 ### 字段清单与 tag 减法
