@@ -275,7 +275,7 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
-### 6.23 08-03(InterpreterRuntime,大纲 8 处漂移含 3 处机制编造,2026-08-13)
+### 6.23 08-03(InterpreterRuntime,大纲 8 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"JRT_ENTRY" 错**: 解释器 runtime 用 **IRT_ENTRY 家族**(interfaceSupport.inline.hpp:445-466),JRT_ENTRY 是 JNI 通道(:468);JRT 与 IRT 宏体几乎相同(ThreadInVMfromJava+VM_ENTRY_BASE),真正禁用异步异常的是 IRT_ENTRY_NO_ASYNC(monitorenter 用);状态转换 RAII(trans_from_java,:224-232)+HandleMark+THREAD 约定;at_safepoint(:1176-1191)函数体近空——**safepoint 检查在 IRT_END 的析构隐式完成**(注释原话)
 - **"OopMapCache LRU + OopMapCacheSize ~1024" 编造**: 固定 32 槽哈希+3 步探测(oopMapCache.hpp:149-151 "Use fixed size for now"),无 LRU 无该 flag;每槽 2 位 oop/dead(:76-78)
 - **"InvocationCounter 递减到 0" 错**: 递增到阈值(_counter=[count29|carry1|state2],increment += 8);InterpreterInvocationLimit=CompileThreshold<<3(invocationCounter.cpp:148);BackwardBranchLimit 掺 OnStackReplacePercentage/InterpreterProfilePercentage(:156-158)
@@ -284,6 +284,7 @@
 - **模板侧 call_VM 链(大纲未提)**: interp_masm call_VM_base(interp_masm_x86.cpp:282-306 save/restore bcp)→macroAssembler call_VM_base(:2482-2550): c_rarg0=r15_thread、set_last_Java_frame(sp,fp,pc=NULL——**pc NULL 不写 anchor pc**,:799-802)、check_exceptions→forward_exception_entry(:2556-2560);LastFrameAccessor(interpreterRuntime.cpp:76-113)=thread->last_frame() 访问器
 - **ldc 模板分派**: 仅 tag=UnresolvedClass/UnresolvedClassInError/Class 时 call runtime(templateTable_x86.cpp:366-381),数字/字符串模板直处理
 - **实证**: Interpreter generation 0.65ms(startuptime);CounterDemo tier3→`%`tier4@4→tier4→made not entrant(08-interpreter-counterdemo.txt+PrintFlagsFinal 附注)
+- **第 3 轮 REVIEW 修正 5 处**: ①safepoint 检查在 ThreadStateTransition::transition 内(interfaceSupport.inline.hpp:111-123: 过渡态→serialize_thread_state→SafepointMechanism::block_if_requested→到态),构造(Java→VM)与析构(VM→Java)两向都有——不只 IRT_END;②call_VM_base 尾部 get_vm_result 把线程 vm_result 读回结果寄存器并清零(:2572-2574),模板取回结果的机制;③increment_mask_and_jump 机制=+8 写回→andl(scratch,mask)→jcc(zero)(interp_masm_x86.cpp:1956-1967);④forward_exception 跳转 :2556-2568(LP64 分支 jcc(equal,ok)+jump+bind(ok));⑤runtime 入口实为 46 个 IRT 宏+少数裸入口(frequency_counter_overflow 无宏),"60 多个"虚高
 
 ### 6.22 08-02(Template Interpreter,大纲 11 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"generate_all 三步" 错**: 真实十一段(templateInterpreterGenerator.cpp:57-263): 签名+错误出口→return 按长度 5 档(_return_entry[6] 0 空)→invoke return 按 TosState 10 档→earlyret→native 结果→safepoint 入口(InterpreterRuntime::at_safepoint)→异常 6 入口→方法入口 28 种(method_entry 宏,MethodKind 在 abstractInterpreter.hpp:59-61,zerolocals..abstract 7+math 11+refget 1+CRC 5+FD 4;MH 系列由 initialize_method_handle_entries 单独处理)→set_entry_points_for_all_bytes(遍历 256,is_defined→模板/否则 _unimplemented_bytecode stop)→safepoints_for_all_bytes→deopt 入口(_deopt_entry[7] 按长度)

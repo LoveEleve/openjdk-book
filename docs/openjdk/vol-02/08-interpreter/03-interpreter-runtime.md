@@ -6,7 +6,7 @@
 
 ## 模板解决不了的事,交给 C++
 
-02 篇的 `invokevirtual` 模板有 1280 字节——但它解决不了根本问题: 目标方法还没解析、对象还没分配、异常还不知道去哪找 handler。模板在关键节点 `call_VM` 调 C++(interpreterRuntime.cpp 的 60 多个入口),C++ 干完把结果放回,模板继续。这一篇拆这个通道的骨架: 入口宏怎么保证"从 Java 安全进入 VM 再回来"、调用点怎么留证据(anchor)、计数与 OSR 怎么触发编译、以及解释器帧的 OopMap 缓存长什么样。
+02 篇的 `invokevirtual` 模板有 1280 字节——但它解决不了根本问题: 目标方法还没解析、对象还没分配、异常还不知道去哪找 handler。模板在关键节点 `call_VM` 调 C++(interpreterRuntime.cpp 的 46 个 IRT 宏入口加少数裸入口),C++ 干完把结果放回,模板继续。这一篇拆这个通道的骨架: 入口宏怎么保证"从 Java 安全进入 VM 再回来"、调用点怎么留证据(anchor)、计数与 OSR 怎么触发编译、以及解释器帧的 OopMap 缓存长什么样。
 
 [实证:] Temurin OpenJDK 11.0.32: 解释器代码生成只要 **0.65ms**(startuptime 日志 "Interpreter generation, 0.0006472 secs");默认阈值 Tier3=2000/Tier4=15000(PrintFlagsFinal,见 materials/commands/08-interpreter-counterdemo.txt 附注);一个 3 万次调用的循环出现完整编译链(08-interpreter-counterdemo.txt): `tier 3`(C1 带 profiling)→ `% tier 4`(OSR,在循环 bci 4 处替换)→ `tier 4` 正常入口 → 旧版 `made not entrant`——这正是本篇计数机制的产物。
 
@@ -14,7 +14,7 @@
 
 ### 入口宏: 不是 JRT_ENTRY,是 IRT_ENTRY
 
-解释器 runtime 的入口都用 **IRT_ENTRY 家族**宏包装(interfaceSupport.inline.hpp:445-466,截取核心,逐字):
+解释器 runtime 的入口都用 **IRT_ENTRY 家族**宏包装(interfaceSupport.inline.hpp:441-466,截取核心,逐字):
 
 ```cpp
 // interfaceSupport.inline.hpp:441-466(截取核心,逐字)
@@ -72,7 +72,7 @@ IRT_ENTRY(void, InterpreterRuntime::at_safepoint(JavaThread* thread))
 IRT_END
 ```
 
-函数体几乎为空——**safepoint 检查在 IRT_ENTRY 的 `ThreadInVMfromJava` 析构(状态切回 Java 前)隐式完成**(注释 "IRT_END does an implicit safepoint check")。02 篇的轮询点把执行器引到这里,这里利用"Java→VM→Java"的状态往返完成真正等待。
+函数体几乎为空——**safepoint 检查在状态转换本身**: `ThreadStateTransition::transition` 里"从→过渡态→序列化→`SafepointMechanism::block_if_requested`→到"三步走(interfaceSupport.inline.hpp:111-123),构造(Java→VM)与析构(VM→Java)各做一遍(注释 "IRT_END does an implicit safepoint check" 说的是析构那一次)。02 篇的轮询点把执行器引到这里,这里利用状态转换完成真正等待。
 
 ## 2. 调用点: 模板怎么把证据留好
 
@@ -97,7 +97,7 @@ IRT_END
   MacroAssembler::call_VM_leaf_base(entry_point, number_of_arguments);
 ```
 
-三条动作: ①LP64 下把 `r15_thread` 放进 c_rarg0——**C 函数的第一个参数永远是** `JavaThread*`;②`set_last_Java_frame` 把当前的 sp/fp 记进线程的 JavaFrameAnchor(24-01 拆过: 栈遍历的起点)——C++ 侧 `thread->last_frame()` 就是从 anchor 取,注意 pc 参数传 NULL 时不写 anchor 的 pc(macroAssembler_x86.cpp:799-802 "last_java_pc is optional");③`call_VM_leaf_base` 直接调用。返回后 `reset_last_Java_frame` 清 anchor(:2549),再检查 popframe/earlyret(JVMTI),最后 `check_exceptions` 看线程的 pending_exception——非空就跳 `StubRoutines::forward_exception_entry()`(异常转发桩,:2556-2560)。
+三条动作: ①LP64 下把 `r15_thread` 放进 c_rarg0——**C 函数的第一个参数永远是** `JavaThread*`;②`set_last_Java_frame` 把当前的 sp/fp 记进线程的 JavaFrameAnchor(24-01 拆过: 栈遍历的起点)——C++ 侧 `thread->last_frame()` 就是从 anchor 取,注意 pc 参数传 NULL 时不写 anchor 的 pc(macroAssembler_x86.cpp:799-802 "last_java_pc is optional");③`call_VM_leaf_base` 直接调用。返回后 `reset_last_Java_frame` 清 anchor(:2549),再检查 popframe/earlyret(JVMTI),最后 `check_exceptions` 看线程的 pending_exception——非空就跳 `StubRoutines::forward_exception_entry()`(异常转发桩,:2556-2568);若模板声明了结果寄存器,尾部 `get_vm_result` 把线程里的 vm_result 读到寄存器并清零(:2572-2574)——这就是模板侧"取回 C++ 结果"的机制。
 
 **关键设计 (斜体)**: *"调用前留证据"让 C++ 侧什么都不用猜: `LastFrameAccessor`(interpreterRuntime.cpp:76-113)构造时 `thread->last_frame()` 一次取回帧,method/bcp/bci/cpCache entry/callee_receiver 全都能查——这就是为什么 runtime 函数签名只需要 `(JavaThread*, ...)`,不需要传帧指针。*
 
@@ -175,7 +175,7 @@ class InvocationCounter {
 
 方法进入解释器时 generate_normal_entry 里的 generate_counter_incr(templateInterpreterGenerator_x86.cpp:385-440)干活:
 
-- **TieredCompilation 下**: `increment_mask_and_jump`(interp_masm 宏)——计数加 8 后用掩码判断,**掩码实现"每 `2^k` 次才真正触发一次溢出检查"**(注释: "checking for negative value instead of overflow so we have a 'sticky' overflow test",:379-382)——这就是 `Tier*InvokeNotifyFreqLog` 通知频率的机械实现;
+- **TieredCompilation 下**: `increment_mask_and_jump`(interp_masm_x86.cpp:1956-1967)——计数器 +8 写回,`andl(scratch, mask)` 后 `jcc(zero)` 跳溢出;**mask 编码"每 `2^k` 次才真正触发一次溢出判断"**(注释: "checking for negative value instead of overflow so we have a 'sticky' overflow test",:379-382)——这就是 `Tier*InvokeNotifyFreqLog` 通知频率的机械实现;
 - **非 tiered**: 直接把 invocation + backedge 两个计数器求和,与 `InterpreterInvocationLimit` 比较(aboveEqual → overflow);
 - 溢出 → generate_counter_overflow → 调 `InterpreterRuntime::frequency_counter_overflow`。
 
