@@ -2,6 +2,15 @@
 
 > 🔴 Deep | 9 KP 中的 2 个核心机制
 > 读者处境: 加载一个类需要 InstanceKlass(~500B)+ConstantPool(~2KB)+Methods(~1KB each)。Metaspace 用 Chunk(大块, 4KB-4MB)+Metablock(小块, 在 Chunk 内 bump-pointer) 两级分配——大块从 VirtualSpace commit，小块极速分配。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/10-metaspace/02 已按真实源码成文~145 行,本大纲为规划期产物,机制描述以文章为准;注意本大纲的"8 种粒度"与 01 篇 ⚠️ 块已修正的 4 类自相矛盾,以 01 篇为准):
+> - **"8 种粒度 Specialized(1KB)/SmallClassic(2KB)/Small(4KB)/MediumClassic(8KB)/Medium(32KB)/Large(256KB)/Humongous/SpecializedHumongous" 全编造**: jdk11u 是 **4 类**(metaspaceCommon.hpp:95-101 ChunkIndex): Specialized=128 words(:36)/Small=512(class 256)(:38-39)/Medium=8K(class 4K)(:40-41)/Humongous;Chunk header 不是 "_word_size/_used_words/_prev/_next/_is_free 64B"——真实字段=_top(:88)/_sentinel MET(:95)/_chunk_type/_is_class(:97-98)/_is_tagged_free(:100)/_origin(:102,ChunkOrigin normal/pad/leftover/merge/split :55-66)/_use_count
+> - **ChunkManager free list**: 真实=**三个固定粒度 ChunkList**(chunkManager.hpp:50,_free_chunks[NumberOfFreeLists],NumberOfFreeLists=3 :101?)+**Humongous 走 ChunkTreeDictionary**(:59-60)——非"每粒度一个 free list 数组查更大粒度";SpaceManager::get_new_chunk(spaceManager.cpp:383-399)=chunk_freelist_allocate(chunkManager.cpp:540)→空则 vs_list()->get_new_chunk;split_chunk(chunkManager.cpp:342,切出带 origin_split :372)
+> - **"Metachunk::allocate: top+word_size>end→NULL" 简化但方向对**: 真实=Metachunk::allocate(metachunk.cpp:72-80)free_word_size()>=word_size 才 bump
+> - **BlockFreelist 不是 "SmallBlocks(<256B)/MediumBlocks(<2KB)/LargeBlocks(>=2KB)" 三档**(编造): 真实=**SmallBlocks 按 word_size 分桶的 FreeList 数组**(smallBlocks.hpp:33,_small_lists[word_size-min_size] :37,min=sizeof(Metablock)/max=sizeof(TreeChunk) :33-35)+**BinaryTreeDictionary<Metablock>**(blockFreelist.hpp:37/:43);return_block(blockFreelist.cpp:45-53): <small_block_max_size→桶,否则字典;**merge_with_next 不存在**
+> - **"MetaspaceArena" 不存在**(JDK15+): 真实=SpaceManager::deallocate(spaceManager.cpp:322-331,懒建 BlockFreelist)+SpaceManager::allocate(:401)
+> - **空洞不触发 chunk 提前归还**: chunk 归还=ClassLoader 卸载整组(CLD unload,07-05);Metablock 无指向 chunk 的链接(metablock.hpp:36-41 注释)
+> - 三层路径(99% bump/1% freelist/<0.01% commit)与 TLAB 同算法不同区域;悬念指向 03-virtualspace-arena-reclaim.md(标题 "03. VirtualSpace 与归还——chunk 从哪来又到哪去")✓
 
 ### 1. Metachunk — 8 种粒度
 
