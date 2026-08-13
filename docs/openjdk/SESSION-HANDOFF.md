@@ -274,7 +274,7 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
-### 6.22 08-02(Template Interpreter,大纲 11 处漂移含 3 处机制编造,2026-08-13)
+### 6.22 08-02(Template Interpreter,大纲 11 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"generate_all 三步" 错**: 真实十一段(templateInterpreterGenerator.cpp:57-263): 签名+错误出口→return 按长度 5 档(_return_entry[6] 0 空)→invoke return 按 TosState 10 档→earlyret→native 结果→safepoint 入口(InterpreterRuntime::at_safepoint)→异常 6 入口→方法入口 28 种(method_entry 宏,MethodKind 在 abstractInterpreter.hpp:59-61,zerolocals..abstract 7+math 11+refget 1+CRC 5+FD 4;MH 系列由 initialize_method_handle_entries 单独处理)→set_entry_points_for_all_bytes(遍历 256,is_defined→模板/否则 _unimplemented_bytecode stop)→safepoints_for_all_bytes→deopt 入口(_deopt_entry[7] 按长度)
 - **寄存器错**: x86_64 下 rlocals=r14、rbcp=r13(templateTable_x86.cpp:46-47),r13 是 bcp 不是 dispatch 表;locals_index 取负 index(negptr);dispatch=lea rscratch1, ExternalAddress(table)+jmp [rscratch1+rbx*8](interp_masm_x86.cpp:826-846),表地址每次 lea 不在寄存器
 - **"iload_0 模板 push(rax)+advance+dispatch_next" 错**: iload_0..3 生成器=**iload(int n)**(templateTable_x86.cpp:878-881)仅 3 行(transition+movl(rax,iaddress(n))),无 push 无 bcp 访问;**transition 只是断言**(templateTable.cpp:162-165);advance/dispatch 由 generate_and_dispatch 统一生成(:377-401,does_dispatch 模板自己跳走+should_not_reach_here)
@@ -284,6 +284,7 @@
 - **入口点家族(核心,大纲未提)**: DispatchTable::_table[10][256](templateInterpreter.hpp:65-83);set_short_entry_points(:345-362) tos_in!=vtos 时 vep=pop(state)(**pop=从栈装载到寄存器**,interp_masm_x86.cpp:678-704)+状态入口=本体;tos_in==vtos 走 set_vtos_entry_points(x86:1765-1794)=aep/fep/lep/iep 压栈序言+vep 共享本体;**tosca=栈顶值留寄存器不压栈**(templateInterpreter.hpp:40 注释);TosState 10 态 globalDefinitions.hpp:819-832
 - **safepoint 轮询内联(大纲未提)**: dispatch_base 每字节码 testb [r15_thread+polling_page_offset],置位跳 safept_table(:826-834);notice_safepoints **整表拷贝**(copy_table safept→active,templateInterpreter.cpp:293-325,非指针换向;safepoint 内 disjoint_words/外 atomic :282-291)——17-02/24-02 轮询点呼应
 - **0xCB-0xFF 修正(01 篇遗留)**: 未定义区是 **0xEF-0xFF 共 17 个**(239-255),0xCB-0xEE(203-238)是 36 条 fast 系列!01 篇第 3 轮 REVIEW 没抓到,本篇深审抓出,两篇正文+大纲已同步修正
+- **第 3 轮 REVIEW 修正 4 处**: ①wide 链精确化: _wide 模板 jump ArrayAddress→_wentry_point(templateTable_x86.cpp:4504-4510,"rbcp increment step is part of the individual wide bytecode implementations"),宽模板出口仍走共享表;②iadd 消费=iop2 的 pop_i(rdx)+addl(rax,rdx)(:1337-1340),非"消费 rax 两个操作数";③deopt 三态: reexecute 走 deopt_reexecute_entry(method,bcp),_return_register_finalizer 特判才走 deopt_reexecute_return_entry(templateInterpreter.cpp:339-352)——24-03 unpack 三态对应,别把两者混成一个;④字节码表初始化=init_globals→bytecodes_init(init.cpp:104),早于模板表;TemplateInterpreter::initialize 只做 TemplateTable::initialize+StubQueue+生成
 
 ### 6.21 08-01(Bytecode 定义表,08 域开篇,大纲 11 处漂移含 3 处机制编造,2026-08-13)
 - **"5 个静态数组 names/lengths/formats/flags/depths" 错**: 6 个数组(_name/_result_type/_depth/_lengths/_java_code/_flags,bytecodes.hpp:339-346),**没有 _format 数组**——format 字符串由 compute_flags(bytecodes.cpp:206-276)预编译成 _flags 位;两条压缩技巧: _lengths 一字节两用(低 4 位短长/高 4 位 wide 长,:397-398)、_flags 512 槽双页(低 256 普通/高 256 wide,:345,432-435)

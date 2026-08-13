@@ -14,7 +14,7 @@
 
 ### 启动时一次性生成,没有运行时编译
 
-解释器代码在 JVM 启动早期生成: `TemplateInterpreter::initialize()`(templateInterpreter.cpp:42-71)先初始化字节码表与模板表,然后 `new StubQueue(..., "Interpreter")`(:57)开出代码仓库,`TemplateInterpreterGenerator g(_code)`(:59)的构造函数一路执行 `generate_all()`——构造函数就是生成器(templateInterpreterGenerator.cpp:38-42)。生成完毕 `deallocate_unused_tail()` 把没用到的空间还给 CodeCache(:61)。`_active_table = _normal_table`(:70)挂上默认 dispatch 表。
+解释器代码在 JVM 启动流程中生成: 字节码定义表(01 篇)更早已由 `init_globals()` 的 `bytecodes_init()` 填好(init.cpp:104);随后 `TemplateInterpreter::initialize()`(templateInterpreter.cpp:42-71)先初始化模板表(`TemplateTable::initialize()`,:50),然后 `new StubQueue(..., "Interpreter")`(:57)开出代码仓库,`TemplateInterpreterGenerator g(_code)`(:59)的构造函数一路执行 `generate_all()`——构造函数就是生成器(templateInterpreterGenerator.cpp:38-42)。生成完毕 `deallocate_unused_tail()` 把没用到的空间还给 CodeCache(:61)。`_active_table = _normal_table`(:70)挂上默认 dispatch 表。
 
 `generate_all()`(templateInterpreterGenerator.cpp:57-263)不是大纲说的"三步",而是十一段,顺序如下:
 
@@ -90,7 +90,7 @@ void TemplateTable::def(Bytecodes::Code code, int flags, TosState in, TosState o
 }
 ```
 
-**关键设计 (斜体)**: *wide 指令没有独立 dispatch 表——注释解释了理由: "executed extremely rarely, it doesn't pay out to have an extra set of 5 dispatch tables"。窄格式与 wide 格式共享同一套 10×256 dispatch 表,wide 入口单列 `_wentry_point[256]`(templateInterpreter.hpp:134)。*
+**关键设计 (斜体)**: *wide 指令没有独立 dispatch 表——注释解释了理由: "executed extremely rarely, it doesn't pay out to have an extra set of 5 dispatch tables"。宽形式模板的入口单列 `_wentry_point[256]`(templateInterpreter.hpp:134): 执行到 `_wide`(196)时模板读第二字节,`jmp [_wentry_point + rbx*8]` 直接跳进被修饰指令的宽模板(templateTable_x86.cpp:4504-4510,注释: bcp 推进由各宽模板自己做);宽模板的出口仍走共享 dispatch 表。*
 
 ### 同一生成函数,多个模板: 参数化共享
 
@@ -190,7 +190,7 @@ void TemplateInterpreterGenerator::set_short_entry_points(Template* t, address& 
 }
 ```
 
-比如 `iadd` 的 tos_in=itos: 模板生成两段——vep 入口先 `pop(itos)`(把栈顶值装进 rax),然后 iep 入口直接是模板本体(消费 rax 里的两个操作数)。**dispatch 表里 iadd 的 itos 行指向本体、vtos 行指向"先补载再进本体"的序言**——执行器按自己当前的栈顶状态选行,两条路径共享一份本体。
+比如 `iadd` 的 tos_in=itos: 模板生成两段——vep 入口先 `pop(itos)`(从栈弹到 rax,把次栈顶让位),然后 iep 入口直接是模板本体;本体 `pop_i(rdx)` 从栈弹次栈顶、`addl(rax, rdx)` 与栈顶缓存相加(templateTable_x86.cpp:1337-1340)。**dispatch 表里 iadd 的 itos 行指向本体、vtos 行指向"先补载再进本体"的序言**——执行器按自己当前的栈顶状态选行,两条路径共享一份本体。
 
 tos_in=vtos 的模板(如 `iload_0`,vtos 入、itos 出)走 set_vtos_entry_points(templateInterpreterGenerator_x86.cpp:1765-1794,截取核心,逐字):
 
@@ -319,7 +319,7 @@ void TemplateInterpreter::notice_safepoints() {
 
 ### return 入口与 deopt 入口
 
-执行 `ireturn` 等返回指令时,模板知道**返回地址按什么方式跳回**(调用点指令的长度与栈顶类型),但不知道调用点的具体字节码——于是运行时按 (长度, 栈顶状态) 查 `_return_entry[6]`/`_invoke_return_entry[10]` 选返回入口(templateInterpreter.cpp:240-259)。deopt 同理: 24-03 拆过,unpack 重建的解释器帧按 bci 选 `deopt_entry(state, length)` 或 `deopt_reexecute_return_entry` 恢复执行——这些入口是 generate_all 第 11 段生成的(templateInterpreterGenerator.cpp:239-261): `_deopt_entry[7]` 按指令长度分档(1-6 字节 + reexecute 特例),每个档位家族覆盖 10 种栈顶状态;`_deopt_reexecute_return_entry` 复用 `_normal_table.entry(_return).entry(vtos)` 的返回入口(:258-260,保证 deopt 重执行后正常弹帧)。
+执行 `ireturn` 等返回指令时,模板知道**返回地址按什么方式跳回**(调用点指令的长度与栈顶类型),但不知道调用点的具体字节码——于是运行时按 (长度, 栈顶状态) 查 `_return_entry[6]`/`_invoke_return_entry[10]` 选返回入口(templateInterpreter.cpp:240-259)。deopt 同理: 24-03 拆过,unpack 重建的解释器帧按 bci 三态选入口——同步点→`deopt_entry(state, length)`、重执行→`deopt_reexecute_entry(method, bcp)`(内部对 `_return_register_finalizer` 特判走 `deopt_reexecute_return_entry`,templateInterpreter.cpp:339-352)、否则→`deopt_continue_after_entry`。这些入口都是 generate_all 第 11 段生成的(templateInterpreterGenerator.cpp:239-261): `_deopt_entry[7]` 按指令长度分档(索引 0 仅 vtos,:240-241),每个档位家族覆盖 10 种栈顶状态;`deopt_reexecute_return_entry` 复用 `_normal_table.entry(_return).entry(vtos)` 的返回入口(:258-260,保证 deopt 重执行后正常弹帧)。
 
 ## 核心悬念
 
