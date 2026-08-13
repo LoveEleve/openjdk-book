@@ -324,6 +324,14 @@
   - GC: unlink_or_oops_do(:402-417)=weak_oops_do(is_alive,f)死项清除+活项修引用;oops_do(:419-422);possibly_parallel_unlink(:429)桶分块
   - 维护: check_concurrent_work(:520-537)三条件(dead>live/load>PREF_AVG_LIST_LEN/dead>水位)→concurrent_work(:538-550,**grow 优先**顺带清死项)→grow(:455,GrowTask);**StringTableSize 默认 65536(globalDefinitions.hpp:483,非 60013)**
   - 实证: materials/commands/07-classfile-stringtable-log.txt(Concurrent work triggered live 3.05/dead 1.53 + Grown to size:131072=65536×2 + intern 语义 new==new false/intern true/literal==intern true)
+- **04 篇(SystemDictionary,大纲漂移 10 处含 2 处编造,重点沉淀)**: systemDictionary.cpp 3058 行/dictionary.cpp 626/placeholders.cpp 237/loaderConstraints.cpp 492 全在 share/classfile/
+  - **六步解析**(resolve_instance_class_or_null :629-830,大纲"三步走"严重简化): ①dictionary->find 带 protection domain(:643-646)②非 parallelCapable 拿类加载器对象锁 ObjectLocker(:655-668,与 Java 层 define 同锁)③锁内 find_class 复查(:678)④placeholder super_load_in_progress→handle_parallel_super_load(:690-712)⑤LOAD_INSTANCE 占位+load_instance_class+定义侧 check_constraints/record_dependency/update_dictionary(:720-831)⑥清理占位(:834-840)+protection domain 校验(:854-866);入口 resolve_or_null :244(数组/对象剥壳/普通)
+  - **PlaceholderTable(大纲未提,核心)**: Hashtable<Symbol*>(placeholders.hpp:37);LOAD_INSTANCE/LOAD_SUPER;bootstrap 在 SystemDictionary_lock wait 等第一请求者(:755-765);check_seen_thread→ClassCircularityError(:759-762,:796-800);RedefineClasses 靠占位符判断定义中(:729-731)
+  - **load_instance_class :1403**: bootstrap→模块可见性检查(:1407-1445)→CDS load_shared_class→ClassLoader::load_class→find_or_define_instance_class;用户 loader→JavaCalls::call_virtual 调 **Java 层 loadClass**(:1519-1530,双亲委派在 Java 层)
+  - **define_instance_class :1555**: check_constraints(:1577)→loader_addClass 注册 classes Vector(:1580-1587)→Compile_lock+add_to_hierarchy(:1593-1599)→update_dictionary(:1600-1603)→eager_initialize(:1605);**"allocate KlassID" 编造**
+  - **Dictionary : Hashtable<InstanceKlass*, mtClass>**(dictionary.hpp:42,非 Symbol-Klass 对);per-loader(ClassLoaderData 各一张,backpointer :50);find 带 pd 过滤(dictionary.cpp:334-345)
+  - **check_constraints 两层**(:2093): ①同 loader 重复定义→"attempted duplicate class definition"→LinkageError(:2115-2127,:2153)②LoaderConstraintTable 全局约束(check_or_update loaderConstraints.cpp:286-313,"loader constraint violation");record_dependency(:821)定义 loader 存活依赖
+  - 实证: materials/commands/07-classfile-dictionary-log.txt(双 URLClassLoader 同名 Shared 加载两次: class+load 两行 + la==lb false/same name true/instance== false)
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
