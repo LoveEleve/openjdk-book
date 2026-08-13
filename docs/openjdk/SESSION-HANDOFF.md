@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **61/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 9: 10/19 域完结 + 23 域 2/3) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **62/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 10: 11/19 域完结,**23 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 23-stub/03(Crypto+Math intrinsics——AES/SHA/大数运算怎么用硬件指令加速)。
+**下一步(唯一,无选择)**: 24-frame/01(Physical Frame——JVM 怎么表示一个栈帧)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,61 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训)。
 
@@ -43,13 +43,13 @@
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26,第 2 批收官)
 第 3 批(对象/类): 07(7/7) → 09(3/3) → 17(4/4)   ✅ **第 3 批完结(14 篇)**
-第 4 批(执行/帧): 10(3/3) → 19(4/4) → 23(2/3) → 24 → 08 → 31 → 44   🚧 进行中
+第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → 24 → 08 → 31 → 44   🚧 进行中
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 61 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 9):
+**已完成 62 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 10):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -70,7 +70,7 @@
 | 17-threads | 1-4 | `17-threads/01`(191 行)/02(192 行)/03(165 行)/04(188 行) | ✅ **17 域完结** |
 | 10-metaspace | 1-3 | `10-metaspace/01`(101 行)/02(142 行)/03(104 行) | ✅ **10 域完结** |
 | 19-sync | 1-4 | `19-sync/01`(157 行)/02(107 行)/03(179 行)/04(113 行) | ✅ **19 域完结** |
-| 23-stub | 1-2 | `23-stub/01-stub-entry.md`(128 行)/`02-arraycopy.md`(313 行) | 🚧 23 域进行中(2/3) |
+| 23-stub | 1-3 | `23-stub/01-stub-entry.md`(128 行)/`02-arraycopy.md`(313 行)/`03-crypto-math.md`(306 行) | ✅ **23 域完结** |
 
 **每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07/09 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官)+a487eac(第 3 轮深度 REVIEW 跨篇联动: String.value 永远 byte[] 修正 07-03、get_injected 行号 1563-1566 修正 07-01);**09域01=fb31f7b(正文+大纲回填)+791540e(README)+4b8b16c(第 3 轮 REVIEW)+f0b7b93(大纲同步);09域02=bf19c20(正文)+9eed025(大纲 ⚠️ 块 12 条)+81f8b56(README)+1727df9(第 3 轮 REVIEW);09域03=3593c9b(正文,09 域收官)+58c5e34(大纲 ⚠️ 块 10 条)+cb0dae2(README)+4cb5120(第 3 轮 REVIEW: GuardedMemory=jniCheck 客户)+d6a3ef7(大纲同步);17域01=bec47da(正文)+dc76829(大纲 ⚠️ 块 9 条)+bb94c20(README)+95b35a6(第 3 轮 REVIEW: ThreadShadow 定位/run 行号/PeriodicTask 断言);17域02=acb2a56(正文)+eee99a9(大纲 ⚠️ 块 7 条)+6f44acd(README)+28d805a(第 3 轮 REVIEW: native 安全条件/trans 死锁检测)+1497e84(大纲同步);17域03=5cf8686(正文)+ea83da0(大纲 ⚠️ 块 8 条)+ecc4ea2(README)+8973d1e(第 3 轮 REVIEW: xchg/is_a_protected/wake_up 实证);17域04=ede39e3(正文,17 域收官)+f552c23(大纲 ⚠️ 块 7 条)+a0c1128(README)+2c2836e(第 3 轮 REVIEW: 悬念批次标注/guard page 实证);10域01=2e39136(正文)+3085390(大纲 ⚠️ 块 8 条)+61e1635(README)+1d9a6e1(第 3 轮 REVIEW: satisfy_failed=VM_CollectForMetadataAllocation/narrow klass shift);10域02=86e977d(正文)+a0f87aa(大纲 ⚠️ 块 7 条)+7833fb7(README)+b821792(第 3 轮 REVIEW: ChunkOrigin 落点实证);10域03=fbf939c(正文,10 域收官)+32091d6(大纲 ⚠️ 块 7 条)+d291111(README)+141bfaf(第 3 轮 REVIEW: CDS 只读映射)+a025f46(大纲同步);19域01=7867d04(正文)+78c1b7a(大纲 ⚠️ 块 8 条)+c6fafae(README)+1529a52(第 3 轮 REVIEW: 汇编 biased 快路径/deflate safepoint 断言/epoch++ 实证);19域02=e009327(正文)+792e9c7(大纲 ⚠️ 块 7 条)+ebca669(README)+d7dd512(第 3 轮 REVIEW: lock bits=10 非 11)+c2048e6(大纲同步);19域03=84345bf(正文)+feb3803(大纲 ⚠️ 块 7 条)+60d5212(README)+3cbb278(第 3 轮 REVIEW: TATAS 实证/默认 QMode/ReenterI);19域04=ced36a2(正文,19 域收官)+fdcb458(大纲 ⚠️ 块 6 条)+316e712(README)+b234a82(第 3 轮 REVIEW: wait 行号/断言依据);23域01=88481ba(正文,128 行)+df084df(大纲 ⚠️ 块 6 条)+c7ffdd5(README)+a4b44b0(第 3 轮 REVIEW: throw 桩不返回实证/generate_all 内容修正)**。各域 README/HANDOFF commit 见 git log。
 
@@ -411,6 +411,18 @@
   - **实证方法论教训**: ①微基准 arraycopy 会被 C2 折叠(重复拷贝只有最终状态可观测→合并为一次)——必须循环内每次校验和(每 4096 字节采样读)防消除;②ping-pong 双数组也不够(JIT 可证最终状态相同);③单位坑: MB/s 当 GB/s 打印;④数组填全程 fill 的 32M 段致 1M 次迭代爆炸
   - 实证结果(AMD EPYC 9K65,TencentKona 17,UseAVX 0/2/3): 1K arraycopy 55.0→68.3 GB/s(SSE2→AVX2 +24%),手写循环 21.2=**3.2x**;64K 78.3 vs 40.1=2.0x;4M/32M 带宽瓶颈≈1.0x;64K fill AVX2/3 137-139 vs SSE2 85.8
   - 悬念→03-crypto-math(AES-NI/SHA-NI 硬件指令)
+- **23-03(Crypto + Math Intrinsics,23 域收官,大纲 10 处漂移含 4 处机制编造,2026-08-13)**:
+  - **行号全漂移**: AES :3016-4701/SHA :3692-3890/CRC :5185-5296/BigInteger :5297-5470/Math :5497-5700(stubGenerator_x86_64.cpp 共 6138 行);大纲 1300-1700/1700-2100/2200-2700/2700-3200 全错;CRC 表不在 stubRoutines_x86_64.cpp 而在 **stubRoutines_x86.cpp**(crc_table :132、k256 :324,64B 对齐)
+  - **"sha256rnds2 4 rounds in 1 instruction" 错**: 一条 rnds2=2 rounds;16 字节块=paddd(K)+rnds2×2=4 rounds(macroAssembler_x86_sha.cpp:271-300);**SHA-256 双路径**(supports_sha→SHA-NI fast_sha256,否则 AVX2 sha256_AVX2 :507)——开关只需 sse4_1 的原因(vm_version_x86.cpp:956-960);**SHA-512 无硬件指令**纯 AVX2(断言 avx2+bmi2 :3814-3815,sha512_AVX2 :1240)
+  - **"CRC32 纯查表" 半对**: kernel_crc32(macroAssembler_x86.cpp:9076)=查表对齐+**pclmulqdq 折叠**(fold_128bit_crc32 :9138)+尾部查表,**无 crc32 指令**;crc32 SSE4.2 指令属 **CRC32C**(crc32c_ipl_alg2_alt2 :9889,指令 :9671-9677);AVX-512 版 kernel_crc32_avx512 :9390
+  - **"montgomery* 是汇编桩" 错(编造)**: =C++ SharedRuntime::montgomery_multiply(sharedRuntime_x86_64.cpp:3811,32 位字),CAST_FROM_FN_PTR 登记(stubGenerator_x86_64.cpp:6111-6118)——**入口表挂名≠汇编桩,须查生成处**;另有大纲没提的 vectorizedMismatch :5357、base64 :4933
+  - **"_dlibm_sin_cos_huge 等" 仅 x86_32 生成**(stubGenerator_x86_32.cpp:3849-3862),x86_64 恒 NULL——"声明有、实现无"第三例(与 02 篇 zero_aligned_words 同类)
+  - **Math 桩=Intel LIBM 2016 移植**(macroAssembler_x86_exp.cpp 头注释 "Intel Math Library (LIBM) Source Code"),7 文件(fast_exp/sin/cos/tan/log/log10/pow)全 XMM 无 x87;fast_exp: 范围检查(32767/16527/15504)+ln2 倒数取整+多项式(0x3FC55555≈1/6、0x3FA55555≈1/24)
+  - **AES**: keylen {44,52,60}=展开密钥长度;密钥直接复用 Java 展开结果("the java expanded key ordering is just what we need" :3044)+pshufb 小端(load_key :2988);CBC 解密并行两版(VAES+AVX512 :4317/SSE :3400);GHASH 4×pclmulqdq(掩码 0/16/1/17)交叉 XOR :4693-4703
+  - **BigInteger**: multiply_to_len(macroAssembler_x86.cpp:8123)BMI2 分派(:8218-8236): mulx+adcx/adox 双进位链 :8030-8047(adcx 需 supports_adx);非 BMI2 回退 :7910;开关是 C2 flag(c2_globals.hpp:718,COMPILER2 才生成)
+  - **实证方法论**: 关闭 diagnostic flags 需先 -XX:+UnlockDiagnosticVMOptions(否则 VM 拒绝启动);Math.exp 微基准会被 C2 消除(i 派生常量)→ 必须数据依赖数组;素材 materials/commands/23-crypto-bench.txt
+  - 实证: SHA-256 1537→262 MB/s=**5.9x**;SHA-512(AVX2 软件)815→438=1.9x;AES-CBC 496→166=3.0x;CRC32 44704→3110=**14.4x**;Math.exp 4.0→7.0 ns/op=1.7x——"8x 加速"编造被实测取代
+  - 悬念→24-frame/01(Physical Frame)
 
 ---
 
@@ -439,8 +451,9 @@
 - [x] **19-sync/01-04**——✅ 19 域完结,commit 见 §二
 - [x] **23-stub/01**(stub-entry)——✅ 完成,commit 见 §二
 - [x] **23-stub/02**(arraycopy,SSE/AVX 向量化)——✅ 完成,commit 见 §二(正文 10d3239+大纲回填 b70cd1a+README 2e1c7cc)
-- [ ] **23-stub/03**(crypto-math,AES/SHA 硬件指令)——**下一篇**;大纲在 `planning/outlines/23-stub-routines/03-crypto-math.md`;02 篇悬念指向它
-- [ ] 23 域 3 篇完结后 → 24-frame-stack
+- [x] **23-stub/03**(crypto-math,AES/SHA 硬件指令)——✅ 完成,commit 见 §二(正文 235140b+大纲回填 6f584f3+README c1b8c07);**23 域 3/3 完结**
+- [ ] **24-frame/01**(physical-frame)——**下一篇**;大纲在 `planning/outlines/24-frame-stack/01-physical-frame.md`;03 篇悬念指向它
+- [ ] 24 域完结后 → 08-interpreter
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -476,10 +489,10 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/23-stub-routines/03-crypto-math.md(大纲,注意 ⚠️ 块——23-01 已回填 6 条、23-02 已回填 11 条,03 大概率同样漂移;02 篇悬念指向它: AES/SHA 硬件加速)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: stubGenerator_x86_64.cpp 的 generate_aescrypt_Block/shuffle_aes_bits、AES-NI aesenc/aesenclast、SHA-1/256/512 的 SHA-NI sha1rnds4/sha256rnds2 或查表实现、GHASH pclmulqdq、CRC32 查表 crc_table 预计算、BigInteger multiplyToLen/montgomeryMultiply、Math 超越函数 dsin/dcos/dtan/dlog/dexp;实证可用 openssl speed 或 JDK 自带 cipher 对比 AES-NI 开关(-XX:+UseAES/-XX:-UseAES))
+1. 读 planning/outlines/24-frame-stack/01-physical-frame.md(大纲,注意 ⚠️ 块——23 域三篇大纲均已回填: 01 六条/02 十一条/03 十条,24 大概率同样漂移;03 篇悬念指向它)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: share/runtime/frame.* 的 frame 抽象(interpreter/compiled/vtable stub 三类帧)、x86 帧布局 register_map/entry_frame、MacroAssembler::build_frame(01 篇 23-02 的 enter/leave 栈回溯与之呼应)、interpreted frame 的 locals/monitors 布局(与 19-sync 的 BasicObjectLock 呼应)、frame::sender/interpreter_frame 系列访问器;实证可用 jcmd Thread.print 抓几类帧或 -XX:+PrintInterpreter 布局)
 3. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 MAPPINGS/HS_MAP;注意 ART 变量改回当前文件;星号检查已修复,正文裸转义星号须加反引号)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
-4. 23 域 3 篇完结后 → 24-frame-stack
+4. 24 域完结后 → 08-interpreter
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
