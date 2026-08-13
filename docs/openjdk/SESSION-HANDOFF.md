@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **47/152 篇完成**(第 1 批 12 ✅ + 第 2 批 26 ✅ 收官 + 第 3 批 9: 07 域 7/7 完结 + 09 域 2/3) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **48/152 篇完成**(第 1 批 12 ✅ + 第 2 批 26 ✅ 收官 + 第 3 批 9: 07 域 7/7 完结 + 09 域 2/3) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 09-memory-core/03(Arena/ResourceArea——VM 自己的 C++ 内存分配器,09 域收官篇),之后进入 17-threads。
+**下一步(唯一,无选择)**: 17-threads(第 3 批第三个域)——09 域已完结(第 3 批第 2 个域收官)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,44 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训)。
 
@@ -42,14 +42,14 @@
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26,第 2 批收官)
-第 3 批(对象/类): 07(7/7 完结) → 09(2/3) → 17   🚧 进行中(09 域 03 下一篇)
+第 3 批(对象/类): 07(7/7) → 09(3/3) → 17   🚧 进行中(17 下一篇)
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 47 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 9):
+**已完成 48 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 10):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -66,9 +66,9 @@
 | 41-zip-jimage | 1-2 | `41-zip-jimage/` 2 篇 | ✅ 41 域完结 |
 | 42-core-native | 1-3 | `42-core-native/01-jni-system.md`(129 行)/02-process.md(264 行)/03-class-io.md(228 行) | ✅ **42 域完结,第 2 批收官** |
 | 07-classfile-classloader | 1-7 | `07-classfile-classloader/01`~`07` | ✅ **07 域完结(7 篇,第 3 批第 1 个域收官)** |
-| 09-memory-core | 1-2 | `09-memory-core/01-universe-heap.md`(222 行)/02-virtualspace.md(240 行) | 🚧 09 域进行中(2/3) |
+| 09-memory-core | 1-3 | `09-memory-core/01`(222 行)/02(240 行)/03(150 行) | ✅ **09 域完结(第 3 批第 2 个域收官)** |
 
-**每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07/09 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官)+a487eac(第 3 轮深度 REVIEW 跨篇联动: String.value 永远 byte[] 修正 07-03、get_injected 行号 1563-1566 修正 07-01);**09域01=fb31f7b(正文+大纲回填,09 域开篇,222 行)+791540e(README)+4b8b16c(第 3 轮 REVIEW: genesis 首步 allocate_fixup_lists/_bootstrapping 语义/OOME 池退回默认)+f0b7b93(大纲同步);09域02=bf19c20(正文,240 行)+9eed025(大纲 ⚠️ 块 12 条)+81f8b56(README,47/152)**。各域 README/HANDOFF commit 见 git log。
+**每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07/09 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官)+a487eac(第 3 轮深度 REVIEW 跨篇联动: String.value 永远 byte[] 修正 07-03、get_injected 行号 1563-1566 修正 07-01);**09域01=fb31f7b(正文+大纲回填)+791540e(README)+4b8b16c(第 3 轮 REVIEW)+f0b7b93(大纲同步);09域02=bf19c20(正文)+9eed025(大纲 ⚠️ 块 12 条)+81f8b56(README)+1727df9(第 3 轮 REVIEW);09域03=3593c9b(正文,09 域收官)+58c5e34(大纲 ⚠️ 块 10 条)+cb0dae2(README,48/152,第 3 批第 2 个域收官)**。各域 README/HANDOFF commit 见 git log。
 
 **已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(三篇)/07(01-07)/09(01)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 09-memory-core/02 前先读 09-01 大纲 ⚠️ 块(15 条,重点是时序/空数组语义/分配链)与 09-02 大纲;09-01 悬念承诺: G1CollectedHeap::initialize(:1533+)里 Reserve the maximum 的虚拟内存机制(ReservedSpace reserve + commit)是 09-02 的主角。**
 
@@ -313,6 +313,14 @@
   - **"CodeCache 用 VirtualSpace 三段" 错(张冠李戴)**: CodeCache=三个独立 CodeHeap(codeCache.hpp:89-92);VirtualSpace 用户=**Metaspace VirtualSpaceList**(metaspace/virtualSpaceList.hpp:39,metaspace.cpp:372);GC heap=ReservedHeapSpace+region 管理
   - **"HeapRegion 是 MemRegion 子类" 错**: HeapRegion : public G1ContiguousSpace(heapRegion.hpp:191);MemRegion=start+word_size 值类型(memRegion.hpp:48-49,:36-40 注释)
   - 悬念→03-arena-resourcearea-allocation(VirtualSpace 之上谁切小块/管理归还: Arena+ResourceArea)
+- **09-03(Arena+ResourceArea,09 域收官,大纲 10 处漂移含 5 处机制编造/错)**:
+  - **Chunk 四规格**(arena.hpp:55-70,**故意比 2^k 略小防 buddy 合并**): tiny=256-slack/init=1K-slack/medium=10K-slack/size=32K-slack;**首个 chunk 是 init_size 非 32K**(Arena 构造 :244-251);字段=_first/_chunk/_hwm/_max(:102-104);Amalloc(arena.hpp:144-159)=ARENA_ALIGN(16B)+overflow check+bump;grow(arena.cpp:360-383)=new Chunk→operator new 按长度匹配四池(:198-216);Afree 通常 NOP 仅最后一块回退(:202-210);析构=destruct_contents→chop 链还池(:309-323/:230-239)
+  - **ChunkPool 四静态池**(arena.cpp:49-52 large/medium/small/tiny): allocate(:75-88,ThreadCritical)/free(:91-103);**take_chunk/give_chunk 不存在**;ChunkPoolCleaner 5 秒 free_all_but(5)(:140-146/:169-181)
+  - **ResourceArea : Arena**(resourceArea.hpp:44)per-thread(thread.hpp:506,bias_to mtCompiler thread.cpp:3447);**ResourceMark 回滚含 next_chop 还块**(reset_to_mark :128-149,流传"只回指针"半对);allocate_bytes nesting 检查防泄漏(fatal "memory leak")(resourceArea.inline.hpp:31-43);**rollback(0) 不存在**
+  - **NMT MallocHeader=16 字节非 64**(mallocTracker.hpp:246,assert sizeof==2 指针 :263);**调用栈不内嵌**,_pos_idx/_bucket_idx→MallocSiteTable 索引查回(get_stack mallocTracker.cpp:92-94);AllocateHeap(allocation.cpp:39-49)=os::malloc+EXIT_OOM
+  - **GuardedMemory canary=badResourceValue 0xAB 非 0xBAADF00D/0xDEADBEEF**(globalDefinitions.hpp:1012,Guard::build/verify :96-112);GUARD_SIZE=16;**guarded_malloc 不存在**——wrap_copy/free_copy(guardedMemory.cpp:31-54)+verify_guards(:212)
+  - **大纲"GC marking bitmap 用 Arena"不准**: G1 bitmap 是 G1CMBitMap(独立 mapper);GC 真实用户=并发标记任务 ResourceMark(g1ConcurrentMark.cpp:833/1548/1578/1835)
+  - 悬念→10-metaspace/01(jdk11u **无 MetaspaceArena**(JDK15+ 术语),结构=VirtualSpaceNode→ChunkManager→Metablock)
 
 ---
 
@@ -335,8 +343,8 @@
 
 - [x] 第 1 批 12 篇 + 第 2 批 26 篇(02/03/04/06/16/38/41/42 域全完结)——✅ 收官
 - [x] **07-classfile-classloader/01-07**(classfile-parser/verifier-stackmap/symbol-string-table/system-dictionary/classloader-hierarchy/jpms-modules/**javaclasses-core-mirrors**)——✅ 07 域完结,commit 见 §二
-- [x] **09-memory-core/01-02**(universe-heap/virtualspace)——✅ 完成,commit 见 §二
-- [ ] **09-memory-core/03**(arena-resourcearea-allocation,VM 自己的 C++ 内存分配器,09 域收官)——大纲在 `planning/outlines/09-memory-core/03-arena-resourcearea-allocation.md`;09-02 悬念指向它(VirtualSpace 之上谁切小块/管理归还)
+- [x] **09-memory-core/01-03**(universe-heap/virtualspace/arena-resourcearea)——✅ **09 域完结(第 3 批第 2 个域收官)**,commit 见 §二
+- [ ] **17-threads**(第 3 批第三个域)——大纲在 `planning/outlines/17-threads/`;09 域悬念已指向 10-metaspace(第 4 批),17 域接续第 3 批对象/类主题
 - [ ] 09 域 3 篇完结后 → 17-threads
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -373,10 +381,10 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/09-memory-core/03-arena-resourcearea-allocation.md(大纲,注意 ⚠️ 块——09-01/02 已回填 27 条,09-03 大概率同样漂移;本篇是 09 域收官篇,09-02 的悬念指向它)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: arena.hpp/cpp 的 Chunk/Arena/Amalloc 与 free list、resourceArea.hpp/cpp 的 ResourceMark/栈式生命周期、allocation.hpp 的 AllocateHeap/NMT 追踪;文件名先 find 验证——arena.cpp/hpp、resourceArea.cpp/hpp、allocation.hpp 在 share/memory/)
+1. 读 planning/outlines/17-threads/ 的大纲(第 3 批第三个域;注意 ⚠️ 块——09 域 3 篇已回填 37 条,17 域大概率同样漂移;先 ls 17-threads 目录确认篇数)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;17 域涉及 thread.cpp/hpp、javaThread.cpp、threads.cpp(Threads 列表/VMThread)、threadSMR 等,文件名先 find 验证;本会话已深挖 thread.cpp 行号 3000+ 段(jstack print_on)与 1088-1102(create_initial_thread),可复用)
 3. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 MAPPINGS/HS_MAP;注意 ART 变量改回当前文件)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
-4. 09 域 3 篇完结后(第 3 批第二个域收官)→ 17-threads
+4. 17 域完结后 → 第 4 批 10-metaspace(09 域悬念指向它)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
