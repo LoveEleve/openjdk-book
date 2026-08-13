@@ -50,7 +50,7 @@ class Metachunk : public Metabase<Metachunk> {
 
 - **`_top`**(:88): chunk 内下一个可分配位置(图里的 top 线);
 - **`_chunk_type`/`_is_class`**(:97-98): 哪类粒度、属于哪个空间(决定归还到哪个 free list);
-- **`_origin`**(:102): **chunk 的出生记录**——normal(正常从已提交区切出)/pad(对齐填充)/leftover(整 Node 退役时剩下的)/merge(小块合并成)/split(大块切开)——调试与统计用;
+- **`_origin`**(:102): **chunk 的出生记录**——normal(正常从已提交区切出)/pad(对齐填充,virtualSpaceNode.cpp:339)/leftover(整 Node 退役时剩下的,枚举注释)/merge(退役时小块合并成,chunkManager.cpp:119)/split(大块切开,:372/:410)——调试与统计用;
 - **`_sentinel`**(:95): "MET" 魔数,debug 抓越界写。
 
 分配就是一次 bump(metachunk.cpp:72-80,截取核心,逐字):
