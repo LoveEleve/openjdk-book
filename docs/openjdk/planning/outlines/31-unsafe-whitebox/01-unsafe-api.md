@@ -2,6 +2,17 @@
 
 > 🔴 Deep | 1 KP 中的核心底层
 > 读者处境: `AtomicInteger.compareAndSet(0,1)` → `Unsafe.compareAndSwapInt(obj, offset, 0, 1)` → JVM `Unsafe_CompareAndSwapInt`。这些是 Java 并发核心——CAS/park/unpark/putOrderedObject——全通过 Unsafe 暴露。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/31-unsafe-whitebox/01 已按真实源码成文 151 行,本大纲为规划期产物,机制描述以文章为准):
+> - **CAS 单路径错(JDK8 形态)**: 大纲的 "jint* addr=(jint*)((address)p+offset); Atomic::cmpxchg(x,addr,e)==e" 是 JDK8 旧版;JDK11 是**双路径**(unsafe.cpp:907-918): obj==NULL→RawAccess<>::atomic_cmpxchg(堆外裸地址),obj!=NULL→HeapAccess<>::atomic_cmpxchg_at(堆内字段,**带 GC barrier**,06-05 access API);index_oop_from_field_offset_long(unsafe.cpp:122-135,p==NULL 返回裸地址,32 位截断处理);assert_field_offset_sane(:914,debug 校验)
+> - **行号全漂**: unsafe.cpp 共 1122 行;CAS 家族 :876-938、Park :939-955、Unpark :960-984、AllocateInstance :365-368、DefineAnonymousClass0 :830-862(+impl :741 起)、方法表 :1035-1109(40 条)、JVM_RegisterJDKInternalMiscUnsafeMethods :1116-1121(RegisterNatives 注册)、UNSAFE_ENTRY=JVM_ENTRY :64-70(interfaceSupport.inline.hpp:558-566,ThreadInVMfromNative);大纲 "40-200/300-400/400-550/500-600" 全错
+> - **"getUnsafe 检查 caller class loader" 半对**: **jdk.internal.misc.Unsafe.getUnsafe() 无任何检查**(return theUnsafe,Unsafe.java:88-91,靠模块系统封闭,java.base 内部包);**sun.misc.Unsafe 才有**(@CallerSensitive+Reflection.getCallerClass+VM.isSystemDomainLoader,sun_misc_Unsafe.java:95-102,抛 SecurityException("Unsafe"),jdk.unsupported 模块,委托 jdk.internal.misc);名字检查非能力检查——反射拿 theUnsafe 可绕(实证)
+> - **"allocateInstance 直接 allocate+zero fill" 半对**: 实际 = env->AllocObject(JNI 分配不调构造器,带 ThreadToNativeFromVM,unsafe.cpp:365-368);字段初始化器也不执行(实证 x=0)
+> - **"~200 方法" 错**: 方法表 `jdk_internal_misc_Unsafe_methods` 实为 40 条(unsafe.cpp:1035-1109)
+> - **JIT intrinsic 接线(大纲未提)**: 注释 unsafe.cpp:1112-1115 "The optimizer looks at names and signatures to recognize individual functions"——C2 按名字+签名认领 intrinsic(13-jit 域)
+> - **park/unpark(大纲细节补全)**: Parker 是 per-thread 等待原语(01-os/03 拆过 futex 实现,**与 19 域 monitor 等待的 ParkEvent 是两套东西**);Unpark 用 ThreadsListHandle+cv_internal_thread_to_JavaThread(线程已死静默跳过,17-03 SMR);"幽灵 unpark"(target 终止后 Parker 类型稳定内存被复用)注释原话
+> - **defineAnonymousClass**: JDK11 **无 deprecated 标记**(JDK15 JEP371 Hidden Classes 后废弃);host class 提供访问上下文,Lambda metafactory 使用
+> - **实证**: 08-unsafe-demo.txt(getUnsafe SecurityException/反射取 theUnsafe/String.value offset=12(mark 8+压缩 klass 4)/CAS 成功/allocateInstance x=0/pageSize 4096/addressSize 8)
 
 ### 1. "CAS — 原子比较并交换"
 
