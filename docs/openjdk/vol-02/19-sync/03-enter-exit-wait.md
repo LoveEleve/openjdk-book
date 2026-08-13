@@ -129,7 +129,7 @@ _exit 的注释把 _succ 的来历讲得清楚(objectMonitor.cpp:978-997,截取�
 
 ### 唤醒: ExitEpilog 的四步协议
 
-复杂出口按 `Knob_QMode` 挑人: QMode 2 直接唤醒 cxq 头;QMode 3/4 先把 **cxq 整段 drain 进 EntryList**(detach _cxq → TState 转 TS_ENTER → append 到 EntryList 尾,:1067-1115 的 bulk transfer)。最后都汇聚到 `ExitEpilog`(objectMonitor.cpp:1282-1314,截取核心,逐字):
+复杂出口按 `Knob_QMode` 挑人(:1051;默认 0,objectMonitor.cpp:136): **默认 EntryList 优先**——非空直接 ExitEpilog 唤醒表头(:1134-1147),EntryList 空才看 cxq(:1149);QMode 2 直接唤醒 cxq 头;QMode 3/4 先把 **cxq 整段 drain 进 EntryList**(detach _cxq → TState 转 TS_ENTER → prepend/append,:1067-1115 的 bulk transfer)。最后都汇聚到 `ExitEpilog`(objectMonitor.cpp:1282-1314,截取核心,逐字):
 
 ```cpp
 // objectMonitor.cpp:1282-1314(截取核心,逐字)
@@ -164,7 +164,7 @@ void ObjectMonitor::ExitEpilog(Thread * Self, ObjectWaiter * Wakee) {
 
 ### wait: 放弃锁,排队睡觉
 
-`wait`(objectMonitor.cpp:1426 起): 在 `_WaitSetLock`(自旋锁)保护下 `AddWaiter` 把自己挂进 **WaitSet**(:1483-1484),**保存 _recursions**(:1490)后 `exit` 掉锁(:1493)、`park()` 睡下。醒来后不是直接拿锁——**回到 EntryList 重新排队竞争**(和 01/02 篇的 enter 路径汇合),最后恢复 _recursions。注释里的关键点: park 前必须 reset 事件再检查竞争(防"先 notify 后 park 丢失唤醒")。
+`wait`(objectMonitor.cpp:1426 起): 在 `_WaitSetLock`(自旋锁)保护下 `AddWaiter` 把自己挂进 **WaitSet**(:1483-1484),**保存 _recursions**(:1490)后 `exit` 掉锁(:1493)、`park()` 睡下。醒来后不是直接拿锁——走 `ReenterI`(objectMonitor.cpp:692,注释: EnterI 慢路径后半段的特化,wait 重入专用)重新排队竞争,最后恢复 _recursions。注释里的关键点: park 前必须 reset 事件再检查竞争(防"先 notify 后 park 丢失唤醒")。
 
 ### notify: 只搬队列,不立即唤醒
 
