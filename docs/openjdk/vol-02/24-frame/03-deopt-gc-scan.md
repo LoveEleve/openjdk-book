@@ -33,7 +33,7 @@ vframeArray 是 CHeapObj(vframeArray.hpp:121,注释 "this can be a ResourceObj i
   vframeArrayElement           _elements[1];   // First variable section.
 ```
 
-**关键设计 (斜体)**: *_original 是"栈上那个要被拆的编译帧"的快照,后面重建解释器帧时以它为栈基准;`_elements[1]` 是柔性数组的惯用法——每个元素对应一个内联层(一层一个解释器帧),数组跟在固定头部之后分配。为什么非放 C 堆不可?因为 deopt 流程马上要**重写线程的栈**,打包的数据不能再依赖栈存活;而且 unpack 发生在"帧格式未知"的中间态。*
+**关键设计 (斜体)**: *_original 是"栈上那个要被拆的编译帧"的快照,后面重建解释器帧时以它为栈基准;`_elements[1]` 是柔性数组的惯用法——每个元素对应一个内联层(一层一个解释器帧),数组跟在固定头部之后分配。为什么非放 C 堆不可?create_vframeArray 的注释说得很直白(deoptimization.cpp:1209-1211): "Since the Java thread being deoptimized will eventually adjust it's own stack, the vframeArray containing the unpacking information is allocated in the C heap."——**deopt 流程马上要调整线程自己的栈**,打包的数据不能依赖栈内存存活。*
 
 ### 元素: 一个内联层 → 一个解释器帧
 
@@ -225,7 +225,7 @@ void vframeArrayElement::unpack_on_stack(int caller_actual_parameters,
 
 ### 实证: 生命周期看得见的部分
 
-[实证:] 24-deopt-demo.txt——PrintCompilation 记录了完整过程: `total` 268ms 出 C1(level 3)+C2(level 4);270ms 传入 Circle 触发类型检查失败 → C1 版 `made not entrant`;271ms 出 OSR 版(`%` = 栈上替换,替换当前循环帧);273ms C2 版也 `made not entrant`;随即按新画像重新编译。**made not entrant 之后,已入栈的旧帧逐个走到栈顶就 deopt 重建**——vframeArray 的打包/重建对每个这样的帧发生一次。JFR 的 jdk.Deoptimization 事件在 JDK 11 的 metadata.xml 里不存在,PrintCompilation 是能抓到的最近观测。
+[实证:] 24-deopt-demo.txt——PrintCompilation 记录了完整过程: `total` 268ms 出 C1(level 3)+C2(level 4);270ms 传入 Circle 触发类型检查失败 → C1 版 `made not entrant`;271ms 出 OSR 版(`%` = 栈上替换,替换当前循环帧);273ms C2 版也 `made not entrant`;随即按新画像重新编译。**made not entrant 之后,栈上仍挂在旧版本的帧怎么处理**: uncommon trap 只拆当前帧;其它帧(同线程更深层或别的线程)由依赖失效通知驱动——Deoptimization::deoptimize_dependents(deoptimization.cpp:800-803)→ Threads::deoptimized_wrt_marked_nmethods(thread.cpp:4625)→ 逐线程遍历所有帧,`should_be_deoptimized()` 的帧当场 deopt(thread.cpp:2847-2858)——**不是"走到栈顶才拆",是下一次 safepoint 检查时全量拆**。JFR 的 jdk.Deoptimization 事件在 JDK 11 的 metadata.xml 里不存在,PrintCompilation 是能抓到的最近观测。
 
 ## 5. GC 侧: RegisterMap 与 OopMap 的配合
 
