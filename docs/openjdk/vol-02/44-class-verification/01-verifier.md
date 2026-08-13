@@ -173,7 +173,7 @@ bool VerificationType::is_reference_assignable_from(
 }
 ```
 
-规则: null → 任何引用;同为 null → 拒绝;同名 → 通过;**目标是 Object → 全通过**;**目标是数组 → 组件类型递归**(`is_component_assignable_from`,基本类型组件必须完全相同);其余 → **`resolve_and_check_assignability` 解析类层次判子类/接口关系**。
+规则: null → 任何引用;同为 null → 拒绝;同名 → 通过;**目标是 Object → 全通过**;**目标是数组 → 组件类型递归**(`is_component_assignable_from`,基本类型组件必须完全相同);其余 → **`resolve_and_check_assignability`**(verificationType.cpp:47-77)解析类层次判子类/接口关系——**接口目标有特例: 数组只能赋给 `Cloneable`/`Serializable`,其他接口按 Object 处理**(注释原话 "we treat interfaces as java.lang.Object");对象对对象走 `is_subclass_of`。
 
 **关键设计 (斜体)**: *注意最后一步会触发类解析——07-02 说 StackMapTable 的类型项"只认名字不解析"(构造时不解析),但**可赋值性检查需要类层次,躲不开解析**。区分两层: 读类型项时只取名字(验证器不主动触发加载),判子类时按需解析(可能触发加载,也可能被 CDS 的 verification constraint 推迟到运行时——DumpSharedSpaces 分支)。验证器的"惰性解析"在这里体现。*
 
@@ -284,7 +284,7 @@ void StackMapFrame::initialize_object(
   }
 ```
 
-四层检查: ①**invokedynamic 的 3/4 字节必须为 0**(保留字节被篡改直接拒);②**`<init>` 只能由 invokespecial 调用**,其他 invoke 调 `<init>` → "Illegal call to internal method";③**invokespecial 的类可赋值性**(当前类必须是目标类的子类,匿名类走 host 类特例,还有间接超接口检查);④**参数按签名从后往前逐个 pop 匹配**——栈顶顺序与 descriptor 参数顺序相反,签名类型依次弹出,`pop_stack(sig_types[i], ...)` 内部就是 §3 的可赋值性判定。返回类型由调用方在检查完参数后推入。
+四层检查: ①**invokedynamic 的 3/4 字节必须为 0**(保留字节被篡改直接拒);②**`<init>` 只能由 invokespecial 调用**,其他 invoke 调 `<init>` → "Illegal call to internal method";③**invokespecial 的类可赋值性**(当前类必须是目标类的子类,匿名类走 host 类特例,还有间接超接口检查;invokevirtual 另有 protected 访问特例,:2681-2714);④**参数按签名从后往前逐个 pop 匹配**——栈顶顺序与 descriptor 参数顺序相反,签名类型依次弹出,`pop_stack(sig_types[i], ...)` 内部就是 §3 的可赋值性判定。返回类型由调用方在检查完参数后推入(:2725-2742,`change_sig_to_verificationType` 转签名类型逐个压栈,**`<init>` 的返回类型必须是 void**,否则拒绝)。
 
 ## 6. VerifyError 是怎么变成那条详细异常的
 

@@ -281,13 +281,14 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
-### 6.27 44-01(ClassVerifier 类型检查引擎,大纲行号全对(07-02 已验过 verifier.cpp),补充机制 7 条,2026-08-13)
+### 6.27 44-01(ClassVerifier 类型检查引擎,大纲行号全对(07-02 已验过 verifier.cpp),补充机制 7 条 + 第 3 轮 REVIEW,2026-08-13)
 - **VerificationType 真 union**: Symbol* 指针或编码数据(verificationType.hpp:48-62);低 2 位 TypeMask 顶层类别(Reference/Primitive/Uninitialized/TypeQuery)+第二字节类别(Category1/2/2_2nd)+高字节基本类型 descriminator;BciMask=0xffff<<8(Uninitialized 存 new 的 bci),BciForThis=(u2)-1(UninitializedThis);Query 类型=pop_stack 的通配符
 - **is_assignable_from 判定树**(verificationType.hpp:267-298): 相同/bogus 通过;Query 按类别;Boolean/Byte/Char/Short 接受 int(宽化);引用对引用→is_reference_assignable_from(verificationType.cpp:79-116: null→任何引用/同名/Object 全通过/数组组件递归 is_component_assignable_from(基本类型必须相同)/其余 resolve_and_check_assignability **会触发类解析**,CDS 下 add_verification_constraint 推迟)——07-02 "只认名字" 与 "判子类要解析" 两层区分
 - **Uninitialized 生命周期**: new→uninitialized_type(bci)(verifier.cpp:1652-1654);verify_invoke_init(verifier.cpp:2371-2420: UninitializedThis 只能调本类/超类 <init>;普通 Uninitialized 校验 bci 处确为 new;initialize_object 全帧替换 stackMapFrame.cpp:57-70;try 块内先验证异常处理器路径以未初始化结束)
 - **invoke 四层检查**(verifier.cpp:2600-2655): invokedynamic 3/4 字节必须 0;<init> 只能 invokespecial;invokespecial 类可赋值(匿名类 host 特例);参数从后往前 pop_stack 匹配
 - **VerifyError 路径**: verify_error 只记录(verifier.cpp:1978-1993),Verifier::verify 尾部 THROW_MSG_(:239);failover(:184-192,版本<51);TypeOrigin :97/ErrorContext :147;aload 模拟=verify_aload(:2832-2837 get_local reference_check,实证消息的出处)
 - **实证**: 08-verifier-demo.txt(iload_0→aload_0 一字节修改: 默认 VerifyError "Bad local variable type"+Reason+Current Frame 转储; -Xverify:none 照跑 result=3);注意改 class 文件时类名不能改(文件与类名匹配)
+- **第 3 轮 REVIEW 修正 2 处**: ①接口可赋值特例补全(resolve_and_check_assignability verificationType.cpp:47-77: 数组只可赋 Cloneable/Serializable,其他接口按 Object 处理,注释原话;对象对对象 is_subclass_of);②invoke 返回类型细节(:2725-2742 change_sig_to_verificationType 压栈,<init> 必须 void)+invokevirtual protected 特例(:2681-2714)
 
 ### 6.26 31-02(WhiteBox + Forte,31 域收官,大纲 6 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"WB_ENTRY 简化版 JVM_ENTRY" 错**: WB_ENTRY=JNI_ENTRY+ClearPendingJniExcCheck(whitebox.inline.hpp:33-37);WhiteBoxAPI diagnostic flag(globals.hpp:2600);JVM_RegisterWhiteBoxMethods 双门控(flag+null loader,:2348-2361);方法表 178 条(:2114-2342);WB_FullGC :1321-1330(soft_ref 清+collect wb_full_gc+G1 复位)/WB_G1IsHumongous :422-429(非 G1 抛异常)
