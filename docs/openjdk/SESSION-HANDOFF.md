@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **64/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 12: 11/19 域完结,**23 域完结**,24 域 2/3) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **65/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 13: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 24-frame/03(Deopt 重建 + GC 扫描——vframeArray 怎么重建解释器帧)。
+**下一步(唯一,无选择)**: 08-interpreter(解释器——字节码怎么执行,24 域三个域的消费方)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,61 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训)。
 
@@ -43,13 +43,13 @@
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26,第 2 批收官)
 第 3 批(对象/类): 07(7/7) → 09(3/3) → 17(4/4)   ✅ **第 3 批完结(14 篇)**
-第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → 24(2/3) → 08 → 31 → 44   🚧 进行中
+第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → 08 → 31 → 44   🚧 进行中
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 64 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 12):
+**已完成 65 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 13):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -71,7 +71,7 @@
 | 10-metaspace | 1-3 | `10-metaspace/01`(101 行)/02(142 行)/03(104 行) | ✅ **10 域完结** |
 | 19-sync | 1-4 | `19-sync/01`(157 行)/02(107 行)/03(179 行)/04(113 行) | ✅ **19 域完结** |
 | 23-stub | 1-3 | `23-stub/01-stub-entry.md`(128 行)/`02-arraycopy.md`(313 行)/`03-crypto-math.md`(306 行) | ✅ **23 域完结** |
-| 24-frame | 1-2 | `24-frame/01-physical-frame.md`(238 行)/`02-virtual-frame.md`(151 行) | 🚧 24 域进行中(2/3) |
+| 24-frame | 1-3 | `24-frame/01-physical-frame.md`(238 行)/`02-virtual-frame.md`(151 行)/`03-deopt-gc-scan.md`(268 行) | ✅ **24 域完结** |
 
 **每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07/09 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官)+a487eac(第 3 轮深度 REVIEW 跨篇联动: String.value 永远 byte[] 修正 07-03、get_injected 行号 1563-1566 修正 07-01);**09域01=fb31f7b(正文+大纲回填)+791540e(README)+4b8b16c(第 3 轮 REVIEW)+f0b7b93(大纲同步);09域02=bf19c20(正文)+9eed025(大纲 ⚠️ 块 12 条)+81f8b56(README)+1727df9(第 3 轮 REVIEW);09域03=3593c9b(正文,09 域收官)+58c5e34(大纲 ⚠️ 块 10 条)+cb0dae2(README)+4cb5120(第 3 轮 REVIEW: GuardedMemory=jniCheck 客户)+d6a3ef7(大纲同步);17域01=bec47da(正文)+dc76829(大纲 ⚠️ 块 9 条)+bb94c20(README)+95b35a6(第 3 轮 REVIEW: ThreadShadow 定位/run 行号/PeriodicTask 断言);17域02=acb2a56(正文)+eee99a9(大纲 ⚠️ 块 7 条)+6f44acd(README)+28d805a(第 3 轮 REVIEW: native 安全条件/trans 死锁检测)+1497e84(大纲同步);17域03=5cf8686(正文)+ea83da0(大纲 ⚠️ 块 8 条)+ecc4ea2(README)+8973d1e(第 3 轮 REVIEW: xchg/is_a_protected/wake_up 实证);17域04=ede39e3(正文,17 域收官)+f552c23(大纲 ⚠️ 块 7 条)+a0c1128(README)+2c2836e(第 3 轮 REVIEW: 悬念批次标注/guard page 实证);10域01=2e39136(正文)+3085390(大纲 ⚠️ 块 8 条)+61e1635(README)+1d9a6e1(第 3 轮 REVIEW: satisfy_failed=VM_CollectForMetadataAllocation/narrow klass shift);10域02=86e977d(正文)+a0f87aa(大纲 ⚠️ 块 7 条)+7833fb7(README)+b821792(第 3 轮 REVIEW: ChunkOrigin 落点实证);10域03=fbf939c(正文,10 域收官)+32091d6(大纲 ⚠️ 块 7 条)+d291111(README)+141bfaf(第 3 轮 REVIEW: CDS 只读映射)+a025f46(大纲同步);19域01=7867d04(正文)+78c1b7a(大纲 ⚠️ 块 8 条)+c6fafae(README)+1529a52(第 3 轮 REVIEW: 汇编 biased 快路径/deflate safepoint 断言/epoch++ 实证);19域02=e009327(正文)+792e9c7(大纲 ⚠️ 块 7 条)+ebca669(README)+d7dd512(第 3 轮 REVIEW: lock bits=10 非 11)+c2048e6(大纲同步);19域03=84345bf(正文)+feb3803(大纲 ⚠️ 块 7 条)+60d5212(README)+3cbb278(第 3 轮 REVIEW: TATAS 实证/默认 QMode/ReenterI);19域04=ced36a2(正文,19 域收官)+fdcb458(大纲 ⚠️ 块 6 条)+316e712(README)+b234a82(第 3 轮 REVIEW: wait 行号/断言依据);23域01=88481ba(正文,128 行)+df084df(大纲 ⚠️ 块 6 条)+c7ffdd5(README)+a4b44b0(第 3 轮 REVIEW: throw 桩不返回实证/generate_all 内容修正)**。各域 README/HANDOFF commit 见 git log。
 
@@ -477,8 +477,8 @@
 - [x] **23-stub/03**(crypto-math,AES/SHA 硬件指令)——✅ 完成,commit 见 §二(正文 235140b+大纲回填 6f584f3+README c1b8c07);**23 域 3/3 完结**
 - [x] **24-frame/01**(physical-frame)——✅ 完成,commit 见 §二(正文 4fd580d+大纲回填 0002994+README 894d505)
 - [x] **24-frame/02**(virtual-frame)——✅ 完成,commit 见 §二(正文 1632ba5+大纲回填 ba87c0e)
-- [ ] **24-frame/03**(deopt-gc-scan)——**下一篇**;大纲在 `planning/outlines/24-frame-stack/03-deopt-gc-scan.md`;02 篇悬念指向它
-- [ ] 24 域完结后 → 08-interpreter
+- [x] **24-frame/03**(deopt-gc-scan)——✅ 完成,commit 见 §二(正文 8850989+大纲回填 6ae67c0);**24 域 3/3 完结**
+- [ ] **08-interpreter**(字节码执行)——**下一篇**;24 域完结后接续
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -514,10 +514,10 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/24-frame-stack/02-virtual-frame.md(大纲,注意 ⚠️ 块——24-01 已回填 10 条,02 大概率同样漂移;01 篇悬念指向它: 内联三层怎么看到源级方法)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: vframe.hpp/vframe.cpp 的 javaVFrame/compiledVFrame/interpretedVFrame/nativeVFrame 四子类、vframeStream(fill_from_frame)、scopeDesc(编译帧内联树,pc→scope 反查)、RegisterMap 寄存器映射;与 01 篇 frame 的呼应: compiledVFrame::sender 沿物理帧还是内联树走;实证可用 jcmd Thread.print 已抓的素材(24-frame-demo.txt)+ JFR 采样栈)
+1. 读 planning/outlines/08-interpreter/ 大纲(注意 ⚠️ 块——24 域三篇大纲均已回填(01 十条/02 六条/03 九条),08 大概率同样漂移;24-03 篇悬念指向它: 解释器怎么执行字节码)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: templateTable.cpp/bytecodeInterpreter 的分派、解释器帧布局(24-01 已铺垫 offsets)、Interpreter::_code codelet(24-01 实证 271 个)、oopMapCache 计算器(24-01 已铺垫 per-Klass);与 24 域呼应: deopt 的 deopt_reexecute_entry/continue_after_entry 就是 08 域的入口模板;实证可用 -XX:+PrintInterpreter 布局+字节码跟踪)
 3. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 MAPPINGS/HS_MAP;注意 ART 变量改回当前文件;星号检查已修复,正文裸转义星号须加反引号)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
-4. 24 域完结后 → 08-interpreter
+4. 08 域完结后 → 31-unsafe
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
