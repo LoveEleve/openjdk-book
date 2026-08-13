@@ -18,7 +18,7 @@
 - **oopFactory 编造**: **无 new_instance、无 new_symbol**;只有 8 个 type array 工厂(:44-51 依赖 Universe::xxxArrayKlassObj)+new_objectArray(:54-58)+new_typeArray(:63)+new_objArray(:68)
 - **iterator.hpp:30-100 漂移**: OopClosure 在 :52-56(do_oop oop*/narrowOop* 双纯虚)、ObjectClosure 在 :161-165(do_object)
 - **预分配 OOME(大纲未提,重点)**: universe_post_init(universe.cpp:1002+)6 个 OOME(:1020-1029)+delayed SOE 消息(:1032-1034);gen_out_of_memory_error(:615-650)池机制(PreallocatedOutOfMemoryErrorCount,取池+搬消息+填栈帧,池尽退回默认)
-- **genesis 依赖顺序(大纲未提)**: compute_base_vtable_size→TypeArrayKlass×8(数组 Klass 先于普通类,vtable 长度继承 Object)→vmSymbols::initialize(:362)→SystemDictionary::initialize(:364)→mirrors→initialize_basic_type_klass×8→_objectArrayKlassObj;_bootstrapping FlagSetting(:324)
+- **genesis 依赖顺序(大纲未提)**: **allocate_fixup_lists(:328,mirror 补丁列表就绪)**→compute_base_vtable_size(:331)→TypeArrayKlass×8(数组 Klass 先于普通类,vtable 长度继承 Object)→vmSymbols::initialize(:362)→SystemDictionary::initialize(:364)→mirrors→initialize_basic_type_klass×8→_objectArrayKlassObj;_bootstrapping FlagSetting(:324,注释 "true during genesis" universe.hpp:209,**真实语义**: 数组 Klass 先不挂 super(arrayKlass.cpp:93)+vtable 引导期跳过(klassVtable.cpp:103-110),universe_post_init reinitialize_vtable_of 后补);**OOME 池尽退回 6 个默认 OOME 之一(default_err)非新分配**(gen_out_of_memory_error :623-641,池数组 :1084)
 - 悬念指向 02-virtualspace.md(标题 "02. VirtualSpace — reserve/commit 三级虚拟地址管理")✓
 
 ### 1. Universe::genesis — JVM 的"宇宙大爆炸"
