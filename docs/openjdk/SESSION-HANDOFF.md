@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **45/152 篇完成**(第 1 批 12 ✅ + 第 2 批 26 ✅ 收官 + 第 3 批 7: 07 域 7/7 完结) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **46/152 篇完成**(第 1 批 12 ✅ + 第 2 批 26 ✅ 收官 + 第 3 批 8: 07 域 7/7 完结 + 09 域 1/3) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 09-memory-core/01(Universe + CollectedHeap)——**第 3 批第二个域开篇**。07 域 7 篇已全部完结。
+**下一步(唯一,无选择)**: 09-memory-core/02(VirtualSpace——reserve/commit 虚拟地址管理,heap 底层的地基),之后 09 域 03(arena-resourcearea)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,44 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训)。
 
@@ -42,14 +42,14 @@
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26,第 2 批收官)
-第 3 批(对象/类): 07(7/7 完结) → 09 → 17   🚧 进行中(09 下一篇)
+第 3 批(对象/类): 07(7/7 完结) → 09(1/3) → 17   🚧 进行中(09 域 02 下一篇)
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 45 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 7):
+**已完成 46 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 8):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -66,10 +66,11 @@
 | 41-zip-jimage | 1-2 | `41-zip-jimage/` 2 篇 | ✅ 41 域完结 |
 | 42-core-native | 1-3 | `42-core-native/01-jni-system.md`(129 行)/02-process.md(264 行)/03-class-io.md(228 行) | ✅ **42 域完结,第 2 批收官** |
 | 07-classfile-classloader | 1-7 | `07-classfile-classloader/01`~`07` | ✅ **07 域完结(7 篇,第 3 批第 1 个域收官)** |
+| 09-memory-core | 1 | `09-memory-core/01-universe-heap.md`(222 行) | 🚧 09 域进行中(1/3) |
 
-**每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);**07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官,45/152)**。各域 README/HANDOFF commit 见 git log。
+**每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07/09 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官)+a487eac(第 3 轮深度 REVIEW 跨篇联动: String.value 永远 byte[] 修正 07-03、get_injected 行号 1563-1566 修正 07-01);**09域01=fb31f7b(正文+大纲回填,09 域开篇,222 行)+791540e(README,46/152)**。各域 README/HANDOFF commit 见 git log。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(三篇)/07(01-07)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 09-memory-core/01 前先读 09 大纲 ⚠️ 块(若有)与 07-07 悬念(镜像/堆的衔接: Universe::initialize_basic_type_mirrors/fixup_mirrors 在 systemDictionary.cpp:2022-2023,镜像分配在堆上)。**
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(三篇)/07(01-07)/09(01)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 09-memory-core/02 前先读 09-01 大纲 ⚠️ 块(15 条,重点是时序/空数组语义/分配链)与 09-02 大纲;09-01 悬念承诺: G1CollectedHeap::initialize(:1533+)里 Reserve the maximum 的虚拟内存机制(ReservedSpace reserve + commit)是 09-02 的主角。**
 
 ---
 
@@ -291,6 +292,19 @@
   - **mirror 可变大小**: create_mirror(:894+)=InstanceMirrorKlass::allocate_instance(instanceMirrorKlass.cpp:48-56,静态字段住镜像);oop_size/static_oop_field_count 自描述(:1279-1291 写/:58-60 读);initialize_static_field 写静态初始值(:744-789);fixup_mirror_list+Universe::fixup_mirrors(systemDictionary.cpp:2023)
   - 悬念→09-memory-core/01(Universe+CollectedHeap: 镜像分配在哪/堆怎么诞生)
 
+### 6.11 09-memory-core 域经验(2026-08-13,01 篇,第 3 批,大纲 15 处漂移含 6 处机制编造/错)
+- **时序(大纲全错)**: init_globals(init.cpp:101)里 **universe_init(:111)建堆**→universe2_init(:124)调 **Universe::genesis(universe.cpp:321-462)造第一批对象**→javaClasses_init(:125);genesis 不在 init_globals 直接调,`_verify_in_progress` 与 genesis 无关(:127 是 verify 开关 :1200-1264);**create_heap 在 universe_init 非 genesis**(initialize_heap :687/:766→Universe::create_heap :752-755→GCConfig::arguments()->create_heap(),gcConfig.cpp:237,gcArguments.hpp:41 纯虚→G1Arguments::create_heap g1Arguments.cpp:151-153);GC 选择=GCConfig::select_gc(gcConfig.cpp:146-183),ergonomics(:102-114)=**server-class→UseG1GC 否则 UseSerialGC**;new 只是 C++ 壳,**虚拟内存 reserve 在 G1CollectedHeap::initialize(g1CollectedHeap.cpp:1533+,"Reserve the maximum" :1556)**
+- **genesis 依赖序(大纲未提)**: compute_base_vtable_size(:331,:1115-1117=ClassLoader::compute_Object_vtable)→**TypeArrayKlass::create_klass×8(:334-341 数组 Klass 先于一切,vtable 长度继承 Object)**→_typeArrayKlassObjs(:343-350)→Metaspace 空数组(MetadataFactory::new_array :354-358)→vmSymbols::initialize(:362)→SystemDictionary::initialize(:364)→initialize_basic_type_mirrors(:464-509,9 个基本类型镜像 create_basic_type_mirror :478-495,**int.class 是 C++ 造的**)+fixup_mirrors(:511-534,"Bootstrap problem" 注释 :512-515,消化 javaClasses 的 fixup_mirror_list)→initialize_basic_type_klass×8(:306-317/:387-394,super=Object 挂层次)→_objectArrayKlassObj(:414-415)=Object_klass()->array_klass(1);_the_null_string/_the_min_jint_string(:368-369,ciEnv 复用 ciEnv.cpp:322-330)
+- **"new int[0] 返回预分配" 错(编造)**: genesis 的 _the_empty_*_array 是 **Metaspace 的 Array<T>**(C 数组)非堆对象;堆上预分配空数组只有 the_empty_class_klass_array(universe.cpp:1018,**用途=method.cpp:733 无 checked exception 的规范空 Class[]**);the_array_interfaces_array=数组类共享接口清单(填 Cloneable/Serializable :383-384)
+- **"genesis_oop 函数" 不存在(编造)**
+- **"oopFactory::new_instance/new_symbol" 不存在(编造)**: oopFactory.hpp:44-58 只有 8 个 type array 工厂(全部依赖 Universe::xxxArrayKlassObj)+new_objectArray/new_typeArray/new_objArray;oopFactory 客户=systemDictionary.cpp:1916 new_intArray(0) 系统类加载器锁对象
+- **CollectedHeap 在 share/gc/shared/collectedHeap.hpp:104 非 share/memory/heap.hpp**(heap.hpp 是 **CodeHeap**!);家族注释 :94-102;mem_allocate(:159-160 纯虚单对象)/allocate_new_tlab(:145-149 **三参数** min/requested/actual)/collect(:398)/object_iterate(:443)/safe_object_iterate(:447)/gc_cause(:299)/total_collections(:419)
+- **分配链(大纲"oopFactory→TLAB→G1Allocator"错)**: MemAllocator(share/gc/shared/memAllocator.cpp)allocate(:373-389)→mem_allocate(:362-369 TLAB 分派)→inside_tlab(:284-295 bump)→slow(:297+: **剩余>refill_waste_limit 放弃慢路径走 TLAB 外** :309-311,否则换新 TLAB :324)→outside_tlab(:270-281 heap->mem_allocate)→G1 attempt_allocation_humongous(:404)/attempt_allocation(:407);对象头=finish(:396-408 prototype_header mark+**release_set_klass**);System.gc 终点=JVM_GC(jvm.cpp:457-460)→heap()->collect(_java_lang_system_gc)
+- **non_oop_word**(universe.cpp:656-672)=os::non_memory_address_word()|1,**用途=compiledIC 内联缓存空目标占位**(compiledIC.cpp:61-63/:120),非"narrow oop 最高位编码"(编造)
+- **预分配 OOME(大纲未提)**: universe_post_init(universe.cpp:1002+)6 个(:1020-1029)+delayed SOE 消息(:1032-1034);gen_out_of_memory_error(:615-650)=**池机制**(PreallocatedOutOfMemoryErrorCount,取池+搬消息+填栈帧,池尽退回默认)
+- iterator.hpp: OopClosure :52-56(do_oop oop*/narrowOop* 双纯虚)/ObjectClosure :161-165(do_object)
+- 实证: 无新素材(纯源码推导,系统属性/JFR 已有素材未引用)
+
 ---
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
@@ -311,8 +325,9 @@
 ## 八、待办清单(按优先级)
 
 - [x] 第 1 批 12 篇 + 第 2 批 26 篇(02/03/04/06/16/38/41/42 域全完结)——✅ 收官
-- [x] **07-classfile-classloader/01-07**(classfile-parser/verifier-stackmap/symbol-string-table/system-dictionary/classloader-hierarchy/jpms-modules/**javaclasses-core-mirrors**)——✅ 07 域完结(第 3 批第 1 个域收官),commit 见 §二
-- [ ] **09-memory-core/01**(universe-heap,JVM 的 Genesis 与全局堆)——大纲在 `planning/outlines/09-memory-core/01-universe-heap.md`(标题 "01. Universe + CollectedHeap — JVM 的"Genesis"与全局堆");07-07 悬念与 09 大纲都指向它(镜像分配/空数组/initialize_basic_type_mirrors)
+- [x] **07-classfile-classloader/01-07**(classfile-parser/verifier-stackmap/symbol-string-table/system-dictionary/classloader-hierarchy/jpms-modules/**javaclasses-core-mirrors**)——✅ 07 域完结,commit 见 §二
+- [x] **09-memory-core/01**(universe-heap,Universe 的 Genesis 与全局堆)——✅ 完成,commit 见 §二
+- [ ] **09-memory-core/02**(virtualspace,reserve/commit 虚拟地址管理)——大纲在 `planning/outlines/09-memory-core/02-virtualspace.md`(标题 "02. VirtualSpace — reserve/commit 三级虚拟地址管理");09-01 悬念指向它(G1CollectedHeap::initialize 里 Reserve the maximum 的底层机制)
 - [ ] 09 域 3 篇完结后 → 17-threads
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -349,9 +364,9 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/09-memory-core/01-universe-heap.md(大纲,注意 ⚠️ 块;本篇是 09 域开篇,07-07 的悬念指向它: Universe::initialize_basic_type_mirrors/fixup_mirrors 在 systemDictionary.cpp:2022-2023,镜像分配在堆上)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: universe.cpp 的 Universe::genesis、CollectedHeap 虚基类 heap.hpp、oopFactory 工厂、initialize_basic_type_klass/空数组预分配;文件名先 find 验证——universe.cpp/hpp、heap.hpp、oopFactory.cpp、init.cpp 在 share/runtime/ 或 share/gc/ 或 share/memory/)
-3. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 MAPPINGS/HS_MAP)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
+1. 读 planning/outlines/09-memory-core/02-virtualspace.md(大纲,注意 ⚠️ 块——09-01 已回填 15 条,09-02 大概率同样漂移;本篇是 09 域第 2 篇,09-01 的悬念指向它: G1CollectedHeap::initialize(g1CollectedHeap.cpp:1533+)里 Reserve the maximum 的底层机制)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: virtualspace.hpp/cpp 的 ReservedSpace/ReservedSpace::initialize/reserve/commit 分层(low/high/lower/middle/higher)、os::reserve_memory/os::commit_memory 系统层;文件名先 find 验证——virtualspace.cpp/hpp 在 share/memory/,os_linux.cpp 在 os/linux/,os_posix.cpp 在 os/posix/)
+3. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 MAPPINGS/HS_MAP;注意 ART 变量改回当前文件)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
 4. 09 域 3 篇完结后(第 3 批第二个域收官)→ 17-threads
 ```
 
