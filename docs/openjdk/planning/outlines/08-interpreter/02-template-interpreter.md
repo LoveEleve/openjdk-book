@@ -2,6 +2,19 @@
 
 > 🔴 Deep | 13 KP 中的 2 个核心机制
 > 读者处境: `iload_0` 是 1B opcode——TemplateInterpreter 生成 ~10B x86 码——存在 CodeCache——每次执行跳过去。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/08-interpreter/02 已按真实源码成文 330 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"generate_all 三步(entry→bytecodes→return)" 错**: 真实=十一段(templateInterpreterGenerator.cpp:57-263): 慢签名+错误出口(:58-65)→return 入口按长度 5 档(_return_entry[6],0 空置,:86-105)→invoke return 按 TosState 10 档(:107-122)→earlyret(:124-138)→native 结果处理器(:140-151)→safepoint 入口(调 InterpreterRuntime::at_safepoint,:154-168)→异常+6 个 throw 入口(:170-182)→方法入口(method_entry 宏 28 种,:186-230)→set_entry_points_for_all_bytes 遍历 256(:233,:276-285)→set_safepoints_for_all_bytes(:237)→deopt 入口(_deopt_entry[7] 按长度,:239-261);顺序是依赖序
+> - **"InterpreterMacroAssembler movl(rax,[rsi+offset])(rsi=locals)" 寄存器错**: x86_64 下 rlocals=r14、rbcp=r13(templateTable_x86.cpp:46-47,r13 是 bcp 不是 dispatch 表);locals_index 取到的是负 index(negptr);iaddress(n)=Address(rlocals, local_offset_in_bytes(n))(:55)
+> - **"DispatchTable: _table[opcode]" 错**: 二维 **DispatchTable::_table[number_of_states][256]**(templateInterpreter.hpp:65-83),10 个栈顶状态 × 256 字节码;EntryPoint=10 状态地址家族(:43-59);set_entry 按状态逐个填(templateInterpreter.cpp:158-171)
+> - **"jmp Address(r13, rbx*8)(rbx=DispatchTable)" 错**: dispatch_base(interp_masm_x86.cpp:808-843)=**lea rscratch1, ExternalAddress(table) + jmp [rscratch1+rbx*8]**(表地址每次 lea);dispatch_next 先 load [bcp+step] 再 bcp+=step(防 AGI,:881-887)
+> - **"iload_0 模板: transition→movl→push(rax)→advance→dispatch_next" 错**: iload_0..3 的生成器是 **iload(int n)**(templateTable_x86.cpp:878-881,3 行: transition+movl(rax,iaddress(n)),**无 push 无 bcp 访问**);transition 只是断言不生成代码(templateTable.cpp:162-165);advance/dispatch 由 generate_and_dispatch 统一生成(templateInterpreterGenerator.cpp:377-401)
+> - **"iload_0 ~20B/生成 ~10B" 错**: 实测 iload_0=96B、iload=192B(iload() 含 RewriteFrequentPairs 重写检查读 bcp[1],:621-637)、iconst 7 个全 96B、iadd 64B、ldc 736B、invokevirtual 1280B(08-interpreter-templates.txt,Temurin 11);271 codelets avg 404B
+> - **"相同 tosState→共享 template(iload 和 fload 都 push 4B→模板相同)" 错**: 共享按**生成函数+arg 参数化**(iconst(arg)/iop2(Operation)/if_0cmp(Condition)/float_cmp(±1)/fast_accessfield(tos),templateTable.cpp:357,410-419,480-487),不是按 tosState;iload/fload 生成器不同
+> - **"TemplateTable::_itable[256]" 错**: 真实=_template_table/_template_table_wide 双表各 239 槽(templateTable.cpp:172-173);def 用 iswd 位选表,:186-203 断言 "wide instructions have vtos entry point only";wide 入口单列 _wentry_point[256](templateInterpreter.hpp:134)
+> - **入口点家族机制(大纲未提,核心)**: set_short_entry_points(templateInterpreterGenerator.cpp:345-362): tos_in!=vtos 时 vep=pop(state)+对应状态入口=本体(**pop 是从栈装载到寄存器**,interp_masm_x86.cpp:678-704);tos_in==vtos 走 set_vtos_entry_points(templateInterpreterGenerator_x86.cpp:1765-1794)=5 个压栈序言(aep push_ptr/fep push_f(xmm0)/lep push_l/iep push_i)+vep 共享本体;**栈顶值留在寄存器(tosca=Top-Of-Stack CAche,templateInterpreter.hpp:40)不压栈**;TosState 10 态在 globalDefinitions.hpp:819-832(btos=0..vtos=9)
+> - **safepoint 轮询内联(大纲未提)**: dispatch_base 里 testb [r15_thread+polling_page_offset] 每字节码轮询一次,置位跳 safept_table(:826-834);notice_safepoints 用 copy_table **整表拷贝** safept→active(templateInterpreter.cpp:293-325,非指针换向;atomic 词拷贝 :282-291)——17-02/24-02 呼应
+> - **"entry_points: _entry_table[MethodKind]——zerolocals/synchronized/native/accessor/empty" 部分对**: MethodKind 28 种(abstractInterpreter.hpp:59-61: zerolocals..abstract 7+math 11+reference_get 1+CRC32 5+Float/Double 4),method_handle_invoke_* 由 initialize_method_handle_entries 单独处理(templateInterpreterGenerator.cpp:211);generate_method_entry 分派(:405-486),zerolocals→generate_normal_entry(x86:1335)
 
 ### 1. TemplateInterpreter — 每条字节码的机器码生成
 
