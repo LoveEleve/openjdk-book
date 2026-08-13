@@ -2,6 +2,14 @@
 
 > 🔴 Deep | 3 KP 中的源级抽象
 > 读者处境: JFR 采了一个 stack trace——PC 在 C2 代码中。C2 内联了 A.bar()→B.baz()→C.qux() → 3 层内联只对应 1 个物理帧。JFR 需要展开成 3 个源级 frame。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/24-frame/02 已按真实源码成文 151 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"vframe 四子类含 nativeVFrame" 错(编造)**: **无 nativeVFrame**;真实家族=vframe(vframe.hpp:54,ResourceObj)→javaVFrame(:107,五纯虚 method/bci/locals/expressions/monitors :110-115)→interpretedVFrame(:160)/compiledVFrame(**vframe_hp.hpp:30**,非 vframe.hpp;scope=NULL 表示 native: vframe_hp.cpp:236-245);另支 externalVFrame(:204)→entryVFrame(:217);"vframe.hpp:40-120" 漂移
+> - **sender 双模式** ✓(compiledVFrame::sender vframe_hp.cpp:304-319: scope 非顶→同帧 scope->sender() 内联上层;scope 顶/native→vframe::sender()(vframe.cpp:103-108)=_fr.real_sender() 物理链;vframe::top :110-116)
+> - **vframeStream 位置错**: 类在 **vframe.hpp:268-330**(vframeStreamCommon,StackObj,_mode interpreted/compiled/at_end :274,_method/_bci 缓存 :279-280;vframeStream :332),**next() 在 vframe.inline.hpp:41-49**(非 vframe_hp.cpp:50-150);fill_from_frame :125-201(解释器→:204-222/编译 native→:118-123/编译→pc_desc_at→fill_from_compiled_frame :75-114 只解码 sender_decode_offset+method+bci 三字段/first+entry→at_end);fill_in_compiled_inlined_sender :66-72(serialized_null 判边界);构造 :51-64(last_frame 起)
+> - **ScopeDesc 链**: CompiledMethod::scope_desc_at(compiledMethod.cpp:218)=pc→PcDesc→scope_decode_offset;ScopeDesc(scopeDesc.hpp:60-108,sender :83/is_top :89,sender() 实现 scopeDesc.cpp:152);内联树=编译期压缩进 nmethod scopes_data 的单向链表
+> - **栈轨迹消费者**: JFR(jfrStackTrace.cpp:135 vframeStreamSamples : vframeStreamCommon)与 Thread.print(thread.cpp:3417 vframeStream vfst)都是 vframeStream 消费;jstack"每行一方法"=迭代器输出
+> - 实证: materials/commands/24-inline-demo.txt(-Xlog:jit+inlining=debug 显示 baz/qux/bar 层层 inline @1/@19 偏移 vs jcmd Thread.print 只有 InlineDemo.main 一行——内联层不出现为物理帧)
 
 ### 1. "物理帧 vs 源级帧" — frame→vframe 双层
 
