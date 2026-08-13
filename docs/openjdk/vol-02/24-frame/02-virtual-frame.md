@@ -6,7 +6,7 @@
 
 ## 一个物理帧,三层方法,怎么数?
 
-[实证:] 同一个程序两种视图(24-inline-demo.txt,main→bar→baz→qux 三层调用): 编译日志里 `InlineDemo::baz inline` → `qux inline` → `bar inline` 层层嵌套——C2 把三层方法内联进了 main 的编译单元;而 `jcmd Thread.print` 的 main 线程只有一行 `at InlineDemo.main`(第 9 行的 sleep)——**内联的 bar/baz/qux 在物理栈上根本不存在**,它们只是 main 这个 nmethod 里的一段机器码。但 GC 反优化、JFR 采样、调试器都要"当前在哪个源级方法"——物理帧回答不了。这一篇拆 vframe: 怎么把 1 个物理帧展开成 N 个源级帧。
+[实证:] 同一个程序四种证据(24-inline-demo.txt,OpenJDK 11 Temurin 11.0.32 与 jdk11u 源码同版本;main→bar→baz→qux 三层调用): ①编译日志里 `InlineDemo2::baz inline` → `qux inline` → `bar inline` 层层嵌套——C2 把三层方法内联进了 main 的编译单元(@ 11 调用点);②SIGQUIT 线程转储、③`jcmd Thread.print`、④JFR 采样栈——**三条路径都只有 `InlineDemo2.main` 一行**。而对照实验(NoInlineDemo: big 过大不内联)同版本 JDK 正常显示 big→mid→top→main 四层——**栈遍历路径没问题,差异全在"是否内联"**。为什么内联层看不见,不是"vframe 不展开",而是两个现实约束: 线程转储的遍历起点是**锚点 pc**(last_Java_pc,停在最近一次 Java→VM 转换点,scope 是 main);JFR 的采样 pc 虽真实,但**内联的纯算术代码段没有 PcDesc**(无安全点/调用点),pc→scope 反查失败就回退到 nmethod 的方法(main)。内联帧能现身的前提: 内联代码段里含调用点/安全点(有 PcDesc)——JFR 栈里常见的 StringBuilder 内联帧就是这种。物理帧只有一个(内联 = 机器码嵌入),这一半是确定的;虚拟层展开的可见性则取决于 pc 能否映射到内联 scope。这一篇拆 vframe: 展开机制本身长什么样。
 
 ## 1. vframe: 物理帧的"源级切片"
 
@@ -129,7 +129,7 @@ fill_from_frame(vframe.inline.hpp:125-201)的分派: 解释器帧 → fill_from_
 
 ### 与 JFR/Thread.print 的关系
 
-JFR 的栈轨迹采样(jfrStackTrace.cpp)和 `jcmd Thread.print` 的 Java 帧列表都是 vframeStream 的消费者——**jstack 里能看到的"每行一个方法"正是这个迭代器吐出来的**。实证里 InlineDemo 的线程转储只有 main 一行,不是 jstack 丢帧,而是物理帧里只有 main 的机器码;内联的三层要等 JFR 这类按 vframeStream 展开的消费者才现身。
+消费者分两条路,别混: **线程转储(SIGQUIT 转储 thread.cpp:3247、jcmd Thread.print 的 dumpThreads 路径 threadService.cpp:645-662)走 `vframe::sender()` 链**——从锚点 pc 的 scope 出发沿虚拟链展开;**JFR 采样(jfrStackTrace.cpp:135 的 vframeStreamSamples : vframeStreamCommon)走 vframeStream**。两者都能展开内联层,但展开的前提是"pc 能映射到内联 scope"(PcDesc 命中)——实证里纯算术内联无 PcDesc,所以三条路径都只显示 main;对照的不内联大方法(每个真实调用点都有 PcDesc)则正常显示四层。**"jstack 每行一个方法"是这两条链的输出,内联帧是否现身取决于 PcDesc 而不是"用没用 vframeStream"。**
 
 ## 3. 一张图串起来
 
