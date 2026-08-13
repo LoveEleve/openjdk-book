@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **73/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **74/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 1: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加要求再 REVIEW)** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 11-cds/01(CDS 全景 + Dump,大纲 `planning/outlines/11-cds/01-cds-overview-dump.md`,标题 "01. CDS 全景 + Dump — 序列化 1000+ 核心类到 archive",第 5 批第一域;第 4 批 21 篇全部完结)。
+**下一步(唯一,无选择)**: 11-cds/02(Load 端,大纲 `planning/outlines/11-cds/02-cds-load-shared.md`,标题 "02. Load — mmap archive → shared spaces → 类就绪";01 篇悬念指向它: mmap 之后怎么进 SystemDictionary)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,65 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训);⑧ **用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)**
 
@@ -44,12 +44,13 @@
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26)
 第 3 批(对象/类): 07(7/7) → 09(3/3) → 17(4/4)   ✅ 第 3 批完结(14 篇)
 第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(4/4 完结)** → **31(2/2 完结)** → **44(2/2 完结)**   ✅ **第 4 批收官**
+第 5 批(VM 核心): **11(1/2)** → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46   🚧 进行中
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 73 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21):
+**已完成 74 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 1):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -75,6 +76,7 @@
 | **08-interpreter** | 1-4 | `01-bytecodes-definition.md`(308)/02(330)/03-interpreter-runtime.md(244)/04-linkresolver-rewriter.md(269) | ✅ **08 域完结(本会话)** |
 | **31-unsafe** | 1-2 | `31-unsafe-whitebox/01-unsafe-api.md`(151)/02-whitebox-forte.md(132) | ✅ **31 域完结(本会话)** |
 | **44-class-verification** | 1-2 | `44-class-verification/01-verifier.md`(316)/02-verification-type.md(149) | ✅ **44 域完结,第 4 批收官(本会话)** |
+| **11-cds** | 1-2 | `11-cds/01-cds-overview-dump.md`(138) | 🚧 11 域 1/2(本会话) |
 
 ### 本会话 6 篇的 commit 清单(23-stub/02 起,按 git log 为准)
 
@@ -91,6 +93,7 @@
 **31-unsafe/02(WhiteBox + Forte)**: 正文 5b9a5d1 → 大纲回填 e53a138(⚠️ 6 条)→ README 78063ea(71/152,**31 域完结**)→ 下一步 44-class-verification/01
 **44-class-verification/01(ClassVerifier)**: 正文 f510ced → 大纲回填 8c22eb0(⚠️ 7 条,大纲行号全对,补充机制为主)→ README 31ffc0e(72/152,44 域 1/2)→ 下一步 44-class-verification/02
 **44-class-verification/02(VerificationType)**: 正文 97cceb3 → 大纲回填 9ec3c4b(⚠️ 7 条: Top=Bogus 别名/双槽 2_2nd/伪代码驳/签名窄化/悬念 11-cds)→ README 838b56d(73/152,**第 4 批收官**)→ 下一步 11-cds/01
+**11-cds/01(CDS 全景与 Dump)**: 正文 171bf24 → 大纲回填 a9dafe0(⚠️ 8 条: magic 0xF00BABA2/region 8 槽/link_and_serialize 编造/行号漂/序列化本质/默认路径)→ README a35de82(74/152,11 域 1/2,第 5 批开篇)→ 下一步 11-cds/02
 
 **本会话新增素材(全部 gitignore 不入库,在 materials/commands/)**:
 - `23-arraycopy-bench.txt`(UseAVX 0/2/3 各档 arraycopy/fill 吞吐 + PrintFlagsFinal 附注: UseFastStosb=false/UseXMMForObjInit=true)
@@ -282,6 +285,15 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
+### 6.29 11-01(CDS 全景与 Dump,第 5 批开篇,大纲 8 处漂移含 2 处机制编造,2026-08-13)
+- **"magic 0xF00BAAA2" 错**: 真实 0xF00BABA2(filemap.hpp:37);validate_header(filemap.cpp:1397)=header->validate+check_shared_paths_misc_info;validate_shared_path_table(:480)在**映射后**(注释 "this is done later")
+- **"5 个 space mc/rw/ro/md/od" 错**: od 是旧版;JDK11=**8 槽位**(metaspaceShared.hpp:66-85: mc/rw/ro/md+string×2+open archive×2),实证 dump 用 6 个(mc/rw/ro/md/st0/oa0);rw 33.4%+ro 60.3%=93.7%
+- **"link_and_serialize" 编造**: 真实=link_and_cleanup_shared_classes(:1680)+VM_PopulateDumpSharedSpace::doit(:1333-1410): Metaspace::freeze(VM 线程不能 GC 故冻结)→CollectClassesClosure→rewrite_nofast_bytecodes_and_calculate_fingerprints(08-04 nofast 落地)→combine_shared_dictionaries→remove_unshareable_in_classes(实证 Removing java_mirror)→**ArchiveCompactor::initialize+copy_and_compact**(压实+重定位,非逐个对象递归写)→dump_symbols/dump_java_heap_objects→relocate_well_known_klasses
+- **行号漂**: preload_and_dump :1632(大纲 200-600);preload_classes :1699=ClassLoaderExt::load_one_class 逐类加载(非大纲 "SystemDictionary::load_shared_class");ClassListParser :46/:78 只做行解析(# 注释/tab 归一),不碰 SymbolTable
+- **默认归档路径**: SharedArchiveFile 缺省=jvm_path 推导的 JVM 同目录 classes.jsa(arguments.cpp:3510-3529),非 jre/lib/server
+- **指针重定位本质**: 压缩 klass base(0x0000000800000000)与归档基址重合→dump 按假想地址摆对象,load 同址 mmap→ro 指针原样有效;堆配置(narrow_klass_base/oop)不匹配归档作废
+- **实证**: 08-cds-demo.txt+08-cds-dump-full.txt(dump 归档 1211 类含 1151 instance/11.9MB/6 空间区;启动 class+load 356 个 shared objects file);**写作期血泪 2**: preload_classes 块又凭记忆编了 is_loading_success 分支(真实 ClassLoaderExt::load_one_class)——第二次犯,深审必须逐行对源码
+
 ### 6.28 44-02(VerificationType 类型系统,第 4 批收官,大纲 7 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"Top vs Bogus 不同" 错**: top_type()=bogus_type() 别名(verificationType.hpp:130-131 注释 "alias");from_tag ITEM_Top->bogus(:33-45);bogus 放行=is_assignable_from 的 equals||is_bogus;帧构造全槽 bogus(stackMapFrame.cpp:43,46)
 - **"slot N+1=Top" 半对**: 文件规范如此,内存解析时 to_category2_2nd() 转 Long_2nd/Double_2nd(stackMapTable.cpp:300-307);内部 16 个类型=9 tag+4 签名窄化+2 次槽+Bogus
@@ -429,7 +441,7 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/11-cds/01-cds-overview-dump.md(注意 ⚠️ 块——44 域两篇大纲均已回填,11 大概率同样漂移;44-02 篇悬念指向它: 启动时怎么加速,1000+ 核心类序列化)
+1. 读 planning/outlines/11-cds/02-cds-load-shared.md(注意 ⚠️ 块——11-01 大纲已回填 8 条,02 大概率同样漂移;01 篇悬念指向它: mmap 之后怎么进 SystemDictionary)
 2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;重点: interpreterRuntime.cpp 的各类入口(resolve_ldc/resolve_invoke/new/throw...)、模板侧 call_VM 的调用点(templateTable.cpp:71-116 断言 calls_vm)、interp_masm 的 call_VM 封装(macroAssembler 层 JavaFrameAnchor/safepoint 处理)、JavaCalls/SharedRuntime 桥、safepoint 入口(InterpreterRuntime::at_safepoint,02 篇第 6 段生成)、invoke 的 resolve 流程;与 02 篇的 dispatch/轮询点/calls_vm 位呼应要在文中体现;03 大纲标题 = InterpreterRuntime,正文标题按 v5 格式)
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);容器后台进程用 wrapper 脚本管理;pgrep 用方括号;转储用 kill -3;jcmd attach 挂起时换 kill -3;class 版本注意 javac/java 同版本;javap -c 偏移差可与 def 表脚本核对(见 08-bytecodes-javap.txt)
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
