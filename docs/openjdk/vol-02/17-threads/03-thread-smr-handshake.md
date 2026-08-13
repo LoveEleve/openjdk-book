@@ -152,7 +152,7 @@ void HandshakeState::process_self_inner(JavaThread* thread) {
 
 线程在下一个安全点(self 路径)自己执行: 先抢占信号量(`trywait`,失败说明 VM 线程正在处理,就 `wait_with_safepoint_check` 等它),然后 `load_acquire` 取闭包,**先 `clear_handshake` 卸下武装再执行**(:430——先清后做,防止执行期间再来新请求),最后 `signal` 放行;
 
-- **VM 线程代办**(try_process_by_vmThread,handshake.cpp:481-516): 检查 `has_operation`(:486,没有就 `_no_operation`)→ `possibly_vmthread_can_process_handshake`(:491,目标线程不在安全状态就 `_not_safe`,让它自己发现)→ **`claim_handshake_for_vmthread`(:497,实现是 `_semaphore.trywait()` + 复查,handshake.cpp:470-479——流传的"CAS 独占"是错的,信号量抢占才是真相)** → 确认安全后 `do_handshake`(:508)→ `clear_handshake`(:510)→ `_success` → `signal`。
+- **VM 线程代办**(try_process_by_vmThread,handshake.cpp:481-516): 检查 `has_operation`(:486,没有就 `_no_operation`)→ `possibly_vmthread_can_process_handshake`(:491,保守检查、允许假阳性——ext_suspended/terminated 直接放行,handshake.cpp:446-456;不安全就 `_not_safe`,让目标线程自己发现)→ **`claim_handshake_for_vmthread`(:497,实现是 `_semaphore.trywait()` + 复查,handshake.cpp:470-479——流传的"CAS 独占"是错的,信号量抢占才是真相)** → `vmthread_can_process_handshake` 再确认安全(:505)后 `do_handshake`(:508)→ `clear_handshake`(:510)→ `_success` → `signal`。
 
 `Handshake::execute`(handshake.cpp:381-389)在 ThreadLocalHandshakes 下走 `VM_HandshakeAllThreads`(VM 操作,等所有线程处理),否则回退旧机制——全局 handshake 与单线程 handshake 共用同一套状态机。
 
