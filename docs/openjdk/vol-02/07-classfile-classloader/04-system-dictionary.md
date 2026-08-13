@@ -6,7 +6,7 @@
 
 ## 名字到类的第一道闸门
 
-`new String()` 的字节码是 `new #2`——#2 是常量池里的类引用,内容是名字 "java/lang/String"。JVM 拿着这个名字问的第一个问题是: **"这个加载器下,我定义过这个类吗?"** 回答这个问题的就是 SystemDictionary——一张把 (类名, 类加载器) 映射到 InstanceKlass 的全局字典,加上每个加载器自己的一张 per-loader 字典。这一篇拆名字到类的完整旅程: 解析入口、占位符与并发、字典查找与约束,以及两个加载器各带一份同名类文件的实证。
+`new String()` 的字节码是 `new #2`——#2 是常量池里的类引用,内容是名字 "java/lang/String"。JVM 拿着这个名字问的第一个问题是: **"这个加载器下,我定义过这个类吗?"** 回答这个问题的就是 SystemDictionary——类解析的总入口(静态工具类): 存储层面是**每个加载器一张 Dictionary**,另配全局的约束表与占位符表。这一篇拆名字到类的完整旅程: 解析入口、占位符与并发、字典查找与约束,以及两个加载器各带一份同名类文件的实证。
 
 ## 1. 解析入口: 一个名字怎么变成 Klass
 
@@ -37,12 +37,12 @@ Klass* SystemDictionary::resolve_or_null(Symbol* class_name, Handle class_loader
 
 主流程在 `resolve_instance_class_or_null`(systemDictionary.cpp:629-830),比流传的"三步走"复杂得多:
 
-1. **先查字典**(:643-646): `dictionary->find(d_hash, name, protection_domain)`——per-loader 字典,带保护域匹配;命中直接返回;
-2. **拿类加载器对象锁**(:650-668): 非 bootstrap、非 parallelCapable 的加载器,解析必须先持有 `ObjectLocker`——注释点明原因: 类加载器在 Java 层用对象锁防并发 define,这里必须同一把锁,否则等待者看不到已加载结果;
-3. **锁内复查**(:678-686): 持锁后 `find_class` 再查一次(可能别的线程刚加载完);
-4. **占位符检查**(:690-712): 若 PlaceholderTable 里有此类的 **LOAD_SUPER 占位**(父类加载中),走 `handle_parallel_super_load`——并行加载器下,父类可能由别的线程正在加载,这里协调等待;
-5. **占位、加载、定义**(:720-830): 自己放 LOAD_INSTANCE 占位 → `load_instance_class` 实际加载 → 若**定义加载器不是发起加载器**,`check_constraints` + `record_dependency` + `update_dictionary`(详见 §3);
-6. **清理占位 + 保护域**(:834-866): 移除 LOAD_INSTANCE 占位、通知等待者;最后校验 `protection_domain`(null 直接返回,否则 `is_valid_protection_domain`/`validate_protection_domain`)。
+1. **先查字典**(:653): `dictionary->find(d_hash, name, protection_domain)`——per-loader 字典,带保护域匹配;命中直接返回;
+2. **拿类加载器对象锁**(:678): 非 bootstrap、非 parallelCapable 的加载器,解析必须先持有 `ObjectLocker`——注释点明原因: 类加载器在 Java 层用对象锁防并发 define,这里必须同一把锁,否则等待者看不到已加载结果;
+3. **锁内复查**(:694): 持锁后 `find_class` 再查一次(可能别的线程刚加载完);
+4. **占位符检查**(:701-713): 若 PlaceholderTable 里有此类的 **LOAD_SUPER 占位**(父类加载中),走 `handle_parallel_super_load`——并行加载器下,父类可能由别的线程正在加载,这里协调等待;
+5. **占位、加载、定义**(:792-859): 自己放 LOAD_INSTANCE 占位 → `load_instance_class` 实际加载 → 若**定义加载器不是发起加载器**,`check_constraints` + `record_dependency` + `update_dictionary`(详见 §3);
+6. **清理占位 + 保护域**(:859-889): 移除 LOAD_INSTANCE 占位、通知等待者;最后校验 `protection_domain`(null 直接返回,否则 `is_valid_protection_domain`/`validate_protection_domain`)。
 
 **关键设计 (斜体)**: *"查→锁→再查→占位→加载"是教科书式的双重检查加锁,但锁有两把: **类加载器对象锁**(Java 层同步)和 **SystemDictionary_lock**(内部表锁)。占位符表是第三层保险——它专门处理"bootstrap 加载器不拿对象锁"和"parallelCapable 并发加载"两种无法用对象锁同步的情况。*
 
@@ -50,12 +50,12 @@ Klass* SystemDictionary::resolve_or_null(Symbol* class_name, Handle class_loader
 
 占位符表是 `Hashtable<Symbol*>`(placeholders.hpp:37),key 是类名,value 是 `PlaceholderEntry`——记录"谁正在加载这个类、加载到哪一步"。两种状态位(placeholders.hpp 的枚举):
 
-- **LOAD_INSTANCE**: 类本身的加载进行中。bootstrap 加载器不拿对象锁,靠它在 SystemDictionary_lock 上 `wait()` 等第一个请求者完成(:755-765);传统但破坏对象锁的加载器同理(`double_lock_wait`);如果**同一线程再次遇到自己的 LOAD_INSTANCE 占位**(`check_seen_thread`),说明出现了循环加载——直接抛 `ClassCircularityError`(:759-762,:796-800);
+- **LOAD_INSTANCE**: 类本身的加载进行中。bootstrap 加载器不拿对象锁,靠它在 SystemDictionary_lock 上 `wait()` 等第一个请求者完成(:768);传统但破坏对象锁的加载器同理(`double_lock_wait`);如果**同一线程再次遇到自己的 LOAD_INSTANCE 占位**(`check_seen_thread`),说明出现了循环加载——直接抛 `ClassCircularityError`(:759,:813);
 - **LOAD_SUPER**: 父类加载进行中。并行加载器解析子类时发现父类正被别的线程加载,协调等待并复用结果(:690-712)。
 
-占位符的生命周期被注释钉死: `resolve_instance_class_or_null` 开头加、结尾清(:834-840),"RedefineClasses 用占位符的存在判断类是否还在定义中"(:729-731)。
+占位符的生命周期被注释钉死: `resolve_instance_class_or_null` 开头加、结尾清(:859),"RedefineClasses 用占位符的存在判断类是否还在定义中"(:734)。
 
-**关键设计 (斜体)**: *占位符表是"加载中"状态的显式表达: 字典里只有"已定义"的类,占位符表里是"正在定义"的类。循环加载(ClassCircularityError)和并发加载(bootstrap/parallelCapable 的等待)都靠它区分——这也解释了为什么解析流程里"查字典"要做三次: 加锁前、加锁后、占位后,每一次都可能在上一刻刚完成。*
+**关键设计 (斜体)**: *占位符表是"加载中"状态的显式表达: 字典里只有"已定义"的类,占位符表里是"正在定义"的类。循环加载(ClassCircularityError)和并发加载(bootstrap/parallelCapable 的等待)都靠它区分——这也解释了为什么解析流程里"查字典"要做四次(:653 加锁前、:694 加锁后、:775 等待后、:800 占位后)——每一次都可能在上一刻刚完成。*
 
 ## 3. Dictionary 与约束: per-loader 字典 + 全局约束表
 
@@ -91,7 +91,7 @@ instance==:   false
 
 ### check_constraints: 两道检查
 
-`check_constraints`(systemDictionary.cpp:2093-2140)在定义时拦两道(截取核心,逐字):
+`check_constraints`(systemDictionary.cpp:2093-2155)在定义时拦两道(截取核心,逐字):
 
 ```cpp
 // systemDictionary.cpp:2108-2137(截取核心,逐字)
@@ -123,7 +123,7 @@ instance==:   false
 
 ### record_dependency: 非双亲委派的反向依赖
 
-发起加载器 ≠ 定义加载器时,还有一步 `record_dependency`(systemDictionary.cpp:821-824): 把定义加载器记进发起加载器的依赖——注释点明目的: **定义类加载器在发起加载器存活期间不能被卸载**,即使发起加载器已不再引用定义类。这是"类 A 由 L1 发起、由 L2 定义"场景下 GC 正确性的关键。
+发起加载器 ≠ 定义加载器时,还有一步 `record_dependency`(systemDictionary.cpp:836-840): 把定义加载器记进发起加载器的依赖——注释点明目的: **定义类加载器在发起加载器存活期间不能被卸载**,即使发起加载器已不再引用定义类。这是"类 A 由 L1 发起、由 L2 定义"场景下 GC 正确性的关键。
 
 **关键设计 (斜体)**: *per-loader 字典实现了"同名不同类"的隔离;全局 LoaderConstraintTable 实现了"同名字必须一致"的约束——一松一紧,正是类型安全的两个支柱。而 record_dependency 补上跨加载器引用的生命周期: 解析是"用别人的类",用完了得保证别人的类还活着。*
 
