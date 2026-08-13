@@ -12,7 +12,7 @@
 
 ### 结构: 09-02 的 VirtualSpace 是内核
 
-`VirtualSpaceNode`(virtualSpaceNode.hpp:42)管一个 mmap 区域: `_rs`(ReservedSpace,09-02 的 reserve)+ `_virtual_space`(09-02 的 VirtualSpace 三段提交)。`initialize`(virtualSpaceNode.cpp:500-526)做两件事: 断言 base/size 对齐到 `Metaspace::commit_alignment()`(:506-508,保证按同一粒度扩展),然后 `virtual_space()->initialize_with_granularity(_rs, pre_committed_size, commit_alignment)`(:516)——09-02 的三段初始化,special 的 Node 整块预提交。
+`VirtualSpaceNode`(virtualSpaceNode.hpp:42)管一个 mmap 区域: `_rs`(ReservedSpace,09-02 的 reserve)+ `_virtual_space`(09-02 的 VirtualSpace 三段提交)。`initialize`(virtualSpaceNode.cpp:500-526)做两件事: 断言 base/size 对齐到 `Metaspace::commit_alignment()`(:506-508,提交粒度默认页大小,metaspace.cpp:1248),然后 `virtual_space()->initialize_with_granularity(_rs, pre_committed_size, commit_alignment)`(:516)——09-02 的三段初始化,special 的 Node 整块预提交。
 
 ### expand: 先查未提交区,再 commit
 
@@ -95,7 +95,7 @@ Metaspace 与 PermGen 的本质差别在这里落地: **回收跟着 ClassLoader
 
 ## 4. CDS: 跨进程共享的类元数据
 
-最后一个话题,概要带过(细节在 11 域): **CDS(Class Data Sharing)**让多 JVM 进程共享同一份核心类元数据。dump 阶段(`MetaspaceShared::preload_and_dump`,metaspaceShared.cpp:1632)把启动时加载的核心类序列化进 archive;load 阶段(`initialize_shared_spaces`,:2100 → `map_shared_spaces`,:2034)把 archive **mmap 进预保留的共享地址**——这些类跳过 ClassFileParser 的解析(07-01 讲过: 解析器是慢路径,archive 是快路径,`shared objects file`)。`MAP_SHARED` 让多进程共享同一物理页,读时共享、redefine 时 COW。
+最后一个话题,概要带过(细节在 11 域): **CDS(Class Data Sharing)**让多 JVM 进程共享同一份核心类元数据。dump 阶段(`MetaspaceShared::preload_and_dump`,metaspaceShared.cpp:1632)把启动时加载的核心类序列化进 archive;load 阶段(`initialize_shared_spaces`,:2100 → `map_shared_spaces`,:2034)把 archive **mmap 进预保留的共享地址**——这些类跳过 ClassFileParser 的解析(07-01 讲过: 解析器是慢路径,archive 是快路径,`shared objects file`)。映射**默认只读**(`_read_only`,filemap.cpp:902-905;JVMTI 声明可改类时才放宽),多进程共享同一物理页,读时零成本。
 
 ## 核心悬念
 
