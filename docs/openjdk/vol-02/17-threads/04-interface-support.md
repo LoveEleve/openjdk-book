@@ -183,6 +183,6 @@ int JavaThread::java_suspend_self() {
 
 ## 核心悬念
 
-17 域收官: interfaceSupport 的守卫家族(ThreadInVMfromJava/ThreadInVMfromNative/ThreadToNativeFromVM/ThreadBlockInVM,加 ThreadInVMForHandshake 与 NoAsyncException 变体)把 02 篇的三拍转换包成"构造进、析构出"的 RAII——状态转换不可能漏,特殊条件(异步异常/挂起)在析构统一处理;自挂起协议让"被要求停"变成"安全位置自愿停"(SR_lock 双层 wait 处理竞态);守卫站在 JNI/解释器/运行时服务每个入口站岗。但这一切的前提是: 真的有人来"停世界"——safepoint 怎么把成百上千个线程都叫住、确认都安全?下一篇: 域 18 Safepoint。
+17 域收官: interfaceSupport 的守卫家族(ThreadInVMfromJava/ThreadInVMfromNative/ThreadToNativeFromVM/ThreadBlockInVM,加 ThreadInVMForHandshake 与 NoAsyncException 变体)把 02 篇的三拍转换包成"构造进、析构出"的 RAII——状态转换不可能漏,特殊条件(异步异常/挂起)在析构统一处理;自挂起协议让"被要求停"变成"安全位置自愿停"(SR_lock 双层 wait 处理竞态);守卫站在 JNI/解释器/运行时服务每个入口站岗。但这一切的前提是: 真的有人来"停世界"——safepoint 怎么把成百上千个线程都叫住、确认都安全?那是域 18 Safepoint(第 5 批)的事——第 4 批先补执行与帧的地基: 从 Metaspace(类元数据住哪)开始。
 
-> → 域 18 Safepoint
+> → 域 18 Safepoint(第 5 批)
