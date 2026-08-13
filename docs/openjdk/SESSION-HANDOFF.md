@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-12 | 卷 2 写作中: **44/152 篇完成**(第 1 批 12 ✅ + 第 2 批 26 ✅ 收官 + 第 3 批 6: 07 域 6/7) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **45/152 篇完成**(第 1 批 12 ✅ + 第 2 批 26 ✅ 收官 + 第 3 批 7: 07 域 7/7 完结) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 07-classfile-classloader/07(javaClasses 核心类镜像)——**07 域收官篇**,之后进入第 3 批 09-memory-core。
+**下一步(唯一,无选择)**: 09-memory-core/01(Universe + CollectedHeap)——**第 3 批第二个域开篇**。07 域 7 篇已全部完结。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,44 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训)。
 
@@ -42,14 +42,14 @@
 ```
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26,第 2 批收官)
-第 3 批(对象/类): 07(6/7) → 09 → 17   🚧 进行中
+第 3 批(对象/类): 07(7/7 完结) → 09 → 17   🚧 进行中(09 下一篇)
 第 4 批(执行/帧): 10 → 19 → 23 → 24 → 08 → 31 → 44
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 44 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 6):
+**已完成 45 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 7):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -65,11 +65,11 @@
 | 38-perfdata | 1-2 | `38-perfdata/` 2 篇 | ✅ 38 域完结 |
 | 41-zip-jimage | 1-2 | `41-zip-jimage/` 2 篇 | ✅ 41 域完结 |
 | 42-core-native | 1-3 | `42-core-native/01-jni-system.md`(129 行)/02-process.md(264 行)/03-class-io.md(228 行) | ✅ **42 域完结,第 2 批收官** |
-| 07-classfile-classloader | 1-6 | `07-classfile-classloader/01-classfile-parser.md`(169 行)/02-verifier-stackmap.md(216 行)/03-symbol-string-table.md(212 行)/04-system-dictionary.md(134 行)/05-classloader-hierarchy.md(125 行)/06-jpms-modules.md(131 行) | ✅ 第 3 批进行中(6/7) |
+| 07-classfile-classloader | 1-7 | `07-classfile-classloader/01`~`07` | ✅ **07 域完结(7 篇,第 3 批第 1 个域收官)** |
 
-**每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);各域 README/HANDOFF commit 见 git log。
+**每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);**07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官,45/152)**。各域 README/HANDOFF commit 见 git log。
 
-**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(三篇)/07(01-06)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 07-07(07 域收官)前先读 07-06 大纲 ⚠️ 块(10 处漂移含 3 处编造已回填: _exports/_uses/is_exported_to 不存在;导出在包级 PackageEntry;模块表 per-loader)。**
+**已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(三篇)/07(01-07)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 09-memory-core/01 前先读 09 大纲 ⚠️ 块(若有)与 07-07 悬念(镜像/堆的衔接: Universe::initialize_basic_type_mirrors/fixup_mirrors 在 systemDictionary.cpp:2022-2023,镜像分配在堆上)。**
 
 ---
 
@@ -281,6 +281,15 @@
   - **PackageEntry**(packageEntry.hpp:97): _module/_export_flags/_qualified_exports(:99-107);状态 is_exported(:134)/is_qual_exported/has_qual_exports_list(名单清空仍算导出防回退)/is_exported_allUnnamed/is_unqual_exported(:141-160);set_exported(packageEntry.cpp:91-110,unqual 不可转 qual :95-96)/set_is_exported_allUnnamed(:111-123,PKG_EXP_ALLUNNAMED);**is_exported_to 函数不存在**(编造)
   - **--add-exports 链路**(大纲误植 set_has_default_read_edges): ModuleBootstrap.java:646-730(处理 :652)→Modules.addExportsToAllUnnamed(:724)→JVM_AddModuleExportsToAllUnnamed(jvm.cpp:1024-1026)→set_is_exported_allUnnamed;检查在 Java 层(Reflection.verifyModuleAccess Reflection.java:203-212→Module.isExported :212,Module.java:453);字节码级=linkResolver.cpp:310-325(IllegalAccessError+verify_class_access_msg);加载侧=load_instance_class 模块可见性(07-04)
   - 实证: 07-classfile-modules.txt(IllegalAccessException "module java.base does not export jdk.internal.misc to unnamed module"↔--add-exports 后 addressSize()=8)
+- **07-07(javaClasses 核心类镜像,07 域收官,大纲漂移 8 处含 4 处机制编造/错)**:
+  - **镜像模式**: 每个核心 Java 类一个 AllStatic 镜像类(BASIC_JAVA_CLASSES_DO javaClasses.hpp:50-85 共 **31 个**: PART1 Class/String + PART2 29 个);偏移=启动时 find_local_field 一次(compute_offset javaClasses.cpp:121-144,找不到→vm_exit_during_initialization);两阶段: String/Class 在 resolve_well_known_classes(systemDictionary.cpp:2012-2015)先算,其余 29 个在 javaClasses_init→JavaClasses::compute_offsets(:4463-4482)+update_delayed_values(:4481,interpreter_init init.cpp:117 早于 javaClasses_init :125 的延迟常量补丁通道,jdk11u 模板表未实际使用)
+  - **"eetop 存 pthread_t" 错(编造)**: eetop=**JavaThread\* 指针**(:1641-1648 address_field);声明在 Thread.java:158("Fields reserved for exclusive use by the JVM")非注入字段;绑定先于 Java 构造器(create_initial_thread thread.cpp:1088-1102,注释: Thread 构造器调 Thread.current() 必须先有 eetop);退出清 NULL→is_alive false(:1885-1890);**jstack 一行三 ID**: #1=Java 层 tid 字段(thread_id :1753-1760,非 eetop!)、tid=JavaThread 地址(thread.cpp:923)、nid=pthread_t(osThread.cpp:41-42)——实证 42-process-reaper-thread.txt:13
+  - **isAlive 链路(无 Java 调用)**: Thread.java:1051 native→Thread.c:46→JVM_IsThreadAlive(jvm.cpp:2987-2992)→is_alive(:1687-1690 判 eetop 非空);threadStatus=JVMTI 状态位组合(javaClasses.hpp:407-434)
+  - **String**: value(byte[])/coder(LATIN1=0/UTF16=1,:107-111)/hash;is_latin1/length 在 javaClasses.inline.hpp:67-87(UTF16 >>1);C2 load_String_length=数组长度>>coder(graphKit.cpp:3887-3893,value_offset 直接入地址 :3895),Java 层 String.length() 同逻辑(String.java:658);StringDedup(stringDedupTable.cpp:345-393): value()/is_latin1()/hash 字段缓存(:361-375 先查后写,与 String.java:156 共享)/set_value 替换数组(:390)
+  - **"klass 字段存 compressed Klass* 再 decode" 错**: 存**全宽 Klass\***,as_Klass :1390-1396 用 metadata_field(oop.hpp:163,HeapAccess 直读,无窄指针编解码);getClass 链路=Object.java:72→jni_GetObjectClass(jni.cpp:1292-1300)→obj->klass()->java_mirror()(与 as_Klass 反方向;06-02 的 _java_mirror klass.hpp:139)
+  - **CLASS_INJECTED_FIELDS 在 :216-223 非 1562+**(1562 是 ALL_INJECTED_FIELDS);注入字段共 **14 个**(Class 7+ClassLoader 1+ResolvedMethodName 2+MemberName 1+CallSiteContext 1+StackFrameInfo 1+Module 1);may_be_java=false→JVM_ACC_FIELD_INTERNAL(fieldInfo.hpp:240);偏移走 _injected_fields 表(:85-87)+InjectedField::compute_offset(:4558-4580,AllFieldStream);compute_offsets :1545-1561(CLASS_FIELDS_DO :1538-1544 + 注入;init_lock/component_mirror C union :1555-1558)
+  - **mirror 可变大小**: create_mirror(:894+)=InstanceMirrorKlass::allocate_instance(instanceMirrorKlass.cpp:48-56,静态字段住镜像);oop_size/static_oop_field_count 自描述(:1279-1291 写/:58-60 读);initialize_static_field 写静态初始值(:744-789);fixup_mirror_list+Universe::fixup_mirrors(systemDictionary.cpp:2023)
+  - 悬念→09-memory-core/01(Universe+CollectedHeap: 镜像分配在哪/堆怎么诞生)
 
 ---
 
@@ -302,9 +311,9 @@
 ## 八、待办清单(按优先级)
 
 - [x] 第 1 批 12 篇 + 第 2 批 26 篇(02/03/04/06/16/38/41/42 域全完结)——✅ 收官
-- [x] **07-classfile-classloader/01-06**(classfile-parser/verifier-stackmap/symbol-string-table/system-dictionary/classloader-hierarchy/jpms-modules)——已完结,见 §二 commit
-- [ ] **07-classfile-classloader/07**(javaclasses-core-mirrors,07 域收官)——大纲在 `planning/outlines/07-classfile-classloader/07-javaclasses-core-mirrors.md`(标题 "07. javaClasses — String/Class/Thread 的 JVM 内建镜像")
-- [ ] 07 域 7 篇完结后 → 第 3 批 09-memory-core → 17-threads
+- [x] **07-classfile-classloader/01-07**(classfile-parser/verifier-stackmap/symbol-string-table/system-dictionary/classloader-hierarchy/jpms-modules/**javaclasses-core-mirrors**)——✅ 07 域完结(第 3 批第 1 个域收官),commit 见 §二
+- [ ] **09-memory-core/01**(universe-heap,JVM 的 Genesis 与全局堆)——大纲在 `planning/outlines/09-memory-core/01-universe-heap.md`(标题 "01. Universe + CollectedHeap — JVM 的"Genesis"与全局堆");07-07 悬念与 09 大纲都指向它(镜像分配/空数组/initialize_basic_type_mirrors)
+- [ ] 09 域 3 篇完结后 → 17-threads
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -340,10 +349,10 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/07-classfile-classloader/07-javaclasses-core-mirrors.md(大纲,注意 ⚠️ 块——06 篇 10 处漂移已回填;本篇是 07 域收官篇,06 域的悬念与 06-03 的 CLASS_INJECTED_FIELDS 都指向它)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: javaClasses.cpp(4586 行!)的 compute_offsets/静态偏移字段,06-03 已见过 java.lang.Class 的 injected fields(CLASS_INJECTED_FIELDS javaClasses.hpp:1562+,java_lang_Class 的 klass/array_klass/oop_size/static_oop_field_count/protection_domain/signers/source_file)——07-07 很可能要讲这些 injected fields 与镜像机制的完整版;String/Class/Thread/Module 的 JVM 内建表示;文件名先 find 验证——javaClasses.cpp/hpp/inline.hpp 在 share/classfile/)
-3. 按第三节流程写 → 自查(脚本)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
-4. 07 域 7 篇完结后(第 3 批第一篇收官)→ 第 3 批 09-memory-core(大纲在 planning/outlines/09-memory-core/)
+1. 读 planning/outlines/09-memory-core/01-universe-heap.md(大纲,注意 ⚠️ 块;本篇是 09 域开篇,07-07 的悬念指向它: Universe::initialize_basic_type_mirrors/fixup_mirrors 在 systemDictionary.cpp:2022-2023,镜像分配在堆上)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: universe.cpp 的 Universe::genesis、CollectedHeap 虚基类 heap.hpp、oopFactory 工厂、initialize_basic_type_klass/空数组预分配;文件名先 find 验证——universe.cpp/hpp、heap.hpp、oopFactory.cpp、init.cpp 在 share/runtime/ 或 share/gc/ 或 share/memory/)
+3. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 MAPPINGS/HS_MAP)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
+4. 09 域 3 篇完结后(第 3 批第二个域收官)→ 17-threads
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
