@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 19-sync/02(ObjectMonitor 结构——重量级锁内部)。
+**下一步(唯一,无选择)**: 19-sync/03(enter/exit/wait——多线程怎么抢锁、怎么睡、怎么醒)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,44 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训)。
 
@@ -43,13 +43,13 @@
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26,第 2 批收官)
 第 3 批(对象/类): 07(7/7) → 09(3/3) → 17(4/4)   ✅ **第 3 批完结(14 篇)**
-第 4 批(执行/帧): 10(3/3) → 19(1/4) → 23 → 24 → 08 → 31 → 44   🚧 进行中
+第 4 批(执行/帧): 10(3/3) → 19(2/4) → 23 → 24 → 08 → 31 → 44   🚧 进行中
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 56 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 4):
+**已完成 57 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 5):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -69,7 +69,7 @@
 | 09-memory-core | 1-3 | `09-memory-core/01`(222 行)/02(240 行)/03(150 行) | ✅ **09 域完结** |
 | 17-threads | 1-4 | `17-threads/01`(191 行)/02(192 行)/03(165 行)/04(188 行) | ✅ **17 域完结** |
 | 10-metaspace | 1-3 | `10-metaspace/01`(101 行)/02(142 行)/03(104 行) | ✅ **10 域完结** |
-| 19-sync | 1 | `19-sync/01-lock-hierarchy.md`(157 行) | 🚧 19 域进行中(1/4) |
+| 19-sync | 1-2 | `19-sync/01`(157 行)/02(107 行) | 🚧 19 域进行中(2/4) |
 
 **每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07/09 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官)+a487eac(第 3 轮深度 REVIEW 跨篇联动: String.value 永远 byte[] 修正 07-03、get_injected 行号 1563-1566 修正 07-01);**09域01=fb31f7b(正文+大纲回填)+791540e(README)+4b8b16c(第 3 轮 REVIEW)+f0b7b93(大纲同步);09域02=bf19c20(正文)+9eed025(大纲 ⚠️ 块 12 条)+81f8b56(README)+1727df9(第 3 轮 REVIEW);09域03=3593c9b(正文,09 域收官)+58c5e34(大纲 ⚠️ 块 10 条)+cb0dae2(README)+4cb5120(第 3 轮 REVIEW: GuardedMemory=jniCheck 客户)+d6a3ef7(大纲同步);17域01=bec47da(正文,191 行,第 3 批第三个域开篇)+dc76829(大纲 ⚠️ 块 9 条)+bb94c20(README,49/152)**。各域 README/HANDOFF commit 见 git log。
 
@@ -373,6 +373,12 @@
   - **revoke_and_rebias(biasedLocking.cpp:624,非 80-150)**: 三 CAS 快路径=匿名偏向(:633-642)/类原型残留(:647-660)/epoch 过期(:664+);update_heuristics(:321,Klass 级计数 :353-362);**BulkRebias=20/BulkRevoke=40**(globals.hpp:978/984);HR_SINGLE_REVOKE 偏自己走自己栈无 safepoint
   - **BasicLock**(basicLock.hpp:32-44): 单字段 _displaced_header,BasicObjectLock 嵌入解释器帧(:55);slow_enter(synchronizer.cpp:339-371): 中性→set_displaced_header+CAS(:345-346)/递归 dhw=NULL(:355)/否则 inflate(:363);fast_exit(:282-331 dhw==NULL 递归,cas_set_mark 恢复 :305-308)
   - 悬念→02-objectmonitor-structure(owner/EntryList/cxq/WaitSet)
+- **19-02(ObjectMonitor 结构,大纲 7 处漂移含 0 处机制编造——结构类最实的一篇)**:
+  - 字段全部核对: _header :143(offset 0,注释 :76-81 不能继承/虚函数)/_object :144/DEFINE_PAD :148/_owner :152/_previous_owner_tid :153/_recursions :154/_EntryList :155/_cxq :159/_succ :160/_Responsible :161/_Spinner :163/_count :166(:168 ≈|WaitSet|+|EntryList|)/_WaitSet :170/_WaitSetLock :173
+  - **OM_OFFSET_NO_MONITOR_VALUE_TAG**(:232-233)=偏移-tag 2(注释 :221);伪共享 Futures notes :112-122(_recursions/_EntryList/_cxq/_succ 另一 cache line);_recursions 建议 int :124-128
+  - **ObjectWaiter**(:42-50): TStates TS_UNDEF/READY/RUN/WAIT/ENTER/CXQ(:44)
+  - **工具修复**: check.py 星号检查 bug——span 正则先跑会破坏代码块围栏(``` 被拆),导致代码块内星号误计;已改为先剔代码块再剔 span
+  - 悬念→03-enter-exit-wait
 
 ---
 
@@ -398,8 +404,8 @@
 - [x] **09-memory-core/01-03**——✅ 09 域完结,commit 见 §二
 - [x] **17-threads/01-04**——✅ 17 域完结(第 3 批收官),commit 见 §二
 - [x] **10-metaspace/01-03**——✅ 10 域完结,commit 见 §二
-- [x] **19-sync/01**(lock-hierarchy)——✅ 完成,commit 见 §二
-- [ ] **19-sync/02**(objectmonitor-structure,重量级锁内部)——大纲在 `planning/outlines/19-synchronization/02-objectmonitor-structure.md`;01 篇悬念指向它
+- [x] **19-sync/01-02**(lock-hierarchy/objectmonitor-structure)——✅ 完成,commit 见 §二
+- [ ] **19-sync/03**(enter-exit-wait,多线程怎么抢锁/睡/醒)——大纲在 `planning/outlines/19-synchronization/03-enter-exit-wait.md`;02 篇悬念指向它
 - [ ] 09 域 3 篇完结后 → 17-threads
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -436,9 +442,9 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/19-synchronization/02-objectmonitor-structure.md(大纲,注意 ⚠️ 块——19-01 已回填 8 条,02 大概率同样漂移;01 篇的悬念指向它: owner/EntryList/cxq/WaitSet)
-2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: objectMonitor.hpp 字段(_header/_owner/_recursions/_EntryList/_cxq/_WaitSet/_succ/_Responsible/_Spinner/_SpinDuration/_count)与 objectMonitor.cpp 的 enter/exit/wait/notify(2455 行)、synchronizer.cpp 的 inflate/deflate_idle_monitors/omAlloc;17-01 已确认 Thread 的 omFreeList/omInUseList 缓存)
-3. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 MAPPINGS/HS_MAP;注意 ART 变量改回当前文件)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
+1. 读 planning/outlines/19-synchronization/03-enter-exit-wait.md(大纲,注意 ⚠️ 块——19-01/02 已回填 15 条,03 大概率同样漂移;02 篇的悬念指向它: enter 排队/exit 唤醒/wait 流转/自旋与 _succ)
+2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: objectMonitor.cpp(2455 行)的 enter/exit/wait/notify/notifyAll/EnterI/ExitEpilog/自旋 TrySpin/AdaptiveSpinning、synchronizer.cpp 的 inflate/deflate_idle_monitors/omAlloc;02 篇已确认字段行号,enter/exit 的行号大概率漂移需重验)
+3. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 MAPPINGS/HS_MAP;注意 ART 变量改回当前文件;星号检查已修复——代码块先剔再剔 span,正文裸转义星号须加反引号)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
 4. 19 域 4 篇完结后 → 23-stub
 ```
 
