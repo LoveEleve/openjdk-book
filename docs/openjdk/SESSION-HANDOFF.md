@@ -339,6 +339,13 @@
   - **安全模型**: preDefineClass(ClassLoader.java:891-899): java. 前缀+**非 Platform**→SecurityException "Prohibited package name"(注释: MemberName.checkForTypeAlias 依赖);防护权在 Platform 非 bootstrap
   - **CLD 生命周期**: _klasses 链表(add_class,06-03/07-01 讲过);do_unloading(classLoaderData.cpp:1373): is_alive(:696)→free_deallocate_list/死→unload()+链表移除(:1394-1412);**_keep_alive 专属于匿名类**(classLoaderData.cpp:149,:285-300,inc/dec 只对 is_anonymous :295/:302)非"JNI 引用"
   - 实证: materials/commands/07-classfile-loader-hierarchy.txt(app=AppClassLoader/platform=PlatformClassLoader/app.parent=platform/platform.parent=null/String.loader=null/java.sql.Driver=Platform/custom.loadClass(String)==String.class true)
+- **06 篇(JPMS Modules,大纲漂移 10 处含 3 处编造,重点沉淀)**: moduleEntry.hpp 267 行/packageEntry.hpp 268/modules.cpp 729 全在 share/classfile/
+  - **ModuleEntry : HashtableEntry<Symbol*, mtModule>**(moduleEntry.hpp:63);字段 :66-77(_module OopHandle=Java Module 弱句柄/_reads GrowableArray/_is_open/_can_read_all_unnamed/_has_default_read_edges JVMTI/_is_patched);**无 _exports/_uses**(大纲编造)——导出在包级
+  - **ModuleEntryTable : Hashtable<Symbol*>**(:208)+静态 _javabase_module(:216,javabase_moduleEntry() :255);can_read(moduleEntry.cpp:116-140): 无名读所有/所有读 java.base(:121-125)/JVMTI 默认读边(:130-136)/_reads 列表
+  - **PackageEntry : HashtableEntry<Symbol*>**(packageEntry.hpp:97): _module/_export_flags/_qualified_exports(:99-107);状态 is_exported(:134)/is_qual_exported/has_qual_exports_list(名单清空仍算导出防回退)/is_exported_allUnnamed/is_unqual_exported(:141-160);set_exported(packageEntry.cpp:91-110,unqual 不可转 qual :95-96)/set_is_exported_allUnnamed(:111-123,PKG_EXP_ALLUNNAMED);**is_exported_to 函数不存在**(大纲编造)
+  - **--add-exports 链路**(大纲误植 set_has_default_read_edges): ModuleBootstrap.java:646-730(处理 :652)→Modules.addExportsToAllUnnamed(:724)→JVM_AddModuleExportsToAllUnnamed(jvm.cpp:1024-1026)→set_is_exported_allUnnamed
+  - **检查在 Java 层**: Reflection.verifyModuleAccess(Reflection.java:203-212→Module.isExported :212,Module.java:453);字节码级=linkResolver.cpp:310-325(IllegalAccessError+verify_class_access_msg 模块消息);加载侧=load_instance_class 模块可见性(07-04)
+  - 实证: materials/commands/07-classfile-modules.txt(java.lang exported true/sun.misc false/IllegalAccessException "module java.base does not export jdk.internal.misc to unnamed module"/--add-exports 后 addressSize()=8)
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
