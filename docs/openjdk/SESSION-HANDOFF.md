@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **67/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 15: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **68/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 16: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加要求再 REVIEW)** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 08-interpreter/03(InterpreterRuntime——解释器调 C++ 的入口,大纲 `planning/outlines/08-interpreter/03-interpreter-runtime.md`,08 域共 4 篇: 01 ✅/02 ✅/03-interpreter-runtime/04-linkresolver-rewriter)。
+**下一步(唯一,无选择)**: 08-interpreter/04(LinkResolver + Rewriter——08 域收官篇,大纲 `planning/outlines/08-interpreter/04-linkresolver-rewriter.md`,08 域共 4 篇: 01 ✅/02 ✅/03 ✅/04-linkresolver-rewriter)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,65 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训);⑧ **用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)**
 
@@ -43,13 +43,13 @@
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26)
 第 3 批(对象/类): 07(7/7) → 09(3/3) → 17(4/4)   ✅ 第 3 批完结(14 篇)
-第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(2/4)** → 31 → 44   🚧 进行中
+第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(3/4)** → 31 → 44   🚧 进行中
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 67 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 15):
+**已完成 68 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 16):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -72,7 +72,7 @@
 | 19-sync | 1-4 | `19-sync/01`(157)/02(107)/03(179)/04(113) | ✅ 19 域完结 |
 | **23-stub** | 1-3 | `23-stub/01-stub-entry.md`(128)/02-arraycopy.md(313)/03-crypto-math.md(306) | ✅ **23 域完结(本会话)** |
 | **24-frame** | 1-3 | `24-frame/01-physical-frame.md`(238)/02-virtual-frame.md(151)/03-deopt-gc-scan.md(268) | ✅ **24 域完结(本会话)** |
-| **08-interpreter** | 1-4 | `08-interpreter/01-bytecodes-definition.md`(308)/02-template-interpreter.md(330) | 🚧 08 域 2/4(本会话) |
+| **08-interpreter** | 1-4 | `08-interpreter/01-bytecodes-definition.md`(308)/02(330)/03-interpreter-runtime.md(244) | 🚧 08 域 3/4(本会话) |
 
 ### 本会话 6 篇的 commit 清单(23-stub/02 起,按 git log 为准)
 
@@ -83,6 +83,7 @@
 **24-frame/03(Deopt+GC)**: 正文 8850989 → 大纲回填 6ae67c0(⚠️ 9 条)→ README+HANDOFF 6faefe1(65/152,24 域完结)→ §6.20 32bebc8 → **第 3 轮 REVIEW** cb8dd16(帧失效=deopt_dependents safepoint 全量拆,非"走到栈顶")+大纲回填 52a1e4c+HANDOFF 32e9a39
 **08-interpreter/01(Bytecodes 定义表)**: 正文 b34880a → 大纲回填 05d5c11(⚠️ 11 条)→ README 4ee15e1(66/152,08 域 1/4)→ 下一步 08-interpreter/02
 **08-interpreter/02(Template Interpreter)**: 正文 9c80ab1(含 01 篇 0xCB-0xFF 修正)→ 大纲回填 e6c2f3e(⚠️ 11 条)→ README b6e7dbf(67/152,08 域 2/4)→ 下一步 08-interpreter/03
+**08-interpreter/03(InterpreterRuntime)**: 正文 1d2807d → 大纲回填 8523d0d(⚠️ 8 条)→ README 3c9e272(68/152,08 域 3/4)→ 下一步 08-interpreter/04
 
 **本会话新增素材(全部 gitignore 不入库,在 materials/commands/)**:
 - `23-arraycopy-bench.txt`(UseAVX 0/2/3 各档 arraycopy/fill 吞吐 + PrintFlagsFinal 附注: UseFastStosb=false/UseXMMForObjInit=true)
@@ -273,6 +274,16 @@
 - **第 3 轮 REVIEW**: ①"已入栈旧帧走到栈顶才 deopt"错——uncommon trap 只拆当前帧;其它帧由 **deopt_dependents(deoptimization.cpp:800-803)→Threads::deoptimized_wrt_marked_nmethods(thread.cpp:4625)→逐帧 should_be_deoptimized 当场拆(:2847-2858)**,下次 safepoint 全量拆;②made not entrant=uncommon trap 的 action 直接标(:1794-1825 Action_make_not_entrant/reinterpret),非依赖系统;③C 堆原因=源码注释(deoptimization.cpp:1209-1211 "Since the Java thread being deoptimized will eventually adjust it's own stack...")
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
+
+### 6.23 08-03(InterpreterRuntime,大纲 8 处漂移含 3 处机制编造,2026-08-13)
+- **"JRT_ENTRY" 错**: 解释器 runtime 用 **IRT_ENTRY 家族**(interfaceSupport.inline.hpp:445-466),JRT_ENTRY 是 JNI 通道(:468);JRT 与 IRT 宏体几乎相同(ThreadInVMfromJava+VM_ENTRY_BASE),真正禁用异步异常的是 IRT_ENTRY_NO_ASYNC(monitorenter 用);状态转换 RAII(trans_from_java,:224-232)+HandleMark+THREAD 约定;at_safepoint(:1176-1191)函数体近空——**safepoint 检查在 IRT_END 的析构隐式完成**(注释原话)
+- **"OopMapCache LRU + OopMapCacheSize ~1024" 编造**: 固定 32 槽哈希+3 步探测(oopMapCache.hpp:149-151 "Use fixed size for now"),无 LRU 无该 flag;每槽 2 位 oop/dead(:76-78)
+- **"InvocationCounter 递减到 0" 错**: 递增到阈值(_counter=[count29|carry1|state2],increment += 8);InterpreterInvocationLimit=CompileThreshold<<3(invocationCounter.cpp:148);BackwardBranchLimit 掺 OnStackReplacePercentage/InterpreterProfilePercentage(:156-158)
+- **"C1=5000/C2=15000" 错**: JDK11 tiered 默认 Tier3=2000/Tier4=15000/Tier2=0,CompileThreshold=10000 非 tiered,InterpreterProfilePercentage=33(PrintFlagsFinal 实证)
+- **计数器机械**: generate_counter_incr(templateInterpreterGenerator_x86.cpp:385-440): tiered 用 increment_mask_and_jump 掩码节流(sticky overflow 注释);非 tiered 求和比较;溢出→frequency_counter_overflow(:1008)→policy()->event(:1065);OSR 成功先 revoke 激活内全部有偏锁(:1072-1094);回边仅向后分支(testl 正负判断,templateTable_x86.cpp:2191-2200)
+- **模板侧 call_VM 链(大纲未提)**: interp_masm call_VM_base(interp_masm_x86.cpp:282-306 save/restore bcp)→macroAssembler call_VM_base(:2482-2550): c_rarg0=r15_thread、set_last_Java_frame(sp,fp,pc=NULL——**pc NULL 不写 anchor pc**,:799-802)、check_exceptions→forward_exception_entry(:2556-2560);LastFrameAccessor(interpreterRuntime.cpp:76-113)=thread->last_frame() 访问器
+- **ldc 模板分派**: 仅 tag=UnresolvedClass/UnresolvedClassInError/Class 时 call runtime(templateTable_x86.cpp:366-381),数字/字符串模板直处理
+- **实证**: Interpreter generation 0.65ms(startuptime);CounterDemo tier3→`%`tier4@4→tier4→made not entrant(08-interpreter-counterdemo.txt+PrintFlagsFinal 附注)
 
 ### 6.22 08-02(Template Interpreter,大纲 11 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"generate_all 三步" 错**: 真实十一段(templateInterpreterGenerator.cpp:57-263): 签名+错误出口→return 按长度 5 档(_return_entry[6] 0 空)→invoke return 按 TosState 10 档→earlyret→native 结果→safepoint 入口(InterpreterRuntime::at_safepoint)→异常 6 入口→方法入口 28 种(method_entry 宏,MethodKind 在 abstractInterpreter.hpp:59-61,zerolocals..abstract 7+math 11+refget 1+CRC 5+FD 4;MH 系列由 initialize_method_handle_entries 单独处理)→set_entry_points_for_all_bytes(遍历 256,is_defined→模板/否则 _unimplemented_bytecode stop)→safepoints_for_all_bytes→deopt 入口(_deopt_entry[7] 按长度)
