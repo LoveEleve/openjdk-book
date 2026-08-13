@@ -3,6 +3,16 @@
 > 🟡 Working | 9种验证类型(Top/Integer/Float/.../Object/Uninitialized)
 > 读者处境: StackMapTable 中每个 slot 有一个 `VerificationType`——Top/Integer/Float/Long/Double/Null/UninitializedThis/Object/Uninitialized。verifier 检查 `current_type.is_assignable_from(expected_type)` → 类型兼容→通过; 不兼容→VerifyError。
 
+> ⚠️ 写作期修正(2026-08-13, vol-02/44-class-verification/02 已按真实源码成文 149 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"Top vs Bogus 不同" 错**: `top_type()` = `bogus_type()` 别名(verificationType.hpp:130-131 注释 "alias");from_tag 的 ITEM_Top 也返 bogus(verificationType.cpp:33-45)——三个入口同落到 Bogus 编码;bogus 的放行语义=is_assignable_from 的 `equals(from)||is_bogus()`(目标是 bogus 时任何源通过);帧构造时全槽初始化为 bogus(stackMapFrame.cpp:43,46)
+> - **"slot N+1=Top" 半对**: 文件规范里次槽是 ITEM_Top,但 HotSpot 解析时 to_category2_2nd() 转 Long_2nd/Double_2nd(stackMapTable.cpp:300-307,is_category2 检查+stack_size=2)——内存帧次槽是显式 Category2_2nd 类型;to_category2_2nd verificationType.hpp:235-238
+> - **is_assignable_from 伪代码错(大纲 :34-44)**: "actual==Top→true" 编造(真实=equals(from)||is_bogus());"is_subclass_of(actual)" 方向反(真实=from_class->is_subclass_of(this_class),verificationType.cpp:47-77);Uninitialized 无专门分支,靠 equals(同 new 指令 bci 编码相等)
+> - **"9+1 种类型" 半对**: 文件 9 tag(verificationType.hpp:36-46,ITEM_Top..Uninitialized)+内部扩展(Boolean/Byte/Short/Char 来自**方法签名** change_sig_to_verification_type stackMapFrame.cpp:115-118——**不是 i2b 模拟**,i2b/i2c/i2s 推 integer_type verifier.cpp:1481-1488)+Long_2nd/Double_2nd+Bogus=内部 16 个类型
+> - **pop 双槽(大纲未提)**: pop_stack 只弹一槽(_stack[--_stack_size],stackMapFrame.cpp:199),category2 首槽弹出后次槽自然落 _stack_size 之外,非"扣两个槽"
+> - **悬念指向错**: 大纲 "→域 45 Math" 错(45 域早已在第 1 批完结);44-02 是**第 4 批收官**,下一域=11-cds(第 5 批第一域)
+> - **实证**: 08-verificationtype-javap.txt(javap -v: loop 方法 StackMapTable `locals = [ long, long ]` 双槽)
+
+
 ### 1. "9 种验证类型 — ITEM_* 枚举"
 
 场景: bytecode `iconst_0`→push ITEM_Integer on stack。`aconst_null`→push ITEM_Null。`new Object()`→push ITEM_Uninitialized→`invokespecial <init>`→change to ITEM_Object(Reference to Object)。
