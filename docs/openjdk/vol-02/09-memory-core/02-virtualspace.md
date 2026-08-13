@@ -6,7 +6,7 @@
 
 ## 占 32GB 的坑,只付 8GB 的钱
 
-G1 默认最大堆是物理内存的 1/4,但 `-Xmx32g` 意味着 JVM 启动就要拿到 32GB 虚拟地址——不是 32GB 物理内存。操作系统允许"reserve 与 commit 分离": 先把地址空间占住(不产生物理页),用到哪再给哪补物理页。hotspot 把这两件事拆成了两个类: `ReservedSpace`(占坑)与 `VirtualSpace`(按需提交)。上一讲 `G1CollectedHeap::initialize` 里那句 `Reserve the maximum`,落到底层就是这篇的两个类加三个系统调用。
+G1 默认最大堆是物理内存的 1/4(`MaxRAMFraction` 默认 4,gc_globals.hpp:320;`MaxHeapSize = physical_memory × MaxRAMPercentage%`,arguments.cpp:1750-1751),但 `-Xmx32g` 意味着 JVM 启动就要拿到 32GB 虚拟地址——不是 32GB 物理内存。操作系统允许"reserve 与 commit 分离": 先把地址空间占住(不产生物理页),用到哪再给哪补物理页。hotspot 把这两件事拆成了两个类: `ReservedSpace`(占坑)与 `VirtualSpace`(按需提交)。上一讲 `G1CollectedHeap::initialize` 里那句 `Reserve the maximum`,落到底层就是这篇的两个类与一组 mmap/mprotect 系统调用。
 
 ## 1. 占坑: PROT_NONE 的 mmap
 
@@ -146,14 +146,14 @@ void ReservedHeapSpace::establish_noaccess_prefix() {
 ```
 
 - `noaccess_prefix_size(alignment)` = `lcm(page_size, alignment)`(:297)——页大小与对齐的最小公倍数;
-- 触发条件是 `base + size > OopEncodingHeapMax`(:305)——堆顶越过了压缩 oops 的编码上限(`OopEncodingHeapMax = 2^32 << LogMinObjAlignmentInBytes`,默认 8 字节对齐下即 32GB,arguments.cpp:1609),意味着压缩指针需要非零 base,此时**堆基址下方那一页必须不可访问**: 隐式 null 检查的原理是"null 解引用 = 访问地址 0 = 堆基址下方",只有那里 PROT_NONE,解引用 null 才必然 SIGSEGV 而不是读到堆里的合法对象;
+- 触发条件是 `base + size > OopEncodingHeapMax`(:305)——堆顶越过了压缩 oops 的编码上限(`OopEncodingHeapMax = 2^32 << LogMinObjAlignmentInBytes`,默认 8 字节对齐下即 32GB,arguments.cpp:1609),意味着压缩指针需要非零 base,此时**堆基址下方那一页必须不可访问**: 隐式 null 检查的原理是——null(或很小偏移)解引用落在堆基址正下方,只有那里 PROT_NONE,解引用 null 才必然 SIGSEGV,而不是读到堆里的合法对象;
 - 之后 `_base += _noaccess_prefix; _size -= _noaccess_prefix`(:318-319): 保护页从堆的账本里让出——`compressed_oop_base()`(virtualspace.hpp:120-123)= `_base - _noaccess_prefix` 暴露真正的压缩基址;`release()` 时也要算回 `real_base = _base - _noaccess_prefix`(virtualspace.cpp:277-278)才能完整释放。
 
 ## 3. VirtualSpace: 三段与顺序提交
 
 ### 一个 reserved 区域,切成三段来 commit
 
-`VirtualSpace` 的类注释是它的自白: "data structure for committing a previously reserved address range in smaller chunks"(virtualspace.hpp:137)。三段布局的注释在 :152-158: 每个区域(lower/middle/upper)有自己的 end boundary 与 high 指针(low water mark 之上已提交);**lower 与 upper 用普通页,中间的 middle 用大页粒度**——这就是 MPSS(多页大小支持)的形态。
+`VirtualSpace` 的类注释是它的自白: "data structure for committing a previously reserved address range in smaller chunks"(virtualspace.hpp:137)。三段布局的注释在 :152-158: 每个区域(lower/middle/upper)有自己的 end boundary 与 high 指针(注释原话: "the high water mark for the last allocated byte"——已提交字节的水位线);**lower 与 upper 用普通页,中间的 middle 用大页粒度**——这就是 MPSS(多页大小支持)的形态。
 
 `initialize_with_granularity`(virtualspace.cpp:680-727)把边界与三段起点算好(截取核心,逐字):
 
@@ -187,7 +187,7 @@ void ReservedHeapSpace::establish_noaccess_prefix() {
 
 ### expand_by: 只能从 high() 顺序推进
 
-`expand_by`(virtualspace.cpp:844-928)的提交顺序是 **lower → middle → upper 依次推进**(:906-925,每段先算 needs 再 `commit_expanded`)。为什么不能跳段?三段的对齐粒度不同: 中间段按大页粒度提交(:704-706),如果 lower 还有未提交的碎块,middle 的整块大页物理地址就会碎片化——注释把来龙去脉写在 :833-842: 大空间(>LargePageSizeInBytes)从一开始就按大页粒度设计 expand/shrink,让 OS 的大页物理页不被割裂。shrink 同理: `shrink_by`(:935 起)从 high() 往回,**先 upper 后 middle 后 lower**(:980-1000 的三个 if 块),永远不动中间未满段的内部——"不能从内部 uncommit"的说法由此而来。`_special` 的整个区域已钉死时,expand/shrink 只是挪指针(:856-860,:939-943),不碰系统调用。
+`expand_by`(virtualspace.cpp:844-928)的提交顺序是 **lower → middle → upper 依次推进**(:906-925,每段先算 needs 再 `commit_expanded`)。为什么不能跳段?三段的对齐粒度不同: 中间段按大页粒度提交(:704-706)。注释把来龙去脉写在 :833-842: 大空间(>LargePageSizeInBytes)从一开始就按大页粒度设计 expand/shrink,让 OS 的大页物理页不被割裂——如果跳过 lower 直接提交 middle,两端粒度不一致会把可合并的大页区域切成碎块。shrink 同理: `shrink_by`(:935 起)从 high() 往回,**先 upper 后 middle 后 lower**(:980-1000 的三个 if 块),永远不动中间未满段的内部——"不能从内部 uncommit"的说法由此而来。`_special` 的整个区域已钉死时,expand/shrink 只是挪指针(:856-860,:939-943),不碰系统调用。
 
 **关键设计 (斜体)**: *三段不是三段"用途",而是三种"提交粒度": 两头的普通页(小步进、低浪费),中间的大页(吞吐优先)。顺序提交/收缩保证已提交区域永远是从基址开始的连续区间——uncommit 与 commit 都只碰边界,中间永不出现洞。*
 
