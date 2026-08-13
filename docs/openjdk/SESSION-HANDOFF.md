@@ -279,11 +279,12 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
-### 6.26 31-02(WhiteBox + Forte,31 域收官,大纲 6 处漂移含 2 处机制编造,2026-08-13)
+### 6.26 31-02(WhiteBox + Forte,31 域收官,大纲 6 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"WB_ENTRY 简化版 JVM_ENTRY" 错**: WB_ENTRY=JNI_ENTRY+ClearPendingJniExcCheck(whitebox.inline.hpp:33-37);WhiteBoxAPI diagnostic flag(globals.hpp:2600);JVM_RegisterWhiteBoxMethods 双门控(flag+null loader,:2348-2361);方法表 178 条(:2114-2342);WB_FullGC :1321-1330(soft_ref 清+collect wb_full_gc+G1 复位)/WB_G1IsHumongous :422-429(非 G1 抛异常)
 - **"Forte——JFR 用" 错(重要)**: JDK11 JFR 采样器(jfrThreadSampler.cpp)不用 AsyncGetCallTrace,用 **os::SuspendedThreadTask**(:114 OSThreadSampler extends os::SuspendedThreadTask)+ucontext;handshake 也零引用(后续版本才接入);AGCT 是外部 profiler 的导出符号(jvm_sym.ver:6)
 - **AGCT 机制(大纲未提)**: 错误码 ticks_*(forte.cpp:50-60:-1 无 CLASS_LOAD/-2 GC/-3..-6 不可得不可遍历/-7 未知/-8 退出/-9 deopt);入口检查 :523-556;三族两路分派 :570-628;find_initial_Java_frame :296-330;vframeStreamForte forte_next :116;ThreadInAsgct 重入(thread.hpp:784);jmethodID 类加载时预分配(信号处理器不能拿锁)
 - **实证方法论**: 最小 WhiteBox 兼容类(bootclasspath/a 加载,方法表注册对缺失方法打 NoSuchMethodError Warning 不影响);不开 flag→UnsatisfiedLinkError(注册层门控);开 flag→heapOopSize 4/isGCSupported true/g1IsHumongous 4MB true/fullGC done(08-whitebox-demo.txt);native 方法签名必须与方法表 JNI 签名一致(getVMPageSize 是 ()I 非 ()J)
+- **第 3 轮 REVIEW 修正 2 处**: ThreadInAsgct 实际在 forte.cpp:559(类定义 thread.hpp:777,重入注释 :784),非 :587;gc 竞态注释在 :588-590("It would be valid if we weren't possibly racing a gc thread... small window but it does happen"),非 :453-456
 
 ### 6.25 31-01(Unsafe 底层 API,31 域开篇,大纲 9 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **CAS 单路径错(JDK8 形态)**: 大纲的 `jint* addr=(jint*)(p+offset); Atomic::cmpxchg` 是 JDK8 旧版;JDK11 双路径=obj==NULL→RawAccess(堆外) / obj!=NULL→HeapAccess::atomic_cmpxchg_at(堆内带 GC barrier,06-05 access API);index_oop_from_field_offset_long(unsafe.cpp:122-135,p==NULL 返裸地址);assert_field_offset_sane

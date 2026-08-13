@@ -113,9 +113,9 @@ JVM_END
 
 ### 线程状态分派: 7 种状态两条路径
 
-拿到 ucontext 后按线程状态分派(forte.cpp:570-628),三族两路: `_thread_in_native/_blocked/_in_vm`(及各自 trans 态)一族 → `pd_get_top_frame_for_signal_handler(&fr, ucontext, false)` 取顶帧后走 `forte_fill_call_trace_given_top`;`_thread_in_Java/_thread_in_Java_trans` 一族 → 同一填充函数带 isInJava=true;新线程(_thread_new 等)返回 0 帧;未知状态兜底 -7。填充逻辑(forte.cpp:416-458): `find_initial_Java_frame`(从给定帧沿 sender 链找第一个带 codeBlob 的 Java 帧,:296-330)→ `vframeStreamForte`(vframeStream 的变体,forte_next :116)逐帧取 method/bci → `find_jmethod_id_or_null` 填 method_id。`ThreadInAsgct`(:587)标记"正在 AGCT 中"以支持重入。
+拿到 ucontext 后按线程状态分派(forte.cpp:570-628),三族两路: `_thread_in_native/_blocked/_in_vm`(及各自 trans 态)一族 → `pd_get_top_frame_for_signal_handler(&fr, ucontext, false)` 取顶帧后走 `forte_fill_call_trace_given_top`;`_thread_in_Java/_thread_in_Java_trans` 一族 → 同一填充函数带 isInJava=true;新线程(_thread_new 等)返回 0 帧;未知状态兜底 -7。填充逻辑(forte.cpp:416-458): `find_initial_Java_frame`(从给定帧沿 sender 链找第一个带 codeBlob 的 Java 帧,:296-330)→ `vframeStreamForte`(vframeStream 的变体,forte_next :116)逐帧取 method/bci → `find_jmethod_id_or_null` 填 method_id。`ThreadInAsgct`(:559;类定义 thread.hpp:777)标记"正在 AGCT 中"以支持重入(thread.hpp:784 注释 "Allow AsyncGetCallTrace to be reentrant - save the previous state")。
 
-**关键设计 (斜体)**: *安全点外的栈遍历没有一致性保证——线程可能正走到帧切换中间,读到的 bci/method 可能过时(注释 :453-456: gc 线程可以让一个本来有效的解释器帧看起来无效,"small window but it does happen")。AGCT 的回应是"尽力而为+明确失败": 能走完填 num_frames=count,走不完给负数,调用者自己判断。*
+**关键设计 (斜体)**: *安全点外的栈遍历没有一致性保证——线程可能正走到帧切换中间,读到的 bci/method 可能过时(:588-590 的注释: "It would be valid if we weren't possibly racing a gc thread. A gc thread can make a valid interpreted frame look invalid... small window but it does happen")。AGCT 的回应是"尽力而为+明确失败": 能走完填 num_frames=count,走不完给负数,调用者自己判断。*
 
 ## 3. JFR 不用它: 采样器是另一条路
 
