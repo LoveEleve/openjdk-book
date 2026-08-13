@@ -2,6 +2,14 @@
 
 > 🔴 Deep | 4 KP 中的安全基石
 > 读者处境: 线程正在执行 JNI native 代码——GC 来了需要 safepoint。线程不能停在 native 代码中间（不会有 Java frame 可以恢复）。线程必须告诉 JVM 自己是什么状态。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/17-threads/02 已按真实源码成文~195 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"JavaThreadState 五状态 0-6(thread.hpp:1038)" 全错**: 枚举在 **globalDefinitions.hpp:889-905**——五个真状态 `0/2/4/6/8/10`(uninitialized=0/new=2/in_native=4/in_vm=6/in_Java=8/blocked=10)+**每个的 +1 trans 状态**(new_trans/in_native_trans/in_vm_trans/blocked_trans 用,new_trans/in_Java_trans 未用);注释 "Given a state, the xxxx_trans state can always be found by adding 1";字段=thread.hpp:1038 volatile;PPC64/AARCH64 访问需 membars(thread.hpp:1262-1275 #else 分支)
+> - **"trans_and_fence = set(to)+OrderAccess::fence()" 错(机制简化)**: 真实=ThreadStateTransition::transition(interfaceSupport.inline.hpp:112-128)三拍: **先写 trans 状态 from+1**(:120)→ serialize_thread_state(:122)=OrderAccess::fence(UseMembar)或 **os::write_memory_serialize_page 伪远程 membar**(:82-97,"Make sure new state is seen by VM thread")→ **SafepointMechanism::block_if_requested(:124,safepoint 检查点嵌在转换里)**→ 写 to(:125);transition_and_fence(:136-148)差异仅在 serialize 用带 SEH 版本(:142,Windows 无调用桩注释 :130-135);transition_from_java(:153-156)不 block 直接写 to
+> - **"safepoint 检查(safepoint.cpp)三 if" 大纲化**: jdk11u 的检查=轮询+block_if_requested(safepointMechanism.inline.hpp:58-63)
+> - **"polling_page mprotect→SIGSEGV" 是 JDK11 前全局页机制**: jdk11u 64 位 x86 默认 **ThreadLocalHandshakes=true**(globals_x86.hpp:100)→**线程本地轮询**: SafepointMechanism(safepointMechanism.hpp:34-46,两种 PollingType :35-38)armed/disarmed 值是 poll_bit/0(:40-41);arm/disarm=set_polling_page(值)(inline:65-70);local_poll_armed=mask poll_bit(:32-35);JIT 轮询=safepoint_poll(macroAssembler_x86.cpp:3744-3756)=**一行 testb [r15_thread+polling_page_offset], poll_bit + jcc notZero,无 SIGSEGV**;01-04 的"si_addr 轮询页"信号分支对应**全局轮询路径**(ThreadLocalHandshakes 关)
+> - **"Termination 四状态(thread.hpp:1044-1050)" 行号对但机制补全**: TerminatedTypes :1044-1050(_not_terminated=0xDEAD-2 :1045/_thread_exiting/_thread_terminated/_vm_exited 仅 VM_Exit 可设 :1050);正常链 _not_terminated=>_thread_exiting=>_thread_terminated(:1052-1054);**退出流程**: JavaThread::exit(thread.cpp:1902-2101,释放 JNI 句柄/移除栈保护页/从 Threads 列表移除,调用点注释 :4334-4338 "<-- no more Java code from this thread after this point -->")→**ensure_join(this) 在 exit 内部(:2015)**→smr_delete(thread.cpp:208-213→ThreadsSMRSupport,03 篇);**"post_run()/0xDEAD sentinel 防未初始化误判"为大纲叙述,真实注释只给转换链**
+> - 悬念指向 03-thread-smr-handshake.md(标题 "03. Thread-SMR——hazard pointer 式的线程安全回收")✓
 
 ### 1. "我有五个状态" — JavaThreadState
 
