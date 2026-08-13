@@ -40,7 +40,7 @@ void VM_PopulateDumpSharedSpace::doit() {
   Metaspace::freeze();
 ```
 
-**`Metaspace::freeze()` 冻结元空间**(此后不再分配——要压实必须保证对象集稳定)。随后: 收集所有已加载类(`ClassLoaderDataGraph::loaded_classes_do`)→ **`rewrite_nofast_bytecodes_and_calculate_fingerprints`**(把字节码恢复成 nofast 形态——08-04 拆过的 `_nofast_*` 在此落地) → `combine_shared_dictionaries`(平台/系统字典并入引导字典) → **`remove_unshareable_in_classes`**(剥离不可共享信息: java_mirror 等,08-cds-dump-full.txt 的 "Removing java_mirror ... done") → **`ArchiveCompactor::initialize + copy_and_compact`**(核心动作,下一节) → `dump_symbols`/`dump_java_heap_objects`(Symbol 与字符串/堆对象) → `relocate_well_known_klasses`。
+**`Metaspace::freeze()` 冻结元空间**(此后不再分配——要压实必须保证对象集稳定)。随后: 收集所有已加载类(`ClassLoaderDataGraph::loaded_classes_do`)→ **`rewrite_nofast_bytecodes_and_calculate_fingerprints`**(:550,把字节码恢复成 nofast 形态——08-04 拆过的 `_nofast_*` 在此落地) → `combine_shared_dictionaries`(平台/系统字典并入引导字典) → **`remove_java_mirror_in_classes`**(:501,剥离每个 Klass 的 java_mirror,08-cds-dump-full.txt 的 "Removing java_mirror ... done" 就是它)与 **`remove_unshareable_in_classes`**(:489,remove_unshareable_info 剥离其余不可共享信息)——两个独立函数别混淆 → **`ArchiveCompactor::initialize + copy_and_compact`**(核心动作,下一节) → `dump_symbols`/`dump_java_heap_objects`(Symbol 与字符串/堆对象) → `relocate_well_known_klasses`。
 
 **关键设计 (斜体)**: *"序列化 C++ 对象"在这里不是逐个对象递归写(大纲的描述),而是 **compaction**: 把 Metaspace 里散布的对象搬到一块连续内存,同时把对象内部指针从"绝对地址"改成"相对归档基址的偏移"。搬运与重定位一次完成——`ArchiveCompactor::copy_and_compact`。*
 
@@ -111,11 +111,11 @@ total    :  11875216 [100.0% of total] out of  11878400 bytes [100.0% used]
 
 ### 指针重定位: 为什么地址能固定
 
-压缩 klass 指针(`narrow_klass_base = 0x0000000800000000`)与归档基址**重合**——dump 时把对象摆到 `0x0000000800000000` 起的"假想地址",内部指针按这个地址计算;load 时在同一地址 mmap,只读区指针**原样有效**、无需现场修复(rw 区仍有少量加载期 patch,02 篇)。这就是实证里 "Allocated shared space: 3221225472 bytes at 0x0000000800000000" 的意义。如果 load 时压缩指针参数不匹配,地址空间对不上 → 校验失败。
+压缩 klass 指针与归档基址的"重合"是**主动设计**: dump 时 `Universe::set_narrow_klass_base((address)_shared_rs.base())`(metaspaceShared.cpp:305)把窄指针基址**设成共享区基址**——于是归档里任意对象的地址 = narrow_klass_base + 窄指针值,指针按这个地址计算;load 时在同一地址 mmap,只读区指针**原样有效**、无需现场修复(rw 区仍有少量加载期 patch,02 篇)。这就是实证里 `narrow_klass_base = 0x0000000800000000` 与 "Allocated shared space ... at 0x0000000800000000" 一致的原因。如果 load 时压缩指针参数不匹配,地址空间对不上 → 校验失败。
 
 ## 4. classlist: dump 加载什么
 
-classlist 文件每行一个类名(发行版自带约 2000 行,`lib/classlist`)。`ClassListParser`(classListParser.cpp:46 构造、:78 parse_one_line)逐行读取: `#` 注释跳过、tab/换行归一为空格、切分出类名(:78-110)——**它只做行解析,不碰 SymbolTable/类加载**;真正的加载在下面的 `ClassLoaderExt::load_one_class`。`preload_classes`(metaspaceShared.cpp:1699 起,截取核心,逐字):
+classlist 文件每行一个类名(发行版自带,位于 `lib/classlist`;dump 时实际归档 1211 个类,含清单外被依赖的类)。`ClassListParser`(classListParser.cpp:46 构造、:78 parse_one_line)逐行读取: `#` 注释跳过、tab/换行归一为空格、切分出类名(:78-110)——**它只做行解析,不碰 SymbolTable/类加载**;真正的加载在下面的 `ClassLoaderExt::load_one_class`。`preload_classes`(metaspaceShared.cpp:1699 起,截取核心,逐字):
 
 ```cpp
 // metaspaceShared.cpp:1699-1705(截取核心,逐字)

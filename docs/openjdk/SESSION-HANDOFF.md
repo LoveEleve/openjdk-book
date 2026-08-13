@@ -285,7 +285,7 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
-### 6.29 11-01(CDS 全景与 Dump,第 5 批开篇,大纲 8 处漂移含 2 处机制编造,2026-08-13)
+### 6.29 11-01(CDS 全景与 Dump,第 5 批开篇,大纲 8 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"magic 0xF00BAAA2" 错**: 真实 0xF00BABA2(filemap.hpp:37);validate_header(filemap.cpp:1397)=header->validate+check_shared_paths_misc_info;validate_shared_path_table(:480)在**映射后**(注释 "this is done later")
 - **"5 个 space mc/rw/ro/md/od" 错**: od 是旧版;JDK11=**8 槽位**(metaspaceShared.hpp:66-85: mc/rw/ro/md+string×2+open archive×2),实证 dump 用 6 个(mc/rw/ro/md/st0/oa0);rw 33.4%+ro 60.3%=93.7%
 - **"link_and_serialize" 编造**: 真实=link_and_cleanup_shared_classes(:1680)+VM_PopulateDumpSharedSpace::doit(:1333-1410): Metaspace::freeze(VM 线程不能 GC 故冻结)→CollectClassesClosure→rewrite_nofast_bytecodes_and_calculate_fingerprints(08-04 nofast 落地)→combine_shared_dictionaries→remove_unshareable_in_classes(实证 Removing java_mirror)→**ArchiveCompactor::initialize+copy_and_compact**(压实+重定位,非逐个对象递归写)→dump_symbols/dump_java_heap_objects→relocate_well_known_klasses
@@ -293,6 +293,7 @@
 - **默认归档路径**: SharedArchiveFile 缺省=jvm_path 推导的 JVM 同目录 classes.jsa(arguments.cpp:3510-3529),非 jre/lib/server
 - **指针重定位本质**: 压缩 klass base(0x0000000800000000)与归档基址重合→dump 按假想地址摆对象,load 同址 mmap→ro 指针原样有效;堆配置(narrow_klass_base/oop)不匹配归档作废
 - **实证**: 08-cds-demo.txt+08-cds-dump-full.txt(dump 归档 1211 类含 1151 instance/11.9MB/6 空间区;启动 class+load 356 个 shared objects file);**写作期血泪 2**: preload_classes 块又凭记忆编了 is_loading_success 分支(真实 ClassLoaderExt::load_one_class)——第二次犯,深审必须逐行对源码
+- **第 3 轮 REVIEW 修正 3 处**: ①java_mirror 移除=remove_java_mirror_in_classes(:501,"Removing java_mirror" 打印 :1300),与 remove_unshareable_in_classes(:489)独立,别混(行 43 原把两者合一);②narrow_klass_base 与归档基址重合是**主动设计**(Universe::set_narrow_klass_base(_shared_rs.base()),metaspaceShared.cpp:305),非巧合;③classlist 行数断言删除(本地无法验证)
 
 ### 6.28 44-02(VerificationType 类型系统,第 4 批收官,大纲 7 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"Top vs Bogus 不同" 错**: top_type()=bogus_type() 别名(verificationType.hpp:130-131 注释 "alias");from_tag ITEM_Top->bogus(:33-45);bogus 放行=is_assignable_from 的 equals||is_bogus;帧构造全槽 bogus(stackMapFrame.cpp:43,46)
