@@ -2,6 +2,14 @@
 
 > 🔴 Deep | 9 KP 中的 2 个核心机制
 > 读者处境: ChunkManager 的 Chunk 从哪来？VirtualSpaceList。ClassLoader 卸载后 Chunk 归还——整个 Node 回收——还给 OS。加上 CDS——多 JVM 共享同一份 Klass 元数据。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/10-metaspace/03 已按真实源码成文~105 行,本大纲为规划期产物,机制描述以文章为准;标题按内容改为 "VirtualSpace 与归还"):
+> - **"retire: Node 所有 Chunk 已归还→os::uncommit_memory+os::release_memory 还给 OS" 错(机制错位)**: 归还链是三步,各有时机——**retire**(virtualSpaceNode.cpp:560-583)=把 Node 剩余空闲区**从大到小切成标准 chunk 全还给 ChunkManager**(Medium→Specialized 逐级 :564-578,断言 free_words==0 :582),**不碰虚拟内存**;触发时机=**换新 Node 前 retire_current_virtual_space**(virtualSpaceList.cpp:141-147,create_new_virtual_space 前 :298-300 注释 "retire current node")非"最后一个 chunk 归还后";**purge**(virtualSpaceList.cpp:74-125,**必须 safepoint** :75,container_count()==0 且非当前 Node :91→摘除链表→Node::purge 摘 chunk(remove_chunk+remove_sentinel :75-88)→delete vsl :109);**release**=~VirtualSpaceNode(virtualSpaceNode.cpp:282-291)**_rs.release()**(:283,09-02 的 ReservedSpace::release)munmap 还给 OS
+> - **扳机**: ClassLoaderDataGraph::purge(classLoaderData.cpp:1455-1473,safepoint,delete 死 CLD :1466→**Metaspace::purge()** :1470→两空间 VirtualSpaceList::purge(metaspace.cpp:1478-1487);"等下次 GC safepoint 批量 retire"准确说是"批量 **purge**"
+> - **expand_by**(virtualSpaceNode.cpp:467-493): 先算 uncommitted(:472-474 不够返回 false)→commit=MIN2(preferred,uncommitted)→virtual_space()->expand_by(:478,09-02 的三段);initialize(:500-526)断言对齐 commit_alignment(:506-508)+initialize_with_granularity(:516,special Node 整块预提交 :511);get_chunk_vs(:494)→take_from_committed(:369,padding chunk :76)
+> - **"Node 默认大小 _reserve_size(1MB)" 未验证**: 实际 VirtualSpaceSize/预留按需(create_new_virtual_space virtualSpaceList.cpp:306);大纲"小 Node 因为 ClassLoader 可能很快卸载"为规划推理
+> - **CDS(概要,细节 11 域)**: preload_and_dump(metaspaceShared.cpp:1632)/initialize_shared_spaces(:2100)/map_shared_spaces(:2034);"metaspaceShared.cpp:200-500/700-1000" 行号漂移(文件 2184 行)
+> - 悬念指向域 11 CDS(第 5 批,archive 生成/校验/映射)✓
 
 ### 1. VirtualSpaceNode — mmap reserve + 按需 commit
 
