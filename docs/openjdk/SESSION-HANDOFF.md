@@ -442,6 +442,8 @@
   - ScopeDesc: scope_desc_at(compiledMethod.cpp:218)=pc→PcDesc→offset;sender() 实现 scopeDesc.cpp:152/is_top :148
   - 消费者: JFR vframeStreamSamples(jfrStackTrace.cpp:135)+Thread.print(thread.cpp:3417);jstack"每行一方法"=vframeStream 输出
   - 实证: materials/commands/24-inline-demo.txt(-Xlog:jit+inlining=debug 内联树 vs jstack 只有外层);实证手法: 内联日志比 PrintAssembly 轻量,证明"多层内联=1 物理帧"够用
+  - **第 3 轮 REVIEW(用户追问 Kona 是否特改)**: 下载 **Temurin OpenJDK 11.0.32**(api.adoptium.net,与 jdk11u 同版本)验证: SIGQUIT 转储/jcmd Thread.print/JFR 三路径都只有 main 一行——**Kona 17/21 与 OpenJDK 行为一致,非 Kona 特改**;对照 NoInlineDemo(不内联)正常 4 层;机制=**锚点 pc**(线程转储起点=last_Java_pc,停在最近 Java→VM 转换点,scope=main)+**内联纯算术段无 PcDesc**(JFR 采样 pc 反查回退 nmethod 方法);**"jstack 是 vframeStream 消费者"断言是错的**——线程转储走 vframe::sender 链(print_stack_on thread.cpp:3247/dumpThreads threadService.cpp:645-662),JFR 走 vframeStreamSamples(jfrStackTrace.cpp:135);内联帧现身前提=PcDesc 命中(StringBuilder 内联帧)
+  - **实证方法论教训**: ①容器后台进程在 bash 工具调用结束被杀——用 wrapper 脚本单次调用内完成(start→sleep→采集→kill);②pgrep/pkill -f 模式匹配到 bash 自身命令行导致自杀/超时——用方括号技巧 [I]nlineDemo;③jcmd attach 在 Temurin 11 挂起——用 kill -3(SIGQUIT)转储,输出走进程 stdout,不需 attach;④JDK 版本匹配: Kona17 javac 编译的 class(61)不能跑 JDK 11(55)——实证 JDK 用哪个 javac 就用哪个 java;⑤echo 文本含中文括号会触发 bash 语法错误
   - 悬念→24-frame/03(Deopt 重建+GC 扫描)
 
 ---
