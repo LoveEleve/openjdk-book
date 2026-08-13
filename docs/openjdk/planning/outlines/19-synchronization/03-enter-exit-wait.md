@@ -1,5 +1,12 @@
 # 03. 多线程抢锁——谁先拿到？— Enter/Exit 与 Wait/Notify
 
+> ⚠️ 写作期修正(2026-08-13, vol-02/19-sync/03 已按真实源码成文~185 行,本大纲为规划期产物,机制描述以文章为准):
+> - **enter**(objectMonitor.cpp:265 起,非"280-320"): 三快路径=空闲 CAS :270/重入 _recursions++ :279-283/**is_lock_owned 栈锁转移** :285-291;慢路径=_count++ 防 deflate :316+ThreadBlockInVM+循环 EnterI :355;EnterI(:442): TryLock TATAS :448/TrySpin :464/封 ObjectWaiter :485-493(TS_CXQ :488)/CAS push-to-front :494-497/Responsible 定时 park 防 stranding(:503-516 注释)
+> - **exit**(:905 起,非"500-650"): 重入退出 :925-930;Knob_ExitPolicy==0: release_store 掉锁 :967+storeload+**看 EntryList|cxq 与 _succ** :968(空或有 succ→简单出口);复杂出口需 **reacquire _owner**(replace_if_null :990-998);_succ 注释 :978-997(Dice §3.3 Futile Wakeup Throttling);QMode 2=cxq 优先 ExitEpilog(:1054-1063)/QMode 3-4=**drain cxq→EntryList bulk transfer**(:1067-1115);ExitEpilog :1282-1314 协议四步(注释 :1288-1291: 置 _succ→membar→_owner=NULL→unpark)
+> - **wait**(:1426 起,非"1400-1600"): WaitSetLock+AddWaiter :1483-1484/保存 _recursions :1490/exit :1493/park;醒来回 EntryList 竞争+恢复递归
+> - **notify**(:1776,非"1700-1800"): **默认 Knob_MoveNotifyee=2 把 waiter 转 TS_CXQ 进 cxq 而非 EntryList**(objectMonitor.cpp:135 默认值,:1715-1726);policy 0/1 才进 EntryList(prepend/append,TS_ENTER :1673-1714);policy 4 直接 unpark(:1742-1747);notify 本身不 unpark(默认策略),唤醒在 exit 时;notifyAll :1795 循环 INotify
+> - 悬念指向 04-internal-locks.md(标题 "04. VM 内部锁——Mutex/Monitor 与 Java 锁有什么不同")✓
+
 > 🔴 Deep | 4 KP 中的锁协议
 > 读者处境: 3 个线程同时 `synchronized(obj)`——一个拿到了锁，两个在等。拿到锁的线程调了 `obj.wait()`。另一个线程调了 `obj.notify()`。这一系列操作的底层是怎么协调的？
 
