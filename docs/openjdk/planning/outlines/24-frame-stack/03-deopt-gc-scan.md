@@ -2,6 +2,16 @@
 
 > 🟡 Working | 3 KP 中的辅助基础设施
 > 读者处境: deopt 决定已做——需要通过 vframeArray 从编译帧提取所有内联信息→分配新帧→复制局部变量→重建监视器→切解释器。GC 同时需要扫描栈上的 oop——用 OopMap 精确标注。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/24-frame/03 已按真实源码成文 268 行,24 域收官,本大纲为规划期产物,机制描述以文章为准):
+> - **行号全漂移**: vframeArrayElement 在 vframeArray.hpp:**50**(非 40-80);vframeArray :121,字段 :131-146(_original :134/_caller :135/_frames :141/_elements[1] :146);fill_in 在 **vframeArray.cpp:60-109**(非 80-250);StackValue stackValue.hpp:31-53(非 35-70);MonitorChunk monitorChunk.hpp:31(非 32-60);RegisterMap registerMap.hpp:52-66(非 35-80;x86 版 registerMap_x86.hpp 只是 pd_location hook :28-36)
+> - **"StackValue 用 union" 错(编造)**: 实际三个独立字段 _type/_integer_value/_handle_value(stackValue.hpp:31-53),非 union——scalar replaced 的 oop 需同时记 Handle 与标记;_**integer_value 兼作 scalar-replaced 标记**(obj_is_scalar_replaced);T_CONFLICT 语义=**死槽**(vframeArray.cpp:130 "A dead local. Will be initialized to null/zero."),非"保守扫描不回收"
+> - **"MonitorChunk _monitors[0] 柔性数组" 错(编造)**: 实际 NEW_C_HEAP_ARRAY(BasicObjectLock)(monitorChunk.cpp:30-34);链挂 JavaThread::_monitor_chunks(thread.hpp:1023);oops_do :42-46(GC 覆盖 C 堆监视器)
+> - **deopt 主链(大纲未提)**: 类型检查失败→uncommon trap blob→Deoptimization::fetch_unroll_info(deoptimization.cpp:139)→fetch_unroll_info_helper(:158)→create_vframe_array(:310,:1169,thread->set_vframe_array_head :315)→UnrollBlock→unpack_frames(:623)→unpack_on_stack(vframeArray.cpp:171-202)
+> - **unpack_on_stack 三态入口**: SynchronizationEntryBCI→deopt_entry / should_reexecute→deopt_reexecute_entry / 否则→deopt_continue_after_entry(:187-220)
+> - **StackValue::create_stack_value**(stackValue.cpp:37): Location 取址=寄存器→reg_map->location(VMReg),栈→unextended_sp+stack_offset(:48-55);窄化 int_in_long/float_in_dbl、narrowoop 解码(:60-110);StackValueCollection(stackValueCollection.hpp:30-50)带类型化访问器
+> - **RegisterMap**: _location[reg_count]+_location_valid 位图+_update_map(registerMap.hpp:52-66);location/set_location :90-109;与 OopMap 配合=sender_for_compiled_frame 里 OopMapSet::update_register_map+oopmapreg_to_location(frame_x86.cpp:476,01 篇)
+> - 实证: materials/commands/24-deopt-demo.txt(PrintCompilation: total 268ms C1+C2→270ms 传 Circle→C1 made not entrant→OSR→C2 made not entrant→重编译;**JDK11 JFR 无 jdk.Deoptimization 事件**);PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag 仅 debug 版
 
 ### 1. "vframeArray — deopt 的核心数据结构"
 
