@@ -44,7 +44,7 @@ void StubRoutines::initialize1() {
 - **`stubRoutines_init1`(init.cpp:110)在 `universe_init`(:111)之前**——genesis 创建基本 oop 时若分配失败要抛 OOM,抛异常得靠桩,所以**第一批桩必须先于 genesis 存在**;
 - **`stubRoutines_init2`(init.cpp:144)在 `universe2_init`(:124,genesis)之后**——第二批(重活)等堆与元数据就绪再生成。
 
-`StubGenerator_generate`(x86 平台函数)用**同一个 StubGenerator 分两次调用**不同的入口: `generate_initial`(stubGenerator_x86_64.cpp:5869,第一批: forward_exception/call_stub/原子操作/抛异常桩)与 `generate_all`(:5971,第二批: arraycopy/crypto/math/BigInteger)。
+`StubGenerator_generate`(x86 平台函数)用**同一个 StubGenerator 分两次调用**不同的入口: `generate_initial`(stubGenerator_x86_64.cpp:5869,第一批: forward_exception/call_stub/原子操作/**栈溢出相关的抛异常桩**)与 `generate_all`(:5971,第二批: 其余抛异常桩(AbstractMethodError/ICCE/NPE,:5977-5984)、f2i/f2l fixup、**arraycopy**(generate_arraycopy_stubs,:2866/:6017)、safefetch(:6095)、crypto/math)。
 
 ### 生成器: StubCodeGenerator
 
