@@ -22,7 +22,7 @@
     _illegal              =  -1,
 ```
 
-从 `_nop = 0` 到 `_breakpoint = 202`(0x00-0xCA)共 203 个枚举成员,把 JVM 规范里保留给实现者的 `wide`(0xC4)与 `breakpoint`(0xCA)也列了进来;0xCB-0xFF 的未分配区(含 `impdep1/impdep2`)HotSpot 不定义,方法体里出现即非法。`number_of_java_codes` 是第一个哨兵(bytecodes.hpp:246)。这之后是 HotSpot 私有的"重写"字节码(bytecodes.hpp:249-303),共 36 条: 29 条 `_fast_*`(getfield/putfield 各 8 个类型版本、access 快捷、线性/二分 switch、`fast_aldc` 等)+ `_return_register_finalizer` + `_invokehandle` + 4 条 `_nofast_*` + `_shouldnotreachhere`;第二个哨兵 `number_of_codes` 在 :306。启动断言 `number_of_codes <= 256`(bytecodes.cpp:280)——枚举值必须全部塞进一个字节,因为运行时取指令就是 `(Code)*bcp`。
+从 `_nop = 0` 到 `_breakpoint = 202`(0x00-0xCA)共 203 个枚举成员,把 JVM 规范里保留给实现者的 `wide`(0xC4)与 `breakpoint`(0xCA)也列了进来;规范在 0xCB-0xFF 预留的未分配区里,HotSpot 只用了 0xCB-0xEE(私有 fast 系列,见下),**0xEF-0xFF 共 17 个值不定义**,方法体里出现即非法。`number_of_java_codes` 是第一个哨兵(bytecodes.hpp:246)。这之后是 HotSpot 私有的"重写"字节码(bytecodes.hpp:249-303),共 36 条: 29 条 `_fast_*`(getfield/putfield 各 8 个类型版本、access 快捷、线性/二分 switch、`fast_aldc` 等)+ `_return_register_finalizer` + `_invokehandle` + 4 条 `_nofast_*` + `_shouldnotreachhere`;第二个哨兵 `number_of_codes` 在 :306。启动断言 `number_of_codes <= 256`(bytecodes.cpp:280)——枚举值必须全部塞进一个字节,因为运行时取指令就是 `(Code)*bcp`。
 
 **关键设计 (斜体)**: *枚举值 = opcode 值本身,不是分开的两套编号——"名字 → 字节"是恒等映射。这是后面所有表的下标规则: `_name[_iload]` 就是 `_name[21]`。*
 
