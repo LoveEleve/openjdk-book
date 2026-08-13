@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **68/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 16: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **69/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 17: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加要求再 REVIEW)** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 08-interpreter/04(LinkResolver + Rewriter——08 域收官篇,大纲 `planning/outlines/08-interpreter/04-linkresolver-rewriter.md`,08 域共 4 篇: 01 ✅/02 ✅/03 ✅/04-linkresolver-rewriter)。
+**下一步(唯一,无选择)**: 31-unsafe/01(Unsafe——JVM 底层 API,大纲 `planning/outlines/31-unsafe-whitebox/01-unsafe-api.md`,31 域共 2 篇: 01-unsafe-api/02-whitebox-forte;08 域 4 篇全部完结)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,65 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训);⑧ **用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)**
 
@@ -43,13 +43,13 @@
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26)
 第 3 批(对象/类): 07(7/7) → 09(3/3) → 17(4/4)   ✅ 第 3 批完结(14 篇)
-第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(3/4)** → 31 → 44   🚧 进行中
+第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(4/4 完结)** → 31 → 44   🚧 进行中
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 68 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 16):
+**已完成 69 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 17):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -72,7 +72,7 @@
 | 19-sync | 1-4 | `19-sync/01`(157)/02(107)/03(179)/04(113) | ✅ 19 域完结 |
 | **23-stub** | 1-3 | `23-stub/01-stub-entry.md`(128)/02-arraycopy.md(313)/03-crypto-math.md(306) | ✅ **23 域完结(本会话)** |
 | **24-frame** | 1-3 | `24-frame/01-physical-frame.md`(238)/02-virtual-frame.md(151)/03-deopt-gc-scan.md(268) | ✅ **24 域完结(本会话)** |
-| **08-interpreter** | 1-4 | `08-interpreter/01-bytecodes-definition.md`(308)/02(330)/03-interpreter-runtime.md(244) | 🚧 08 域 3/4(本会话) |
+| **08-interpreter** | 1-4 | `01-bytecodes-definition.md`(308)/02(330)/03-interpreter-runtime.md(244)/04-linkresolver-rewriter.md(269) | ✅ **08 域完结(本会话)** |
 
 ### 本会话 6 篇的 commit 清单(23-stub/02 起,按 git log 为准)
 
@@ -84,6 +84,7 @@
 **08-interpreter/01(Bytecodes 定义表)**: 正文 b34880a → 大纲回填 05d5c11(⚠️ 11 条)→ README 4ee15e1(66/152,08 域 1/4)→ 下一步 08-interpreter/02
 **08-interpreter/02(Template Interpreter)**: 正文 9c80ab1(含 01 篇 0xCB-0xFF 修正)→ 大纲回填 e6c2f3e(⚠️ 11 条)→ README b6e7dbf(67/152,08 域 2/4)→ 下一步 08-interpreter/03
 **08-interpreter/03(InterpreterRuntime)**: 正文 1d2807d → 大纲回填 8523d0d(⚠️ 8 条)→ README 3c9e272(68/152,08 域 3/4)→ 下一步 08-interpreter/04
+**08-interpreter/04(LinkResolver + Rewriter)**: 正文 050eb2d → 大纲回填 61b4df7(⚠️ 10 条)→ README 587e62e(69/152,**08 域完结**)→ 下一步 31-unsafe/01
 
 **本会话新增素材(全部 gitignore 不入库,在 materials/commands/)**:
 - `23-arraycopy-bench.txt`(UseAVX 0/2/3 各档 arraycopy/fill 吞吐 + PrintFlagsFinal 附注: UseFastStosb=false/UseXMMForObjInit=true)
@@ -275,6 +276,16 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
+### 6.24 08-04(LinkResolver + Rewriter,08 域收官,大纲 10 处漂移含 3 处机制编造,2026-08-13)
+- **"getstatic → fast_agetfield/putstatic → fast_aputfield" 编造**: getstatic/putstatic 无 fast 版本(01 篇枚举无);fast_agetfield 来自 _getfield;Rewriter 对字段/方法指令只换 CP→cpCache 索引(rewrite_member_reference rewriter.cpp:168-183,get_Java_u2→cp_entry_to_cp_cache→put_native_u2 = 01 篇 bJJ 大写 J 的来源),不改指令字节
+- **"newarray → fast_newarray" 编造**: 枚举里不存在;Rewriter 唯一替换指令字节=lookupswitch→fast_linearswitch/fast_binaryswitch(scan_method :394-402,BinarySwitchThreshold);getfield→fast_igetfield 是解释器运行时 patch(02 篇)非 Rewriter
+- **行号全漂**: 五入口 linkResolver.cpp:1652-1690,resolve_static_call :1058/virtual :1291/interface :1411/field :948/resolve_method 六步主链 :723-800;rewrite 入口 :570、rewrite_bytecodes :524-569(forward 一遍,restore_bytecodes 出错反扫 :78-88)、scan_method :370-511
+- **invokedynamic**: 每调用点独占 cpCache 条目(one per bytecode,注释 rewriter.cpp:263-272)→u4 索引→**bJJJJ 5 字节格式的根本原因**;resolved_references 登记;rewrite_Object_init :136-164(RegisterFinalizersAtInit→return_register_finalizer 落地)
+- **cpCache 结构(大纲未提)**: 四字段 _indices[b2|b1|index]/_f1(metadata)/_f2(vtable 索引或偏移)/_flags(cpCache.hpp:49-54,132-142);is_resolved=bytecode 匹配(:inline 43-49);indy 写入=set_method_handle_common 锁协议(flags→refs[f2]→f1,f1 发布点,cpCache.cpp:350-395,ResolutionError 失败传播);普通 invoke=set_direct_or_vtable_call(:318 起)无锁,_indices 字节码最后写(cpCache.hpp:128 注释);invokespecial(interface sender)/invokestatic(类未初始化)故意不标记 resolved(do_resolve=false)
+- **resolve_invoke 写回分派**: 按 CallInfo::call_kind 三写(set_direct_call/vtable_call/itable_call,interpreterRuntime.cpp:904-921),非 set_method_handle_common(那是 indy 专用)
+- **虚分派两段**: linktime_resolve_virtual_method(:1300-1355 检查)/runtime_resolve_virtual_method(:1358-1405: 接口默认-miranda→vtable_index_of_interface_method;普通→vtable_index(),nonvirtual_vtable_index 特例=private/final 静态绑定;否则 recv_klass->method_at_vtable);解析结果在 per-class cpCache
+- **实证**: fast_linearswitch 192B/fast_binaryswitch 256B/fast_aldc 352B/return_register_finalizer 1248B 模板(重写发生证据);javap -v Methodref/Fieldref/InvokeDynamic#0→BootstrapMethods(08-linkresolve-javap.txt)
+
 ### 6.23 08-03(InterpreterRuntime,大纲 8 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"JRT_ENTRY" 错**: 解释器 runtime 用 **IRT_ENTRY 家族**(interfaceSupport.inline.hpp:445-466),JRT_ENTRY 是 JNI 通道(:468);JRT 与 IRT 宏体几乎相同(ThreadInVMfromJava+VM_ENTRY_BASE),真正禁用异步异常的是 IRT_ENTRY_NO_ASYNC(monitorenter 用);状态转换 RAII(trans_from_java,:224-232)+HandleMark+THREAD 约定;at_safepoint(:1176-1191)函数体近空——**safepoint 检查在 IRT_END 的析构隐式完成**(注释原话)
 - **"OopMapCache LRU + OopMapCacheSize ~1024" 编造**: 固定 32 槽哈希+3 步探测(oopMapCache.hpp:149-151 "Use fixed size for now"),无 LRU 无该 flag;每槽 2 位 oop/dead(:76-78)
@@ -374,7 +385,7 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/08-interpreter/03-interpreter-runtime.md(注意 ⚠️ 块——01/02 大纲均已回填,03 大概率同样漂移;02 篇悬念指向它: calls_vm 指令怎么调 C++)
+1. 读 planning/outlines/31-unsafe-whitebox/01-unsafe-api.md(注意 ⚠️ 块——08 域四篇大纲均已回填,31 大概率同样漂移;08-04 篇悬念指向它: 绕过一切检查的 direct memory 通道)
 2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;重点: interpreterRuntime.cpp 的各类入口(resolve_ldc/resolve_invoke/new/throw...)、模板侧 call_VM 的调用点(templateTable.cpp:71-116 断言 calls_vm)、interp_masm 的 call_VM 封装(macroAssembler 层 JavaFrameAnchor/safepoint 处理)、JavaCalls/SharedRuntime 桥、safepoint 入口(InterpreterRuntime::at_safepoint,02 篇第 6 段生成)、invoke 的 resolve 流程;与 02 篇的 dispatch/轮询点/calls_vm 位呼应要在文中体现;03 大纲标题 = InterpreterRuntime,正文标题按 v5 格式)
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);容器后台进程用 wrapper 脚本管理;pgrep 用方括号;转储用 kill -3;jcmd attach 挂起时换 kill -3;class 版本注意 javac/java 同版本;javap -c 偏移差可与 def 表脚本核对(见 08-bytecodes-javap.txt)
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
