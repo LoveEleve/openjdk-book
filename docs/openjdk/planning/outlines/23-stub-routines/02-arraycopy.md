@@ -13,7 +13,8 @@
 > - **"stubRoutines.hpp:128-157" 漂移**: :126-127 注释;conjoint :128-132;disjoint :133-137;arrayof :139-152;可选 :154-157;fill/zero :159-167;select_arraycopy_function 在 stubRoutines.cpp:522(映射: boolean→jbyte :536-543,char→jshort :544-550,float→jint,int 同,double→jlong,对象→oop 带 uninit)
 > - **"stubGenerator_x86_64.cpp:600-900/900-1100/1100-1300" 行号全漂移**: array_overlap_test :1173;copy_bytes_forward :1246;copy_bytes_backward :1354;8 生成函数 :1473-2177;generate_fill :1756
 > - **JIT 分派补充(大纲未提)**: C2=LibraryCallKit::inline_arraycopy(library_call.cpp:4743)→ArrayCopyNode→宏展开 generate_arraycopy(macroArrayCopy.cpp:278)→basictype2arraycopy(:216-244,常量偏移 src_off>=dst_off 判 disjoint)→select_arraycopy_function→make_leaf_call(:1100 叶子调用);C1=emit_arraycopy(c1_LIRAssembler_x86.cpp:3049,类型未知→generic);**解释器=JVM_ArrayCopy(jvm.cpp:324-340)→klass()->copy_array(typeArrayKlass.cpp:126)不用桩**;oop 变体 barrier 包夹(prologue=SATB 预屏障整段入队 g1BarrierSetAssembler_x86.cpp:44,uninit 跳过;epilogue=卡表标记);checkcast 失败返 -1^K(:2430-2438)
-> - 实证: materials/commands/23-arraycopy-bench.txt(AMD EPYC 9K65,TencentKona 17,UseAVX 0/2/3 各档独立 JVM,byte[]): 1K arraycopy 55.0→68.3 GB/s(SSE2→AVX2 +24%),手写循环 21.2 GB/s=**3.2x**;64K 78.3 vs 40.1=2.0x;4M/32M 带宽瓶颈≈1.0x;64K fill AVX2/3 137-139 vs SSE2 85.8 GB/s
+> - 实证: materials/commands/23-arraycopy-bench.txt(AMD EPYC 9K65,TencentKona 17,UseAVX 0/2/3 各档独立 JVM,byte[]): 1K arraycopy 55.0→68.3 GB/s(SSE2→AVX2 +24%),手写循环 21.2 GB/s=**3.2x**;64K 78.3 vs 40.1=2.0x;4M/32M 带宽瓶颈≈1.0x;64K fill AVX2/3 137-139 vs SSE2 85.8
+> - 第 3 轮 REVIEW 补充: **oop 拷贝宽度**——压缩 oop 下引用数组走 int_oop 生成器,同样 64B/迭代向量循环(count 右移 1 转 qword 后 copy_bytes_forward),非"一次 8 字节";"ignored" 注释在 :1456(disjoint)/:1563(conjoint)非 1462-1463;uninit 预屏障是 `if (!dest_uninitialized)` 守卫跳过(g1BarrierSetAssembler_x86.cpp:46-48)非"直接 return";write_ref_array_pre 有窄/宽两入口(UseCompressedOops 分派) GB/s
 
 ### 1. "14 种变体" — arraycopy entry table
 
