@@ -2,6 +2,17 @@
 
 > 🟡 Working | 2 KP 中的密码学加速
 > 读者处境: `MessageDigest.getInstance("SHA-256").digest(data)` — JIT 把这段代码替换成 call `_sha256_implCompress` stub。这个 stub 是手写 x86 汇编——用 SHA-NI 硬件指令在每个压缩轮中处理 64 bytes。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/23-stub/03 已按真实源码成文 306 行,23 域收官,本大纲为规划期产物,机制描述以文章为准):
+> - **行号全漂移**: AES 系列实际 :3016-4701(stubGenerator_x86_64.cpp,非 1300-1700);SHA :3692-3890(非 1700-2100);CRC :5185-5296(非 stubRoutines_x86_64.cpp:100-200,预计算表在 **stubRoutines_x86.cpp**: crc_table :132、k256 :324);BigInteger :5297-5470(非 2200-2700);Math :5497-5700(非 2700-3200)
+> - **"sha256rnds2 4 rounds in 1 instruction" 错**: 一条 rnds2 做 **2 个 round**;每 16 字节块 = paddd(K)+rnds2×2 = 4 rounds(macroAssembler_x86_sha.cpp:271-300);消息扩展 sha256msg1/msg2+palignr 与压缩交叉流水;K256 是**静态数组**(stubRoutines_x86.cpp:324)非 DataSegment
+> - **SHA-256 双路径(大纲未提)**: supports_sha()→SHA-NI fast_sha256,否则 AVX2 sha256_AVX2(:507)——所以 UseSHA256Intrinsics 开关只需 **sse4_1+UseSHA**(vm_version_x86.cpp:956-960);SHA-512 **无硬件指令**纯 AVX2(断言 avx2+bmi2,stubGenerator_x86_64.cpp:3814-3815,sha512_AVX2 macroAssembler_x86_sha.cpp:1240,vpsrlq/vpsllq 模拟循环移位);MB 批量=ofs/limit 多块循环 state 驻寄存器
+> - **AES 细节**: encryptBlock :3016,keylen {44,52,60} 分派(:3038-3100),密钥=Java 展开的轮密钥 int 数组直接复用(注释 "the java expanded key ordering is just what we need" :3044),pshufb 转小端(load_key :2988);CBC 解密并行两条路径(VAES+AVX512 向量版 :4317/SSE Parallel :3400,按 supports_vaes+avx512vl+dq 二选一 :6024-6030);CTR :3916/:3998
+> - **GHASH**: 4 次 pclmulqdq(a0*b0/a0*b1/a1*b0/a1*b1,掩码 0/16/1/17)交叉 XOR(:4693-4703);AVX 版 avx_ghash(macroAssembler_x86_aes.cpp:614)
+> - **CRC32 不是"纯查表"**(半对): kernel_crc32(macroAssembler_x86.cpp:9076)=查表对齐+**pclmulqdq 折叠**(fold_128bit_crc32 :9138)+尾部查表,**无 crc32 指令**;crc32 SSE4.2 指令属 **CRC32C**(crc32c_ipl_alg2_alt2 :9889,:9671-9677);AVX-512 版 kernel_crc32_avx512 :9390(VPCLMULQDQ)
+> - **BigInteger**: multiply_to_len(macroAssembler_x86.cpp:8123)按 BMI2 分派(:8218-8236): BMI2→multiply_128_x_128_bmi2_loop(:7989,mulxq :8030+adcx/adox 双进位链 :8039-8047,adcx/adox 需 supports_adx);非 BMI2→multiply_128_x_128_loop :7910;**"montgomery* 是汇编桩" 错(编造)**: 登记的是 C++ SharedRuntime::montgomery_multiply(sharedRuntime_x86_64.cpp:3811,32 位字),CAST_FROM_FN_PTR(stubGenerator_x86_64.cpp:6111-6118);另有 vectorizedMismatch :5357、base64 :4933(大纲未提);开关是 C2 flag(c2_globals.hpp:718)
+> - **Math**: 桩=generate_libmExp/Sin/Cos/Tan/Log/Log10/Pow(:5497-5699)→MacroAssembler::fast_*,**Intel LIBM 2016 移植**(macroAssembler_x86_exp.cpp 头注释 "Intel Math Library (LIBM) Source Code"),7 文件各一函数,全 XMM 无 x87;fast_exp 常数表 _cv/_shifter(嵌桩后),范围检查(32767/16527/15504)+ln2 倒数取整归约+多项式(系数 0x3FC55555≈1/6、0x3FA55555≈1/24);**_dlibm_sin_cos_huge/reduce_pi04l/tan_cot_huge 仅 x86_32 生成**(stubGenerator_x86_32.cpp:3849-3862),x86_64 恒 NULL——"声明有、实现无"又一例
+> - 实证: materials/commands/23-crypto-bench.txt(AMD EPYC 9K65,TencentKona 17): SHA-256 1537→262 MB/s=**5.9x**;SHA-512(AVX2)815→438=1.9x;AES-CBC 496→166=3.0x;CRC32 44704→3110=14.4x;Math.exp 4.0→7.0 ns/op=1.7x(用 -XX:+UnlockDiagnosticVMOptions 关闭)
 
 ### 1. "一 round 64 bytes" — SHA 系列 intrinsics
 
@@ -75,6 +86,6 @@ _dlibm_reduce_pi04l — π/4 精确归约(π 扩展精度)
 
 ### 核心悬念
 
-**"Crypto intrinsics 用 AES-NI/SHA-NI 硬件指令达到 8x 加速——Math 用多项式近似替代硬件 FSIN 达到更高精度。大整数乘法用 mulx+adcx 双-carry-chain 并行度翻倍。所有 stub 是手写 x86 汇编预生成在 _code2 中。"** — 下一篇: 域24 Frame & Stack Walking——JVM 怎么走栈。
+**"Crypto intrinsics 用 AES-NI/SHA-NI 硬件指令(实测 5.9x/14.4x),Math 用 Intel LIBM 多项式移植(求确定性非速度),大整数乘法用 mulx+adcx 双-carry-chain(Montgomery 例外:C++ 函数)。所有 stub 是手写 x86 汇编预生成在 _code2 中。"** — 下一篇: 域24 Frame & Stack Walking——JVM 怎么走栈。
 
 > → 域24 Frame & Stack Walking
