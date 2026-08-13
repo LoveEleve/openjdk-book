@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **74/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 1: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **74/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 1) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 1/13 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -9,11 +9,11 @@
 
 **项目**: 写一本 OpenJDK 源码分析书("格物致知"),源码树 = jdk11u(`/data/workspace/jdk11u/src/hotspot/`)。
 
-**当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加要求再 REVIEW)** → 回填大纲 → 提交。
+**当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 11-cds/02(Load 端,大纲 `planning/outlines/11-cds/02-cds-load-shared.md`,标题 "02. Load — mmap archive → shared spaces → 类就绪";01 篇悬念指向它: mmap 之后怎么进 SystemDictionary)。
+**下一步(唯一,无选择)**: 11-cds/02(Load 端,大纲 `planning/outlines/11-cds/02-cds-load-shared.md`,标题 "02. Load — mmap archive → shared spaces → 类就绪";11 域共 2 篇: 01 ✅/02-cds-load-shared;01 篇悬念指向它: mmap 之后怎么进 SystemDictionary)。
 
-**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,65 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训);⑧ **用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)**
+**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,74 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
 ---
 
@@ -25,12 +25,12 @@
 | 卷 T 工具观测 | `docs/openjdk/vol-tools/`(ch01.md~ch07.md 共 7 篇) | ✅ 旧会话完成,写作时引用其素材做实证 |
 | 卷 1-bak 启动 | `docs/openjdk/vol-01-bak/`(14 章) | ✅ 归档,不沿用 |
 | **卷 2 运行时深处** | `docs/openjdk/vol-02/` | 🚧 **当前任务**,按 48 域依赖拓扑写 |
-| 域规划 | `docs/openjdk/planning/` | 48 域权威清单(00-domain-discovery-v3.md)+ 每域 KP(knowledge-planning/0X-*.md)+ 每域大纲(outlines/0X-*/) |
+| 域规划 | `docs/openjdk/planning/` | 48 域权威清单(00-domain-discovery-v3.md)+ 每域 KP + 每域大纲(outlines/0X-*/) |
 | 工具素材库 | `docs/openjdk/planning/outlines/00-jvm-tools/materials/` | ✅ 命令输出/截图/JFR 录制(gitignore,不入库) |
 | 本交接文档 | `docs/openjdk/SESSION-HANDOFF.md` | 本文件 |
 
 **git 仓库**: `/data/workspace/source-code/openjdk-book/`(remote: git@github.com:LoveEleve/openjdk-book.git,main 分支,每篇一提交一推送)
-**JDK 工具**: `/opt/codev/TencentKona/bin/`(17.0.8.1,通用实证)与 **`/data/tmp/opencode/jdk11`(Temurin OpenJDK 11.0.32,与 jdk11u 源码同版本——实证首选!)**
+**JDK 工具**: **`/data/tmp/opencode/jdk11`(Temurin OpenJDK 11.0.32,与 jdk11u 源码同版本——实证首选!)**;`/data/tmp/opencode/jdk17`(Temurin 17,含 src.zip 可查新版本 API 变迁,31-01 用它验证 defineAnonymousClass 移除);`/opt/codev/TencentKona/bin/`(17.0.8.1,通用)
 **旧交接文档**(更早会话起点,可参考历史): `/data/workspace/source-code/book/成长之路/tmp-question/training-camp/source-code/analysis/source-analysis/HANDOFF.md`
 
 ---
@@ -40,71 +40,65 @@
 **写作顺序依据**: `docs/openjdk/planning/knowledge-planning/00-domain-writing-order.md`(48 域依赖拓扑 7 层,脚本验证自洽)
 
 ```
-第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
-第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26)
-第 3 批(对象/类): 07(7/7) → 09(3/3) → 17(4/4)   ✅ 第 3 批完结(14 篇)
-第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(4/4 完结)** → **31(2/2 完结)** → **44(2/2 完结)**   ✅ **第 4 批收官**
+第 1 批(地基): 01(4) → 05(2) → 45(2) → 48(4)                     ✅ 完结 12/12
+第 2 批(原语): 02(4) → 03(2) → 04(2) → 06(6) → 16(5) → 38(2) → 41(2) → 42(3)   ✅ 完结 26/26
+第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
+第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11(1/2)** → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46   🚧 进行中
-第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 74 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 1):
+**已完成 74 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
-| 01-os | 1-4 | `01-os/` 4 篇 | ✅ 旧会话完成 |
-| 05-cpu-primitives | 1-2 | `05-cpu-primitives/` 2 篇 | ✅ 旧会话完成 |
-| 45-math-library | 1-2 | `45-math-library/` 2 篇 | ✅ 45 域完结 |
-| 48-utilities | 1-4 | `48-utilities/` 4 篇 | ✅ 48 域完结 |
-| 02-assembler | 1-4 | `02-assembler/` 4 篇 | ✅ 02 域完结 |
-| 03-arguments-flags | 1-2 | `03-arguments-flags/` 2 篇 | ✅ 03 域完结 |
-| 04-logging | 1-2 | `04-logging/` 2 篇 | ✅ 04 域完结 |
-| 06-oops | 1-6 | `06-oops/01`~`06` | ✅ 06 域完结 |
-| 16-codecache | 1-5 | `16-code-cache/` 5 篇 | ✅ 16 域完结 |
-| 38-perfdata | 1-2 | `38-perfdata/` 2 篇 | ✅ 38 域完结 |
-| 41-zip-jimage | 1-2 | `41-zip-jimage/` 2 篇 | ✅ 41 域完结 |
-| 42-core-native | 1-3 | `42-core-native/01-jni-system.md`(129)/02-process.md(264)/03-class-io.md(228) | ✅ 42 域完结 |
-| 07-classfile-classloader | 1-7 | `07-classfile-classloader/01`~`07` | ✅ 07 域完结 |
-| 09-memory-core | 1-3 | `09-memory-core/01`(214)/02(237)/03(147) | ✅ 09 域完结 |
-| 17-threads | 1-4 | `17-threads/01`(191)/02(192)/03(165)/04(188) | ✅ 17 域完结 |
-| 10-metaspace | 1-3 | `10-metaspace/01`(101)/02(142)/03(104) | ✅ 10 域完结 |
-| 19-sync | 1-4 | `19-sync/01`(157)/02(107)/03(179)/04(113) | ✅ 19 域完结 |
-| **23-stub** | 1-3 | `23-stub/01-stub-entry.md`(128)/02-arraycopy.md(313)/03-crypto-math.md(306) | ✅ **23 域完结(本会话)** |
-| **24-frame** | 1-3 | `24-frame/01-physical-frame.md`(238)/02-virtual-frame.md(151)/03-deopt-gc-scan.md(268) | ✅ **24 域完结(本会话)** |
-| **08-interpreter** | 1-4 | `01-bytecodes-definition.md`(308)/02(330)/03-interpreter-runtime.md(244)/04-linkresolver-rewriter.md(269) | ✅ **08 域完结(本会话)** |
+| 01-os | 1-4 | `01-os/` 4 篇 | ✅ 旧会话 |
+| 05-cpu-primitives | 1-2 | `05-cpu-primitives/` 2 篇 | ✅ 旧会话 |
+| 45-math-library | 1-2 | `45-math-library/` 2 篇 | ✅ 旧会话 |
+| 48-utilities | 1-4 | `48-utilities/` 4 篇 | ✅ 旧会话 |
+| 02-assembler | 1-4 | `02-assembler/` 4 篇 | ✅ 旧会话 |
+| 03-arguments-flags | 1-2 | `03-arguments-flags/` 2 篇 | ✅ 旧会话 |
+| 04-logging | 1-2 | `04-logging/` 2 篇 | ✅ 旧会话 |
+| 06-oops | 1-6 | `06-oops/01`~`06` | ✅ 旧会话 |
+| 16-codecache | 1-5 | `16-code-cache/` 5 篇 | ✅ 旧会话 |
+| 38-perfdata | 1-2 | `38-perfdata/` 2 篇 | ✅ 旧会话 |
+| 41-zip-jimage | 1-2 | `41-zip-jimage/` 2 篇 | ✅ 旧会话 |
+| 42-core-native | 1-3 | `42-core-native/` 3 篇 | ✅ 旧会话 |
+| 07-classfile-classloader | 1-7 | `07-classfile-classloader/` 7 篇 | ✅ 旧会话 |
+| 09-memory-core | 1-3 | `09-memory-core/` 3 篇 | ✅ 旧会话 |
+| 17-threads | 1-4 | `17-threads/` 4 篇 | ✅ 旧会话 |
+| 10-metaspace | 1-3 | `10-metaspace/` 3 篇 | ✅ 旧会话 |
+| 19-sync | 1-4 | `19-sync/` 4 篇 | ✅ 旧会话 |
+| 23-stub | 1-3 | `23-stub/` 3 篇 | ✅ 旧会话 |
+| 24-frame | 1-3 | `24-frame/` 3 篇 | ✅ 旧会话 |
+| **08-interpreter** | 1-4 | `08-interpreter/01-bytecodes-definition.md`(308)/02-template-interpreter.md(330)/03-interpreter-runtime.md(244)/04-linkresolver-rewriter.md(269) | ✅ **08 域完结(本会话)** |
 | **31-unsafe** | 1-2 | `31-unsafe-whitebox/01-unsafe-api.md`(151)/02-whitebox-forte.md(132) | ✅ **31 域完结(本会话)** |
 | **44-class-verification** | 1-2 | `44-class-verification/01-verifier.md`(316)/02-verification-type.md(149) | ✅ **44 域完结,第 4 批收官(本会话)** |
 | **11-cds** | 1-2 | `11-cds/01-cds-overview-dump.md`(138) | 🚧 11 域 1/2(本会话) |
 
-### 本会话 6 篇的 commit 清单(23-stub/02 起,按 git log 为准)
+### 本会话 9 篇的 commit 清单(按 git log 为准)
 
-**23-stub/02(arraycopy 向量化)**: 正文 10d3239 → 大纲回填 b70cd1a(⚠️ 11 条)→ README 2e1c7cc → HANDOFF 42877ad+d62dea1 → **第 3 轮 REVIEW** df53a53(oop 拷贝宽度 64B 修正/ignored 行号 1456/正文块头行号对齐/uninit if 守卫/窄宽入口/开篇软化/61 篇同步)→ 大纲回填 3b31e38
-**23-stub/03(Crypto+Math)**: 正文 235140b → 大纲回填 6f584f3(⚠️ 10 条)→ README c1b8c07 → HANDOFF fda8aec(§6.17,62/152,23 域完结)→ 下一步 24-frame/01
-**24-frame/01(Physical Frame)**: 正文 4fd580d → 大纲回填 0002994(⚠️ 10 条)→ README 894d505 → HANDOFF ea6afe5(§6.18,63/152)→ 下一步 24-frame/02
-**24-frame/02(Virtual Frame)**: 正文 1632ba5 → 大纲回填 ba87c0e(⚠️ 6 条)→ README+HANDOFF a5eb4dd(64/152)→ §6.19 4e6296c → **第 3 轮 REVIEW** 2fb8f8e(实证 v2 升级 Temurin 11 三路径,消费者双路径修正)+大纲回填 79f5df2+HANDOFF 33031a2 → **第 4 轮 REVIEW** 1aed4ab(锚点 pc=轮询点机制闭环)+大纲回填 f1ce672
-**24-frame/03(Deopt+GC)**: 正文 8850989 → 大纲回填 6ae67c0(⚠️ 9 条)→ README+HANDOFF 6faefe1(65/152,24 域完结)→ §6.20 32bebc8 → **第 3 轮 REVIEW** cb8dd16(帧失效=deopt_dependents safepoint 全量拆,非"走到栈顶")+大纲回填 52a1e4c+HANDOFF 32e9a39
-**08-interpreter/01(Bytecodes 定义表)**: 正文 b34880a → 大纲回填 05d5c11(⚠️ 11 条)→ README 4ee15e1(66/152,08 域 1/4)→ 下一步 08-interpreter/02
-**08-interpreter/02(Template Interpreter)**: 正文 9c80ab1(含 01 篇 0xCB-0xFF 修正)→ 大纲回填 e6c2f3e(⚠️ 11 条)→ README b6e7dbf(67/152,08 域 2/4)→ 下一步 08-interpreter/03
-**08-interpreter/03(InterpreterRuntime)**: 正文 1d2807d → 大纲回填 8523d0d(⚠️ 8 条)→ README 3c9e272(68/152,08 域 3/4)→ 下一步 08-interpreter/04
-**08-interpreter/04(LinkResolver + Rewriter)**: 正文 050eb2d → 大纲回填 61b4df7(⚠️ 10 条)→ README 587e62e(69/152,**08 域完结**)→ 下一步 31-unsafe/01
-**31-unsafe/01(Unsafe 底层 API)**: 正文 f902593 → 大纲回填 0ccf408(⚠️ 9 条)→ README 9780838(70/152,31 域 1/2)→ 下一步 31-unsafe/02
-**31-unsafe/02(WhiteBox + Forte)**: 正文 5b9a5d1 → 大纲回填 e53a138(⚠️ 6 条)→ README 78063ea(71/152,**31 域完结**)→ 下一步 44-class-verification/01
-**44-class-verification/01(ClassVerifier)**: 正文 f510ced → 大纲回填 8c22eb0(⚠️ 7 条,大纲行号全对,补充机制为主)→ README 31ffc0e(72/152,44 域 1/2)→ 下一步 44-class-verification/02
-**44-class-verification/02(VerificationType)**: 正文 97cceb3 → 大纲回填 9ec3c4b(⚠️ 7 条: Top=Bogus 别名/双槽 2_2nd/伪代码驳/签名窄化/悬念 11-cds)→ README 838b56d(73/152,**第 4 批收官**)→ 下一步 11-cds/01
-**11-cds/01(CDS 全景与 Dump)**: 正文 171bf24 → 大纲回填 a9dafe0(⚠️ 8 条: magic 0xF00BABA2/region 8 槽/link_and_serialize 编造/行号漂/序列化本质/默认路径)→ README a35de82(74/152,11 域 1/2,第 5 批开篇)→ 下一步 11-cds/02
+**08-interpreter/01(Bytecodes 定义表)**: 正文 b34880a → 大纲回填 05d5c11(⚠️ 11 条)→ README 4ee15e1(66/152)→ HANDOFF 66ae707 → **第 3 轮 REVIEW** e4d5f42+24da2f2(is_aload 枚举不连续/快速化闭环 templateTable_x86.cpp:973/getfield patch :2929/verifier.cpp:754 语义/BcDemo 六方法)
+**08-interpreter/02(Template Interpreter)**: 正文 9c80ab1(含 01 篇 0xCB-0xFF 修正: 真正未定义是 0xEF-0xFF 17 个,0xCB-0xEE 是 fast 系列)→ 回填 e6c2f3e(⚠️ 11 条)→ README b6e7dbf(67/152)→ HANDOFF 08ec0b4 → **第 3 轮** 2c55647(wide 链 jump _wentry_point :4504-4510/iadd=pop_i+addl iop2 :1337-1340/deopt 三态/deopt_reexecute_entry 特判/bytecodes_init init.cpp:104)
+**08-interpreter/03(InterpreterRuntime)**: 正文 1d2807d → 回填 8523d0d(⚠️ 8 条)→ README 3c9e272(68/152)→ HANDOFF 3a4fde4 → **第 3 轮** db55e5d(safepoint 检查在 transition 两向 block_if_requested interfaceSupport.inline.hpp:111-123/get_vm_result 读回 :2572-2574/increment_mask_and_jump=andl+jcc :1956-1967/forward_exception :2556-2568/入口 46 个)
+**08-interpreter/04(LinkResolver + Rewriter)**: 正文 050eb2d → 回填 61b4df7(⚠️ 10 条)→ README 587e62e(69/152,**08 域完结**)→ HANDOFF b9c1bfc → **第 3 轮** 9ae2af7(指令替换两类: lookupswitch+ldc→fast_aldc :355 修正自相矛盾/rewrite_class instanceKlass.cpp:851-857 时机/fast_* 只能由 Rewriter 产生/is_resolved b1/b2 半槽共享)
+**31-unsafe/01(Unsafe 底层 API)**: 正文 f902593 → 回填 0ccf408(⚠️ 9 条)→ README 9780838(70/152)→ HANDOFF 82eb54f → **第 3 轮** edf1e48(反射绕 theUnsafe 补 JDK11 permit 条件实测/assert_field_offset_sane NULL 跳过 :105-118/defineAnonymousClass JDK17 已移除 实测 Temurin 17 src.zip)
+**31-unsafe/02(WhiteBox + Forte)**: 正文 5b9a5d1 → 回填 e53a138(⚠️ 6 条)→ README 78063ea(71/152,**31 域完结**)→ HANDOFF c16990b → 目录修正 87aa89b → **第 3 轮** 735f67e(ThreadInAsgct 实际 forte.cpp:559/thread.hpp:777,gc 竞态注释 :588-590)
+**44-class-verification/01(ClassVerifier)**: 正文 f510ced → 回填 8c22eb0(⚠️ 7 条,大纲行号全对,补充机制为主)→ README 471a9da(72/152)→ HANDOFF ac47702 → **第 3 轮** 943f66b(接口可赋值特例 数组只可赋 Cloneable/Serializable verificationType.cpp:47-77/<init> 必须 void :2725-2742)
+**44-class-verification/02(VerificationType)**: 正文 97cceb3 → 回填 9ec3c4b(⚠️ 7 条)→ README 838b56d(73/152,**第 4 批收官**)→ HANDOFF bb16581 → **第 3 轮** 0bd8215(实证解读修正: [ long, long ] 是 2 个 long 变量,双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 fd 00 05 04 04 04)
+**11-cds/01(CDS 全景与 Dump)**: 正文 171bf24 → 回填 a9dafe0(⚠️ 8 条)→ README a35de82(74/152,第 5 批开篇)→ HANDOFF ca5ccc8 → **第 3 轮** 5375e05(java_mirror 移除与 remove_unshareable 分列两函数 :501/:489/narrow_klass_base 重合=主动设计 set_narrow_klass_base(_shared_rs.base()) :305/classlist 行数断言删除)
 
-**本会话新增素材(全部 gitignore 不入库,在 materials/commands/)**:
-- `23-arraycopy-bench.txt`(UseAVX 0/2/3 各档 arraycopy/fill 吞吐 + PrintFlagsFinal 附注: UseFastStosb=false/UseXMMForObjInit=true)
-- `23-crypto-bench.txt`(SHA-256 5.9x/AES-CBC 3.0x/CRC32 14.4x/SHA-512 1.9x/exp 1.7x,开关对比)
-- `24-frame-demo.txt`(jstack 两行 at/codelist 双版本 nmethod/三 CodeHeap 1098 blobs/PrintInterpreter 271 codelets)
-- `24-inline-demo.txt` **v2**(Temurin 11: 编译日志 qux inline 7 次 + SIGQUIT 转储/jcmd/JFR 三路径都只有 main + 对照 NoInlineDemo 4 层)
-- `24-deopt-demo.txt`(PrintCompilation: total C1+C2→传 Circle→made not entrant×2→OSR→重编译)
+**本会话新增素材**(全部 gitignore 不入库,在 materials/commands/):
 - `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
 - `08-interpreter-templates.txt`(PrintInterpreter: 271 codelets avg 404B/iload 192 vs iload_0 96/iconst 7×96B/iadd 64B/ldc 736B/invokevirtual 1280B)
-
-**已回填的大纲 ⚠️ 块**(写作期修正,防下次抄错): 45/48/02/03/04/06/16/38/41/42/07/09/17/10/19 + 本会话 **23-01(6 条)/23-02(11 条+第 3 轮 4 条)/23-03(10 条)/24-01(10 条)/24-02(6 条+第 3 轮+第 4 轮)/24-03(9 条+第 3 轮)**。
+- `08-interpreter-counterdemo.txt`(CounterDemo PrintCompilation 全链 tier3→`%`tier4@4→tier4→made not entrant + PrintFlagsFinal 阈值附注)
+- `08-linkresolve-javap.txt`(javap -v Methodref/Fieldref/InvokeDynamic#0→BootstrapMethods)
+- `08-unsafe-demo.txt`(getUnsafe SecurityException/反射取 theUnsafe/String.value offset 12/CAS/allocateInstance x=0/pageSize 4096)
+- `08-whitebox-demo.txt`(最小 WhiteBox 兼容类: 不开 flag→UnsatisfiedLinkError/开 flag→heapOopSize 4/vmPageSize 4096/isGCSupported/g1IsHumongous/fullGC)
+- `08-verifier-demo.txt`(iload_0→aload_0 一字节修改: VerifyError 详细转储 vs -Xverify:none 照跑 result=3)
+- `08-verificationtype-javap.txt`(javap -v: loop 方法 StackMapTable locals=[ long, long ])
+- `08-cds-demo.txt` + `08-cds-dump-full.txt`(cds dump 归档 1211 类含 1151 instance/11.9MB/6 空间区 mc-rw-ro-md-st0-oa0;启动 class+load 356 个 shared objects file)
 
 ---
 
@@ -114,7 +108,7 @@
 1. 读大纲: planning/outlines/<NN>-<域>/<NN>-<篇>.md(注意 ⚠️ 写作期修正块)
 2. 读 KP: planning/knowledge-planning/<NN>-<域>.md(若大纲信息不足)
 3. 【铁律】验证大纲里所有 file:line 与"专有名词存在性"——逐个 grep/sed 核对,发现漂移用真实行号
-   —— 实测: 大纲几乎每篇都有 2-15 处错误/漂移,绝不可照抄;行号对了名字也可能是假的
+   —— 实测: 大纲几乎每篇都有 2-15 处错误/漂移,绝不可照抄;行号对了名字也可能是假的(44-01 行号全对但缺机制,11-01 机制与行号双错)
 4. 写正文到 vol-02/<NN>-<域>/<NN>-<篇>.md
 5. 自查:
    - 代码块与源码逐字核对(python 脚本 /data/tmp/opencode/check.py: 提取块内行逐一比对源文件区间;"..." 可省略任意源行;strip 后判 "..."!)
@@ -133,7 +127,7 @@
     ① 写作时"凭记忆/凭直觉"补的机制描述——逐个回源码核对(识别信号: "所以/为什么能/自然"开头的推导段)
     ② 正文引用的 file:line 内容语义(不是存在性)
     ③ 数字自洽(全文 grep 关键数字,含默认值/枚举值)
-    ④ #7 文字锚(文件名后无行号的引用)
+    ④ 文字锚(文件名后无行号的引用)
     ⑤ 跨篇一致性: 本篇 OUTBOUND 悬念行描述、上篇悬念承诺的话题(逐条对照正文是否覆盖)
     ⑥ 元文档自查(HANDOFF/README 篇数)
 发现错误 → 修正文章 → 回填大纲(#15 规则)→ 提交
@@ -157,15 +151,15 @@
 ### 4.2 v5 文章格式(每篇固定结构)
 - 头部: `# NN. 标题 — 问题句` + `> **前置依赖**`(链接前文,文本与目标标题一致)+ `> → **后续**`(链接下一篇)+ `> 关联域`
 - 开篇: 场景句(为什么问这个问题)
-- 每机制段落四要素: 场景 → 技术描述(file:line+函数名) → **关键设计 (斜体)**(why)→ 跨层标注([C++:] [x86:] [man N xxx] [实证:])
+- 每机制段落四要素: 场景 → 技术描述(file:line+函数名) → **关键设计 (斜体)**(why)→ 跨层标注([C++:] [x86:] [实证:])
 - 结尾: `## 核心悬念`(一段话总结本篇+桥到下一篇)+ `> → [下一篇](...)`
 - 代码块: 首行标注 `// file.cpp:start-end(截取核心,逐字)`;标注范围必须与内容精确对应(含闭合括号行)
-- 跨篇引用用相对/`openjdk/vol-02/...` 路径;**链接文本必须与目标文章标题一致**(已抓过 3 处不一致)
+- 跨篇引用用相对/`openjdk/vol-02/...` 路径;**链接文本必须与目标文章标题一致**(已抓过多次)
 
 ### 4.3 书稿代码块纪律(血泪总结,每篇深审都靠它抓错)
 1. **代码块 = 真实源码**: 截取可(省略模板/错误处理,用 "..." 占位),核心语句逐字,**禁止凭记忆写值/编码/常量/注释**
-2. **行号写作时重新 grep**: 大纲/KP 是规划期产物,行号大量漂移——每篇实测都有 2-15 处漂移;07-04 教训: 写正文时 sed 目测的行号也可能偏 10 行;24-03 教训: **代码块范围必须与块体逐行对齐(用自动对齐脚本核对首末行),凭 sed 目测必错**(24-03 首轮 7 块错 5 块)
-3. **自查脚本**(/data/tmp/opencode/check.py): 文章每个 file:line 逐个核对;代码块与源码逐行 diff("..." 跳过);新文件先加 MAPPINGS(JDK 侧)/HS_MAP(hotspot 侧,单行 dict,追加时注意逗号)
+2. **行号写作时重新 grep**: 大纲/KP 是规划期产物,行号大量漂移——每篇实测都有 2-15 处漂移
+3. **自查脚本**(/data/tmp/opencode/check.py): 文章每个 file:line 逐个核对;代码块与源码逐行 diff("..." 跳过);新文件先加 MAPPINGS(JDK 侧)/HS_MAP(hotspot 侧,单行 dict,追加时注意逗号);**EXTERNAL 字典**处理不在 SRC/HS 树内的文件(如 sun.misc.Unsafe.java 在 jdk.unsupported 模块)
 4. **文件名必须 find 验证**: 目录/文件路径凭记忆必错
 5. **大纲的"篇数/数字"也要重验**: 进度表述以 outlines/ 实际文件数为准
 
@@ -182,11 +176,10 @@
 |---|---|---|
 | 素材索引 | `planning/outlines/00-jvm-tools/materials/INDEX.md` | 按域查素材的入口 |
 | JFR 录制 | `materials/jfr-recordings/rec-demo.jfr` 等 10 个 | 事件计数实证 |
-| 命令输出 | `materials/commands/` 130+ 文件 | jcmd/jstat/jmap 等真实输出 |
+| 命令输出 | `materials/commands/` 140+ 文件 | jcmd/jstat/jmap 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材**(全部现场跑,部分用 Temurin 11,详见 §二 commit 清单):
-- `23-arraycopy-bench.txt` / `23-crypto-bench.txt` / `24-frame-demo.txt` / `24-inline-demo.txt`(v2,Temurin 11 三路径)/ `24-deopt-demo.txt` / `08-bytecodes-javap.txt` / `08-interpreter-templates.txt`
+**本会话新增素材**(详见 §二 commit 清单,共 9 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
@@ -194,189 +187,133 @@
 
 ## 六、本会话实战经验(最重要,新 AI 必读)
 
-### 6.1 大纲漂移的规律(67 篇全部出现,2-15 处/篇;02/03/04/45/48 域案例为更早会话沉淀,06/16/38/41/42/07/09/17/10/19/23/24/08 域为本会话沉淀)
+### 6.1 大纲漂移的规律(74 篇全部出现,2-15 处/篇;旧会话沉淀 02/03/04/45/48/06/16/38/41/42/07/09/17/10/19/23/24 域,本会话沉淀 08/31/44/11 域)
 **任何机制描述/行号/值/专有名词,一律当"线索"而非"事实"**。高频漂移类型:
-1. **机制编造**(最严重): 大纲把"想当然的实现"写成机制——实证全部是编造(案例见各域经验)
-2. **版本漂移**: 大纲写的是 JDK 8/其他版本的机制
-3. **行号漂移**: 大纲行号与实际差几十到几百行;07-04 教训: 写作时 sed 目测的行号也可能偏 10 行
-4. **文件名漂移**: 目录/文件路径凭记忆必错
-5. **"声明有、实现无"**: 入口表里挂名的 ≠ 有实现/汇编(23-02 zero_aligned_words=C++ 遗留;23-03 _dlibm_*_huge 仅 x86_32、montgomery=C++ 函数;24-02 nativeVFrame 不存在)
+1. **机制编造**(最严重): 大纲把"想当然的实现"写成机制——实证全部是编造
+2. **版本漂移**: 大纲写的是 JDK 8/其他版本的机制(31-01 的 CAS 单路径是 JDK8 形态;11-01 的 od region 是旧版)
+3. **行号漂移**: 大纲行号与实际差几十到几百行
+4. **文件名漂移**: 目录/文件路径凭记忆必错(31 域目录是 31-unsafe-whitebox 不是 31-unsafe;44 域目录是 44-class-verification 不是 44-verification)
+5. **"声明有、实现无"**: 入口表里挂名的 ≠ 有实现(11-01 的 "link_and_serialize" 不存在;44-02 的 is_assignable_from 伪代码是编造)
+6. **悬念指向错**: 大纲的"下一篇"常常过期(44-02 大纲指向域 45 Math——45 域早已完结;正确指向 11-cds 第 5 批)
 
 ### 6.2 写作期"凭记忆"错误(自查 diff 抓出的真实案例,每篇深审必有)
-- 07-01: "oops 在前"方向反了;07-03: 数组头"4+3 字节"错(16+3);07-05: "BuiltinClassLoader.java:54 防护注释"错(:54 是 import);07-06: "模块表全局注册"错(per-loader)
-- 23-02: "引用数组一次只能拷 8 字节"错(压缩 oop 下同样 64B/迭代向量循环);"ignored 注释行号 1462-1463"错(1456/1563)
-- 24-02: "jstack 是 vframeStream 消费者"断言错(线程转储走 vframe::sender 链);"停在最近转换点"不精确(=循环回边安全点轮询点)
-- 24-03: T_CONFLICT 语义编造(真实="A dead local"死槽);"帧走到栈顶才 deopt"错(safepoint 全量拆)
+- 08 域: "0xCB-0xFF 未分配区"错(实际 0xCB-0xEE 是 fast 系列,未定义只有 0xEF-0xFF);is_aload 点名原因错(枚举不连续非重写)
+- 31 域: "JRT_ENTRY"错(解释器是 IRT_ENTRY 家族);"JFR 用 Forte"错(JDK11 JFR 用 SuspendedThreadTask)
+- 44 域: "i2b 推 Byte 类型"错(推 integer,窄化类型来自方法签名);"pop 扣两槽"错(只弹一槽次槽出界)
+- 11 域: "link_and_serialize"不存在;classlist 行数无依据
 - **教训**: 凡代码块里的值/编码/常量/注释,写完必须用 sed 逐行对照;数字先数后写;推导段("所以/为什么能")必须回源码找依据;REVIEW 时正文与大纲 ⚠️ 块行号一起过
 
-### 6.3 平台/环境事实(写作时已确认)
+### 6.3 写作期血泪(本会话新增,最高优先级)
+- **记忆代码编造×2(本会话)**: ①44-02 的 stackMapTable.cpp 块混入不存在的 `check_end_stack()`/"Let's just insert a bogus type"(grep 零命中);②11-01 的 preload_classes 块编了 `is_loading_success` 分支(真实是 `ClassLoaderExt::load_one_class`)。**自查脚本的逐行 diff 当场抓出**——写代码块时宁可多抄几行真实代码,绝不"凭记忆补全";深审时对每个函数名做存在性 grep
+- **块标注范围反复错**: 44-02 的 verificationType.hpp 三个块连续 4 轮标注错(内容比标注多几行)——用 python 脚本"内容跨度自动对齐"(从标注起点逐行匹配到块末行,输出真实终点行号)一次解决
+- **反引号/星号配对**: 44-01 一个漏掉的反引号让全篇 100+ 星号统计全乱;statistics 前先修反引号配对
+
+### 6.4 平台/环境事实(写作时已确认)
 - **jdk11u 源码树只含 x86 平台**(cpu/ 只有 x86,os/ 只有 linux/posix)——不要断言其他平台的实现细节
-- 23 域关键位置: stubGenerator_x86_64.cpp(6138 行,generate_all :5971,arraycopy :2866,AES :3016+,SHA :3692+,CRC :5185+,BigInteger :5297+,Math :5497+);stubRoutines.hpp 入口表 :126-167;macroAssembler_x86_sha/exp/aes/*.cpp 是算法主体
-- 24 域关键位置: frame.hpp:50-65(共享字段)/frame_x86.hpp:110-120(_fp/_unextended_sp)/frame_x86.cpp(sender 三路 :488-503)/vframe.hpp(:54 基类/:268 vframeStreamCommon)/vframe_hp.hpp(:30 compiledVFrame)/vframe.inline.hpp(next :41)/vframeArray.hpp(:121)/deoptimization.cpp(fetch_unroll_info :139/unpack_frames :623)
-- 常用实证: **Temurin OpenJDK 11.0.32 在 /data/tmp/opencode/jdk11**(与 jdk11u 同版本,实证首选);Temurin 17 在 /data/tmp/opencode/jdk17;TencentKona 17/21 在 /opt/codev/(通用)
+- 常用实证: **Temurin OpenJDK 11.0.32 在 /data/tmp/opencode/jdk11**(与 jdk11u 同版本,实证首选);Temurin 17 在 /data/tmp/opencode/jdk17(含 src.zip 可查 API 变迁);TencentKona 17/21 在 /opt/codev/
+- 本会话关键源码位置: templateInterpreter.cpp/hpp、templateTable.cpp、interpreterRuntime.cpp(:148-215 ldc/resolve_ldc、:217 _new、:749 monitorenter、:1176 at_safepoint、:1008 frequency_counter_overflow)、interfaceSupport.inline.hpp(:445 IRT_ENTRY、:468 JRT_ENTRY、:111-123 ThreadStateTransition)、unsafe.cpp(1122 行)、whitebox.cpp(2360 行)、forte.cpp(668 行)、verifier.cpp(2913 行)、verificationType.hpp/cpp、metaspaceShared.cpp(2184 行)、filemap.hpp/cpp
 
-### 6.4 已完成的交叉引用关系(写作时保持一致性)
-- 45→48;02→03→04;06 域链 → 07 域链 → 09 → 17 → 10 → 19 → **23 域链(23-01 桩骨架 → 23-02 arraycopy → 23-03 crypto/math)→ 24 域链(24-01 物理帧 → 24-02 虚拟帧 → 24-03 deopt/GC)→ 08-interpreter**
-- 24 域跨篇: 24-01 的 frame 五字段/sender 链/unextended_sp 是 24-02/24-03 的地基;24-02 的 ScopeDesc/vframeStream 是 24-03 的原料;24-03 的 deopt 入口模板(deopt_reexecute_entry/continue_after_entry)是 08 域的解释器模板;19-sync 的 BasicLock 在 24-03 MonitorChunk 迁移
-- 跨域: 17-02 的 safepoint_poll(循环回边轮询)解释 24-02 的锚点 pc;16-01 的 CodeHeap 是 24-01 find_blob 的载体
+### 6.5 实证方法论新增(本会话沉淀)
+- **javap 原始字节分析**: javap 显示是"解释过的",原始证据要 xxd/hexdump——44-02 的双槽证据是 `fd 00 05 04 04 04`(append 的 number_of_locals=4 vs 类型项 2 个),不是 javap 的 `[ long, long ]`
+- **一字节修改构造坏 class**: 直接改 .class 字节(iload_0→aload_0)制造 VerifyError——注意类名不能改(文件与内部类名必须匹配);RunEvil 用 Class.forName 触发验证
+- **WhiteBox 最小兼容类**: 自己写 sun.hotspot.WhiteBox(bootclasspath/a 加载),方法表注册对缺失方法只打 NoSuchMethodError Warning 不影响;native 方法签名必须与方法表 JNI 签名一致(getVMPageSize 是 ()I 非 ()J)
+- **CDS 实证**: -Xshare:dump 生成 jsa;-Xlog:cds 看校验;-Xlog:class+load 看 "shared objects file" 来源
+- **JDK 版本对比**: 用 Temurin 17 的 src.zip 验证 API 变迁(defineAnonymousClass 在 17 已移除)
+- **JDK11 的 --illegal-access=permit**: 反射非导出包仅告警仍可用(实测无 --add-opens 通过);JDK16+ 才需 --add-opens
+- **static final 陷阱**: 静态块里用限定名(ClassName.field)给 final 赋值,javac 报 "cannot assign a value to final variable"(非限定名 OK)
 
-### 6.5 06-oops 域新增经验(2026-08-12)——略(已完结域,详见前版 HANDOFF git 历史)
-### 6.6 错误根因(为什么"每篇 2-15 处"不可避免)
-1. 大纲是规划期 AI 生成,"像真的"的编造是最危险形态——名字合理、机制自洽,唯独源码里不存在
-2. 写作期大脑默认路径: 大纲说法"合理"→直接写,而不是"每个机制先 grep 再写"(铁律 ② 的对抗者)
-3. 自查脚本只能抓"写错"(行号/代码块/数字),抓不了"写对但机制是编的"——机制正确性只能靠人工深审,且第 1 轮常被自己的叙述带着走,第 2 轮逐条质疑才有效
-4. 结论: **深审必须 2 轮(用户常追加第 3/4 轮)**;沉淀要即时(本篇教训进 §6.1/6.2 后再写下一篇)
+### 6.6-6.20 旧会话经验(06/16/38/41/42/07/09/17/10/19/23/24 域)——略,详见 git 历史
 
-### 6.7-6.15 16-codecache/38-perfdata/41+42/07/09/17/10/19 域经验——略(已完结域,详见前版 HANDOFF git 历史)
-(23-01 在第 6.15: 两阶段桩/atomic 8 桩/throw 帧布局/第 3 轮 REVIEW: should_not_reach_here/generate_all 内容/initialize1 时序注释)
+### 6.21 08-01(Bytecode 定义表,大纲 11 处漂移含 3 处机制编造,2026-08-13)
+- **"5 个静态数组含 format 表" 错**: 6 个数组(_name/_result_type/_depth/_lengths/_java_code/_flags,bytecodes.hpp:339-346),**无 _format 数组**——format 由 compute_flags(:206-276)预编译成位掩码;_lengths 一字节两用(低 4 位短长/高 4 位 wide 长,:397-398);_flags 512 槽双页(:345,432-435)
+- **"def 宏展开" 错**: C++ 静态函数 7/8 参数(code,name,format,wide_format,result_type,depth,can_trap[,java_code]);239 条 def 启动一次填充(.bss 非 .data)
+- **"Format: b=1B signed/j=4B branch offset" 全错**: b=opcode 本身、c=signed constant、i=local index、**j=2B CP cache index**、k=CP index、o=branch offset;大写=原生字节序(实际只有 J 出现,:244);长度=format 字符数;变长 format=""
+- **"256 条(255=impdep2)" 错**: 枚举 203 成员(0x00-0xCA,含保留 wide/breakpoint)+36 私有=239;0xEF-0xFF 17 个未定义;load/store 50 条非 ~60
+- **"upper 4 bits 分组" 编造**: 段布局是规范历史安排;HotSpot 分组=区间谓词(is_aload 枚举不连续等),消费者 verifier.cpp:754/templateInterpreter.cpp:254/deoptimization.cpp:705-722
+- **"can_trap 用于 loop optimization" 编造**: 真实=GenerateOopMap::do_exception_edge(generateOopMap.cpp:1178,异常边→解释器 OopMap,接通 24-01 oopMapCache 链);C1 自建 _can_trap 表(c1_GraphBuilder.cpp:2976-3034)
+- **"stack_effect/_unknown_depth" 编造**: 不存在;depth 恒静态(invoke 系 -1);T_ILLEGAL 表达"栈顶类型由上下文决定"
+- **变长仅三条**: wide/tableswitch/lookupswitch(special_length_at :90-137);breakpoint 走 raw_special_length_at(:151-158,普通迭代器经 code_at 伪装)
+- 实证: 08-bytecodes-javap.txt(76 条固定长全对+lookupswitch 对齐 1→4→44)
 
-### 6.16 23-02(Arraycopy 向量化,大纲 11 处漂移含 5 处机制编造,2026-08-13)
-- **"14 种变体/16 入口" 错**: 入口=stubRoutines.hpp:126-167 三组: conjoint 6(:128-132)+disjoint 6(:133-137)+**arrayof 12 别名(大纲没提;aligned 参数 "ignored" stubGenerator_x86_64.cpp:1456,conjoint :1563;全部别名 :2945-2962)**+可选 3(checkcast×2/unsafe/generic :154-157);8 个生成函数=4 宽×2 向(:1473/:1576/:1676/:1792/:1884/:1980/:2081/:2177),入口 generate_arraycopy_stubs :2866
-- **"generate_disjoint_copy/generate_conjoint_copy" 不存在**(编造): 按宽度拆 8 个;conjoint=array_overlap_test(:1173-1191,to<=from 或 to>=end 跳 disjoint)+跳入 disjoint 内部 entry(先生成 disjoint 存 entry :2875-2878),重叠走 copy_bytes_backward(:1354-1451 同套向量化)
-- **"rep_movsb/ERMSB 分级" 全错**(编造): **jdk11u x86 无 rep_movsb**(grep 零命中);真实=生成期 UseAVX 定档(CPUID 探测+SEGV 测试 YMM/ZMM 恢复 vm_version_x86.cpp:363-368;UseAVX 默认 3 globals_x86.hpp:121): evmovdqul 512 位 64B→vmovdqu×2 64B→movdqu×4 64B→movq×4 32B;**唯一运行时分支=AVX3Threshold=4096**(globals_x86.hpp:224,copy_bytes_forward :1255-1283);负计数技巧 :1506-1509([end+count*8-56] 寻址);vzeroupper :1550/vpxor 清 YMM :1319-1323
-- **"fill 用 rep_stosb" 错**: fill 桩(generate_fill :1756→MacroAssembler::generate_fill macroAssembler_x86.cpp:7447,广播 dword :7469-7482,<8B 逐元素 :7484)纯向量(vpbroadcastd+evmovdqul/vmovdqu,AVX3Threshold 门控 :7554-7576);**rep_stosb(UseFastStosb,ERMS 自动开 vm_version_x86.cpp:1471-1479)属 C2 ClearArray 对象清零**(x86_64.ad:11257→clear_mem macroAssembler_x86.cpp:6012-6020)
-- **"_zero_aligned_words 是汇编桩" 错**: =C++ Copy::zero_to_words(stubRoutines.cpp:110),生成器从不覆盖,全树无调用者——**声明 ≠ 有实现**
-- **"std; rep_movsb; cld 倒序" 错**(编造): 倒序=copy_bytes_backward 同套向量循环
-- JIT 分派三路(大纲未提): C2=inline_arraycopy(library_call.cpp:4743)→ArrayCopyNode→宏展开 generate_arraycopy(macroArrayCopy.cpp:278)→basictype2arraycopy(:216-244,常量偏移 src_off>=dst_off 判 disjoint)→select_arraycopy_function(stubRoutines.cpp:522,映射 boolean→jbyte :536-543/char→jshort :544-550)→**make_leaf_call(:1100 叶子调用无 safepoint)**;C1=emit_arraycopy(c1_LIRAssembler_x86.cpp:3049 类型未知→generic);**解释器=JVM_ArrayCopy(jvm.cpp:324-340)→klass()->copy_array 不用桩**
-- oop 变体: barrier 包夹——prologue=SATB 预屏障(satb_mark_queue_active 检查+整段运行时调用 write_ref_array_pre_oop_entry,g1BarrierSetAssembler_x86.cpp:44;uninit 整体 if 守卫跳过 :46-48),epilogue=卡表标记(:1950);checkcast 失败返 **-1^K**(K=已拷元素,:2430-2438)
-- **实证方法论教训**: ①微基准 arraycopy 会被 C2 折叠(重复拷贝只有最终状态可观测→合并为一次)——必须循环内每次校验和(每 4096 字节采样读)防消除;②ping-pong 双数组也不够;③单位坑: MB/s 当 GB/s;④数组填全程 fill 的 32M 段致迭代爆炸
-- 实证(AMD EPYC 9K65,TencentKona 17,UseAVX 0/2/3): 1K arraycopy 55.0→68.3 GB/s(SSE2→AVX2 +24%),手写循环 21.2=**3.2x**;64K 78.3 vs 40.1=2.0x;4M/32M 带宽瓶颈≈1.0x;64K fill AVX2/3 137-139 vs SSE2 85.8
+### 6.22 08-02(Template Interpreter,大纲 11 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
+- **"generate_all 三步" 错**: 真实十一段(templateInterpreterGenerator.cpp:57-263): 签名+错误出口→return 按长度 5 档(_return_entry[6] 0 空)→invoke return 按 TosState 10 档→earlyret→native 结果→safepoint 入口→异常 6 入口→方法入口 28 种→set_entry_points_for_all_bytes→safepoints→deopt 入口(_deopt_entry[7])
+- **寄存器错**: x86_64 下 rlocals=r14、rbcp=r13(templateTable_x86.cpp:46-47);locals_index 取负 index;dispatch=lea+jmp [table+rbx*8](interp_masm_x86.cpp:826-846)
+- **"iload_0 模板 push(rax)+advance" 错**: 生成器=**iload(int n)**(templateTable_x86.cpp:878-881)仅 3 行;transition 只是断言(:162-165);advance/dispatch 由 generate_and_dispatch 统一(:377-401)
+- **实证尺寸**: iload_0=96B vs iload=192B(RewriteFrequentPairs 检查);iconst 7 个全 96B;iadd 64B;ldc 736B;invokevirtual 1280B;271 codelets avg 404B
+- **"tosState 共享模板" 错**: 共享按**生成函数+arg 参数化**(iconst/iop2/if_0cmp/fast_accessfield),非 tosState
+- **"TemplateTable::_itable[256]" 错**: _template_table/_template_table_wide 双表 239 槽(:172-173);wide 入口单列 _wentry_point
+- **入口点家族(核心)**: DispatchTable::_table[10][256];set_short_entry_points pop 序言(:345-362);set_vtos_entry_points 压栈序言(x86:1765-1794);tosca=栈顶留寄存器(globalDefinitions.hpp:819-832)
+- **safepoint 轮询内联**: dispatch_base 每字节码 testb 轮询页(:826-834);notice_safepoints **整表拷贝**(copy_table,templateInterpreter.cpp:293-325,非指针换向)
+- **0xCB-0xFF 修正(01 篇遗留)**: 未定义区是 0xEF-0xFF 17 个,0xCB-0xEE 是 36 条 fast 系列
+- **第 3 轮**: wide 链=_wide 模板 jump ArrayAddress→_wentry_point(templateTable_x86.cpp:4504-4510);iadd=pop_i(rdx)+addl(rax,rdx)(iop2 :1337-1340);deopt 三态(reexecute 走 deopt_reexecute_entry,return_register_finalizer 特判 :339-352);字节码表初始化=init_globals→bytecodes_init(init.cpp:104)
 
-### 6.17 23-03(Crypto + Math Intrinsics,23 域收官,大纲 10 处漂移含 4 处机制编造,2026-08-13)
-- **行号全漂移**: AES :3016-4701/SHA :3692-3890/CRC :5185-5296/BigInteger :5297-5470/Math :5497-5700(stubGenerator_x86_64.cpp 共 6138 行);大纲 1300-1700/1700-2100/2200-2700/2700-3200 全错;CRC 表不在 stubRoutines_x86_64.cpp 而在 **stubRoutines_x86.cpp**(crc_table :132、k256 :324,64B 对齐)
-- **"sha256rnds2 4 rounds in 1 instruction" 错**: 一条 rnds2=**2 rounds**;16 字节块=paddd(K)+rnds2×2=4 rounds(macroAssembler_x86_sha.cpp:271-300);**SHA-256 双路径**(supports_sha→SHA-NI fast_sha256,否则 AVX2 sha256_AVX2 :507)——开关只需 sse4_1 的原因(vm_version_x86.cpp:956-960);**SHA-512 无硬件指令**纯 AVX2(断言 avx2+bmi2 :3814-3815,sha512_AVX2 :1240);MB=ofs/limit 多块循环 state 驻寄存器
-- **"CRC32 纯查表" 半对**: kernel_crc32(macroAssembler_x86.cpp:9076)=查表对齐+**pclmulqdq 折叠**(fold_128bit_crc32 :9138)+尾部查表,**无 crc32 指令**;crc32 SSE4.2 指令属 **CRC32C**(crc32c_ipl_alg2_alt2 :9889,指令 :9671-9677);AVX-512 版 kernel_crc32_avx512 :9390
-- **"montgomery* 是汇编桩" 错(编造)**: =C++ SharedRuntime::montgomery_multiply(sharedRuntime_x86_64.cpp:3811,32 位字),CAST_FROM_FN_PTR 登记(stubGenerator_x86_64.cpp:6111-6118)——**入口表挂名≠汇编桩,须查生成处**;另有 vectorizedMismatch :5357、base64 :4933(大纲没提);开关是 C2 flag(c2_globals.hpp:718)
-- **"_dlibm_sin_cos_huge 等" 仅 x86_32 生成**(stubGenerator_x86_32.cpp:3849-3862),x86_64 恒 NULL——"声明有、实现无"又一例
-- **Math 桩=Intel LIBM 2016 移植**(macroAssembler_x86_exp.cpp 头注释 "Intel Math Library (LIBM) Source Code"),7 文件(fast_exp/sin/cos/tan/log/log10/pow)全 XMM 无 x87;fast_exp: 范围检查(32767/16527/15504)+ln2 倒数取整+多项式(0x3FC55555≈1/6、0x3FA55555≈1/24)
-- **AES**: keylen {44,52,60}=展开密钥长度;密钥直接复用 Java 展开结果("the java expanded key ordering is just what we need" :3044)+pshufb 小端(load_key :2988);CBC 解密并行两版(VAES+AVX512 :4317/SSE :3400,按 supports_vaes+avx512vl+dq 二选一 :6024-6030);GHASH 4×pclmulqdq(掩码 0/16/1/17)交叉 XOR :4693-4703;AVX 版 avx_ghash(macroAssembler_x86_aes.cpp:614)
-- **BigInteger**: multiply_to_len(macroAssembler_x86.cpp:8123)BMI2 分派(:8218-8236): mulx+adcx/adox 双进位链 :8030-8047(adcx 需 supports_adx);非 BMI2 回退 :7910
-- **实证方法论**: 关闭 diagnostic flags 需先 -XX:+UnlockDiagnosticVMOptions;Math.exp 微基准会被 C2 消除(i 派生常量)→数据依赖数组
-- 实证: SHA-256 1537→262 MB/s=**5.9x**;SHA-512(AVX2 软件)815→438=1.9x;AES-CBC 496→166=3.0x;CRC32 44704→3110=**14.4x**;Math.exp 4.0→7.0 ns/op=1.7x——"8x 加速"编造被实测取代
+### 6.23 08-03(InterpreterRuntime,大纲 8 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
+- **"JRT_ENTRY" 错**: 解释器 runtime 用 **IRT_ENTRY 家族**(interfaceSupport.inline.hpp:445-466),JRT 是 JNI 通道(:468);JRT/IRT 宏体几乎相同,禁用异步的是 IRT_ENTRY_NO_ASYNC;at_safepoint(:1176-1191)函数体近空
+- **"OopMapCache LRU+OopMapCacheSize~1024" 编造**: 固定 32 槽哈希+3 步探测(oopMapCache.hpp:149-151 "Use fixed size for now"),无 LRU 无该 flag;每槽 2 位 oop/dead(:76-78)
+- **"递减到 0" 错**: 递增到阈值(count_grain=8);InterpreterInvocationLimit=CompileThreshold<<3(invocationCounter.cpp:148);**"C1=5000" 错**: JDK11 默认 Tier3=2000/Tier4=15000/Tier2=0,CompileThreshold=10000,InterpreterProfilePercentage=33
+- **计数器机械**: generate_counter_incr(templateInterpreterGenerator_x86.cpp:385-440) tiered 用 increment_mask_and_jump 掩码节流;回边仅向后分支(templateTable_x86.cpp:2191-2200);OSR 成功先 revoke 有偏锁(:1072-1094)
+- **模板侧 call_VM 链**: interp_masm call_VM_base(interp_masm_x86.cpp:282-306)→macroAssembler(:2482-2550): c_rarg0=r15_thread、set_last_Java_frame(sp,fp,pc=NULL **不写 anchor pc**,:799-802)、check_exceptions→forward_exception_entry(:2556-2568)、尾部 get_vm_result 读回(:2572-2574);LastFrameAccessor(interpreterRuntime.cpp:76-113)
+- **第 3 轮**: safepoint 检查在 ThreadStateTransition::transition 内(interfaceSupport.inline.hpp:111-123: 过渡态→serialize→block_if_requested→到态,构造析构两向);increment_mask_and_jump=+8 写回→andl(mask)→jcc(zero)(interp_masm_x86.cpp:1956-1967);入口 46 个 IRT 宏("60+" 虚高)
+- 实证: Interpreter generation 0.65ms;CounterDemo tier3→`%`tier4@4→tier4→made not entrant
 
-### 6.18 24-01(Physical Frame,第 4 批第 4 个域开篇,大纲 10 处漂移含 2 处编造,2026-08-13)
-- **"frame 三字段" 错**: 共享 _sp/_pc/_cb+deopt 三态(frame.hpp:50-65),**x86 附加 _fp/_unextended_sp(frame_x86.hpp:110-120)**——注释解释了双 sp 的由来(interpreter/adapters 扩展 caller 帧,oopMap 按扩展前 sp 记录);别信"三字段 32 字节"
-- **"compiled sender = *rbp/+(rbp+8)" 错**: sender_sp = unextended_sp + **_cb->frame_size()(编译期元数据)**,sender_pc=*(sender_sp-1),saved_fp=*(sender_sp-2)(frame_x86.cpp:451-483);非 rbp 链现场走
-- **"interpreter sender = *[method_locals-2]" 半对**: interpreter_frame_sender_sp()=fp[-1](帧内保存 caller sp,frame_x86.cpp:431-446);偏移表 frame_x86.hpp:60-73(正偏移 fp 上方/负偏移 fp 下方)
-- **"四种帧" 简化错**: sender 分派三路(entry/interpreter/compiled,frame_x86.cpp:488-503),JNI native 帧也是 nmethod;兜底纯 C 帧
-- **"find_blob 二分搜索" 错(编造)**: CodeHeap segmap 段映射链式回跳(heap.cpp:456-483),x86 段 128B(CodeCacheSegmentSize=64 TIERED_ONLY(+64) globals_x86.hpp:40)
-- **"Interpreter::oop_map_cache()" 不存在(编造)**: per-Klass(InstanceKlass::_oop_map_cache instanceKlass.hpp:247);Method::mask_for(method.cpp:237)/OopMapCache::compute_one_oop_map(oopMapCache.cpp:597)
-- oops_do: oops_do_internal(frame.cpp:1115)分派;解释器帧=monitor→native temp oop→mirror→调用点参数→mask(:890-958);编译帧=OopMapSet::oops_do(compiler/oopMap.cpp:288,oop_map_for_return_address :302,**derived 先处理** :307-340);OopMapValue 四型 oopMap.hpp:69-73
-- 栈顶: Thread::last_frame(thread.hpp:1879)=make_walkable+pd_last_frame(thread_linux_x86.cpp:30-34);deopt 构造判定=get_deopt_original_pc(frame_x86.inline.hpp:44-60)
-- **实证方法论**: jcmd 输出走目标进程 stdout(重定向文件);attach 失败=进程已死/pgrep 误匹配(用 jps -l);PrintInterpreter 是 diagnostic flag 需先 UnlockDiagnosticVMOptions;适配器=AdapterBlob:BufferBlob→non-nmethods 段(codeBlob.cpp:262)
-- 实证: 24-frame-demo.txt(jstack 两行 at/codelist hot 双版本 nmethod level4+3/三 CodeHeap 1098 blobs 653 nmethods 359 adapters/PrintInterpreter 271 codelets 358B)
+### 6.24 08-04(LinkResolver + Rewriter,08 域收官,大纲 10 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
+- **"getstatic→fast_agetfield" 编造**: getstatic/putstatic 无 fast 版本;fast_agetfield 来自 _getfield;Rewriter 对字段/方法指令只换 CP→cpCache 索引(rewrite_member_reference rewriter.cpp:168-183,put_native_u2=01 篇 bJJ 大写 J 的来源)
+- **"newarray→fast_newarray" 编造**: 枚举里不存在;Rewriter 替换指令字节的只有两类=lookupswitch→fast_*switch(:394-402)与 ldc→fast_aldc((*bcp)=_fast_aldc :355);rewrite 时机=instanceKlass.cpp:851-857 rewrite_class(验证后首次执行前,is_rewritten 只一次)
+- **行号全漂**: 五入口 linkResolver.cpp:1652-1690,resolve_static_call :1058/virtual :1291/interface :1411/field :948/resolve_method 六步 :723-800
+- **invokedynamic**: 每调用点独占 cpCache 条目(注释 rewriter.cpp:263-272)→u4 索引→**bJJJJ 5 字节格式的根本原因**;rewrite_Object_init :136-164(return_register_finalizer 落地)
+- **cpCache**: 四字段 _indices[b2|b1|index]/_f1/_f2/_flags(cpCache.hpp:49-54,132-142);is_resolved 查 b1/b2 半槽可共享;indy 写入=set_method_handle_common 锁协议(f1 发布点,:350-395);普通 invoke=set_direct_or_vtable_call 无锁(_indices 最后写,:128 注释);do_resolve 特例(invokespecial interface sender/invokestatic 未初始化类故意不标记)
+- **resolve_invoke 写回分派**: 按 CallInfo::call_kind 三写(set_direct_call/vtable_call/itable_call,interpreterRuntime.cpp:904-921)
+- **虚分派两段**: linktime(:1300-1355)/runtime(:1358-1405: nonvirtual_vtable_index 特例=private/final 静态绑定;否则 recv_klass->method_at_vtable)
+- **第 3 轮**: 指令替换两类修正自相矛盾;实证逻辑修正(fast_* 只能由 Rewriter 产生,javac 不产 fast_*——模板存在是 generate_all 全量生成的产物,不能直接证明重写)
+- 实证: fast_linearswitch 192B/fast_binaryswitch 256B/fast_aldc 352B/return_register_finalizer 1248B 模板;javap -v Methodref/Fieldref/InvokeDynamic#0→BootstrapMethods
 
-### 6.19 24-02(Virtual Frame,大纲 5 处漂移含 1 处编造 + 第 3/4 轮 REVIEW,2026-08-13)
-- **"nativeVFrame" 不存在(编造)**: 家族=vframe(vframe.hpp:54)→javaVFrame(:107 五纯虚)→interpretedVFrame(:160)/compiledVFrame(**vframe_hp.hpp:30**);另支 externalVFrame→entryVFrame(:204/:217);JNI 帧走 compiledVFrame scope=NULL(vframe_hp.cpp:236-245,method/bci 直接取 :267-292,"native nmethods have no scope")
-- **vframeStream 位置错**: 类在 vframe.hpp:268-330(StackObj,_mode 三态 :274),**next() 在 vframe.inline.hpp:41-49**(非 vframe_hp.cpp)——同帧内联层 fill_in_compiled_inlined_sender(:66-72,serialized_null 判边界)不动 _frame,物理层 do-while sender;fill_from_frame :125-201(编译帧只解码 sender_decode_offset+method+bci 三字段 :75-114,locals 不碰=惰性)
-- ScopeDesc: scope_desc_at(compiledMethod.cpp:218)=pc→PcDesc→offset;sender() 实现 scopeDesc.cpp:152/is_top :148
-- 消费者: JFR vframeStreamSamples(jfrStackTrace.cpp:135)+Thread.print(thread.cpp:3417);**第 3 轮修正**: 线程转储走 vframe::sender 链(print_stack_on thread.cpp:3247、dumpThreads threadService.cpp:645-662),非 vframeStream
-- **第 3 轮 REVIEW(用户追问 Kona 是否特改)**: 下载 **Temurin OpenJDK 11.0.32**(api.adoptium.net,与 jdk11u 同版本)验证: SIGQUIT 转储/jcmd Thread.print/JFR 三路径都只有 main 一行——**Kona 17/21 与 OpenJDK 行为一致,非 Kona 特改**;对照 NoInlineDemo(不内联)正常 4 层;机制=**锚点 pc**(线程转储起点=last_Java_pc)+**内联纯算术段无 PcDesc**
-- **第 4 轮 REVIEW(锚点 pc 精确定位)**: 锚点 pc=最近 Java→VM 转换点=**C2 插在循环回边的安全点轮询点**(17-02 safepoint_poll 呼应);**显示哪层由轮询点所在方法决定**(InlineDemo2 轮询点在 main 循环→1 层;NoInlineDemo 轮询点在 big 循环→物理链 4 层,top/mid 均未内联 grep=0);内联纯算术无循环无轮询点→锚点永不落内联代码;JFR JDK11=suspend+ucontext 但 **pd_get_top_frame 优先锚点帧**(thread_linux_x86.cpp:55-58);ucontext 路径 pc_desc_at NULL 回退(vframe.inline.hpp:139-189)
-- **实证方法论教训**: ①容器后台进程在 bash 工具调用结束被杀——用 wrapper 脚本单次调用内完成(start→sleep→采集→kill);②pgrep/pkill -f 模式匹配到 bash 自身命令行导致自杀/超时——用方括号技巧 [I]nlineDemo;③jcmd attach 在 Temurin 11 挂起——用 kill -3(SIGQUIT)转储,输出走进程 stdout,不需 attach;④JDK 版本匹配: Kona17 javac 编译的 class(61)不能跑 JDK 11(55)——实证 JDK 用哪个 javac 就用哪个 java;⑤echo 文本含中文括号会触发 bash 语法错误;⑥内联日志(-Xlog:jit+inlining=debug)比 PrintAssembly 轻量,证明"多层内联=1 物理帧"够用
-- 实证: 24-inline-demo.txt v2(Temurin 11 三路径+对照)
-
-### 6.20 24-03(Deopt 重建 + GC 扫描,24 域收官,大纲 9 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
-- **"StackValue 用 union" 错(编造)**: 三独立字段 _type/_integer_value/_handle_value(stackValue.hpp:31-53),非 union——scalar replaced oop 需同时记 Handle+标记(**_integer_value 兼作 scalar-replaced 标记**);T_CONFLICT=**死槽**(vframeArray.cpp:130 "A dead local. Will be initialized to null/zero."),非"保守扫描"
-- **"MonitorChunk _monitors[0] 柔性数组" 错(编造)**: NEW_C_HEAP_ARRAY BasicObjectLock(monitorChunk.cpp:30-34);链挂 JavaThread::_monitor_chunks(thread.hpp:1023);oops_do :42-46(GC 覆盖 C 堆监视器)
-- **行号全漂移**: vframeArrayElement :50/vframeArray :121 字段 :131-146;fill_in vframeArray.cpp:60-109;create_stack_value stackValue.cpp:37(取址 :48-55: 寄存器→reg_map->location,栈→unextended_sp+offset;窄化+解码 :60-110);unpack_on_stack :171-202;RegisterMap registerMap.hpp:52-66/x86 版仅 pd_location hook(registerMap_x86.hpp:28-36)
-- **deopt 主链**: uncommon trap→fetch_unroll_info(deoptimization.cpp:139)→helper(:158)→create_vframeArray(:310/:1169,set_vframe_array_head :315)→unpack_frames(:623);unpack_on_stack 三态入口(SynchronizationEntryBCI→deopt_entry/reexecute→deopt_reexecute_entry/否则→deopt_continue_after_entry :187-220)
-- **第 3 轮 REVIEW**: ①"已入栈旧帧走到栈顶才 deopt"错——uncommon trap 只拆当前帧;其它帧由 **deopt_dependents(deoptimization.cpp:800-803)→Threads::deoptimized_wrt_marked_nmethods(thread.cpp:4625)→逐帧 should_be_deoptimized 当场拆(:2847-2858)**,下次 safepoint 全量拆;②made not entrant=uncommon trap 的 action 直接标(:1794-1825 Action_make_not_entrant/reinterpret),非依赖系统;③C 堆原因=源码注释(deoptimization.cpp:1209-1211 "Since the Java thread being deoptimized will eventually adjust it's own stack...")
-- **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
-- 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
-
-### 6.29 11-01(CDS 全景与 Dump,第 5 批开篇,大纲 8 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
-- **"magic 0xF00BAAA2" 错**: 真实 0xF00BABA2(filemap.hpp:37);validate_header(filemap.cpp:1397)=header->validate+check_shared_paths_misc_info;validate_shared_path_table(:480)在**映射后**(注释 "this is done later")
-- **"5 个 space mc/rw/ro/md/od" 错**: od 是旧版;JDK11=**8 槽位**(metaspaceShared.hpp:66-85: mc/rw/ro/md+string×2+open archive×2),实证 dump 用 6 个(mc/rw/ro/md/st0/oa0);rw 33.4%+ro 60.3%=93.7%
-- **"link_and_serialize" 编造**: 真实=link_and_cleanup_shared_classes(:1680)+VM_PopulateDumpSharedSpace::doit(:1333-1410): Metaspace::freeze(VM 线程不能 GC 故冻结)→CollectClassesClosure→rewrite_nofast_bytecodes_and_calculate_fingerprints(08-04 nofast 落地)→combine_shared_dictionaries→remove_unshareable_in_classes(实证 Removing java_mirror)→**ArchiveCompactor::initialize+copy_and_compact**(压实+重定位,非逐个对象递归写)→dump_symbols/dump_java_heap_objects→relocate_well_known_klasses
-- **行号漂**: preload_and_dump :1632(大纲 200-600);preload_classes :1699=ClassLoaderExt::load_one_class 逐类加载(非大纲 "SystemDictionary::load_shared_class");ClassListParser :46/:78 只做行解析(# 注释/tab 归一),不碰 SymbolTable
-- **默认归档路径**: SharedArchiveFile 缺省=jvm_path 推导的 JVM 同目录 classes.jsa(arguments.cpp:3510-3529),非 jre/lib/server
-- **指针重定位本质**: 压缩 klass base(0x0000000800000000)与归档基址重合→dump 按假想地址摆对象,load 同址 mmap→ro 指针原样有效;堆配置(narrow_klass_base/oop)不匹配归档作废
-- **实证**: 08-cds-demo.txt+08-cds-dump-full.txt(dump 归档 1211 类含 1151 instance/11.9MB/6 空间区;启动 class+load 356 个 shared objects file);**写作期血泪 2**: preload_classes 块又凭记忆编了 is_loading_success 分支(真实 ClassLoaderExt::load_one_class)——第二次犯,深审必须逐行对源码
-- **第 3 轮 REVIEW 修正 3 处**: ①java_mirror 移除=remove_java_mirror_in_classes(:501,"Removing java_mirror" 打印 :1300),与 remove_unshareable_in_classes(:489)独立,别混(行 43 原把两者合一);②narrow_klass_base 与归档基址重合是**主动设计**(Universe::set_narrow_klass_base(_shared_rs.base()),metaspaceShared.cpp:305),非巧合;③classlist 行数断言删除(本地无法验证)
-
-### 6.28 44-02(VerificationType 类型系统,第 4 批收官,大纲 7 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
-- **"Top vs Bogus 不同" 错**: top_type()=bogus_type() 别名(verificationType.hpp:130-131 注释 "alias");from_tag ITEM_Top->bogus(:33-45);bogus 放行=is_assignable_from 的 equals||is_bogus;帧构造全槽 bogus(stackMapFrame.cpp:43,46)
-- **"slot N+1=Top" 半对**: 文件规范如此,内存解析时 to_category2_2nd() 转 Long_2nd/Double_2nd(stackMapTable.cpp:300-307);内部 16 个类型=9 tag+4 签名窄化+2 次槽+Bogus
-- **is_assignable_from 伪代码全错**(大纲): "Top->true" 编造;"is_subclass_of(actual)" 方向反;Uninitialized 靠 equals(同 bci)
-- **"Byte/Char 来自 i2b" 错**: 窄化类型来自**方法签名**(change_sig_to_verification_type stackMapFrame.cpp:115-118);i2b/i2c/i2s 模拟推 integer_type(verifier.cpp:1481-1488)
-- **pop 只弹一槽**(stackMapFrame.cpp:199),category2 次槽自然落 _stack_size 之外,非"扣两槽"
-- **悬念指向错**: 大纲 "->域 45 Math" 错(45 已完结);44-02=第 4 批收官,下一域 11-cds(第 5 批第一域)
-- **实证**: 08-verificationtype-javap.txt + 原始字节 `fd 00 05 04 04 04`(append+delta5+**number_of_locals=4**+2 个 ITEM_Long——槽数是类型项两倍=long 双槽,次槽文件不写类型项隐式 Top,HotSpot 展开 Long/Long_2nd);**写作期血泪**: 块内代码凭记忆混入不存在的 check_end_stack/bogus type 注释(grep 零命中)——必须逐行回源码,任何"记忆中的代码"都要验证存在性
-- **第 3 轮 REVIEW 修正 2 处**: ①实证解读修正: [ long, long ] 是 2 个 long 变量(loop 的 sum+i)的类型项列表,双槽的证据是 number_of_locals=4 vs 类型项 2 个——"每个 long 占两槽"不能从 javap 显示直接读出;②11-cds 链接文本修正(副标题 "序列化 1000+ 核心类到 archive")
-
-### 6.27 44-01(ClassVerifier 类型检查引擎,大纲行号全对(07-02 已验过 verifier.cpp),补充机制 7 条 + 第 3 轮 REVIEW,2026-08-13)
-- **VerificationType 真 union**: Symbol* 指针或编码数据(verificationType.hpp:48-62);低 2 位 TypeMask 顶层类别(Reference/Primitive/Uninitialized/TypeQuery)+第二字节类别(Category1/2/2_2nd)+高字节基本类型 descriminator;BciMask=0xffff<<8(Uninitialized 存 new 的 bci),BciForThis=(u2)-1(UninitializedThis);Query 类型=pop_stack 的通配符
-- **is_assignable_from 判定树**(verificationType.hpp:267-298): 相同/bogus 通过;Query 按类别;Boolean/Byte/Char/Short 接受 int(宽化);引用对引用→is_reference_assignable_from(verificationType.cpp:79-116: null→任何引用/同名/Object 全通过/数组组件递归 is_component_assignable_from(基本类型必须相同)/其余 resolve_and_check_assignability **会触发类解析**,CDS 下 add_verification_constraint 推迟)——07-02 "只认名字" 与 "判子类要解析" 两层区分
-- **Uninitialized 生命周期**: new→uninitialized_type(bci)(verifier.cpp:1652-1654);verify_invoke_init(verifier.cpp:2371-2420: UninitializedThis 只能调本类/超类 <init>;普通 Uninitialized 校验 bci 处确为 new;initialize_object 全帧替换 stackMapFrame.cpp:57-70;try 块内先验证异常处理器路径以未初始化结束)
-- **invoke 四层检查**(verifier.cpp:2600-2655): invokedynamic 3/4 字节必须 0;<init> 只能 invokespecial;invokespecial 类可赋值(匿名类 host 特例);参数从后往前 pop_stack 匹配
-- **VerifyError 路径**: verify_error 只记录(verifier.cpp:1978-1993),Verifier::verify 尾部 THROW_MSG_(:239);failover(:184-192,版本<51);TypeOrigin :97/ErrorContext :147;aload 模拟=verify_aload(:2832-2837 get_local reference_check,实证消息的出处)
-- **实证**: 08-verifier-demo.txt(iload_0→aload_0 一字节修改: 默认 VerifyError "Bad local variable type"+Reason+Current Frame 转储; -Xverify:none 照跑 result=3);注意改 class 文件时类名不能改(文件与类名匹配)
-- **第 3 轮 REVIEW 修正 2 处**: ①接口可赋值特例补全(resolve_and_check_assignability verificationType.cpp:47-77: 数组只可赋 Cloneable/Serializable,其他接口按 Object 处理,注释原话;对象对对象 is_subclass_of);②invoke 返回类型细节(:2725-2742 change_sig_to_verificationType 压栈,<init> 必须 void)+invokevirtual protected 特例(:2681-2714)
+### 6.25 31-01(Unsafe 底层 API,31 域开篇,大纲 9 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
+- **CAS 单路径错(JDK8 形态)**: 大纲的 `jint* addr=(jint*)(p+offset); Atomic::cmpxchg` 是 JDK8 旧版;JDK11 双路径=obj==NULL→RawAccess(堆外) / obj!=NULL→HeapAccess::atomic_cmpxchg_at(堆内带 GC barrier,06-05 access API);index_oop_from_field_offset_long(unsafe.cpp:122-135,p==NULL 返裸地址);assert_field_offset_sane(:105-118,p==NULL 时断言体整体跳过)
+- **行号全漂**: unsafe.cpp 1122 行;CAS :876-938/Park :939-955/Unpark :960-984/AllocateInstance :365-368/defineAnonymousClass0 :830-862(impl :741)/方法表 :1035-1109(40 条)/JVM_RegisterJDKInternalMiscUnsafeMethods :1116-1121;UNSAFE_ENTRY=JVM_ENTRY(:64-70,ThreadInVMfromNative)
+- **"getUnsafe 检查 caller" 半对**: jdk.internal.misc.getUnsafe() 无检查(模块封闭);sun.misc.getUnsafe() 才有(@CallerSensitive+Reflection.getCallerClass+VM.isSystemDomainLoader,抛 SecurityException("Unsafe"));名字检查非能力检查(反射拿 theUnsafe 可绕,JDK11 permit 模式实测无 --add-opens 可用)
+- **allocateInstance=env->AllocObject**(JNI 分配不调构造器,字段初始化器也不执行,实证 x=0)
+- **方法表 40 条**("~200 方法" 虚高);C2 intrinsic 接线注释 :1112-1115
+- **park/unpark**: Parker 是 01-os/03 拆过的原语(19 域是 ParkEvent,两套);Unpark 走 ThreadsListHandle(17-03 SMR,线程死亡静默跳过);"幽灵 unpark"=类型稳定内存复用
+- **defineAnonymousClass JDK11 无 deprecated 标记**;**JDK17 已移除**(实测 Temurin 17 src.zip 零命中,defineHiddenClass 取代)
+- 实证: 08-unsafe-demo.txt(getUnsafe SecurityException/String.value offset 12=CAS 成功/allocateInstance x=0/pageSize 4096/addressSize 8)
 
 ### 6.26 31-02(WhiteBox + Forte,31 域收官,大纲 6 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"WB_ENTRY 简化版 JVM_ENTRY" 错**: WB_ENTRY=JNI_ENTRY+ClearPendingJniExcCheck(whitebox.inline.hpp:33-37);WhiteBoxAPI diagnostic flag(globals.hpp:2600);JVM_RegisterWhiteBoxMethods 双门控(flag+null loader,:2348-2361);方法表 178 条(:2114-2342);WB_FullGC :1321-1330(soft_ref 清+collect wb_full_gc+G1 复位)/WB_G1IsHumongous :422-429(非 G1 抛异常)
 - **"Forte——JFR 用" 错(重要)**: JDK11 JFR 采样器(jfrThreadSampler.cpp)不用 AsyncGetCallTrace,用 **os::SuspendedThreadTask**(:114 OSThreadSampler extends os::SuspendedThreadTask)+ucontext;handshake 也零引用(后续版本才接入);AGCT 是外部 profiler 的导出符号(jvm_sym.ver:6)
-- **AGCT 机制(大纲未提)**: 错误码 ticks_*(forte.cpp:50-60:-1 无 CLASS_LOAD/-2 GC/-3..-6 不可得不可遍历/-7 未知/-8 退出/-9 deopt);入口检查 :523-556;三族两路分派 :570-628;find_initial_Java_frame :296-330;vframeStreamForte forte_next :116;ThreadInAsgct 重入(thread.hpp:784);jmethodID 类加载时预分配(信号处理器不能拿锁)
-- **实证方法论**: 最小 WhiteBox 兼容类(bootclasspath/a 加载,方法表注册对缺失方法打 NoSuchMethodError Warning 不影响);不开 flag→UnsatisfiedLinkError(注册层门控);开 flag→heapOopSize 4/isGCSupported true/g1IsHumongous 4MB true/fullGC done(08-whitebox-demo.txt);native 方法签名必须与方法表 JNI 签名一致(getVMPageSize 是 ()I 非 ()J)
-- **第 3 轮 REVIEW 修正 2 处**: ThreadInAsgct 实际在 forte.cpp:559(类定义 thread.hpp:777,重入注释 :784),非 :587;gc 竞态注释在 :588-590("It would be valid if we weren't possibly racing a gc thread... small window but it does happen"),非 :453-456
+- **AGCT 机制**: 错误码 ticks_*(forte.cpp:50-60:-1 无 CLASS_LOAD/-2 GC/-3..-6 不可得不可遍历/-7 未知/-8 退出/-9 deopt);入口检查 :523-556;三族两路分派 :570-628;find_initial_Java_frame :296-330;vframeStreamForte forte_next :116;ThreadInAsgct(:559,类定义 thread.hpp:777,重入注释 :784);jmethodID 类加载时预分配(信号处理器不能拿锁)
+- **实证方法论**: 最小 WhiteBox 兼容类(bootclasspath/a 加载,方法表注册对缺失方法打 NoSuchMethodError Warning 不影响);不开 flag→UnsatisfiedLinkError(注册层门控);native 方法签名必须与方法表 JNI 签名一致(getVMPageSize 是 ()I 非 ()J)
+- **第 3 轮**: ThreadInAsgct 实际 forte.cpp:559(非 :587);gc 竞态注释在 :588-590(非 :453-456)
+- 实证: 08-whitebox-demo.txt(不开 flag→UnsatisfiedLinkError/开 flag→heapOopSize 4/vmPageSize 4096/isGCSupported true/g1IsHumongous 4MB true/fullGC done)
 
-### 6.25 31-01(Unsafe 底层 API,31 域开篇,大纲 9 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
-- **CAS 单路径错(JDK8 形态)**: 大纲的 `jint* addr=(jint*)(p+offset); Atomic::cmpxchg` 是 JDK8 旧版;JDK11 双路径=obj==NULL→RawAccess(堆外) / obj!=NULL→HeapAccess::atomic_cmpxchg_at(堆内带 GC barrier,06-05 access API);index_oop_from_field_offset_long(unsafe.cpp:122-135,p==NULL 返裸地址);assert_field_offset_sane
-- **行号全漂**: unsafe.cpp 1122 行;CAS :876-938/Park :939-955/Unpark :960-984/AllocateInstance :365-368/defineAnonymousClass0 :830-862(impl :741)/方法表 :1035-1109/JVM_RegisterJDKInternalMiscUnsafeMethods :1116-1121;UNSAFE_ENTRY=JVM_ENTRY(:64-70,interfaceSupport.inline.hpp:558-566 ThreadInVMfromNative)
-- **"getUnsafe 检查 caller" 半对**: jdk.internal.misc.getUnsafe() 无检查(模块封闭);sun.misc.getUnsafe() 才有(@CallerSensitive+Reflection.getCallerClass+VM.isSystemDomainLoader,抛 SecurityException("Unsafe"));名字检查非能力检查(反射拿 theUnsafe 可绕,实证)
-- **allocateInstance=env->AllocObject**(JNI 分配不调构造器,字段初始化器也不执行,实证 x=0),非"直接 zero fill"
-- **方法表 40 条**("~200 方法" 虚高);C2 intrinsic 接线注释 :1112-1115
-- **park/unpark**: Parker 是 01-os/03 拆过的原语(19 域是 ParkEvent,两套);Unpark 走 ThreadsListHandle(17-03 SMR,线程死亡静默跳过);"幽灵 unpark"=类型稳定内存复用
-- **defineAnonymousClass JDK11 无 deprecated 标记**(JDK15 JEP371 后废弃)
-- **实证**: 08-unsafe-demo.txt(getUnsafe SecurityException/String.value offset 12=CAS 成功/allocateInstance x=0/pageSize 4096/addressSize 8);**JDK11 默认 --illegal-access=permit 下反射非导出包仅告警仍可用**(不带 --add-opens 实测通过,JDK16+ 才需 --add-opens);static final 在 static 块用限定名赋值 javac 报错(非限定名 OK)
-- **第 3 轮 REVIEW 修正 4 处**: ①反射拿 theUnsafe 补条件(JDK11 permit 过渡模式可用,JDK16+ 强封装需 --add-opens);②assert_field_offset_sane p==NULL 时断言体整体跳过(unsafe.cpp:105-118,堆外不校验);③defineAnonymousClass **JDK17 已移除**(实测 Temurin 17 src.zip 零命中,defineHiddenClass 取代),非"JDK15 标记废弃"笼统说法;④"JDK8 旧形态"软化(勿凭记忆断言具体版本)、putOrdered 内存序表述精确化
+### 6.27 44-01(ClassVerifier 类型检查引擎,大纲行号全对(07-02 已验过 verifier.cpp),补充机制 7 条 + 第 3 轮 REVIEW,2026-08-13)
+- **VerificationType 真 union**: Symbol* 指针或编码数据(verificationType.hpp:48-62);低 2 位 TypeMask 顶层类别+第二字节类别(Category1/2/2_2nd)+高字节 descriminator;BciMask=0xffff<<8(Uninitialized 存 new 的 bci),BciForThis=(u2)-1(UninitializedThis);Query 类型=pop_stack 的通配符
+- **is_assignable_from 判定树**(verificationType.hpp:267-298): 相同/bogus 通过;Query 按类别;Boolean/Byte/Char/Short 接受 int;引用对引用→is_reference_assignable_from(verificationType.cpp:79-116: null→任何引用/同名/Object 全通过/数组组件递归/其余 resolve_and_check_assignability **会触发类解析**,CDS 下 add_verification_constraint 推迟;**接口特例: 数组只可赋 Cloneable/Serializable,其他接口按 Object**,:47-77)
+- **Uninitialized 生命周期**: new→uninitialized_type(bci)(verifier.cpp:1652-1654);verify_invoke_init(:2371-2420: UninitializedThis 只能调本类/超类 <init>;普通 Uninitialized 校验 bci 处确为 new;initialize_object 全帧替换 stackMapFrame.cpp:57-70;try 块内先验证异常处理器路径)
+- **invoke 四层检查**(verifier.cpp:2600-2655): invokedynamic 3/4 字节必须 0;<init> 只能 invokespecial;invokespecial 类可赋值(匿名类 host 特例)+protected 特例(:2681-2714);参数从后往前 pop_stack;返回类型 :2725-2742(<init> 必须 void)
+- **VerifyError 路径**: verify_error 只记录(:1978-1993),Verifier::verify 尾部 THROW_MSG_(:239);failover(:184-192,版本<51);TypeOrigin :97/ErrorContext :147;aload 模拟=verify_aload(:2832-2837 get_local reference_check)
+- 实证: 08-verifier-demo.txt(iload_0→aload_0: 默认 VerifyError "Bad local variable type"+Reason+Current Frame 转储; -Xverify:none 照跑 result=3)
 
-### 6.24 08-04(LinkResolver + Rewriter,08 域收官,大纲 10 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
-- **"getstatic → fast_agetfield/putstatic → fast_aputfield" 编造**: getstatic/putstatic 无 fast 版本(01 篇枚举无);fast_agetfield 来自 _getfield;Rewriter 对字段/方法指令只换 CP→cpCache 索引(rewrite_member_reference rewriter.cpp:168-183,get_Java_u2→cp_entry_to_cp_cache→put_native_u2 = 01 篇 bJJ 大写 J 的来源),不改指令字节
-- **"newarray → fast_newarray" 编造**: 枚举里不存在;Rewriter 唯一替换指令字节=lookupswitch→fast_linearswitch/fast_binaryswitch(scan_method :394-402,BinarySwitchThreshold);getfield→fast_igetfield 是解释器运行时 patch(02 篇)非 Rewriter
-- **行号全漂**: 五入口 linkResolver.cpp:1652-1690,resolve_static_call :1058/virtual :1291/interface :1411/field :948/resolve_method 六步主链 :723-800;rewrite 入口 :570、rewrite_bytecodes :524-569(forward 一遍,restore_bytecodes 出错反扫 :78-88)、scan_method :370-511
-- **invokedynamic**: 每调用点独占 cpCache 条目(one per bytecode,注释 rewriter.cpp:263-272)→u4 索引→**bJJJJ 5 字节格式的根本原因**;resolved_references 登记;rewrite_Object_init :136-164(RegisterFinalizersAtInit→return_register_finalizer 落地)
-- **cpCache 结构(大纲未提)**: 四字段 _indices[b2|b1|index]/_f1(metadata)/_f2(vtable 索引或偏移)/_flags(cpCache.hpp:49-54,132-142);is_resolved=bytecode 匹配(:inline 43-49);indy 写入=set_method_handle_common 锁协议(flags→refs[f2]→f1,f1 发布点,cpCache.cpp:350-395,ResolutionError 失败传播);普通 invoke=set_direct_or_vtable_call(:318 起)无锁,_indices 字节码最后写(cpCache.hpp:128 注释);invokespecial(interface sender)/invokestatic(类未初始化)故意不标记 resolved(do_resolve=false)
-- **resolve_invoke 写回分派**: 按 CallInfo::call_kind 三写(set_direct_call/vtable_call/itable_call,interpreterRuntime.cpp:904-921),非 set_method_handle_common(那是 indy 专用)
-- **虚分派两段**: linktime_resolve_virtual_method(:1300-1355 检查)/runtime_resolve_virtual_method(:1358-1405: 接口默认-miranda→vtable_index_of_interface_method;普通→vtable_index(),nonvirtual_vtable_index 特例=private/final 静态绑定;否则 recv_klass->method_at_vtable);解析结果在 per-class cpCache
-- **实证**: fast_linearswitch 192B/fast_binaryswitch 256B/fast_aldc 352B/return_register_finalizer 1248B 模板;javap -v Methodref/Fieldref/InvokeDynamic#0→BootstrapMethods(08-linkresolve-javap.txt)
-- **第 3 轮 REVIEW 修正 4 处**: ①"唯一替换指令字节是 lookupswitch"错——ldc/ldc_w→fast_aldc/fast_aldc_w 也是指令替换((*bcp)=_fast_aldc,rewriter.cpp:355),与正文其他段自相矛盾;②rewrite 时机补全=instanceKlass.cpp:851-857 rewrite_class(注释 "after verification but before the first method is executed",is_rewritten 只一次),非笼统"类加载早期";③实证逻辑修正: 模板存在是 generate_all 全量生成的产物,不能直接证明重写——真正的推论=fast_* 只能由 Rewriter 产生(javac 不产 fast_*,规范 class 只允许 0x00-0xCA);④is_resolved 只查 b1/b2 自己那半,invokespecial 与 invokevirtual 可共享条目互不干扰("重新解析"说法错);restore_bytecodes 是错误还原/StressRewriter,非"调试还原"
+### 6.28 44-02(VerificationType 类型系统,第 4 批收官,大纲 7 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
+- **"Top vs Bogus 不同" 错**: top_type()=bogus_type() 别名(verificationType.hpp:130-131 注释 "alias");from_tag ITEM_Top→bogus(:33-45);bogus 放行=is_assignable_from 的 equals||is_bogus;帧构造全槽 bogus(stackMapFrame.cpp:43,46)
+- **"slot N+1=Top" 半对**: 文件规范如此,内存解析时 to_category2_2nd() 转 Long_2nd/Double_2nd(stackMapTable.cpp:300-307);内部 16 个类型=9 tag+4 签名窄化+2 次槽+Bogus
+- **is_assignable_from 伪代码全错**(大纲): "Top→true" 编造;"is_subclass_of(actual)" 方向反;Uninitialized 靠 equals(同 bci)
+- **"Byte/Char 来自 i2b" 错**: 窄化类型来自**方法签名**(change_sig_to_verification_type stackMapFrame.cpp:115-118);i2b/i2c/i2s 模拟推 integer_type(verifier.cpp:1481-1488)
+- **pop 只弹一槽**(stackMapFrame.cpp:199),category2 次槽自然落 _stack_size 之外,非"扣两槽"
+- **悬念指向错**: 大纲 "→域 45 Math" 错(45 已完结);44-02=第 4 批收官,下一域 11-cds
+- **写作期血泪**: 块内代码凭记忆混入不存在的 check_end_stack/grep 零命中——必须逐行回源码
+- **第 3 轮**: 实证解读修正([ long, long ] 是 2 个 long 变量(loop 的 sum+i),双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 `fd 00 05 04 04 04`)
+- 实证: 08-verificationtype-javap.txt
 
-### 6.23 08-03(InterpreterRuntime,大纲 8 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
-- **"JRT_ENTRY" 错**: 解释器 runtime 用 **IRT_ENTRY 家族**(interfaceSupport.inline.hpp:445-466),JRT_ENTRY 是 JNI 通道(:468);JRT 与 IRT 宏体几乎相同(ThreadInVMfromJava+VM_ENTRY_BASE),真正禁用异步异常的是 IRT_ENTRY_NO_ASYNC(monitorenter 用);状态转换 RAII(trans_from_java,:224-232)+HandleMark+THREAD 约定;at_safepoint(:1176-1191)函数体近空——**safepoint 检查在 IRT_END 的析构隐式完成**(注释原话)
-- **"OopMapCache LRU + OopMapCacheSize ~1024" 编造**: 固定 32 槽哈希+3 步探测(oopMapCache.hpp:149-151 "Use fixed size for now"),无 LRU 无该 flag;每槽 2 位 oop/dead(:76-78)
-- **"InvocationCounter 递减到 0" 错**: 递增到阈值(_counter=[count29|carry1|state2],increment += 8);InterpreterInvocationLimit=CompileThreshold<<3(invocationCounter.cpp:148);BackwardBranchLimit 掺 OnStackReplacePercentage/InterpreterProfilePercentage(:156-158)
-- **"C1=5000/C2=15000" 错**: JDK11 tiered 默认 Tier3=2000/Tier4=15000/Tier2=0,CompileThreshold=10000 非 tiered,InterpreterProfilePercentage=33(PrintFlagsFinal 实证)
-- **计数器机械**: generate_counter_incr(templateInterpreterGenerator_x86.cpp:385-440): tiered 用 increment_mask_and_jump 掩码节流(sticky overflow 注释);非 tiered 求和比较;溢出→frequency_counter_overflow(:1008)→policy()->event(:1065);OSR 成功先 revoke 激活内全部有偏锁(:1072-1094);回边仅向后分支(testl 正负判断,templateTable_x86.cpp:2191-2200)
-- **模板侧 call_VM 链(大纲未提)**: interp_masm call_VM_base(interp_masm_x86.cpp:282-306 save/restore bcp)→macroAssembler call_VM_base(:2482-2550): c_rarg0=r15_thread、set_last_Java_frame(sp,fp,pc=NULL——**pc NULL 不写 anchor pc**,:799-802)、check_exceptions→forward_exception_entry(:2556-2560);LastFrameAccessor(interpreterRuntime.cpp:76-113)=thread->last_frame() 访问器
-- **ldc 模板分派**: 仅 tag=UnresolvedClass/UnresolvedClassInError/Class 时 call runtime(templateTable_x86.cpp:366-381),数字/字符串模板直处理
-- **实证**: Interpreter generation 0.65ms(startuptime);CounterDemo tier3→`%`tier4@4→tier4→made not entrant(08-interpreter-counterdemo.txt+PrintFlagsFinal 附注)
-- **第 3 轮 REVIEW 修正 5 处**: ①safepoint 检查在 ThreadStateTransition::transition 内(interfaceSupport.inline.hpp:111-123: 过渡态→serialize_thread_state→SafepointMechanism::block_if_requested→到态),构造(Java→VM)与析构(VM→Java)两向都有——不只 IRT_END;②call_VM_base 尾部 get_vm_result 把线程 vm_result 读回结果寄存器并清零(:2572-2574),模板取回结果的机制;③increment_mask_and_jump 机制=+8 写回→andl(scratch,mask)→jcc(zero)(interp_masm_x86.cpp:1956-1967);④forward_exception 跳转 :2556-2568(LP64 分支 jcc(equal,ok)+jump+bind(ok));⑤runtime 入口实为 46 个 IRT 宏+少数裸入口(frequency_counter_overflow 无宏),"60 多个"虚高
-
-### 6.22 08-02(Template Interpreter,大纲 11 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
-- **"generate_all 三步" 错**: 真实十一段(templateInterpreterGenerator.cpp:57-263): 签名+错误出口→return 按长度 5 档(_return_entry[6] 0 空)→invoke return 按 TosState 10 档→earlyret→native 结果→safepoint 入口(InterpreterRuntime::at_safepoint)→异常 6 入口→方法入口 28 种(method_entry 宏,MethodKind 在 abstractInterpreter.hpp:59-61,zerolocals..abstract 7+math 11+refget 1+CRC 5+FD 4;MH 系列由 initialize_method_handle_entries 单独处理)→set_entry_points_for_all_bytes(遍历 256,is_defined→模板/否则 _unimplemented_bytecode stop)→safepoints_for_all_bytes→deopt 入口(_deopt_entry[7] 按长度)
-- **寄存器错**: x86_64 下 rlocals=r14、rbcp=r13(templateTable_x86.cpp:46-47),r13 是 bcp 不是 dispatch 表;locals_index 取负 index(negptr);dispatch=lea rscratch1, ExternalAddress(table)+jmp [rscratch1+rbx*8](interp_masm_x86.cpp:826-846),表地址每次 lea 不在寄存器
-- **"iload_0 模板 push(rax)+advance+dispatch_next" 错**: iload_0..3 生成器=**iload(int n)**(templateTable_x86.cpp:878-881)仅 3 行(transition+movl(rax,iaddress(n))),无 push 无 bcp 访问;**transition 只是断言**(templateTable.cpp:162-165);advance/dispatch 由 generate_and_dispatch 统一生成(:377-401,does_dispatch 模板自己跳走+should_not_reach_here)
-- **实证尺寸**: iload_0=96B vs iload=192B(iload() 含 RewriteFrequentPairs 检查读 bcp[1],:621-637);iconst 7 个全 96B;iadd 64B;ldc 736B;invokevirtual 1280B;271 codelets avg 404B(08-interpreter-templates.txt,Temurin 11;24-01 素材的 358B 是 Kona 17,引用时注明版本)
-- **"tosState 共享模板(iload/fload 同)" 错**: 共享按**生成函数+arg 参数化**(iconst(arg)/iop2(Operation)/if_0cmp(Condition)/float_cmp(±1)/fast_accessfield(tos),templateTable.cpp:357,410-419,480-487),非按 tosState
-- **"TemplateTable::_itable[256]" 错**: 真实=_template_table/_template_table_wide 双表 239 槽(templateTable.cpp:172-173);def 用 iswd 选表,断言 "wide instructions have vtos entry point only";wide 入口单列 _wentry_point[256](templateInterpreter.hpp:134)
-- **入口点家族(核心,大纲未提)**: DispatchTable::_table[10][256](templateInterpreter.hpp:65-83);set_short_entry_points(:345-362) tos_in!=vtos 时 vep=pop(state)(**pop=从栈装载到寄存器**,interp_masm_x86.cpp:678-704)+状态入口=本体;tos_in==vtos 走 set_vtos_entry_points(x86:1765-1794)=aep/fep/lep/iep 压栈序言+vep 共享本体;**tosca=栈顶值留寄存器不压栈**(templateInterpreter.hpp:40 注释);TosState 10 态 globalDefinitions.hpp:819-832
-- **safepoint 轮询内联(大纲未提)**: dispatch_base 每字节码 testb [r15_thread+polling_page_offset],置位跳 safept_table(:826-834);notice_safepoints **整表拷贝**(copy_table safept→active,templateInterpreter.cpp:293-325,非指针换向;safepoint 内 disjoint_words/外 atomic :282-291)——17-02/24-02 轮询点呼应
-- **0xCB-0xFF 修正(01 篇遗留)**: 未定义区是 **0xEF-0xFF 共 17 个**(239-255),0xCB-0xEE(203-238)是 36 条 fast 系列!01 篇第 3 轮 REVIEW 没抓到,本篇深审抓出,两篇正文+大纲已同步修正
-- **第 3 轮 REVIEW 修正 4 处**: ①wide 链精确化: _wide 模板 jump ArrayAddress→_wentry_point(templateTable_x86.cpp:4504-4510,"rbcp increment step is part of the individual wide bytecode implementations"),宽模板出口仍走共享表;②iadd 消费=iop2 的 pop_i(rdx)+addl(rax,rdx)(:1337-1340),非"消费 rax 两个操作数";③deopt 三态: reexecute 走 deopt_reexecute_entry(method,bcp),_return_register_finalizer 特判才走 deopt_reexecute_return_entry(templateInterpreter.cpp:339-352)——24-03 unpack 三态对应,别把两者混成一个;④字节码表初始化=init_globals→bytecodes_init(init.cpp:104),早于模板表;TemplateInterpreter::initialize 只做 TemplateTable::initialize+StubQueue+生成
-
-### 6.21 08-01(Bytecode 定义表,08 域开篇,大纲 11 处漂移含 3 处机制编造,2026-08-13)
-- **"5 个静态数组 names/lengths/formats/flags/depths" 错**: 6 个数组(_name/_result_type/_depth/_lengths/_java_code/_flags,bytecodes.hpp:339-346),**没有 _format 数组**——format 字符串由 compute_flags(bytecodes.cpp:206-276)预编译成 _flags 位;两条压缩技巧: _lengths 一字节两用(低 4 位短长/高 4 位 wide 长,:397-398)、_flags 512 槽双页(低 256 普通/高 256 wide,:345,432-435)
-- **"def(...) 宏展开" 错**: 是 C++ 静态函数非宏;7/8 参数 (code,name,format,wide_format,result_type,depth,can_trap[,java_code]);239 条 def 调用启动一次填充(数组在 .bss 非 .data,"编译时预计算"应说"启动时预填充")
-- **"Format: b=1B signed byte/c=1B CP index/i=2B/j=4B branch offset" 全错**: 真实语义(cpp:188-204 注释)=**b 是 opcode 本身**、c=signed constant、i=local index、**j=2B CP cache index**、k=CP index、o=branch offset(ifeq "boo"/goto_w "boooo");大写=原生字节序(实际只有 J 出现,:244 注释);**指令长度=format 字符串字符数**;变长 format=""
-- **"256 条(255=impdep2)" 错**: 枚举 203 个成员(0x00-0xCA,含规范保留 wide/breakpoint)+36 条私有(fast 29+return_register_finalizer+invokehandle+nofast 4+shouldnotreachhere)=number_of_codes 239;0xCB-0xFF 不定义;load/store 实数=5 类型×(1+4 short)=25+25=50 条(大纲 "~60/6 种×4" 错)
-- **"opcode upper 4 bits 分组让 dispatch 用查表" 编造**: 段布局是 JVM 规范历史安排;HotSpot 分组=区间谓词函数(hpp:415-429 is_aload/is_const/is_return/is_invoke),真实消费者 verifier.cpp:754(异常区检查)/templateInterpreter.cpp:254(invoke 单独处理)/deoptimization.cpp:705-722(deopt 重建时 is_invoke 判调用点+falls_through)
-- **"can_trap 用于 loop optimization" 编造**: 真实消费者=GenerateOopMap::do_exception_edge(generateOopMap.cpp:1178 第一行剪枝,决定"异常边"→解释器 OopMap 栈图——连接 24-01 的 oopMapCache 链: mask_for→compute_one_oop_map(oopMapCache.cpp:597)→OopMapForCacheEntry(:72))+ciTypeFlow.cpp:2171;C1 自建 _can_trap 表(c1_GraphBuilder.cpp:2976-3034,剔 return/monitorexit,"monitor pairing proved");def 末尾 ASSERT 保证重写指令 can_trap 是原指令子集(cpp:553-563)
-- **"stack_effect(opc,bci)/_unknown_depth" 编造**: 不存在;depth 恒静态(invoke 系 -1=近似 pop receiver,invokestatic/indy=0);"栈顶类型由上下文决定"由 result_type=T_ILLEGAL 表达(cpp:289-291 Note 2)
-- **变长只有三条**: wide(读第二字节查高 4 位)/tableswitch(align_up(bcp+1,4),长=(补齐)+(3+hi-lo+1)*4)/lookupswitch(长=(补齐)+(2+2*npairs)*4);**breakpoint 不在 special_length_at case(返 0)**,普通迭代器经 code_at 伪装成原指令(hpp:369-374),只有 raw_special_length_at 给 1(:151-158);迭代器先 length_for 固定长、0 才 length_at(bytecodeStream.hpp:205-207)
-- **实证方法论**: javap 偏移差=def 表 format 长度,可脚本全量核对(76 条固定长全对;方法边界 return 行会算出负差需过滤);lookupswitch 对齐可用偏移链证明(1→4 对齐→44,43 字节);正则陷阱: def 表名字匹配写死 "bytecode" 前缀导致零命中
-- 实证: 08-bytecodes-javap.txt(Temurin 11 javac/javap,BcDemo 六方法: 构造器+常量/局部变量/算术/if/lookupswitch/invoke/indy/new/数组;invokedynamic #11,0 5 字节、bipush 42 2 字节、iinc 2,1 3 字节)
+### 6.29 11-01(CDS 全景与 Dump,第 5 批开篇,大纲 8 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
+- **"magic 0xF00BAAA2" 错**: 真实 0xF00BABA2(filemap.hpp:37);validate_header(filemap.cpp:1397)=header->validate+check_shared_paths_misc_info;validate_shared_path_table(:480)在**映射后**(注释 "this is done later")
+- **"5 个 space mc/rw/ro/md/od" 错**: od 是旧版;JDK11=**8 槽位**(metaspaceShared.hpp:66-85: mc/rw/ro/md+string×2+open archive×2),实证 dump 用 6 个(mc/rw/ro/md/st0/oa0);rw 33.4%+ro 60.3%=93.7%
+- **"link_and_serialize" 编造**: 真实=link_and_cleanup_shared_classes(:1680)+VM_PopulateDumpSharedSpace::doit(:1333-1410): Metaspace::freeze(VM 线程不能 GC 故冻结)→CollectClassesClosure→rewrite_nofast_bytecodes_and_calculate_fingerprints(:550,08-04 nofast 落地)→combine_shared_dictionaries→**remove_java_mirror_in_classes(:501,"Removing java_mirror" 打印 :1300)与 remove_unshareable_in_classes(:489)两个独立函数**→**ArchiveCompactor::initialize+copy_and_compact**(压实+重定位,非逐个对象递归写)→dump_symbols/dump_java_heap_objects→relocate_well_known_klasses
+- **行号漂**: preload_and_dump :1632(大纲 200-600);preload_classes :1699=ClassLoaderExt::load_one_class 逐类加载;ClassListParser :46/:78 只做行解析(# 注释/tab 归一),不碰 SymbolTable
+- **默认归档路径**: SharedArchiveFile 缺省=jvm_path 推导的 JVM 同目录 classes.jsa(arguments.cpp:3510-3529)
+- **指针重定位本质**: narrow_klass_base 与归档基址重合是**主动设计**(Universe::set_narrow_klass_base(_shared_rs.base()),:305)→dump 按假想地址摆对象,load 同址 mmap→ro 指针原样有效;堆配置不匹配归档作废
+- **写作期血泪 2**: preload_classes 块又凭记忆编了 is_loading_success 分支(真实 ClassLoaderExt::load_one_class)——第二次犯
+- **第 3 轮**: java_mirror 两函数分列;narrow_klass_base 主动设计;classlist 行数断言删除
+- 实证: 08-cds-demo.txt+08-cds-dump-full.txt(dump 归档 1211 类含 1151 instance/11.9MB/6 空间区;启动 class+load 356 个 shared objects file)
 
 ---
 
@@ -386,7 +323,7 @@
 2. **每篇都做深度 REVIEW(2 轮)**: 用户会要求"按照方法论深度的 REVIEW",写完后**主动自查深审,不要等**;用户还会追加"再次深度的 REVIEW"(第 3/4 轮)——按同样方法重新质疑,重点抓上一轮没抓到的"顺理成章"错误
 3. **一篇一篇写**: 不并行、不跳步
 4. **数字/事实必须验证**: 任何带数字的陈述回源码/素材验证,禁止"凭记忆"
-5. **命名混淆注意**: "域 07"与"07 域的第 01 篇"都带 07,表述时写清"域 XX 第 Y 篇"
+5. **命名混淆注意**: "域 07"与"07 域的第 01 篇"都带 07,表述时写清"域 XX 第 Y 篇";目录名以 outlines/ 实际为准(31-unsafe-whitebox、44-class-verification)
 6. 中文交流,提交信息用中文
 7. 用户会追问"下一步规划是否合理"——要有自己的判断
 8. **用户会追问"发现的问题都修复了吗/有沉淀吗"**——修复要有 commit 可查,沉淀要即时写进本文件 §6
@@ -398,11 +335,11 @@
 
 ## 八、待办清单(按优先级)
 
-- [x] 第 1 批 12 篇 + 第 2 批 26 篇 + 第 3 批 14 篇(01/05/45/48/02/03/04/06/16/38/41/42/07/09/17 域)——✅ 完结
-- [x] 第 4 批: 10-metaspace(3/3)/19-sync(4/4)/23-stub(3/3)/24-frame(3/3)——✅ 完结(commit 见 §二)
-- [x] **08-interpreter/01**(bytecodes 定义表)——✅ 完结(正文 b34880a/回填 05d5c11/README 4ee15e1,commit 见 §二)
-- [ ] **08-interpreter/02**(template interpreter)——**下一篇**;大纲 `planning/outlines/08-interpreter/02-template-interpreter.md`(08 域剩 3 篇: 02-template-interpreter/03-interpreter-runtime/04-linkresolver-rewriter);01 篇悬念指向它: 定义表怎么变成机器码
-- [ ] 08 域完结后 → 31-unsafe → 44-verification(第 4 批收尾)
+- [x] 第 1 批 12 篇 + 第 2 批 26 篇 + 第 3 批 14 篇——✅ 完结
+- [x] 第 4 批 21 篇(10/19/23/24/08/31/44 域)——✅ **第 4 批收官**(commit 见 §二)
+- [x] **11-cds/01**(CDS 全景与 Dump)——✅ 完结(正文 171bf24/回填 a9dafe0/README a35de82,commit 见 §二)
+- [ ] **11-cds/02**(Load 端)——**下一篇**;大纲 `planning/outlines/11-cds/02-cds-load-shared.md`;01 篇悬念指向它: mmap 之后怎么进 SystemDictionary
+- [ ] 11 域完结后 → 12-ci → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -422,31 +359,30 @@
 | 卷 2 进度 | `docs/openjdk/vol-02/README.md` |
 | 源码树(jdk11u) | `/data/workspace/jdk11u/src/hotspot/`(仅 x86+linux!) |
 | JDK 侧源码 | `/data/workspace/jdk11u/src/java.base/` |
-| 工具素材 | `docs/openjdk/planning/outlines/00-jvm-tools/materials/`(commands/ 130+ 文件) |
-| **实证 JDK(首选,与源码同版本)** | **`/data/tmp/opencode/jdk11/bin`(Temurin OpenJDK 11.0.32,api.adoptium.net 下载)** |
-| 通用 JDK | `/opt/codev/TencentKona/bin/`(17.0.8.1);`/opt/codev/TencentKona-21.0.12.b1/bin`(21);`/data/tmp/opencode/jdk17/bin`(Temurin 17) |
-| 自查脚本 | `/data/tmp/opencode/check.py`(代码块/行号/星号/锚;新文件先加 MAPPINGS/HS_MAP;ART 改当前文章;相对链接豁免已泛化) |
-| 实证工作目录 | `/data/tmp/opencode/acbench/`(bench 源码+wrapper 脚本 run_*.sh) |
-| GUI 手册 | `docs/openjdk/planning/outlines/00-jvm-tools/GUI-manual.md` |
+| 工具素材 | `docs/openjdk/planning/outlines/00-jvm-tools/materials/`(commands/ 140+ 文件) |
+| **实证 JDK(首选,与源码同版本)** | **`/data/tmp/opencode/jdk11/bin`(Temurin OpenJDK 11.0.32)** |
+| 对照 JDK | `/data/tmp/opencode/jdk17/bin`(Temurin 17,含 src.zip 验证 API 变迁);`/opt/codev/TencentKona/bin/`(17.0.8.1) |
+| 自查脚本 | `/data/tmp/opencode/check.py`(代码块/行号/星号/锚;新文件先加 MAPPINGS/HS_MAP/**EXTERNAL**;ART 改当前文章;forward-link 用 basename 匹配 outlines) |
+| 实证工作目录 | `/data/tmp/opencode/acbench/`(bench 源码+wrapper 脚本 run_*.sh;bc08/ 与 verify/ wb/ unsafe/ 等子目录) |
 
 **自查脚本要点**(python,每篇跑):
 - 代码块: `re.findall(r'```cpp\n// (file):(s)-(e)\(...\)\n(.*?)```')` → 逐行比对(遇 "..." 跳过,strip 后判)
-- 行号范围: HS_MAP(hotspot: share/classfile/、share/runtime/、share/code/、share/opto/、share/compiler/、share/interpreter/、share/memory/、share/oops/、share/gc/*、cpu/x86/、os/linux/、os/posix/、os_cpu/linux_x86/ 等)+ MAPPINGS(JDK 侧)→ 行号 ∈ [1, 行数]
-- 星号: 剔除代码 span 后 `count('*') % 2 == 0`(注意 `java.*` 类裸星号必须加反引号)
-- 文字锚: 文件名后无行号的引用 → 报错补行号(注意 .cpp 后缀的锚检查天然失效,仍要手动补行号)
-- 链接: 相对链接按文章目录解析;forward link 豁免=大纲目录里存在同名文件(已泛化为全 outlines 扫描)
-- **代码块行号不匹配时**: 用 python 自动对齐脚本(取块体首行在源中的位置+逐行匹配末行,见 24-03 做法)
+- 行号范围: HS_MAP(hotspot)+ MAPPINGS(JDK 侧)+ **EXTERNAL**(jdk.unsupported 等 SRC 树外)→ 行号 ∈ [1, 行数]
+- 星号: 剔除代码 span 后 `count('*') % 2 == 0`(裸星号如 `Method*`/`2^k`/`Tier*` 必须加反引号;**反引号配对先修**,一个漏闭会让全篇统计错乱)
+- 文字锚: 文件名后无行号的引用 → 报错补行号
+- 链接: 相对链接按文章目录解析;forward link 豁免=outlines 全扫描按 basename 匹配
+- **代码块行号不匹配时**: 用 python 自动对齐脚本(从标注起点逐行匹配块内容,输出真实终点——44-02 三块连错 4 轮后用它一次解决)
 
 ---
 
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/11-cds/02-cds-load-shared.md(注意 ⚠️ 块——11-01 大纲已回填 8 条,02 大概率同样漂移;01 篇悬念指向它: mmap 之后怎么进 SystemDictionary)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;重点: interpreterRuntime.cpp 的各类入口(resolve_ldc/resolve_invoke/new/throw...)、模板侧 call_VM 的调用点(templateTable.cpp:71-116 断言 calls_vm)、interp_masm 的 call_VM 封装(macroAssembler 层 JavaFrameAnchor/safepoint 处理)、JavaCalls/SharedRuntime 桥、safepoint 入口(InterpreterRuntime::at_safepoint,02 篇第 6 段生成)、invoke 的 resolve 流程;与 02 篇的 dispatch/轮询点/calls_vm 位呼应要在文中体现;03 大纲标题 = InterpreterRuntime,正文标题按 v5 格式)
-3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);容器后台进程用 wrapper 脚本管理;pgrep 用方括号;转储用 kill -3;jcmd attach 挂起时换 kill -3;class 版本注意 javac/java 同版本;javap -c 偏移差可与 def 表脚本核对(见 08-bytecodes-javap.txt)
-4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
-5. 08 域完结后 → 31-unsafe → 44-verification(第 4 批收尾)
+1. 读 planning/outlines/11-cds/02-cds-load-shared.md(注意 ⚠️ 块——11-01 大纲已回填 8 条,02 大概率同样漂移;01 篇悬念指向它: mmap 之后共享类怎么进 SystemDictionary)
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;重点: FileMapInfo::map_regions/map_info、SystemDictionaryShared::init_shared_dictionary 或类似入口、MetaspaceShared::initialize_shared_spaces、共享类的 InstanceKlass 恢复(offset 解码)、字符串/堆对象恢复(StringTable/HeapShared)、验证器对共享类的处理(已归档的已验类跳过验证,44 域呼应)、nofast 字节码在 load 端的处理(08-04 呼应: CDS 归档字节码不重写,is_rewritten 标记);与 01 篇的 region 布局/指针重定位呼应要在文中体现;02 大纲标题副标题 = "mmap archive → shared spaces → 类就绪")
+3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);CDS 实证: -Xshare:dump 生成 jsa(08-cds-demo.txt/full 已有)、-Xlog:cds,class+load 看 "shared objects file"、-XX:SharedArchiveFile 指定自定义归档;类加载器/字典的共享类标记可用 -Xlog:class+load 观察
+4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
+5. 11 域完结后 → 12-ci → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 12 域)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
