@@ -2,6 +2,14 @@
 
 > 🔴 Deep | 4 KP 中的锁演化路径
 > 读者处境: `synchronized(obj) {}` 编译成 monitorenter/monitorexit 字节码——但 JVM 不只一成不变地做重量级锁。同一把锁随着竞争程度变化，在三种不同实现间切换。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/19-sync/01 已按真实源码成文~160 行,本大纲为规划期产物,机制描述以文章为准;注意与 06-01 的 markOop 锁位承接,不重复):
+> - **markOop 3-bit 编码已在 06-01 讲透**(locked_value=0/unlocked_value=1/monitor_value=2/biased_lock_pattern=5),本篇只补生命周期: 单向 unlocked→biased→BasicLock→ObjectMonitor,deflate(GC safepoint)是唯一降级,不回 BasicLock
+> - **fast_enter(synchronizer.cpp:264-280,非"160-240")**: UseBiasedLocking+非 safepoint→revoke_and_rebias;BIAS_REVOKED_AND_REBIASED 直接返回;否则 slow_enter;safepoint 时 revoke_at_safepoint
+> - **revoke_and_rebias(biasedLocking.cpp:624 起,非"80-150")**: 三个无 safepoint CAS 快路径——匿名偏向(:633-642 CAS 换回原型)/类原型无偏向残留(:647-660 CAS 换类原型)/epoch 过期(:664 起 attempt_rebias→encode 重偏向否则 CAS 撤销);CAS 失败才 update_heuristics(:321,撤销次数记 **Klass** 上 _biased_lock_revocation_count :353-362);阈值=**BulkRebiasThreshold=20(globals.hpp:978)/BulkRevokeThreshold=40(:984)**;HR_SINGLE_REVOKE 偏自己可走自己栈无 safepoint(:700+ 注释)
+> - **BasicLock(basicLock.hpp:32-44)**: 只有 volatile markOop _displaced_header;BasicObjectLock 嵌入解释器帧(:55 起),不进堆零 GC
+> - **slow_enter(synchronizer.cpp:339-371)**: 中性→set_displaced_header+**cas_set_mark 换成指向 BasicLock 的指针**(:345-346,一条 lock cmpxchg);自己持有→**递归 dhw=NULL**(:355);否则 inflate(:363-365);fast_exit(:282-331): dhw==NULL 递归返回;cas_set_mark 恢复(:305-308);失败 inflate→exit
+> - 悬念指向 02-objectmonitor-structure.md(标题 "02. ObjectMonitor 结构——重量级锁内部")✓
 
 ### 1. "对象头的 3 个 bit 在说什么？" — markOop 锁编码
 
