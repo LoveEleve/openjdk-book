@@ -276,7 +276,7 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
-### 6.24 08-04(LinkResolver + Rewriter,08 域收官,大纲 10 处漂移含 3 处机制编造,2026-08-13)
+### 6.24 08-04(LinkResolver + Rewriter,08 域收官,大纲 10 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"getstatic → fast_agetfield/putstatic → fast_aputfield" 编造**: getstatic/putstatic 无 fast 版本(01 篇枚举无);fast_agetfield 来自 _getfield;Rewriter 对字段/方法指令只换 CP→cpCache 索引(rewrite_member_reference rewriter.cpp:168-183,get_Java_u2→cp_entry_to_cp_cache→put_native_u2 = 01 篇 bJJ 大写 J 的来源),不改指令字节
 - **"newarray → fast_newarray" 编造**: 枚举里不存在;Rewriter 唯一替换指令字节=lookupswitch→fast_linearswitch/fast_binaryswitch(scan_method :394-402,BinarySwitchThreshold);getfield→fast_igetfield 是解释器运行时 patch(02 篇)非 Rewriter
 - **行号全漂**: 五入口 linkResolver.cpp:1652-1690,resolve_static_call :1058/virtual :1291/interface :1411/field :948/resolve_method 六步主链 :723-800;rewrite 入口 :570、rewrite_bytecodes :524-569(forward 一遍,restore_bytecodes 出错反扫 :78-88)、scan_method :370-511
@@ -284,7 +284,8 @@
 - **cpCache 结构(大纲未提)**: 四字段 _indices[b2|b1|index]/_f1(metadata)/_f2(vtable 索引或偏移)/_flags(cpCache.hpp:49-54,132-142);is_resolved=bytecode 匹配(:inline 43-49);indy 写入=set_method_handle_common 锁协议(flags→refs[f2]→f1,f1 发布点,cpCache.cpp:350-395,ResolutionError 失败传播);普通 invoke=set_direct_or_vtable_call(:318 起)无锁,_indices 字节码最后写(cpCache.hpp:128 注释);invokespecial(interface sender)/invokestatic(类未初始化)故意不标记 resolved(do_resolve=false)
 - **resolve_invoke 写回分派**: 按 CallInfo::call_kind 三写(set_direct_call/vtable_call/itable_call,interpreterRuntime.cpp:904-921),非 set_method_handle_common(那是 indy 专用)
 - **虚分派两段**: linktime_resolve_virtual_method(:1300-1355 检查)/runtime_resolve_virtual_method(:1358-1405: 接口默认-miranda→vtable_index_of_interface_method;普通→vtable_index(),nonvirtual_vtable_index 特例=private/final 静态绑定;否则 recv_klass->method_at_vtable);解析结果在 per-class cpCache
-- **实证**: fast_linearswitch 192B/fast_binaryswitch 256B/fast_aldc 352B/return_register_finalizer 1248B 模板(重写发生证据);javap -v Methodref/Fieldref/InvokeDynamic#0→BootstrapMethods(08-linkresolve-javap.txt)
+- **实证**: fast_linearswitch 192B/fast_binaryswitch 256B/fast_aldc 352B/return_register_finalizer 1248B 模板;javap -v Methodref/Fieldref/InvokeDynamic#0→BootstrapMethods(08-linkresolve-javap.txt)
+- **第 3 轮 REVIEW 修正 4 处**: ①"唯一替换指令字节是 lookupswitch"错——ldc/ldc_w→fast_aldc/fast_aldc_w 也是指令替换((*bcp)=_fast_aldc,rewriter.cpp:355),与正文其他段自相矛盾;②rewrite 时机补全=instanceKlass.cpp:851-857 rewrite_class(注释 "after verification but before the first method is executed",is_rewritten 只一次),非笼统"类加载早期";③实证逻辑修正: 模板存在是 generate_all 全量生成的产物,不能直接证明重写——真正的推论=fast_* 只能由 Rewriter 产生(javac 不产 fast_*,规范 class 只允许 0x00-0xCA);④is_resolved 只查 b1/b2 自己那半,invokespecial 与 invokevirtual 可共享条目互不干扰("重新解析"说法错);restore_bytecodes 是错误还原/StressRewriter,非"调试还原"
 
 ### 6.23 08-03(InterpreterRuntime,大纲 8 处漂移含 3 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 - **"JRT_ENTRY" 错**: 解释器 runtime 用 **IRT_ENTRY 家族**(interfaceSupport.inline.hpp:445-466),JRT_ENTRY 是 JNI 通道(:468);JRT 与 IRT 宏体几乎相同(ThreadInVMfromJava+VM_ENTRY_BASE),真正禁用异步异常的是 IRT_ENTRY_NO_ASYNC(monitorenter 用);状态转换 RAII(trans_from_java,:224-232)+HandleMark+THREAD 约定;at_safepoint(:1176-1191)函数体近空——**safepoint 检查在 IRT_END 的析构隐式完成**(注释原话)

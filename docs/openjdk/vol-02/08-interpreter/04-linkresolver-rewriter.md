@@ -8,13 +8,13 @@
 
 `invokevirtual #5`——#5 是常量池里一个符号引用(Methodref: 类名+名字+签名)。解释器每次走到这行,都要从符号找到 Method* 再找到 vtable 槽位吗?显然不是: **类加载时 Rewriter 先把 CP 索引换成 cpCache 索引(字节序翻转),首次执行时 LinkResolver 把解析结果写进 cpCache,之后每次执行直接命中**。这一篇拆这两段: 重写做了什么(不改变指令语义,只换索引)、解析怎么从符号一步步走到 Method*/字段偏移、解析结果以什么结构缓存。
 
-[实证:] Temurin 11 的 PrintInterpreter 里存在 `fast_linearswitch` 192B/`fast_binaryswitch` 256B/`fast_aldc` 352B/`return_register_finalizer` 1248B 模板(08-interpreter-templates.txt)——这些"重写后的字节码"模板存在,证明类加载期的重写真的发生了(见第一节的实证)。javap -v 显示类文件里的符号引用形态(08-linkresolve-javap.txt): `#7 = Methodref #41.#42 // Integer.valueOf:(I)Ljava/lang/Integer;`、`#10 = Fieldref`、`#11 = InvokeDynamic #0:#50`——本篇拆的就是这些符号在 JVM 内部的命运。
+[实证:] Temurin 11 的 PrintInterpreter 里存在 `fast_linearswitch` 192B/`fast_binaryswitch` 256B/`fast_aldc` 352B/`return_register_finalizer` 1248B 模板(08-interpreter-templates.txt)——这些字节码**只能由 Rewriter 产生**(javac 生成的类文件不可能含 fast_* 系列,规范 class 文件只允许 0x00-0xCA 的标准指令),模板被生成说明类加载后字节码流里会出现它们,即重写真的发生了。javap -v 显示类文件里的符号引用形态(08-linkresolve-javap.txt): `#7 = Methodref #41.#42 // Integer.valueOf:(I)Ljava/lang/Integer;`、`#10 = Fieldref`、`#11 = InvokeDynamic #0:#50`——本篇拆的就是这些符号在 JVM 内部的命运。
 
 ## 1. Rewriter: 类加载时的一次性索引替换
 
 ### 重写什么: 指令不变,索引变
 
-Rewriter 在类加载早期跑一遍所有方法(rewriter.cpp:524 的 rewrite_bytecodes,逐方法一次 forward 扫描),**不改指令语义,只改操作数**;出错时 `restore_bytecodes` 反扫还原(:78-88)。核心是 rewrite_member_reference(rewriter.cpp:168-181,截取核心,逐字):
+Rewriter 在类链接阶段跑一遍所有方法(instanceKlass.cpp:851-857 的 `rewrite_class`: 注释 "must happen after verification but before the first method of the class is executed",`is_rewritten` 标记保证只调一次)→ rewriter.cpp:524 的 rewrite_bytecodes 逐方法一次 forward 扫描;**不改指令语义,只改操作数**;出错时 `restore_bytecodes` 反扫还原(:78-88)。核心是 rewrite_member_reference(rewriter.cpp:168-181,截取核心,逐字):
 
 ```cpp
 // rewriter.cpp:168-183(截取核心,逐字)
@@ -36,7 +36,7 @@ void Rewriter::rewrite_member_reference(address bcp, int offset, bool reverse) {
 }
 ```
 
-`get_Java_u2`(大端读 CP 索引)→ `cp_entry_to_cp_cache`(CP 索引→cpCache 槽位)→ `put_native_u2`(小端写回)。**同一个 2 字节,从"类文件的 CP 下标"变成"内存里 cpCache 的下标",字节序也从大端翻成小端**——这就是 01 篇 `getfield "bJJ"` 大写 J 的来源。reverse 方向(CDS 归档/调试还原)完全可逆。
+`get_Java_u2`(大端读 CP 索引)→ `cp_entry_to_cp_cache`(CP 索引→cpCache 槽位)→ `put_native_u2`(小端写回)。**同一个 2 字节,从"类文件的 CP 下标"变成"内存里 cpCache 的下标",字节序也从大端翻成小端**——这就是 01 篇 `getfield "bJJ"` 大写 J 的来源。reverse 方向(错误还原与 StressRewriter,restore_bytecodes)完全可逆;CDS 场景是 dump 时改写一次、运行时不再改写(rewriter.cpp:571-573 注释)。
 
 ### 扫描主循环: 按字节码类型分派
 
@@ -50,7 +50,7 @@ scan_method(rewriter.cpp:370-511)逐条迭代(用 01 篇的 length_for/length_at
 | `invokedynamic` | 专用 4 字节索引 + 独立解析引用条目 | :418 |
 | `ldc`/`ldc_w` | String/MethodHandle/MethodType/引用型 condy → `fast_aldc`/`fast_aldc_w` | :420-427 |
 
-**关键设计 (斜体)**: *注意两件大事不是 Rewriter 干的: ①`getfield → fast_igetfield` 是解释器运行时解析后 patch 的(02 篇),Rewriter 只换索引不改指令;②`newarray → fast_newarray` 不存在(01 篇的枚举里没有)——大纲常写的这个"重写"是编造的。Rewriter 唯一替换指令字节的是 lookupswitch(按 `BinarySwitchThreshold` 把线性/二分查找定死,把"数对数决定策略"从每次执行提前到类加载一次)。*
+**关键设计 (斜体)**: *注意两件大事不是 Rewriter 干的: ①`getfield → fast_igetfield` 是解释器运行时解析后 patch 的(02 篇),Rewriter 只换索引不改指令;②`newarray → fast_newarray` 不存在(01 篇的枚举里没有)——大纲常写的这个"重写"是编造的。Rewriter 替换指令字节的只有两类: lookupswitch→fast_linear/fast_binaryswitch(按 `BinarySwitchThreshold` 把线性/二分查找定死)与 ldc/ldc_w→fast_aldc/fast_aldc_w(maybe_rewrite_ldc 的 `(*bcp) = Bytecodes::_fast_aldc`,rewriter.cpp:355)——其余指令一律只换操作数。*
 
 ### invokedynamic: 为什么必须是 5 字节
 
@@ -80,7 +80,7 @@ rewrite_invokedynamic(rewriter.cpp:256-285)的处理与所有其他指令不同�
 - `maybe_rewrite_ldc`(rewriter.cpp:322-368): String/MethodHandle/MethodType/引用型 condy 的 ldc 替换成 `fast_aldc`/`fast_aldc_w`,操作数换成 resolved_references 数组的下标——模板侧直接按引用取,不再查常量池;
 - `rewrite_Object_init`(rewriter.cpp:136-164): 启用 RegisterFinalizersAtInit 时,把 `Object.<init>` 的 `return` 字节替换成 `_return_register_finalizer`——01 篇枚举里那条神秘的私有字节码在这里落地(它让构造返回前注册 finalizer)。
 
-[实证:] 08-interpreter-templates.txt 里 `fast_aldc`/`fast_linearswitch`/`fast_binaryswitch`/`return_register_finalizer` 各有独立模板(352B/192B/256B/1248B)——如果重写从未发生,这些模板永远不会被执行,但 JVM 仍然为它们生成了模板。
+[实证:] 08-interpreter-templates.txt 里 `fast_aldc`/`fast_linearswitch`/`fast_binaryswitch`/`return_register_finalizer` 各有独立模板(352B/192B/256B/1248B)。注意模板存在本身是"全量生成"的结果(generate_all 遍历所有已定义字节码)——真正的推论是: 这些字节码只能由 Rewriter 产生(javac 不产 fast_*),它们在运行类里出现即重写发生。
 
 ## 2. cpCache 条目: 解析结果的家
 
@@ -111,7 +111,7 @@ class ConstantPoolCacheEntry {
   volatile intx     _flags;    // flags
 ```
 
-四个字: `_indices` 高 16 位存"解析时用的字节码"(b1/b2 两个槽,允许一个条目被两个字节码共享——如 invokespecial 与 invokevirtual 共用)、低 16 位存原始 CP 索引;`_f1` 是 Method*/Klass*;`_f2` 是字段偏移/vtable 索引/最终 Method*;`_flags` 编码 TosState+参数大小+条目类型。**"已解析"的判断是 `is_resolved(code)`: 条目里记录的字节码与当前执行的字节码一致(cpCache.inline.hpp:43-49)——所以一个条目被 `invokevirtual` 解析后,`invokespecial` 再用它就得重新解析(字节码不匹配)**。
+四个字: `_indices` 高 16 位存"解析时用的字节码"(b1/b2 两个槽,允许一个条目被两个字节码共享——如 invokespecial 与 invokevirtual 共用)、低 16 位存原始 CP 索引;`_f1` 是 Method*/Klass*;`_f2` 是字段偏移/vtable 索引/最终 Method*;`_flags` 编码 TosState+参数大小+条目类型。**"已解析"的判断是 `is_resolved(code)`: 条目里记录的字节码与当前执行的字节码一致(cpCache.inline.hpp:43-49)——条目的两半(b1/b2)可被两个字节码分别标记,`is_resolved` 只查自己那半,所以 invokespecial 与 invokevirtual 可以共享一个条目而互不干扰**。
 
 ### 并发写入协议: 先 flags,后 f1
 
@@ -242,7 +242,7 @@ resolve_virtual_call 分两半(linkResolver.cpp:1291-1405): linktime 半(linktim
   }
 ```
 
-**关键设计 (斜体)**: *解析时"符号 → 解析方法"是 linktime(只依赖声明类);"解析方法 → 实际方法"是 runtime(依赖 receiver 的实际类,每次执行不同)。解析结果落在类的 cpCache 里,同类内一次解析、全部调用点共享。vtable 索引本身在方法解析时就能定(虚方法在 vtable 里的槽位是类布局时确定的),执行时只需要 `recv_klass->method_at_vtable(index)` 一次访存——**这就是解释器/编译器分派的最快路径**。private/final 方法不进 vtable,标记 `nonvirtual_vtable_index` 后 selected = resolved(可静态绑定)。接口(默认/miranda)方法走 `vtable_index_of_interface_method` + receiver vtable。*
+**关键设计 (斜体)**: *解析时"符号 → 解析方法"是 linktime(只依赖声明类);"解析方法 → 实际方法"是 runtime(依赖 receiver 的实际类,每次执行不同)。解析结果落在类的 cpCache 里,同类内一次解析、全部调用点共享。vtable 索引本身在方法解析时就能定(虚方法在 vtable 里的槽位是类布局时确定的),执行时只需要 `recv_klass->method_at_vtable(index)` 一次访存——**这就是解释器/编译器分派的最快路径**。private/final 方法不进 vtable(注释: final 方法除非覆盖已有方法,注释原文 "never put in the vtable, unless they override an existing method"),标记 `nonvirtual_vtable_index` 后 selected = resolved(可静态绑定)。接口(默认/miranda)方法走 `vtable_index_of_interface_method` + receiver vtable。*
 
 resolve_interface_call(:1411-1651)走 itable(接口方法表,按 (接口, 方法名) 双键查找,06 域的 klassVtable 铺垫过),解析结果同样进 `CallInfo`。
 
