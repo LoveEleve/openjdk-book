@@ -100,7 +100,7 @@ BiasedLocking::Condition BiasedLocking::revoke_and_rebias(Handle obj, bool attem
 
 CAS 都失败才进 `update_heuristics`(:321): 撤销次数记在 **Klass 上**(`_biased_lock_revocation_count`,:353-362),两个阈值驱动批量操作——**`BiasedLockingBulkRebiasThreshold=20`**(globals.hpp:978)与 **`BiasedLockingBulkRevokeThreshold=40`**(:984): 同类的偏向锁撤销超过 20 次 → epoch+1 触发**批量重偏向**;超过 40 次 → 批量撤销(类原型清除偏向位,以后这类对象不再偏向)。HR_SINGLE_REVOKE 时若能走"偏向自己的栈"(revoke 自己的偏向)也可以无 safepoint;否则需要 **safepoint 暂停对方线程检查它的栈**——因为撤销时要确认"它是否还在临界区",非 safepoint 读别的线程的栈不安全。
 
-**关键设计 (斜体)**: *偏向锁把"常态"变成零成本: 偏向的线程再次进入不需要任何原子操作(解释器/汇编快路径直接判 thread_id)。撤销设计成"能 CAS 就 CAS,不能才进 safepoint"——匿名/过期/残留三类都可以无锁搞定,只有真有人在临界区里才需要停世界。批量阈值(20/40)把"这个类的偏向锁频繁被抢"识别出来,从逐个撤销升级为整类重偏向/撤销。*
+**关键设计 (斜体)**: *偏向锁把"常态"变成零成本: 偏向的线程再次进入不需要任何原子操作——解释器汇编的 monitorenter 快路径直接比对 thread_id(biased_locking_enter,interp_masm_x86.cpp:1179)。撤销设计成"能 CAS 就 CAS,不能才进 safepoint"——匿名/过期/残留三类都可以无锁搞定,只有真有人在临界区里才需要停世界。批量阈值(20/40)把"这个类的偏向锁频繁被抢"识别出来,从逐个撤销升级为整类重偏向/撤销(epoch 递增,biasedLocking.cpp:409-411)。*
 
 ## 3. BasicLock: 栈上的轻量锁
 
