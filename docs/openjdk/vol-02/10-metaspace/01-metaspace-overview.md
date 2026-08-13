@@ -53,7 +53,7 @@ MetaWord* Metaspace::allocate(ClassLoaderData* loader_data, size_t word_size,
 }
 ```
 
-两步: 先按类型分到 **class 空间或 non-class 空间**(`mdtype`,:1378),交给当前 ClassLoader 的 `metaspace_non_null()`(:1386);失败则 `satisfy_failed_metadata_allocation`(:1396)——**触发一次 GC 腾出可卸载的类再重试**(注释: 避免过早扩张 Metaspace);再失败才 OOM。最后 **zero 初始化**(:1413)。
+两步: 先按类型分到 **class 空间或 non-class 空间**(`mdtype`,:1378),交给当前 ClassLoader 的 `metaspace_non_null()`(:1386);失败则 `satisfy_failed_metadata_allocation`(:1396)——**发起 VM_CollectForMetadataAllocation 触发一次 GC 腾出可卸载的类再重试**(collectedHeap.cpp:257-324,`GCCause::_metadata_GC_threshold`,注释: 避免过早扩张 Metaspace);再失败才 OOM。最后 **zero 初始化**(:1413)。
 
 ### L2: ClassLoaderMetaspace —— 每个 ClassLoader 一套
 
@@ -84,7 +84,7 @@ MetaWord* Metaspace::allocate(ClassLoaderData* loader_data, size_t word_size,
 
 ## 3. 两个世界: class space 与 non-class space
 
-普通 Metaspace 与压缩类空间是**两个独立的虚拟地址范围**。class space 的建立走 `Metaspace::allocate_metaspace_compressed_klass_ptrs`(metaspace.cpp:1074+,断言 UseCompressedClassPointers 等),上限 `CompressedClassSpaceSize` 默认 **1G**(globals.hpp:1825)。分开的理由: Klass 指针要快速 decode 成 narrowKlass——**独立地址范围让 base 固定、shift=0,decode 就是一次 `add base`**;而普通元数据(Method/ConstantPool)访问模式不同,不必享受这个待遇。这与 09-02 压缩 oops 的堆保护页是同一套"压缩指针"思想的延伸——那边压 oop,这边压 Klass。
+普通 Metaspace 与压缩类空间是**两个独立的虚拟地址范围**。class space 的建立走 `Metaspace::allocate_metaspace_compressed_klass_ptrs`(metaspace.cpp:1074+,断言 UseCompressedClassPointers 等),上限 `CompressedClassSpaceSize` 默认 **1G**(globals.hpp:1825)。分开的理由: Klass 指针要快速 decode 成 narrowKlass——**独立地址范围让 base 固定,默认配置下(无 CDS、class space ≤4G)shift=0,decode 就是一次 `add base`**(shift 的选择在 metaspace.cpp:1017-1053,超出 4G 才退回 LogKlassAlignmentInBytes);而普通元数据(Method/ConstantPool)访问模式不同,不必享受这个待遇。这与 09-02 压缩 oops 的堆保护页是同一套"压缩指针"思想的延伸——那边压 oop,这边压 Klass。
 
 ## 4. 阈值与 GC: Metaspace 也会"GC"
 
