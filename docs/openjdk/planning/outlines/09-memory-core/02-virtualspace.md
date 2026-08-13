@@ -2,6 +2,20 @@
 
 > 🔴 Deep | 10 KP 中的 2 个虚拟内存机制
 > 读者处境: Metaspace 要 1GB 虚拟地址——但只用 200MB commit。VirtualSpace 管这种 reserve+commit 双级——被 CodeCache/Metaspace/GC heap 全部依赖。是 JVM 所有大面积内存区域的基础抽象。
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/09-memory-core/02 已按真实源码成文~240 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"os::reserve_memory→mmap MAP_NORESERVE" 不完整**: 真实=anon_mmap(os_linux.cpp:3838-3855)MAP_PRIVATE|MAP_NORESERVE|MAP_ANONYMOUS + **PROT_NONE 整段**(注释: 未提交页误触立刻 SIGSEGV 防隐蔽泄漏),mmap 的是整个区域非只有前缀
+> - **"vm_allocation_granularity Linux 默认 64KB" 错**: = Linux **page_size(4K)**(os_linux.cpp:3126-3129);"至少 64K"只是 virtualspace.cpp:186 注释观察
+> - **"未对齐→重试最多 10 次" 编造**: 真实=一次重试+**超额保留手动对齐**(os::reserve_memory_aligned os_posix.cpp:287-340: reserve size+alignment→align_up→释放 begin/end 两侧 :324-334);ReservedSpace::initialize(virtualspace.cpp:120-232): alignment=MAX2(alignment,page_size) :131、requested_address→attempt_reserve_memory_at :193、未对齐→release+reserve_memory_aligned :206-222
+> - **"align_reserved_region/_noaccess_prefix=对齐后多余空间" 错(机制编造)**: 普通 ReservedSpace._noaccess_prefix **恒 0**;只属 ReservedHeapSpace::establish_noaccess_prefix(virtualspace.cpp:301-327): 触发=base+size > OopEncodingHeapMax(:305,=2^32<<LogMinObjAlignmentInBytes 默认 8 字节对齐=32GB,arguments.cpp:1609)→堆基址下方 PROT_NONE 保护 lcm(page,alignment) 字节(noaccess_prefix_size :297)→_base+=prefix;_size-=prefix(:324-325);动机=**压缩 oops 隐式 null 检查**(null 解引用=基址下方必须 SIGSEGV);compressed_oop_base()(virtualspace.hpp:120-123)=_base-_noaccess_prefix;release 算回 real_base(:277-278)
+> - **"split_reserved_space 函数" 不存在**: first_part(virtualspace.cpp:234-243)调 **os::split_reserved_memory**(os.hpp:348,os_linux.cpp anon_mmap 对等实现);last_part(:246-250)
+> - **"_rs_allocations/_total_reserved_bytes/_total_committed_bytes" 不存在(编造)**: 追踪靠 NMT MemTracker::record_virtual_memory_reserve(如上)
+> - **"expand_by(size,is_lower) 只能向上扩展/先 try lower" 错**: 签名=**expand_by(size_t bytes, bool pre_touch)**(:844-928);三段从 high() 顺序推进 **lower→middle→upper**(:906-925);不跳段原因=中段按大页粒度(_middle_alignment=max_commit_granularity,:704-706,注释 :833-842),跳段会割裂大页物理地址;**"initialize 初始只有 lower committed" 错**: 初始 commit 直接 expand_by(committed_size)(:723-726),可能提交进 middle
+> - **"shrink_by(size,is_lower)" 错**: 签名=shrink_by(size_t size)(:935 起),从 high() 往回**先 upper 后 middle 后 lower**(:980-1000);_special 时只挪指针(:939-943)
+> - **"uncommit=madvise(MADV_DONTNEED)" 错**: =**再一次 mmap(PROT_NONE,MAP_PRIVATE|MAP_FIXED|MAP_NORESERVE|MAP_ANONYMOUS)**(os::pd_uncommit_memory os_linux.cpp:3641-3645)——与 reserve 同态;commit=mmap(MAP_FIXED|MAP_ANONYMOUS,PROT_READ|WRITE±EXEC)(commit_memory_impl :3209-3218)
+> - **"VirtualSpace 三段被 CodeCache 用(lower=non-profiled/middle=profiled/upper=non-method)" 错(张冠李戴)**: CodeCache 用**三个独立 CodeHeap**(codeCache.hpp:89-92 _heaps/_nmethod_heaps);VirtualSpace 的真正用户=**Metaspace**(VirtualSpaceList,metaspace/virtualSpaceList.hpp:39,按 mdtype 取列表 metaspace.cpp:372);GC heap=ReservedHeapSpace+自己的 region 管理
+> - **"MemRegion 16B/G1 HeapRegion 是 MemRegion 子类" 错**: HeapRegion : public **G1ContiguousSpace**(heapRegion.hpp:191)非 MemRegion 子类;MemRegion=HeapWord* _start+size_t _word_size(memRegion.hpp:48-49)按值传递纯数据(:36-40 注释),contains :81-88/intersection :64
+> - 悬念指向 03-arena-resourcearea-allocation.md(标题 "03. Arena/ResourceArea — VM 自己的内存分配器")✓
 
 ### 1. ReservedSpace — 先占坑，后付费
 
