@@ -332,6 +332,13 @@
   - **Dictionary : Hashtable<InstanceKlass*, mtClass>**(dictionary.hpp:42,非 Symbol-Klass 对);per-loader(ClassLoaderData 各一张,backpointer :50);find 带 pd 过滤(dictionary.cpp:334-345)
   - **check_constraints 两层**(:2093): ①同 loader 重复定义→"attempted duplicate class definition"→LinkageError(:2115-2127,:2153)②LoaderConstraintTable 全局约束(check_or_update loaderConstraints.cpp:286-313,"loader constraint violation");record_dependency(:821)定义 loader 存活依赖
   - 实证: materials/commands/07-classfile-dictionary-log.txt(双 URLClassLoader 同名 Shared 加载两次: class+load 两行 + la==lb false/same name true/instance== false)
+- **05 篇(ClassLoader 双亲委派,大纲漂移 9 处含 4 处机制错,重点沉淀)**:
+  - **三层在 Java 层非 C++**: ClassLoaders.java(PlatformClassLoader :126/AppClassLoader :151,继承 BuiltinClassLoader;platformClassLoader() :96/appClassLoader() :103);**bootstrap 不是 ClassLoader 实例**(getClassLoader()==null;platform.parent==null 即"父是 bootstrap"约定,BuiltinClassLoader.java:157-158)
+  - **双亲委派=Java 层 ClassLoader.loadClass**(ClassLoader.java:571-607): getClassLoadingLock 同步→findLoadedClass→parent.loadClass/findBootstrapClassOrNull→findClass→resolve;BuiltinClassLoader.loadClassOrNull(:590-634)模块化变体(模块优先→parent→classpath);**"load_class: find_loaded→parent->load_class→find_class" 是 JDK 8 C++ 旧流程**
+  - **C++ 侧 ClassLoader::load_class(classLoader.cpp:1406)=bootstrap 实现**: patch-module→jimage→bootclasspath/a+classpath;**无 rt.jar/loadZipJar**(模块化);CDS load_shared_class 在 SystemDictionary::load_instance_class(:1472)先拦
+  - **安全模型**: preDefineClass(ClassLoader.java:891-899): java. 前缀+**非 Platform**→SecurityException "Prohibited package name"(注释: MemberName.checkForTypeAlias 依赖);防护权在 Platform 非 bootstrap
+  - **CLD 生命周期**: _klasses 链表(add_class,06-03/07-01 讲过);do_unloading(classLoaderData.cpp:1373): is_alive(:696)→free_deallocate_list/死→unload()+链表移除(:1394-1412);**_keep_alive 专属于匿名类**(classLoaderData.cpp:149,:285-300,inc/dec 只对 is_anonymous :295/:302)非"JNI 引用"
+  - 实证: materials/commands/07-classfile-loader-hierarchy.txt(app=AppClassLoader/platform=PlatformClassLoader/app.parent=platform/platform.parent=null/String.loader=null/java.sql.Driver=Platform/custom.loadClass(String)==String.class true)
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
