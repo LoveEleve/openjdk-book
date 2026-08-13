@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **74/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 1) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 1/13 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **75/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 2) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 2/13,**11-cds 域完结** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 11-cds/02(Load 端,大纲 `planning/outlines/11-cds/02-cds-load-shared.md`,标题 "02. Load — mmap archive → shared spaces → 类就绪";11 域共 2 篇: 01 ✅/02-cds-load-shared;01 篇悬念指向它: mmap 之后怎么进 SystemDictionary)。
+**下一步(唯一,无选择)**: 12-ci/01(ciObject 镜像体系,大纲 `planning/outlines/12-ci/01-ci-overview-mirror.md`;"JIT 怎么看到 Java 类?";11-cds/02 悬念指向它)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,74 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -75,7 +75,7 @@
 | **08-interpreter** | 1-4 | `08-interpreter/01-bytecodes-definition.md`(308)/02-template-interpreter.md(330)/03-interpreter-runtime.md(244)/04-linkresolver-rewriter.md(269) | ✅ **08 域完结(本会话)** |
 | **31-unsafe** | 1-2 | `31-unsafe-whitebox/01-unsafe-api.md`(151)/02-whitebox-forte.md(132) | ✅ **31 域完结(本会话)** |
 | **44-class-verification** | 1-2 | `44-class-verification/01-verifier.md`(316)/02-verification-type.md(149) | ✅ **44 域完结,第 4 批收官(本会话)** |
-| **11-cds** | 1-2 | `11-cds/01-cds-overview-dump.md`(138) | 🚧 11 域 1/2(本会话) |
+| **11-cds** | 1-2 | `11-cds/01-cds-overview-dump.md`(138)+`02-cds-load-shared.md`(322) | ✅ **11 域完结(本会话)** |
 
 ### 本会话 9 篇的 commit 清单(按 git log 为准)
 
@@ -88,6 +88,7 @@
 **44-class-verification/01(ClassVerifier)**: 正文 f510ced → 回填 8c22eb0(⚠️ 7 条,大纲行号全对,补充机制为主)→ README 471a9da(72/152)→ HANDOFF ac47702 → **第 3 轮** 943f66b(接口可赋值特例 数组只可赋 Cloneable/Serializable verificationType.cpp:47-77/<init> 必须 void :2725-2742)
 **44-class-verification/02(VerificationType)**: 正文 97cceb3 → 回填 9ec3c4b(⚠️ 7 条)→ README 838b56d(73/152,**第 4 批收官**)→ HANDOFF bb16581 → **第 3 轮** 0bd8215(实证解读修正: [ long, long ] 是 2 个 long 变量,双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 fd 00 05 04 04 04)
 **11-cds/01(CDS 全景与 Dump)**: 正文 171bf24 → 回填 a9dafe0(⚠️ 8 条)→ README a35de82(74/152,第 5 批开篇)→ HANDOFF ca5ccc8 → **第 3 轮** 5375e05(java_mirror 移除与 remove_unshareable 分列两函数 :501/:489/narrow_klass_base 重合=主动设计 set_narrow_klass_base(_shared_rs.base()) :305/classlist 行数断言删除)
+**11-cds/02(CDS Load 端,11 域收官)**: 正文 e8f9905 → 回填 2e9bc6c(⚠️ 13 条)→ README 529c91d(75/152,11 域完结,第 5 批 2/13)→ 素材 11-cds-load-demo.txt(gitignore)
 
 **本会话新增素材**(全部 gitignore 不入库,在 materials/commands/):
 - `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
@@ -99,6 +100,7 @@
 - `08-verifier-demo.txt`(iload_0→aload_0 一字节修改: VerifyError 详细转储 vs -Xverify:none 照跑 result=3)
 - `08-verificationtype-javap.txt`(javap -v: loop 方法 StackMapTable locals=[ long, long ])
 - `08-cds-demo.txt` + `08-cds-dump-full.txt`(cds dump 归档 1211 类含 1151 instance/11.9MB/6 空间区 mc-rw-ro-md-st0-oa0;启动 class+load 356 个 shared objects file)
+- `11-cds-load-demo.txt`(Load 端实证: 默认归档落 lib/server/classes.jsa;加载 cds 日志(校验+relocation delta=0+Trying to map heap data region[4]/[6]);坏 magic 降级(mixed mode 无 sharing);-Xshare:on 缺归档退出(An error has occurred.../Unable to use shared archive);classpath mismatch+class+path 详情(Expecting -Djava.class.path=cpA.jar vs cpB.jar);-Xmx1g 触发 incompatible oop encoding 重定位 delta=-28991029248 照用;AppCDS 下应用类 T source: shared objects file)
 
 ---
 
@@ -179,7 +181,7 @@
 | 命令输出 | `materials/commands/` 140+ 文件 | jcmd/jstat/jmap 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材**(详见 §二 commit 清单,共 10 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt
+**本会话新增素材**(详见 §二 commit 清单,共 11 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
@@ -211,7 +213,7 @@
 ### 6.4 平台/环境事实(写作时已确认)
 - **jdk11u 源码树只含 x86 平台**(cpu/ 只有 x86,os/ 只有 linux/posix)——不要断言其他平台的实现细节
 - 常用实证: **Temurin OpenJDK 11.0.32 在 /data/tmp/opencode/jdk11**(与 jdk11u 同版本,实证首选);Temurin 17 在 /data/tmp/opencode/jdk17(含 src.zip 可查 API 变迁);TencentKona 17/21 在 /opt/codev/
-- 本会话关键源码位置: templateInterpreter.cpp/hpp、templateTable.cpp、interpreterRuntime.cpp(:148-215 ldc/resolve_ldc、:217 _new、:749 monitorenter、:1176 at_safepoint、:1008 frequency_counter_overflow)、interfaceSupport.inline.hpp(:445 IRT_ENTRY、:468 JRT_ENTRY、:111-123 ThreadStateTransition)、unsafe.cpp(1122 行)、whitebox.cpp(2360 行)、forte.cpp(668 行)、verifier.cpp(2913 行)、verificationType.hpp/cpp、metaspaceShared.cpp(2184 行)、filemap.hpp/cpp
+- 本会话关键源码位置: templateInterpreter.cpp/hpp、templateTable.cpp、interpreterRuntime.cpp(:148-215 ldc/resolve_ldc、:217 _new、:749 monitorenter、:1176 at_safepoint、:1008 frequency_counter_overflow)、interfaceSupport.inline.hpp(:445 IRT_ENTRY、:468 JRT_ENTRY、:111-123 ThreadStateTransition)、unsafe.cpp(1122 行)、whitebox.cpp(2360 行)、forte.cpp(668 行)、verifier.cpp(2913 行)、verificationType.hpp/cpp、metaspaceShared.cpp(2184 行)、filemap.hpp/cpp(1515 行)、systemDictionaryShared.cpp(1071 行)、compactHashtable.cpp(529 行)、heapShared.cpp(862 行)
 
 ### 6.5 实证方法论新增(本会话沉淀)
 - **javap 原始字节分析**: javap 显示是"解释过的",原始证据要 xxd/hexdump——44-02 的双槽证据是 `fd 00 05 04 04 04`(append 的 number_of_locals=4 vs 类型项 2 个),不是 javap 的 `[ long, long ]`
@@ -304,7 +306,21 @@
 - **第 3 轮**: 实证解读修正([ long, long ] 是 2 个 long 变量(loop 的 sum+i),双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 `fd 00 05 04 04 04`)
 - 实证: 08-verificationtype-javap.txt
 
+### 6.30 11-02(CDS Load 端,11 域收官,大纲 13 处漂移含 3 处编造 + 深审 2 轮,2026-08-13)
+- **"MAP_SHARED" 错(重要)**: Linux 实现 os::pd_map_memory(os_linux.cpp:6129)**flags=MAP_PRIVATE**(:6133),addr 非空才 |= MAP_FIXED(:6145-6146);跨进程共享页来自 file-backed 页缓存,与 MAP_SHARED 语义无关;映射调用=os::map_memory→pd_map_memory,mmap 直接调用在 :6149
+- **"map_regions()" 编造**: 不存在;真实=map_shared_spaces(metaspaceShared.cpp:2034): reserve_shared_memory(filemap.cpp:869,整块 ReservedSpace 防覆盖 code cache)→逐区 map_region(filemap.cpp:891)→validate_shared_path_table(:2058);布局断言 mc_top==rw_base==ro_base==md_top(:2069-2071)支撑 set_shared_metaspace_range 单区间判定
+- **"initialize_shared_spaces :700-1000" 错**: 装配在 **:2100**(universe.cpp:729 调用);映射在 initialize_runtime_shared_and_meta_spaces(:216,metaspace.cpp:1305);UseSharedSpaces 是参数先定(默认 true=auto 行为,globals.hpp:2484/2491),失败统一走 fail_continue(filemap.cpp:102: 日志+UseSharedSpaces=false+close :124-126,RequireSharedSpaces 则 fail 退出 :114-115)——"成功后置 true"是方向反
+- **"shared dictionary 在 CompactHashtable" 错**: 共享字典=SharedDictionary:Dictionary(systemDictionaryShared.hpp:162,链表桶,可挂验证约束/id/crc 等每类附加信息,SharedDictionaryEntry :113);CompactHashtable 只管符号/字符串(symbolTable.cpp:53/stringTable.cpp:68)
+- **"lookup(Symbol* key)" 签名错**: 真实 lookup(const N* name, unsigned int hash, int len)(compactHashtable.inline.hpp:59-91);桶项 u4 位打包(高 2 位类型/低 30 位偏移,:140-147),VALUE_ONLY 单条目 4B/REGULAR (hash,offset) 8B;decode 双保险: 符号版 base+offset+equals+断言 refcount==-1(:36-46)
+- **"mmap 后 _base_address 设实际地址" 错(把结果当原因)**: base_address=dump 时写死 shared_rs()->base()(compactHashtable.cpp:147),load serialize 原样读回;有效前提=同址映射
+- **find_or_load_shared_class 在 :480**(大纲 50-250);AppCDS 拦截点=JVM_FindLoadedClass(jvm.cpp:999,由 BuiltinClassLoader.loadClassOrNull→findLoadedClass 触发,BuiltinClassLoader.java:593);引导路=SystemDictionary::load_shared_class(systemDictionary.cpp:1165/1270)
+- **深审抓到的实质错误**: ①"init_state 直接 loaded"错——dump 时 remove_unshareable_info **重置为 allocated**(instanceKlass.cpp:2293-2297 注释),load 端 add_to_hierarchy 设回 loaded,restore 断言 !is_loaded()(:2349);②"java_mirror 是 NULL"半对——dump 剥离但镜像若可归档存 raw archived mirror(klass.cpp:545-554 恢复,否则 create_mirror :565-568);③cpCache 不空,是 resolved_references 要重建(constantPool.cpp:328,:352-359);④mc 区 trampoline 机制: unlink_method(method.cpp:977,:985-986)设 cds entry,load 时 method_entry 宏重写(templateInterpreterGenerator.cpp:186-189),link_method assert entry==_i2i_entry(:1082);adapter 走 _adapter_trampoline 运行期填(:1015-1031 注释,make_adapters :1142-1148);⑤C++ vtable 克隆: dump 清零(:751)load 现拷 libjvm.so(:667-681)
+- **验证约束兑现**: 共享类 link_class 跳过 verify/rewrite 改 check_verification_constraints(instanceKlass.cpp:805-807→systemDictionaryShared.cpp:911-941);dump 端记录触发点 verificationType.cpp:97-103
+- **实证方法论**: 默认归档路径实测=lib/server/classes.jsa(jvm_path 解析);坏 magic 用 dd 改前 4 字节(printf '\x00\x00\x00\x00'|dd of=... bs=1 seek=0 conv=notrunc);classpath mismatch 需先归档应用类(SharedClassListFile 加 T,jar 路径——非空目录 dump 直接拒绝 "Cannot have non-empty directory in paths");Xmx1g 触发 oop 编码不匹配但归档照用(delta=-28991029248)
+- 实证: 11-cds-load-demo.txt(素材清单见 §五)
+
 ### 6.29 11-01(CDS 全景与 Dump,第 5 批开篇,大纲 8 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
+
 - **"magic 0xF00BAAA2" 错**: 真实 0xF00BABA2(filemap.hpp:37);validate_header(filemap.cpp:1397)=header->validate+check_shared_paths_misc_info;validate_shared_path_table(:480)在**映射后**(注释 "this is done later")
 - **"5 个 space mc/rw/ro/md/od" 错**: od 是旧版;JDK11=**8 槽位**(metaspaceShared.hpp:66-85: mc/rw/ro/md+string×2+open archive×2),实证 dump 用 6 个(mc/rw/ro/md/st0/oa0);rw 33.4%+ro 60.3%=93.7%
 - **"link_and_serialize" 编造**: 真实=link_and_cleanup_shared_classes(:1680)+VM_PopulateDumpSharedSpace::doit(:1333-1410): Metaspace::freeze(VM 线程不能 GC 故冻结)→CollectClassesClosure→rewrite_nofast_bytecodes_and_calculate_fingerprints(:550,08-04 nofast 落地)→combine_shared_dictionaries→**remove_java_mirror_in_classes(:501,"Removing java_mirror" 打印 :1300)与 remove_unshareable_in_classes(:489)两个独立函数**→**ArchiveCompactor::initialize+copy_and_compact**(压实+重定位,非逐个对象递归写)→dump_symbols/dump_java_heap_objects→relocate_well_known_klasses
@@ -338,8 +354,9 @@
 - [x] 第 1 批 12 篇 + 第 2 批 26 篇 + 第 3 批 14 篇——✅ 完结
 - [x] 第 4 批 21 篇(10/19/23/24/08/31/44 域)——✅ **第 4 批收官**(commit 见 §二)
 - [x] **11-cds/01**(CDS 全景与 Dump)——✅ 完结(正文 171bf24/回填 a9dafe0/README a35de82,commit 见 §二)
-- [ ] **11-cds/02**(Load 端)——**下一篇**;大纲 `planning/outlines/11-cds/02-cds-load-shared.md`;01 篇悬念指向它: mmap 之后怎么进 SystemDictionary
-- [ ] 11 域完结后 → 12-ci → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批)
+- [x] **11-cds/02**(Load 端)——✅ 完结(正文 e8f9905/回填 2e9bc6c/README 529c91d,commit 见 §二);**11 域完结,第 5 批 2/13**
+- [ ] **12-ci/01**(ciObject 镜像体系)——**下一篇**;大纲 `planning/outlines/12-ci/01-ci-overview-mirror.md`(注意: 文件名是 01-ci-overview-**mirror**.md,不是 01-ci-overview.md——11-cds/02 大纲的悬念指向错文件名已被回填纠正);11-cds/02 悬念指向它: JIT 怎么消费共享元数据
+- [ ] 12-ci 完结后 → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 11 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -378,11 +395,11 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/11-cds/02-cds-load-shared.md(注意 ⚠️ 块——11-01 大纲已回填 8 条,02 大概率同样漂移;01 篇悬念指向它: mmap 之后共享类怎么进 SystemDictionary)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;重点: FileMapInfo::map_regions/map_info、SystemDictionaryShared::init_shared_dictionary 或类似入口、MetaspaceShared::initialize_shared_spaces、共享类的 InstanceKlass 恢复(offset 解码)、字符串/堆对象恢复(StringTable/HeapShared)、验证器对共享类的处理(已归档的已验类跳过验证,44 域呼应)、nofast 字节码在 load 端的处理(08-04 呼应: CDS 归档字节码不重写,is_rewritten 标记);与 01 篇的 region 布局/指针重定位呼应要在文中体现;02 大纲标题副标题 = "mmap archive → shared spaces → 类就绪")
-3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);CDS 实证: -Xshare:dump 生成 jsa(08-cds-demo.txt/full 已有)、-Xlog:cds,class+load 看 "shared objects file"、-XX:SharedArchiveFile 指定自定义归档;类加载器/字典的共享类标记可用 -Xlog:class+load 观察
+1. 读 planning/outlines/12-ci/01-ci-overview-mirror.md(注意 ⚠️ 块——11-cds/02 大纲已回填 13 条,12-ci 大纲大概率同样漂移;11-cds/02 悬念指向它: JIT 编译器怎么消费共享元数据)
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;12-ci 是 JIT 编译器入口,重点: ciEnv/ciInstanceKlass/ciMethod/ciField 镜像构造、ciSymbol/ciType 缓存与 VM 侧 oop 隔离、与 11-cds 共享类的交互——共享 InstanceKlass 的 ci 镜像;实证: 用 jdk11 跑 PrintCompilation 或 -Xlog 观察编译器)
+3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
-5. 11 域完结后 → 12-ci → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 12 域)
+5. 12-ci 完结后 → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 11 域)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
