@@ -115,7 +115,7 @@ oop StringTable::do_intern(Handle string_or_null_h, jchar* name,
   }
 ```
 
-- **没现成对象就造一个**: `java_lang_String::create_from_unicode`(javaClasses.cpp:263-285)——`CompactStrings` 开启时先检测是否纯 Latin-1,是则创建 `byte[]` value,否则 `char[]`(这就是为什么 JDK 9+ 的 "abc" 只占 4+3 字节而非 4+6);
+- **没现成对象就造一个**: `java_lang_String::create_from_unicode`(javaClasses.cpp:263-285)——`CompactStrings` 开启时先检测是否纯 Latin-1,是则创建 `byte[]` value,否则 `char[]`(这就是为什么 JDK 9+ 的 "abc" 的 value 只占 16+3 字节而非 16+6——数组头 16 字节,06-03 讲过);
 - **插入前先做字符串去重**(:365-367,`deduplicate_string`,注释: 入表后就不能再 dedup,否则会破坏对 intern 字面量的编译期优化)——这是 JDK 8u20 的 String Deduplication 特性在 intern 路径上的落点;
 - **插入走 `get_insert_lazy`**: ConcurrentHashTable 的懒插入,带 rehash 预警(桶不平衡时置 `_needs_rehashing`)。
 
@@ -159,7 +159,7 @@ void StringTable::unlink_or_oops_do(BoolObjectClosure* is_alive, OopClosure* f,
 
 ### 维护: 检查与增长的时机
 
-清理不在每次 GC 都全量做——`check_concurrent_work`(stringTable.cpp:520-536,截取核心,逐字)按负载决定:
+死项的清除(weak_oops_do)每次 GC 都做;而表的**增长与深度清理**由 `check_concurrent_work`(stringTable.cpp:520-536,截取核心,逐字)按负载决定,实际执行在 **serviceThread** 上(serviceThread.cpp:123,GC 间隙):
 
 ```cpp
 // stringTable.cpp:520-537(截取核心,逐字)
@@ -190,7 +190,7 @@ void StringTable::check_concurrent_work() {
 [0.113s][debug][stringtable] Grown to size:131072
 ```
 
-表从 65536 翻倍到 131072,而 dead factor 1.53 说明有约 10 万个 intern 字符串已失去强引用(正好对应 demo 里释放的那批)、等着被下一次清理摘掉——弱引用淘汰不是"立刻",是"随 GC 与负载检查推进"。
+表从 65536 翻倍到 131072,而 dead factor 1.53 说明有约 10 万个 intern 字符串已失去强引用(正好对应 demo 里释放的那批)、等着被下一次清理摘掉——弱引用淘汰不是"立刻",是"随 GC 与服务线程的负载检查推进"。
 
 ### 两表对比
 
@@ -207,6 +207,6 @@ void StringTable::check_concurrent_work() {
 
 ## 核心悬念
 
-两个 intern 表到此分明: SymbolTable 一把全局锁管 Metaspace 里的名字(refcount 淘汰),StringTable 用并发哈希管堆里的字符串(弱引用 + GC 淘汰),hash 同源、生命周期相反。但"java/lang/String 只有一个"是**同一名字只有一个 Symbol**——`ClassLoader` 可以从五个地方读到 "java/lang/String" 并定义出五个不同的类。下一篇: SystemDictionary——同一个全限定名在不同 ClassLoader 里是不同类,名字到类的第一道闸门。
+两个 intern 表到此分明: SymbolTable 一把全局锁管 Metaspace 里的名字(refcount 淘汰),StringTable 用并发哈希管堆里的字符串(弱引用 + GC 淘汰),hash 同源、生命周期相反。但"java/lang/String 只有一个"是**同一名字只有一个 Symbol**——不同的 `ClassLoader` 可以各自读到 "java/lang/String" 并定义出不同的类。下一篇: SystemDictionary——同一个全限定名在不同 ClassLoader 里是不同类,名字到类的第一道闸门。
 
 > → [04 — SystemDictionary](04-system-dictionary.md)
