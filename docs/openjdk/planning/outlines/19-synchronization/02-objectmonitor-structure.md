@@ -4,6 +4,7 @@
 > - **行号核对(大纲 143-155/86-121/155-170 基本对)**: 字段= _header :143/_object :144/DEFINE_PAD :148/_owner :152/_previous_owner_tid :153/_recursions :154/_EntryList :155/_cxq :159/_succ :160/_Responsible :161/_Spinner :163/_count :166(注释 :168 "approximately |_WaitSet| + |_EntryList|")/_WaitSet :170/_WaitSetLock :173;offset 0 约束注释 :76-81(不能继承/虚函数,markOop.hpp 不 include ObjectMonitor.hpp);Futures notes 伪共享 :112-122(_recursions/_EntryList/_cxq/_succ 放另一 cache line 免疫 _owner 的 CAS 失效);_recursions 建议 int :124-128
 > - **OM_OFFSET_NO_MONITOR_VALUE_TAG(f)**(objectMonitor.hpp:232-233)=偏移减去 monitor_value(2),注释 :221 "ObjectMonitor references can be ORed with markOopDesc::monitor_value"
 > - **ObjectWaiter**(:42-50): TStates=TS_UNDEF/TS_READY/TS_RUN/TS_WAIT/TS_ENTER/TS_CXQ(:44)+_next/_prev/_thread/_notifier_tid/_event
+> - **第 3 轮 REVIEW 修正**: 大纲"lock bits=11 时剩余 62 bit 存 ObjectMonitor*"错——monitor_value=2 的二进制是 **10**;11 是 **marked_value=3**(GC markSweep,markOop.hpp:95/:150-155);正文已辨析
 > - 三队列分工(cxq 新到达 LIFO/EntryList 排队/exit 转移/WaitSet wait 者);悬念指向 03-enter-exit-wait.md(标题 "03. enter/exit/wait——多线程怎么抢锁、怎么睡、怎么醒")✓
 
 > 🔴 Deep | 4 KP 中的锁内部结构
