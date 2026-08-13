@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **48/152 篇完成**(第 1 批 12 ✅ + 第 2 批 26 ✅ 收官 + 第 3 批 9: 07 域 7/7 完结 + 09 域 2/3) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **60/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 8: 10/19 域完结 + 23 域 1/3) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -72,7 +72,7 @@
 | 19-sync | 1-4 | `19-sync/01`(157 行)/02(107 行)/03(179 行)/04(113 行) | ✅ **19 域完结** |
 | 23-stub | 1 | `23-stub/01-stub-entry.md`(128 行) | 🚧 23 域进行中(1/3) |
 
-**每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07/09 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官)+a487eac(第 3 轮深度 REVIEW 跨篇联动: String.value 永远 byte[] 修正 07-03、get_injected 行号 1563-1566 修正 07-01);**09域01=fb31f7b(正文+大纲回填)+791540e(README)+4b8b16c(第 3 轮 REVIEW)+f0b7b93(大纲同步);09域02=bf19c20(正文)+9eed025(大纲 ⚠️ 块 12 条)+81f8b56(README)+1727df9(第 3 轮 REVIEW);09域03=3593c9b(正文,09 域收官)+58c5e34(大纲 ⚠️ 块 10 条)+cb0dae2(README)+4cb5120(第 3 轮 REVIEW: GuardedMemory=jniCheck 客户)+d6a3ef7(大纲同步);17域01=bec47da(正文,191 行,第 3 批第三个域开篇)+dc76829(大纲 ⚠️ 块 9 条)+bb94c20(README,49/152)**。各域 README/HANDOFF commit 见 git log。
+**每篇 commit 号**(以 git log 为准;旧批次省略,列出 42/07/09 域): 42域01=d52e3a3(正文+大纲回填)+1245c25(README);42域02=476c3a9(正文+大纲回填)+ec7338f(README);42域03=c4d1b1f(正文+大纲回填,42 域完结)+e8789cc(README,第 2 批收官)+d474372(深度 REVIEW: findJniFunction builtin 限定、execstack 修复机制、VerifyFixClassname 语义、行号修正);07域01=8a24a30(正文+大纲回填)+fe93766(README)+7c199ba(深度 REVIEW: 字段排列顺序方向修正 oops 默认排最后、Module ACC_MODULE 拒绝、行号 8 处);07域02=f1684a0(正文+大纲回填)+5d486bd(README)+4a7bb70(深度 REVIEW: chop 数解读修正/block 范围/链接文本对齐);07域03=c65d49c(正文+大纲回填)+93e11a6(README)+eccd834(深度 REVIEW: 数组头 16+3/并发清理归属 serviceThread/'五个 ClassLoader' 删)+3d246fe(rehash 种子表述补丁);07域04=1ea098c(正文+大纲回填)+a84c8e4(README)+c0deb38(深度 REVIEW: 六步行号精确化/查字典四次/SystemDictionary 定位);07域05=3db4402(正文+大纲回填)+9d3502a(README)+d8a145e(深度 REVIEW: is_alive 判定/unload 动作/load_shared_class 行号);07域06=4a23fde(正文+大纲回填)+94a9f44(README)+2a185ec(深度 REVIEW: 模块表归属修正 per-loader ClassLoaderData._modules);07域07=4965aa8(正文+大纲回填,07 域完结,405 行)+fe78586(README,第 3 批第 1 个域收官)+a487eac(第 3 轮深度 REVIEW 跨篇联动: String.value 永远 byte[] 修正 07-03、get_injected 行号 1563-1566 修正 07-01);**09域01=fb31f7b(正文+大纲回填)+791540e(README)+4b8b16c(第 3 轮 REVIEW)+f0b7b93(大纲同步);09域02=bf19c20(正文)+9eed025(大纲 ⚠️ 块 12 条)+81f8b56(README)+1727df9(第 3 轮 REVIEW);09域03=3593c9b(正文,09 域收官)+58c5e34(大纲 ⚠️ 块 10 条)+cb0dae2(README)+4cb5120(第 3 轮 REVIEW: GuardedMemory=jniCheck 客户)+d6a3ef7(大纲同步);17域01=bec47da(正文)+dc76829(大纲 ⚠️ 块 9 条)+bb94c20(README)+95b35a6(第 3 轮 REVIEW: ThreadShadow 定位/run 行号/PeriodicTask 断言);17域02=acb2a56(正文)+eee99a9(大纲 ⚠️ 块 7 条)+6f44acd(README)+28d805a(第 3 轮 REVIEW: native 安全条件/trans 死锁检测)+1497e84(大纲同步);17域03=5cf8686(正文)+ea83da0(大纲 ⚠️ 块 8 条)+ecc4ea2(README)+8973d1e(第 3 轮 REVIEW: xchg/is_a_protected/wake_up 实证);17域04=ede39e3(正文,17 域收官)+f552c23(大纲 ⚠️ 块 7 条)+a0c1128(README)+2c2836e(第 3 轮 REVIEW: 悬念批次标注/guard page 实证);10域01=2e39136(正文)+3085390(大纲 ⚠️ 块 8 条)+61e1635(README)+1d9a6e1(第 3 轮 REVIEW: satisfy_failed=VM_CollectForMetadataAllocation/narrow klass shift);10域02=86e977d(正文)+a0f87aa(大纲 ⚠️ 块 7 条)+7833fb7(README)+b821792(第 3 轮 REVIEW: ChunkOrigin 落点实证);10域03=fbf939c(正文,10 域收官)+32091d6(大纲 ⚠️ 块 7 条)+d291111(README)+141bfaf(第 3 轮 REVIEW: CDS 只读映射)+a025f46(大纲同步);19域01=7867d04(正文)+78c1b7a(大纲 ⚠️ 块 8 条)+c6fafae(README)+1529a52(第 3 轮 REVIEW: 汇编 biased 快路径/deflate safepoint 断言/epoch++ 实证);19域02=e009327(正文)+792e9c7(大纲 ⚠️ 块 7 条)+ebca669(README)+d7dd512(第 3 轮 REVIEW: lock bits=10 非 11)+c2048e6(大纲同步);19域03=84345bf(正文)+feb3803(大纲 ⚠️ 块 7 条)+60d5212(README)+3cbb278(第 3 轮 REVIEW: TATAS 实证/默认 QMode/ReenterI);19域04=ced36a2(正文,19 域收官)+fdcb458(大纲 ⚠️ 块 6 条)+316e712(README)+b234a82(第 3 轮 REVIEW: wait 行号/断言依据);23域01=88481ba(正文,128 行)+df084df(大纲 ⚠️ 块 6 条)+c7ffdd5(README)+a4b44b0(第 3 轮 REVIEW: throw 桩不返回实证/generate_all 内容修正)**。各域 README/HANDOFF commit 见 git log。
 
 **已回填的大纲**(写作中发现漂移即回填,防下次抄错): 45/48/02/03/04/06(六篇)/16(五篇)/38(两篇)/41(两篇)/42(三篇)/07(01-07)/09(01)各域 outlines 均已按真实源码重写并标 ⚠️ 写作期修正;KP(45/48/04)同步修正。**写作 09-memory-core/02 前先读 09-01 大纲 ⚠️ 块(15 条,重点是时序/空数组语义/分配链)与 09-02 大纲;09-01 悬念承诺: G1CollectedHeap::initialize(:1533+)里 Reserve the maximum 的虚拟内存机制(ReservedSpace reserve + commit)是 09-02 的主角。**
 
@@ -398,6 +398,7 @@
   - **atomic 桩**: generate_atomic_xchg(:560-577,自动 LOCK);参数注释 :569-572;解释器/VM 用 C++ 内联 Atomic::cmpxchg 不需要桩
   - StubCodeGenerator(stubCodeGenerator.hpp:97-110)+StubCodeMark(:113-126);"stubCodeGenerator.hpp:35-80" 漂移
   - 悬念→02-arraycopy(SSE/AVX 向量化)
+  - **第 3 轮 REVIEW 补充**: throw 桩尾部 `__ should_not_reach_here()`(:5830)——"从不返回"坐实;generate_all 也含 throw 桩(AbstractMethodError/ICCE/NPE :5977-5984)+f2i/f2l fixup+arraycopy(:6017)+safefetch(:6095)——两阶段内容描述修正;initialize1 注释 "must happen before universe::genesis"(stubRoutines.hpp:234)确认时序依据
 
 ---
 
@@ -425,8 +426,8 @@
 - [x] **10-metaspace/01-03**——✅ 10 域完结,commit 见 §二
 - [x] **19-sync/01-04**——✅ 19 域完结,commit 见 §二
 - [x] **23-stub/01**(stub-entry)——✅ 完成,commit 见 §二
-- [ ] **23-stub/02**(arraycopy,SSE/AVX 向量化)——大纲在 `planning/outlines/23-stub-routines/02-arraycopy.md`;01 篇悬念指向它
-- [ ] 09 域 3 篇完结后 → 17-threads
+- [ ] **23-stub/02**(arraycopy,SSE/AVX 向量化)——**下一篇**;大纲在 `planning/outlines/23-stub-routines/02-arraycopy.md`;01 篇悬念指向它
+- [ ] 23 域 3 篇完结后 → 24-frame-stack
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -462,7 +463,7 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/23-stub-routines/02-arraycopy.md(大纲,注意 ⚠️ 块——23-01 已回填 6 条,02 大概率同样漂移;01 篇的悬念指向它: SSE/AVX 向量化)
+1. 读 planning/outlines/23-stub-routines/02-arraycopy.md(大纲,注意 ⚠️ 块——23-01 已回填 6 条+第 3 轮 REVIEW 修正(generate_all 也含 throw 桩/arraycopy :6017/safefetch :6095),02 大概率同样漂移;01 篇的悬念指向它: SSE/AVX 向量化)
 2. 验证大纲所有 file:line 与专有名词(按 §6.5-1 的规律;重点: stubGenerator_x86_64.cpp 的 generate_disjoint_copy/generate_conjoint_copy 与数组类型变体(boolean/byte/char/short/int/long/float/double/oop)、向量化 SSE/AVX 指令、checkcast 与 oop 变体的 GC 处理;23-01 已确认 generate_all(:5971)含 arraycopy)
 3. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 MAPPINGS/HS_MAP;注意 ART 变量改回当前文件;星号检查已修复,正文裸转义星号须加反引号)→ 深审 2 轮 → 回填大纲 → 提交 → 更新 README
 4. 23 域 3 篇完结后 → 24-frame-stack
