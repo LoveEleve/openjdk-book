@@ -12,7 +12,7 @@
 
 ### 类的位置与核心职责
 
-所有 JVM 线程的共同基类是 `Thread`(thread.hpp:115,继承 ThreadShadow 的异常字段)。它不跑任何业务,而是给每个线程配齐"行李"——每线程独立的东西(thread.hpp:315-373,截取核心,逐字):
+所有 JVM 线程的共同基类是 `Thread`(thread.hpp:115,继承 ThreadShadow 的异常字段——ThreadShadow 定义在 exceptions.hpp:60,挂起异常/异常文件行号都在它身上)。它不跑任何业务,而是给每个线程配齐"行李"——每线程独立的东西(thread.hpp:315-373,截取核心,逐字):
 
 ```cpp
 // thread.hpp:315-373(截取核心,逐字)
@@ -101,7 +101,7 @@ void Thread::start(Thread* thread) {
 - **OS 入口**: pthread 的入口是 `thread_native_entry`(os_linux.cpp:770 起): 记录栈边界(:772)、`initialize_thread_current()` 设置 TLS(:789)、`osthread->set_thread_id(os::current_thread_id())`(:794——**07-07 jstack 的 nid 在这里落库**),然后是一段父子握手(:810-819): 把自己置成 INITIALIZED 并 notify 父线程,随后在 `startThread_lock` 上 wait;`os::start_thread`(os.cpp:884-890)在 SR_lock 下把状态置成 **RUNNABLE**(pd_start_thread),唤醒它,这才进入 `Thread::call_run()`;
 - **call_run → run()**: `call_run`(thread.cpp:370-401)调虚函数 `run()`(:386)——多态分发到 JavaThread::run 或 WatcherThread::run 等。注释点破一个细节: run() 返回后线程对象**可能已经自删**(:389-390,"the thread object may already have deleted itself"),所以之后的清理只能碰 TLS 不能碰 this。
 
-`JavaThread::run`(thread.cpp:1818 起)是 Java 线程的入口: 初始化 TLAB、建栈保护页、**状态转换 `_thread_new → _thread_in_vm`**(transition_and_fence,:1832)——这是 02 篇状态机的第一次亮相,然后 `thread_main_inner`(:1860 起)调 `entry_point()`——普通线程的 entry 是 `thread_entry`(jvm.cpp:2844,JavaCalls 虚调用 `Thread.run()`),于是 Java 层的 run() 终于被调用。
+`JavaThread::run`(thread.cpp:1818 起)是 Java 线程的入口: 初始化 TLAB、建栈保护页、**状态转换 `_thread_new → _thread_in_vm`**(transition_and_fence,:1831)——这是 02 篇状态机的第一次亮相,然后 `thread_main_inner`(:1855 起)调 `entry_point()`——普通线程的 entry 是 `thread_entry`(jvm.cpp:2844,JavaCalls 虚调用 `Thread.run()`),于是 Java 层的 run() 终于被调用。
 
 ## 3. JavaThread: 一个 Java 线程的 C++ 身份
 
@@ -153,7 +153,7 @@ void Thread::start(Thread* thread) {
   - `VMThread`(vmThread.hpp:114)——执行 VM_Operation 的唯一线程(20 域);
   - `ConcurrentGCThread`(concurrentGCThread.hpp:31)——后台 GC 线程的根(25-26 域);
   - `WorkerThread`(thread.hpp:885)——并行 GC 的干活线程(带 `_id`);
-- **`WatcherThread : NonJavaThread`**(thread.hpp:902)——**不挂 NamedThread 名下**,名字硬编码 "VM Periodic Task Thread"(:923),跑周期任务(如 09-03 的 ChunkPoolCleaner 就是 PeriodicTask,由它调度)。
+- **`WatcherThread : NonJavaThread`**(thread.hpp:902)——**不挂 NamedThread 名下**,名字硬编码 "VM Periodic Task Thread"(:923),跑周期任务(PeriodicTask 的 `real_time_tick` 断言必须是 WatcherThread 来调,task.cpp:49-50——09-03 的 ChunkPoolCleaner 就是这样的 PeriodicTask)。
 
 ### 为什么 GC 不怎么管它们的栈
 
