@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **66/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 14: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **67/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 15: 12/19 域完结,**23/24 域完结**) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2(按 48 域规划写源码文章),每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加要求再 REVIEW)** → 回填大纲 → 提交。
 
-**下一步(唯一,无选择)**: 08-interpreter/02(TemplateInterpreter——每条字节码生成 x86 模板,大纲 `planning/outlines/08-interpreter/02-template-interpreter.md`,08 域共 4 篇: 01-bytecodes-definition ✅/02-template-interpreter/03-interpreter-runtime/04-linkresolver-rewriter)。
+**下一步(唯一,无选择)**: 08-interpreter/03(InterpreterRuntime——解释器调 C++ 的入口,大纲 `planning/outlines/08-interpreter/03-interpreter-runtime.md`,08 域共 4 篇: 01 ✅/02 ✅/03-interpreter-runtime/04-linkresolver-rewriter)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,65 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错;④ 每篇写完整理后做深审,**必须 2 轮**(第 1 轮自查+通读,第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ **REVIEW 时正文与大纲的行号要一起过**(07-04 REVIEW 时发现大纲 ⚠️ 块行号也带着同样的偏差);⑦ 脚本语法错误要立即发现——一次 commit 曾因 `;` 链把未应用的修改提交了(07-03 REVIEW 教训);⑧ **用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)**
 
@@ -43,13 +43,13 @@
 第 1 批(地基): 01(4 篇) → 05(2 篇) → 45(2 篇) → 48(4 篇)         ✅ 全部完成(12/12)
 第 2 批(原语): 02(4 篇) → 03(2 篇) → 04(2 篇) → 06(6 篇) → 16(5 篇) → 38(2 篇) → 41(2 篇) → 42(3 篇)   ✅ 全部完成(26/26)
 第 3 批(对象/类): 07(7/7) → 09(3/3) → 17(4/4)   ✅ 第 3 批完结(14 篇)
-第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(1/4)** → 31 → 44   🚧 进行中
+第 4 批(执行/帧): 10(3/3) → 19(4/4) → **23(3/3)** → **24(3/3)** → **08(2/4)** → 31 → 44   🚧 进行中
 第 5 批(VM 核心): 11 → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 66 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 14):
+**已完成 67 篇**(全部在 `docs/openjdk/vol-02/`,第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 15):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -72,7 +72,7 @@
 | 19-sync | 1-4 | `19-sync/01`(157)/02(107)/03(179)/04(113) | ✅ 19 域完结 |
 | **23-stub** | 1-3 | `23-stub/01-stub-entry.md`(128)/02-arraycopy.md(313)/03-crypto-math.md(306) | ✅ **23 域完结(本会话)** |
 | **24-frame** | 1-3 | `24-frame/01-physical-frame.md`(238)/02-virtual-frame.md(151)/03-deopt-gc-scan.md(268) | ✅ **24 域完结(本会话)** |
-| **08-interpreter** | 1-4 | `08-interpreter/01-bytecodes-definition.md`(308) | 🚧 08 域 1/4(本会话) |
+| **08-interpreter** | 1-4 | `08-interpreter/01-bytecodes-definition.md`(308)/02-template-interpreter.md(330) | 🚧 08 域 2/4(本会话) |
 
 ### 本会话 6 篇的 commit 清单(23-stub/02 起,按 git log 为准)
 
@@ -82,6 +82,7 @@
 **24-frame/02(Virtual Frame)**: 正文 1632ba5 → 大纲回填 ba87c0e(⚠️ 6 条)→ README+HANDOFF a5eb4dd(64/152)→ §6.19 4e6296c → **第 3 轮 REVIEW** 2fb8f8e(实证 v2 升级 Temurin 11 三路径,消费者双路径修正)+大纲回填 79f5df2+HANDOFF 33031a2 → **第 4 轮 REVIEW** 1aed4ab(锚点 pc=轮询点机制闭环)+大纲回填 f1ce672
 **24-frame/03(Deopt+GC)**: 正文 8850989 → 大纲回填 6ae67c0(⚠️ 9 条)→ README+HANDOFF 6faefe1(65/152,24 域完结)→ §6.20 32bebc8 → **第 3 轮 REVIEW** cb8dd16(帧失效=deopt_dependents safepoint 全量拆,非"走到栈顶")+大纲回填 52a1e4c+HANDOFF 32e9a39
 **08-interpreter/01(Bytecodes 定义表)**: 正文 b34880a → 大纲回填 05d5c11(⚠️ 11 条)→ README 4ee15e1(66/152,08 域 1/4)→ 下一步 08-interpreter/02
+**08-interpreter/02(Template Interpreter)**: 正文 9c80ab1(含 01 篇 0xCB-0xFF 修正)→ 大纲回填 e6c2f3e(⚠️ 11 条)→ README b6e7dbf(67/152,08 域 2/4)→ 下一步 08-interpreter/03
 
 **本会话新增素材(全部 gitignore 不入库,在 materials/commands/)**:
 - `23-arraycopy-bench.txt`(UseAVX 0/2/3 各档 arraycopy/fill 吞吐 + PrintFlagsFinal 附注: UseFastStosb=false/UseXMMForObjInit=true)
@@ -90,6 +91,7 @@
 - `24-inline-demo.txt` **v2**(Temurin 11: 编译日志 qux inline 7 次 + SIGQUIT 转储/jcmd/JFR 三路径都只有 main + 对照 NoInlineDemo 4 层)
 - `24-deopt-demo.txt`(PrintCompilation: total C1+C2→传 Circle→made not entrant×2→OSR→重编译)
 - `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
+- `08-interpreter-templates.txt`(PrintInterpreter: 271 codelets avg 404B/iload 192 vs iload_0 96/iconst 7×96B/iadd 64B/ldc 736B/invokevirtual 1280B)
 
 **已回填的大纲 ⚠️ 块**(写作期修正,防下次抄错): 45/48/02/03/04/06/16/38/41/42/07/09/17/10/19 + 本会话 **23-01(6 条)/23-02(11 条+第 3 轮 4 条)/23-03(10 条)/24-01(10 条)/24-02(6 条+第 3 轮+第 4 轮)/24-03(9 条+第 3 轮)**。
 
@@ -173,7 +175,7 @@
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
 **本会话新增素材**(全部现场跑,部分用 Temurin 11,详见 §二 commit 清单):
-- `23-arraycopy-bench.txt` / `23-crypto-bench.txt` / `24-frame-demo.txt` / `24-inline-demo.txt`(v2,Temurin 11 三路径)/ `24-deopt-demo.txt` / `08-bytecodes-javap.txt`
+- `23-arraycopy-bench.txt` / `23-crypto-bench.txt` / `24-frame-demo.txt` / `24-inline-demo.txt`(v2,Temurin 11 三路径)/ `24-deopt-demo.txt` / `08-bytecodes-javap.txt` / `08-interpreter-templates.txt`
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
@@ -181,7 +183,7 @@
 
 ## 六、本会话实战经验(最重要,新 AI 必读)
 
-### 6.1 大纲漂移的规律(66 篇全部出现,2-15 处/篇;02/03/04/45/48 域案例为更早会话沉淀,06/16/38/41/42/07/09/17/10/19/23/24/08 域为本会话沉淀)
+### 6.1 大纲漂移的规律(67 篇全部出现,2-15 处/篇;02/03/04/45/48 域案例为更早会话沉淀,06/16/38/41/42/07/09/17/10/19/23/24/08 域为本会话沉淀)
 **任何机制描述/行号/值/专有名词,一律当"线索"而非"事实"**。高频漂移类型:
 1. **机制编造**(最严重): 大纲把"想当然的实现"写成机制——实证全部是编造(案例见各域经验)
 2. **版本漂移**: 大纲写的是 JDK 8/其他版本的机制
@@ -272,6 +274,17 @@
 - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件;deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B);代码块范围用自动对齐脚本核对(凭 sed 目测必错)
 - 实证: 24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
 
+### 6.22 08-02(Template Interpreter,大纲 11 处漂移含 3 处机制编造,2026-08-13)
+- **"generate_all 三步" 错**: 真实十一段(templateInterpreterGenerator.cpp:57-263): 签名+错误出口→return 按长度 5 档(_return_entry[6] 0 空)→invoke return 按 TosState 10 档→earlyret→native 结果→safepoint 入口(InterpreterRuntime::at_safepoint)→异常 6 入口→方法入口 28 种(method_entry 宏,MethodKind 在 abstractInterpreter.hpp:59-61,zerolocals..abstract 7+math 11+refget 1+CRC 5+FD 4;MH 系列由 initialize_method_handle_entries 单独处理)→set_entry_points_for_all_bytes(遍历 256,is_defined→模板/否则 _unimplemented_bytecode stop)→safepoints_for_all_bytes→deopt 入口(_deopt_entry[7] 按长度)
+- **寄存器错**: x86_64 下 rlocals=r14、rbcp=r13(templateTable_x86.cpp:46-47),r13 是 bcp 不是 dispatch 表;locals_index 取负 index(negptr);dispatch=lea rscratch1, ExternalAddress(table)+jmp [rscratch1+rbx*8](interp_masm_x86.cpp:826-846),表地址每次 lea 不在寄存器
+- **"iload_0 模板 push(rax)+advance+dispatch_next" 错**: iload_0..3 生成器=**iload(int n)**(templateTable_x86.cpp:878-881)仅 3 行(transition+movl(rax,iaddress(n))),无 push 无 bcp 访问;**transition 只是断言**(templateTable.cpp:162-165);advance/dispatch 由 generate_and_dispatch 统一生成(:377-401,does_dispatch 模板自己跳走+should_not_reach_here)
+- **实证尺寸**: iload_0=96B vs iload=192B(iload() 含 RewriteFrequentPairs 检查读 bcp[1],:621-637);iconst 7 个全 96B;iadd 64B;ldc 736B;invokevirtual 1280B;271 codelets avg 404B(08-interpreter-templates.txt,Temurin 11;24-01 素材的 358B 是 Kona 17,引用时注明版本)
+- **"tosState 共享模板(iload/fload 同)" 错**: 共享按**生成函数+arg 参数化**(iconst(arg)/iop2(Operation)/if_0cmp(Condition)/float_cmp(±1)/fast_accessfield(tos),templateTable.cpp:357,410-419,480-487),非按 tosState
+- **"TemplateTable::_itable[256]" 错**: 真实=_template_table/_template_table_wide 双表 239 槽(templateTable.cpp:172-173);def 用 iswd 选表,断言 "wide instructions have vtos entry point only";wide 入口单列 _wentry_point[256](templateInterpreter.hpp:134)
+- **入口点家族(核心,大纲未提)**: DispatchTable::_table[10][256](templateInterpreter.hpp:65-83);set_short_entry_points(:345-362) tos_in!=vtos 时 vep=pop(state)(**pop=从栈装载到寄存器**,interp_masm_x86.cpp:678-704)+状态入口=本体;tos_in==vtos 走 set_vtos_entry_points(x86:1765-1794)=aep/fep/lep/iep 压栈序言+vep 共享本体;**tosca=栈顶值留寄存器不压栈**(templateInterpreter.hpp:40 注释);TosState 10 态 globalDefinitions.hpp:819-832
+- **safepoint 轮询内联(大纲未提)**: dispatch_base 每字节码 testb [r15_thread+polling_page_offset],置位跳 safept_table(:826-834);notice_safepoints **整表拷贝**(copy_table safept→active,templateInterpreter.cpp:293-325,非指针换向;safepoint 内 disjoint_words/外 atomic :282-291)——17-02/24-02 轮询点呼应
+- **0xCB-0xFF 修正(01 篇遗留)**: 未定义区是 **0xEF-0xFF 共 17 个**(239-255),0xCB-0xEE(203-238)是 36 条 fast 系列!01 篇第 3 轮 REVIEW 没抓到,本篇深审抓出,两篇正文+大纲已同步修正
+
 ### 6.21 08-01(Bytecode 定义表,08 域开篇,大纲 11 处漂移含 3 处机制编造,2026-08-13)
 - **"5 个静态数组 names/lengths/formats/flags/depths" 错**: 6 个数组(_name/_result_type/_depth/_lengths/_java_code/_flags,bytecodes.hpp:339-346),**没有 _format 数组**——format 字符串由 compute_flags(bytecodes.cpp:206-276)预编译成 _flags 位;两条压缩技巧: _lengths 一字节两用(低 4 位短长/高 4 位 wide 长,:397-398)、_flags 512 槽双页(低 256 普通/高 256 wide,:345,432-435)
 - **"def(...) 宏展开" 错**: 是 C++ 静态函数非宏;7/8 参数 (code,name,format,wide_format,result_type,depth,can_trap[,java_code]);239 条 def 调用启动一次填充(数组在 .bss 非 .data,"编译时预计算"应说"启动时预填充")
@@ -348,8 +361,8 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/08-interpreter/02-template-interpreter.md(注意 ⚠️ 块——01 篇大纲已回填 11 条,02 大概率同样漂移;01 篇悬念指向它: 定义表怎么变成机器码)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;重点: templateInterpreterGenerator.cpp 的 generate_all 三段流程、DispatchTable(_table[opcode]=codelet->entry_point)、tosState 七态与模板共享、Template::_flags 四属性(uses_bcp/does_dispatch/calls_vm/wide)、templateTable.hpp 的 _template_table/_template_table_wide 双表、InterpreterCodelet/StubQueue 结构(24-01 实证 271 个 codelet)、interpreter.hpp 的 MethodKind 入口/return 入口/deopt 入口(24-03 铺垫 deopt_reexecute_entry/continue_after_entry);与 01 篇的 six 数组/谓词呼应要在文中体现;templateTable.hpp:141 附近是函数声明不是 contains 表的误导点)
+1. 读 planning/outlines/08-interpreter/03-interpreter-runtime.md(注意 ⚠️ 块——01/02 大纲均已回填,03 大概率同样漂移;02 篇悬念指向它: calls_vm 指令怎么调 C++)
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;重点: interpreterRuntime.cpp 的各类入口(resolve_ldc/resolve_invoke/new/throw...)、模板侧 call_VM 的调用点(templateTable.cpp:71-116 断言 calls_vm)、interp_masm 的 call_VM 封装(macroAssembler 层 JavaFrameAnchor/safepoint 处理)、JavaCalls/SharedRuntime 桥、safepoint 入口(InterpreterRuntime::at_safepoint,02 篇第 6 段生成)、invoke 的 resolve 流程;与 02 篇的 dispatch/轮询点/calls_vm 位呼应要在文中体现;03 大纲标题 = InterpreterRuntime,正文标题按 v5 格式)
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);容器后台进程用 wrapper 脚本管理;pgrep 用方括号;转储用 kill -3;jcmd attach 挂起时换 kill -3;class 版本注意 javac/java 同版本;javap -c 偏移差可与 def 表脚本核对(见 08-bytecodes-javap.txt)
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
 5. 08 域完结后 → 31-unsafe → 44-verification(第 4 批收尾)
