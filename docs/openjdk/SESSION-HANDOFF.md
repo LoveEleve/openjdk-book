@@ -454,6 +454,7 @@
   - **实证方法论**: PrintDeoptimizationDetails/TraceDeoptimization 是 develop flag(release 版没有);JDK11 JFR metadata 无 jdk.Deoptimization 事件(JDK14+ 才有);deopt 观测用 -XX:+PrintCompilation 的 made not entrant(类型漂移 demo: 接口先只传 A 后传 B)
   - 实证: materials/commands/24-deopt-demo.txt(total 268ms C1+C2→270ms Circle→made not entrant×2→OSR→重编译)
   - 悬念→08-interpreter(字节码执行)
+  - **第 3 轮 REVIEW(2026-08-13)**: ①"帧走到栈顶才 deopt"错——uncommon trap 只拆当前帧,其它帧=deopt_dependents(deoptimization.cpp:800-803)→Threads::deoptimized_wrt_marked_nmethods(thread.cpp:4625)→逐帧 should_be_deoptimized 当场拆(:2847-2858),**safepoint 全量**;②made not entrant=uncommon trap 的 action 直接标(:1794-1825),非依赖系统;③C 堆原因引源码注释(deoptimization.cpp:1209-1211)
 
 ---
 
