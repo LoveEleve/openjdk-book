@@ -2,6 +2,17 @@
 
 > 🔴 Deep | 3 KP 中的栈帧表示
 > 读者处境: GC 需要扫描所有线程的栈——每个 slot 可能是 oop。要安全地读栈，必须先知道每个帧的格式：哪些 slot 是 oop？这个帧是编译的还是解释的？caller 在哪？
+>
+> ⚠️ 写作期修正(2026-08-13, vol-02/24-frame/01 已按真实源码成文 238 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"frame 三字段" 错**: 共享 _sp/_pc/_cb+deopt 三态(frame.hpp:50-65,枚举 not_deoptimized/is_deoptimized/unknown :57-61),**x86 附加 _fp 与 _unextended_sp(frame_x86.hpp:110-120)**——注释: interpreter/adapters 扩展 caller 帧,oopMap 按扩展前 sp 记录,故需双 sp;别写"32 字节三字段"
+> - **"compiled sender = *rbp / *(rbp+8)" 错**: 真实=**sender_sp = unextended_sp + _cb->frame_size()(编译期元数据,一跳到位)**,sender_pc = *(sender_sp-1),saved_fp = *(sender_sp-2)(frame_x86.cpp:451-483);不是 rbp 链现场走
+> - **"interpreter sender = *[method_locals-2]" 半对**: sender_sp = this->sender_sp()(raw sp),unextended_sp = interpreter_frame_sender_sp()(**fp[-1],帧内保存的 caller sp**,frame_x86.cpp:431-446);偏移表 frame_x86.hpp:60-73(link=0/return=1/sender_sp=2;解释器侧 sender_sp=-1/method=-2/mdp=-3/cache=-4/locals=-5/bcp=-6/initial_sp=-7)
+> - **"四种帧" 简化错**: sender 分派**只有三路**(entry/interpreter/compiled,frame_x86.cpp:488-503),JNI native 帧也是 nmethod 走 compiled;兜底是纯 C 帧(注释 "the marshaling code for native methods")
+> - **"find_blob 二分搜索" 错**: CodeHeap 段映射(segmap)链式回跳一次到位(heap.cpp:456-483: 地址→段号→段标记记"距块首段数"→回跳),非 O(log N);x86 段=128B(CodeCacheSegmentSize=64 TIERED_ONLY(+64),globals_x86.hpp:40)
+> - **"Interpreter::oop_map_cache()" 不存在(编造)**: 缓存挂在 **Klass 上**(InstanceKlass::_oop_map_cache,instanceKlass.hpp:247,per-class 懒分配);mask 现场算=Method::mask_for(method.cpp:237)→OopMapCache::compute_one_oop_map(oopMapCache.cpp:597),按 (method,bci) 推导
+> - **oops_do 行号漂移**: oops_do_internal(frame.cpp:1115-1130,分派 interpreted/entry/CodeCache);oops_interpreted_do(:890-958: monitor 块→native temp oop→方法 mirror→调用点参数→mask 遍历 locals+表达式栈);oops_code_blob_do(:976-990)→**OopMapSet::oops_do(compiler/oopMap.cpp:288)**→all_do(:298+: cb->oop_map_for_return_address(pc) :302,derived 先处理 :307-340);OopMapValue 四型 oopMap.hpp:69-73(oop/narrowoop/callee_saved/derived)
+> - **栈顶入口(大纲未提)**: Thread::last_frame(thread.hpp:1879-1883)=_anchor.make_walkable+pd_last_frame(thread_linux_x86.cpp:30-34);JavaFrameAnchor(thread.hpp:984);构造时 deopt 判定=get_deopt_original_pc(frame_x86.inline.hpp:44-60,set_pc 后 _deopt_state=unknown frame.cpp:157)
+> - 实证: materials/commands/24-frame-demo.txt(jstack 两行 at=帧链+vframe 产物;Compiler.codelist hot(I)I 双版本 level4/3;三段 CodeHeap 1098 blobs/653 nmethods/359 adapters(适配器也是 BufferBlob→non-nmethods 段,codeBlob.cpp:262);PrintInterpreter 271 codelets 平均 358B)
 
 ### 1. "我是哪种帧？" — 四种帧类型
 
