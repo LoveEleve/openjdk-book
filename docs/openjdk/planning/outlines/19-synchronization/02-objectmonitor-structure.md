@@ -1,5 +1,11 @@
 # 02. 一个 Java Monitor 在 C++ 里怎么表示？— ObjectMonitor 结构
 
+> ⚠️ 写作期修正(2026-08-13, vol-02/19-sync/02 已按真实源码成文~110 行,本大纲为规划期产物,机制描述以文章为准):
+> - **行号核对(大纲 143-155/86-121/155-170 基本对)**: 字段= _header :143/_object :144/DEFINE_PAD :148/_owner :152/_previous_owner_tid :153/_recursions :154/_EntryList :155/_cxq :159/_succ :160/_Responsible :161/_Spinner :163/_count :166(注释 :168 "approximately |_WaitSet| + |_EntryList|")/_WaitSet :170/_WaitSetLock :173;offset 0 约束注释 :76-81(不能继承/虚函数,markOop.hpp 不 include ObjectMonitor.hpp);Futures notes 伪共享 :112-122(_recursions/_EntryList/_cxq/_succ 放另一 cache line 免疫 _owner 的 CAS 失效);_recursions 建议 int :124-128
+> - **OM_OFFSET_NO_MONITOR_VALUE_TAG(f)**(objectMonitor.hpp:232-233)=偏移减去 monitor_value(2),注释 :221 "ObjectMonitor references can be ORed with markOopDesc::monitor_value"
+> - **ObjectWaiter**(:42-50): TStates=TS_UNDEF/TS_READY/TS_RUN/TS_WAIT/TS_ENTER/TS_CXQ(:44)+_next/_prev/_thread/_notifier_tid/_event
+> - 三队列分工(cxq 新到达 LIFO/EntryList 排队/exit 转移/WaitSet wait 者);悬念指向 03-enter-exit-wait.md(标题 "03. enter/exit/wait——多线程怎么抢锁、怎么睡、怎么醒")✓
+
 > 🔴 Deep | 4 KP 中的锁内部结构
 > 读者处境: `synchronized(obj)` 锁升级为重量锁后——obj 的 mark word 里不再存 hash/age/biased thread，而是存一个指针指向 ObjectMonitor。这个 ObjectMonitor 里有几条队列，一个 spin counter。
 
