@@ -1,5 +1,12 @@
 # 04. JVM 自己怎么锁自己？— VM 内部锁与安全网
 
+> ⚠️ 写作期修正(2026-08-13, vol-02/19-sync/04 已按真实源码成文~115 行,本大纲为规划期产物,机制描述以文章为准):
+> - **"Mutex rank 0-25 数字层级" 编造(旧版)**: jdk11u 是**符号枚举 lock_types**(mutex.hpp:106-120: event/access/tty/special/suspend_resume/vmweak/leaf/safepoint/barrier/nonleaf/max_nonleaf/native);注释 :82-105(special 最低除 event/access,持有不阻塞;leaf 历史命名;safepoint 专属 Safepoint_lock);rank 存 debug_only _rank(:141)——只在 debug 构建
+> - **"Monitor 继承 Mutex" 反了**: 真实=**Mutex : public Monitor**(mutex.hpp:297 "degenerate Monitor")——Monitor 是完整版(锁+队列+notify),Mutex 去掉 wait 能力
+> - **"Monitor 条件变量用 pthread_cond" 部分错**: Monitor 的锁与队列**自研**——SplitWord _LockWord(锁字节+cxq colocate :125)+_owner+ParkEvent 队列 _EntryList/_OnDeck(heir-presumptive)/_WaitSet(:128-131)+ILock(:436-500 TryFast→TrySpin→AcquireOrPush→_OnDeck→ParkCommon);**pthread_cond 只在 PlatformEvent 底层**(os_posix.hpp:170-190;permit _event -1/0/1,park 原子递减 :1996-2034,unpark :2098);notify(:663 WaitSet 头→cxq CAS :679-687)/notify_all(:703)/wait(:1064 rank 断言 :1082-1088+set_owner(NULL)+ThreadBlockInVM+IWait)
+> - **"MutexLocker(mutexLocker.hpp:200-300)"**: 实际 MutexLocker :183/MutexLockerEx :224(no_safepoint_check,special 锁专用)/MonitorLockerEx :251(wait :271-275);special 锁不能用 MutexLocker(:187 断言)
+> - 悬念指向域 20 VM Operations(第 5 批)✓
+
 > 🟡 Working | 3 KP 中的内部基础设施
 > 读者处境: JVM 内部有 100+ 把锁——Mutex 保护 safepoint、CodeCache_lock 保护编译缓存、Threads_lock 保护线程列表。这些锁怎么保证不产生死锁？
 
