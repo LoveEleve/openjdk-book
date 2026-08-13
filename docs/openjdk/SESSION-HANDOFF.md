@@ -436,6 +436,13 @@
   - **实证方法论**: jcmd 输出走目标进程 stdout(重定向文件);attach 失败=进程已死/pgrep 误匹配(用 jps -l);PrintInterpreter 是 diagnostic flag 需先 UnlockDiagnosticVMOptions;适配器=AdapterBlob:BufferBlob→non-nmethods 段(codeBlob.cpp:262)
   - 实证: materials/commands/24-frame-demo.txt(jstack 两行 at/codelist hot 双版本 nmethod level4+3/三 CodeHeap 1098 blobs 653 nmethods 359 adapters/PrintInterpreter 271 codelets 358B)
   - 悬念→24-frame/02(Virtual Frame)
+- **24-02(Virtual Frame,大纲 5 处漂移含 1 处编造,2026-08-13)**:
+  - **"nativeVFrame" 不存在(编造)**: 家族=vframe(vframe.hpp:54)→javaVFrame(:107 五纯虚)→interpretedVFrame(:160)/compiledVFrame(**vframe_hpp:30**);另支 externalVFrame→entryVFrame(:204/:217);JNI 帧走 compiledVFrame scope=NULL(vframe_hp.cpp:236-245,method/bci 直接取 :267-292,"native nmethods have no scope")
+  - **vframeStream 位置错**: 类在 vframe.hpp:268-330(StackObj,_mode 三态 :274),**next() 在 vframe.inline.hpp:41-49**(非 vframe_hp.cpp)——同帧内联层 fill_in_compiled_inlined_sender(:66-72,serialized_null 判边界)不动 _frame,物理层 do-while sender;fill_from_frame :125-201(编译帧只解码 sender_decode_offset+method+bci 三字段 :75-114,locals 不碰=惰性)
+  - ScopeDesc: scope_desc_at(compiledMethod.cpp:218)=pc→PcDesc→offset;sender() 实现 scopeDesc.cpp:152/is_top :148
+  - 消费者: JFR vframeStreamSamples(jfrStackTrace.cpp:135)+Thread.print(thread.cpp:3417);jstack"每行一方法"=vframeStream 输出
+  - 实证: materials/commands/24-inline-demo.txt(-Xlog:jit+inlining=debug 内联树 vs jstack 只有外层);实证手法: 内联日志比 PrintAssembly 轻量,证明"多层内联=1 物理帧"够用
+  - 悬念→24-frame/03(Deopt 重建+GC 扫描)
 
 ---
 
