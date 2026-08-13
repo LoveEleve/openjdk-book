@@ -318,6 +318,12 @@
   - **ITEM 枚举 0-8**(verificationType.hpp:36-46): Top=0/Integer=1/Float=2/Double=3/Long=4/Null=5/UninitializedThis=6/Object=7/**Uninitialized=8(非 NewObject,带 bci=new 指令偏移)**;parse_verification_type(stackMapTable.cpp:184-218): Object 校验 cpool 索引取名字不解析/Uninitialized 校验 NEW_OFFSET 标记(generate_code_data verifier.cpp:1763-1784)
   - 操作码模拟: new→uninitialized_type(bci)(:1652-1654);invoke 五兄弟统一 verify_invoke_instructions(:2491);verify_stackmap_table :1858;STACKMAP_ATTRIBUTE_MAJOR_VERSION=50(verifier.hpp:39)
   - 实证: materials/commands/07-classfile-verification-log.txt(-Xlog:verification=info "Verifying class ... with new format" 逐方法)+07-classfile-stackmap-javap.txt(javap StackMapTable: 253 append/16 same/250 chop 三帧演示增量编码)
+- **03 篇(SymbolTable + StringTable,大纲漂移 10 处含 4 处机制错;06-06 已拆 Symbol 本体,本篇只补锁语义+StringTable 为主角)**:
+  - **SymbolTable**: RehashableHashtable+全局 SymbolTable_lock(06-06 已证);lookup(symbolTable.cpp:319-334)=先无锁查桶 miss 才 MutexLocker basic_add(:329-334 "Grab SymbolTable_lock first");hash_symbol(:286-290)=java_lang_String::hash_code 或 AltHashing::halfsiphash_32;unlink(:147-155)buckets_unlink+bulk_free_entries 批量释放;**rehash_table(:184-203)是换种子重建表非回收**
+  - **StringTable**: 表=ConcurrentHashTable<WeakHandle<vm_string_table_data>>(stringTable.hpp:42-43)+OopStorage _weak_handles(:71,06-05 呼应);intern 链=JVM_InternString(jvm.cpp:3501-3509)→StringTable::intern(stringTable.cpp:312-328,lookup_shared CDS→do_lookup→do_intern)→do_intern(:354-380:create_from_unicode(javaClasses.cpp:263-285,CompactStrings latin1→byte[]/char[])+deduplicate_string(:365-367,入表后禁 dedup)+get_insert_lazy+rehash 预警)
+  - GC: unlink_or_oops_do(:402-417)=weak_oops_do(is_alive,f)死项清除+活项修引用;oops_do(:419-422);possibly_parallel_unlink(:429)桶分块
+  - 维护: check_concurrent_work(:520-537)三条件(dead>live/load>PREF_AVG_LIST_LEN/dead>水位)→concurrent_work(:538-550,**grow 优先**顺带清死项)→grow(:455,GrowTask);**StringTableSize 默认 65536(globalDefinitions.hpp:483,非 60013)**
+  - 实证: materials/commands/07-classfile-stringtable-log.txt(Concurrent work triggered live 3.05/dead 1.53 + Grown to size:131072=65536×2 + intern 语义 new==new false/intern true/literal==intern true)
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
