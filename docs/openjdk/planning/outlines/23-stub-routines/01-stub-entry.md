@@ -1,5 +1,12 @@
 # 01. JVM 启动时预生成哪些汇编例程？— StubRoutines 全局桩
 
+> ⚠️ 写作期修正(2026-08-13, vol-02/23-stub/01 已按真实源码成文~125 行,本大纲为规划期产物,机制描述以文章为准):
+> - **两阶段**: _code1/_code2(stubRoutines.hpp:123-124);initialize1(stubRoutines.cpp:188-202)/initialize2(:275-283)=BufferBlob::create+StubGenerator_generate;时序=stubRoutines_init1(init.cpp:110)先于 universe_init(:111),init2(:144)在 universe2_init(:124)后;generate_initial(:5869 forward_exception/call_stub/catch_exception/atomic 8 个(:5889-5897)/throw 桩)/generate_all(:5971)
+> - **throw 桩**(stubRoutines.hpp:97-101 声明): generate_throw_exception(stubGenerator_x86_64.cpp:5758)先记账帧布局(:5762-5765 "Information about frame layout at time of blocking runtime call...preserve callee-saved registers");"rbp 链弄乱"为流传解释,正文收敛到源码注释
+> - **atomic 桩**: generate_atomic_xchg(:560-577)=movl+xchgl(自动 LOCK)+ret;参数注释 :569-572;"只有编译代码用桩"原因=解释器/VM 用 C++ 内联 Atomic::cmpxchg
+> - StubCodeGenerator(stubCodeGenerator.hpp:97-110 _masm)+StubCodeMark(:113-126 桩名登记 StubCodeDesc);"stubCodeGenerator.hpp:35-80" 漂移
+> - 悬念指向 02-arraycopy.md(标题 "02. Arraycopy 向量化——System.arraycopy 怎么做到 3x 加速")✓
+
 > 🔴 Deep | 2 KP 中的桩入口表
 > 读者处境: JVM 启动时不仅初始化数据结构——还生成一段手写汇编代码存进 CodeCache。异常抛出、原子CAS、call stub——这些高频操作直接从 CodeCache 跳桩而不走 C++ 函数调用。
 
