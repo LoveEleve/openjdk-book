@@ -65,7 +65,7 @@ jobject JNIHandles::make_local(oop obj) {
 
 编译代码的 native wrapper 同样处理(sharedRuntime_x86_64.cpp:2652-2656,注释 "reset handle block";critical native 例外)。效果: 一次 native 调用里的所有本地引用整体失效——块里的旧值变成垃圾,GC 的 `oops_do`(jniHandles.cpp:453-478)只遍历 `_top` 以内的槽,所以旧值也不会被当成根。**JNI 规范"本地引用在 native 返回后无效"就是这样一行 movl 实现的**——比逐个释放快一个量级。
 
-**参数也是本地引用**: 实证里 `GetObjectRefType` 对"从 Java 传进来的 jobject"返回 `JNILocalRefType`([实证:](planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt));实现上共享的 native 调用代码(编译代码的 native wrapper 与解释器的签名处理器,templateInterpreterGenerator_x86.cpp:932-947)把**参数帧里 oop 槽的地址**当作 handle 传给 native(sharedRuntime_x86_64.cpp:1157-1180,注释 "An oop arg. Must pass a handle not the oop itself"),GC 靠 oop map 更新那个槽(`is_frame_handle` 专门识别栈上的引用,jniHandles.cpp:270-278)——所以参数引用在调用结束、帧失效后自然作废,也解释了为什么不能把参数当 global handle 传回给 `DeleteGlobalRef`(那是另一套存储,会崩)。
+**参数也是本地引用**: 实证里 `GetObjectRefType` 对"从 Java 传进来的 jobject"返回 `JNILocalRefType`([实证:](planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt));实现上共享的 native 调用代码把**参数帧里 oop 槽的地址**当作 handle 传给 native——编译代码的 native wrapper 走 `object_move`(sharedRuntime_x86_64.cpp:1157-1180,注释 "An oop arg. Must pass a handle not the oop itself"),解释器经签名处理器(`pass_object` 用 `lea` 取参数槽地址,interpreterRT_x86_64.cpp:214-260,templateInterpreterGenerator_x86.cpp:932-947 调用它,参数为 null 时传 NULL 与 null 规范化呼应)——GC 靠 oop map 更新那个槽(`is_frame_handle` 专门识别栈上的引用,jniHandles.cpp:270-278)——所以参数引用在调用结束、帧失效后自然作废,也解释了为什么不能把参数当 global handle 传回给 `DeleteGlobalRef`(那是另一套存储,会崩)。
 
 ### Push/Pop: 显式的帧边界
 
