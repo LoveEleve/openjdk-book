@@ -104,9 +104,9 @@ char* os::pd_map_memory(int fd, const char* file_name, size_t file_offset,
                                      fd, file_offset);
 ```
 
-[C++:] 这里要纠正一个直觉: 用的是 **MAP_PRIVATE 不是 MAP_SHARED**。多进程共享同一份物理页,靠的是 file-backed mmap 的**页缓存**——所有进程读同一个文件页,OS 只缓存一份;MAP_SHARED 与 MAP_PRIVATE 的区别只在写传播语义(共享映射回写文件,私有映射写时复制),归档区读多写少,私有映射恰好安全。**MAP_FIXED**(addr 非空时,:6145-6146)才是"必须落在预留地址"的强制手段: 地址不对就直接失败,map_region 里 `base != requested_addr` 也兜底(filemap.cpp:908-911)。
+[C++:] 这里要纠正一个直觉: 用的是 **MAP_PRIVATE 不是 MAP_SHARED**。多进程共享同一份物理页,靠的是 file-backed mmap 的**页缓存**——所有进程读同一个文件页,OS 只缓存一份;MAP_SHARED 与 MAP_PRIVATE 的区别只在写传播语义(共享映射回写文件,私有映射**写时复制**——所以只读区(ro)才是纯共享,可写的 rw/mc 一旦被加载期 patch 写脏,该页就 COW 成进程私有)。**MAP_FIXED**(addr 非空时,:6145-6146)把文件页钉死在 requested_addr,配合先行的整块预留(见上),保证不会盖到其他预留内存——它本身不报错(目标地址被占用时是静默替换),所以 map_region 还要用 `base != requested_addr` 兜底检查(filemap.cpp:908-911)。
 
-**关键设计 (斜体)**: *为什么必须同址?01 篇的压实把所有内部指针从"绝对地址"改成了"距归档基址的偏移"——dump 时 `Universe::set_narrow_klass_base(_shared_rs.base())` 让窄指针与归档基址重合(metaspaceShared.cpp:305)。因此只要 load 端在同一地址映射,ro 区指针原样有效、零修正;代价是这段地址空间在启动时必须真空——被别的预留(堆、code cache)占了就映射失败,auto 模式回退,on 模式退出(:2088-2092)。*
+**关键设计 (斜体)**: *为什么必须同址?01 篇的压实把所有内部指针从"绝对地址"改成了"距归档基址的偏移"——dump 时 `Universe::set_narrow_klass_base(_shared_rs.base())` 让窄指针与归档基址重合(metaspaceShared.cpp:305)。因此只要 load 端在同一地址映射,ro 区指针原样有效、零修正;rw 区仍有少量**加载期 patch**——方法入口 trampoline 与适配器槽在运行期才填(第 6 节),这正是 01 篇留给 02 篇的尾巴;代价是这段地址空间在启动时必须真空——被别的预留(堆、code cache)占了就映射失败,auto 模式回退,on 模式退出(:2088-2092)。*
 
 映射成功后还有两件收尾: ① 压缩类空间紧贴 CDS 之上分配(`Metaspace::allocate_metaspace_compressed_klass_ptrs(cds_end, cds_address)`,metaspaceShared.cpp:238,布局见 10-03 域)并设 `narrow_klass_range`(:243);② `map_heap_regions`(:241 → filemap.cpp:1096)——把字符串区(st0)和 open archive 区(oa0)映射进 **G1 堆**: `map_heap_data` 在堆里 `alloc_archive_regions` 划出归档区(filemap.cpp:1140)再 mmap 数据。JDK11 的堆区允许搬家: oop 编码不一致时按 `runtime_heap_end - dumptime_heap_end` 算 relocation delta(filemap.cpp:1042-1058),由 oopmap 在加载期修补(`patch_archived_heap_embedded_pointers`,filemap.cpp:1188);[实证:](planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 同配置启动打印 `relocation delta = 0 bytes`,`-Xmx1g` 启动打印 `incompatible oop encoding mode` + `delta = -28991029248 bytes`,归档照用。**压缩类指针(narrow klass)**编码不一致则整段堆数据弃用(filemap.cpp:1021-1025)。
 
@@ -188,7 +188,7 @@ InstanceKlass* SystemDictionaryShared::find_or_load_shared_class(
 }
 ```
 
-**路 3(自定义加载器)**: `defineClass` 走 `SystemDictionary::parse_stream` 时调 `lookup_from_stream`(systemDictionary.cpp:1074 → systemDictionaryShared.cpp:585): 只处理非 builtin 加载器(:596-601);共享字典里没有名字匹配就直接放弃(:607-610);有则按 **(类名, classfile 长度, crc32)** 三元组精确匹配 UNREGISTERED 条目(:612-616)——自定义加载器无法用类名保证身份,用字节指纹;命中后 `acquire_class_for_current_thread`(:628)在 `SharedDictionary_lock` 下认领(防多线程重复加载,已认领返回 NULL,:637-646),再走 `load_shared_class`。
+**路 3(自定义加载器)**: `defineClass` 走 `SystemDictionary::parse_stream` 时调 `lookup_from_stream`(systemDictionary.cpp:1072 → systemDictionaryShared.cpp:585): 只处理非 builtin 加载器(:596-601);共享字典里没有名字匹配就直接放弃(:607-610);有则按 **(类名, classfile 长度, crc32)** 三元组精确匹配 UNREGISTERED 条目(:612-616)——自定义加载器无法用类名保证身份,用字节指纹;命中后 `acquire_class_for_current_thread`(:628)在 `SharedDictionary_lock` 下认领(防多线程重复加载,已认领返回 NULL,:637-646),再走 `load_shared_class`。
 
 **关键设计 (斜体)**: *共享字典是 `SharedDictionary : public Dictionary`(systemDictionaryShared.hpp:162)——可链式增长的 Hashtable,不是第 7 节的 CompactHashtable。原因: dump 端要往里逐类插条目并挂每类的附加信息(验证约束、id、classpath 索引、crc,`SharedDictionaryEntry`,:113 起),运行端则只读遍历。boot 类查找无锁,因为表头在归档里就是静态的——"查共享类"与"查符号/字符串"用两套表结构,正是这个原因。*
 
@@ -226,7 +226,7 @@ InstanceKlass* SystemDictionaryShared::find_or_load_shared_class(
     }
 ```
 
-`InstanceKlass::restore_unshareable_info`(instanceKlass.cpp:2345)的动作: `set_package`(:2350)→ `Klass::restore_unshareable_info`(klass.cpp:508: 恢复 class_loader_data;若 `has_raw_archived_mirror` 且开放归档区已映射,从归档恢复 java_lang.Class 对象,klass.cpp:545-554,否则新建 mirror,:565-568)→ 逐个 `Method::restore_unshareable_info`(method.cpp:1152 → `link_method` :1077)。方法恢复是理解"为什么 mc 区需要 trampoline"的关键: dump 时 `Method::unlink_method`(method.cpp:977)把 `_i2i_entry` 设成 `Interpreter::entry_for_cds_method`(:985-986)——即 mc 区里的 **jmp 桩**(`update_cds_entry_table`,abstractInterpreter.cpp:214,每个桩 `jmp _entry_table[kind]`);load 时解释器重新生成(`method_entry` 宏,templateInterpreterGenerator.cpp:186-189)把桩的目标地址刷成当前进程的 `_entry_table`,而 `link_method` 的断言 `entry == _i2i_entry`(method.cpp:1082)保证两者一致——于是共享方法的解释器入口无需在归档里存任何运行期地址。i2c/c2i 适配器同理: dump 时 `_adapter_trampoline`(RW 区,初始 NULL)顶替具体 AdapterHandlerEntry,第一个被 link 的方法在运行期生成适配器并填入(注释 method.cpp:1015-1031,`make_adapters` :1142-1148)。常量池侧: `ConstantPool::restore_unshareable_info`(constantPool.cpp:328)重建 resolved_references——归档堆可用就直接用归档的数组,否则按记录长度重建(:352-359)。
+`InstanceKlass::restore_unshareable_info`(instanceKlass.cpp:2345)的动作: `set_package`(:2350)→ `Klass::restore_unshareable_info`(klass.cpp:508: 恢复 class_loader_data;若 `has_raw_archived_mirror` 且开放归档区已映射,从归档恢复 java_lang.Class 对象,klass.cpp:545-554,否则新建 mirror,:565-568)→ 逐个 `Method::restore_unshareable_info`(method.cpp:1152 → `link_method` :1077)。方法恢复是理解"为什么 mc 区需要 trampoline"的关键: dump 时 `Method::unlink_method`(method.cpp:977)把 `_i2i_entry` 设成 `Interpreter::entry_for_cds_method`(:985-986)——即 mc 区里的 **jmp 桩**(`update_cds_entry_table`,abstractInterpreter.cpp:214,每个桩 `jmp _entry_table[kind]`);load 时解释器重新生成(`method_entry` 宏,templateInterpreterGenerator.cpp:186-189)把桩的目标地址刷成当前进程的 `_entry_table`,而 `link_method` 的断言 `entry == _i2i_entry`(method.cpp:1082)保证两者一致——于是共享方法的解释器入口无需在归档里存任何运行期地址。i2c/c2i 适配器同理: dump 时 `ConstMethod` 的 `_adapter_trampoline` 指向 RW 区一个槽(初始 NULL,constMethod.hpp:212/301-308),第一个被 link 的方法在运行期生成 `AdapterHandlerEntry` 并把指针填进该槽(注释 method.cpp:1015-1031,`make_adapters` :1142-1148)。常量池侧: `ConstantPool::restore_unshareable_info`(constantPool.cpp:328)重建 resolved_references——归档堆可用就直接用归档的数组,否则按记录长度重建(:352-359)。
 
 接着进 `link_class`(instanceKlass.cpp:777 起)——共享类在这里与普通类分道扬镳:
 
@@ -259,7 +259,7 @@ InstanceKlass* SystemDictionaryShared::find_or_load_shared_class(
 
 收尾: `print_class_load_logging`(systemDictionary.cpp:1350)——实证里每行 `[class,load] java.lang.Object source: shared objects file` 就是它;[实证:](planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) AppCDS 归档下应用类 T 同样 `T source: shared objects file`。之后 `define_instance_class` 把它挂进加载器的字典、加入类层级。注意状态机并没有"从归档继承 loaded"——dump 时 `remove_unshareable_info` 把 `_init_state` 重置回 allocated(instanceKlass.cpp:2293-2297,注释明说 loaded 要在运行期由 `add_to_hierarchy` 设置);load 端 `restore_unshareable_info` 的断言也要求状态 < loaded(:2349)。所以加载状态机照走一遍,但每一步的重活都已被跳过——解析(没有 ClassFileParser)、验证(只剩约束)、重写(没有 Rewriter)。
 
-## 7. 符号与字符串: CompactHashtable 的毫米级查找
+## 7. 符号与字符串: CompactHashtable 的 O(1) 查找
 
 类就绪了,但它们的常量池引用着归档里的 `Symbol*` 与字符串对象。这些小东西归另一张表管:**CompactHashtable**(symbolTable.cpp:53/stringTable.cpp:68)。它只读、不可扩容,但每个条目省到极致: 桶数组 `buckets[num_buckets+1]` 每个 u4——**高 2 位是桶类型、低 30 位是 entries 偏移**(compactHashtable.hpp:140-147);entries 两种形态: 单条目桶(VALUE_ONLY)只存 4B offset,多条目桶(REGULAR)存 (hash, offset) 8B 对,桶尾用下一个桶的偏移标记边界(:158-195)。对照动态 Hashtable 每条目 8B 指针 + 8B 链,省一半以上。
 
@@ -302,7 +302,7 @@ inline T CompactHashtable<T,N>::lookup(const N* name, unsigned int hash, int len
 
 [C++:] 哈希相同还要 **decode_entry 双保险**: 符号版 `(Symbol*)(_base_address + offset)` 后用 `sym->equals(name, len)` 逐字节比对,并且断言 `refcount() == -1`(compactHashtable.inline.hpp:36-46,共享符号不可释放);字符串版把 offset 当 narrowOop,`HeapShared::decode_from_archive` 解码出堆区对象再比对(:48-58)。`_base_address` 是 **dump 时写死的 `shared_rs()->base()`**(compactHashtable.cpp:147),load 时由 serialize 原样读回——之所以有效,正是因为第 3 节的同址映射;大纲所说的"mmap 后把 base 设成实际地址"并不存在,那是把结果当成了原因。
 
-集成侧: `SymbolTable::lookup`(symbolTable.cpp:239-260)先查共享表再查动态表,用 `_lookup_shared_first` 抖动切换(命中率高时一直先查共享);`StringTable::lookup_shared`(stringTable.cpp:784-788)同样先查共享表,归档堆没映射上时 `_shared_table.reset()` 全弃(:866-869)——字符串在堆里,堆区不能用,表就作废,一切回到普通加载。
+集成侧: 符号表查共享表与动态表的顺序由 `_lookup_shared_first` 决定(symbolTable.cpp:242-258)——初始 false 时**先查动态表**,miss 后查共享表,共享命中把它置 true;此后**先查共享表**,共享 miss 再回落 false——一个"最近哪边命中先查哪边"的启发式;`StringTable::lookup`(stringTable.cpp:240-249)则**固定先查共享表**,miss 才走动态表,归档堆没映射上时 `_shared_table.reset()` 全弃(:866-869)——字符串在堆里,堆区不能用,表就作废,一切回到普通加载。
 
 **关键设计 (斜体)**: *只读 + 不扩容 = 没有 rehash、没有锁、没有引用计数。它赌的是"这些符号永远活着"——归档符号确实如此(没人能删),归档字符串由 G1 的归档区托管。4B 一个桶槽 + 4B 一个单条目值,是"为 mmap 而生"的哈希表。*
 
