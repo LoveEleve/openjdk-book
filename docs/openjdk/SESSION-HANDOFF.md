@@ -361,6 +361,7 @@
 - **ExecutionSample/NativeMethodSample/ThreadDump period="everyChunk"**(metadata.xml:709-724);ExecutionSample 字段 sampledThread/stackTrace/state
 - **实证方法论**: jfr print --events 'jdk.ExecutionSample' 看采样实例(sampledThread/state/完整栈);jfc 文件(default.jfc/profile.jfc :117 ExecutionSample period)查默认周期;traceid 大小查 jfrTypes.hpp:30
 - **第 3 轮** 79a1216: 函数名修正(jfr_set_method_sampling_interval 非 jfr_set_java_sample_interval)
+- **第 4 轮** 5ae494d: ①悬念段遗留"4 字节"改 8 字节(id=u8)——**跨段一致性问题(第 2 轮改了正文没改悬念)**;②栈轨迹落盘补全(repository::write JfrChunkWriter :100,WriteStackTraceRepository friend);③resolve_linenos 在 add 层验证
 - 实证: 32-jfr-sampling-demo.txt(素材清单见 §五)
 
 ### 6.47 32-jfr/02(Event Types + Metadata,32 域 2/4,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
