@@ -24,7 +24,7 @@ bool MemBaseline::baseline_summary() {
 
 `baseline_summary` 把**三个快照区拷进 MemBaseline 自己的成员**——malloc 计数器、虚拟内存计数、Metaspace 用量(01 篇说过快照区是静态区,`copy_to` 用 ThreadCritical 保证拷贝中 chunk 不被调整);外加 `ClassLoaderDataGraph::num_instance_classes/num_array_classes`(:186-187)记类数。summary 级别的基线到此为止;detail 级别(NMT_detail)才继续 `baseline_allocation_sites`(:154-181): walk 整张 MallocSiteTable(忽略 size 为 0 的空 site,:97-109)拷进排序链表,**再 walk 虚拟内存区域链表并按"调用栈+类型"聚合成 per-site 的 reserved/committed**(aggregate_virtual_memory_allocation_sites :210-231)。排序方式四种(memBaseline.hpp:53-58): by_address/by_size/by_site/by_site_and_type,report 时按需重排(malloc_sites 惰性排序 :270-302)。
 
-*关键设计: 报告器只读快照,不碰追踪数据结构*——采集在 `MemTracker::query_lock`(DCmd 层,见 §4)内一次性完成,report 阶段纯读,所以报告线程安全、也不会打断分配路径。**持久基线只有一份**(`MemTracker::_baseline`,memTracker.hpp:312),`VM.native_memory baseline` 命令写它;而每次普通报告(`VM.native_memory summary`)都新建临时 baseline,报告完即弃(NMTDCmd::report :174-185)——"照片"用完就删。
+*关键设计: 报告器只读快照,不碰追踪数据结构*——采集在 `MemTracker::query_lock`(DCmd 层,见 §4)内一次性完成(快照拷贝本身受 ThreadCritical 保护,mallocTracker.hpp:172,防止拷贝中 arena chunk 被调整),report 阶段纯读——报告线程安全,且对分配路径的干扰只在采集快照的那一瞬间。**持久基线只有一份**(`MemTracker::_baseline`,memTracker.hpp:312),`VM.native_memory baseline` 命令写它;而每次普通报告(`VM.native_memory summary`)都新建临时 baseline,报告完即弃(NMTDCmd::report :174-185)——"照片"用完就删。
 
 ## 2. summary 报告: 一行一个类别,与实证逐行对照
 
