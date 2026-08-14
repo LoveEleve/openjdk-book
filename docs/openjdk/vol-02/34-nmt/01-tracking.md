@@ -95,7 +95,7 @@ class MallocHeader {
 
 `_size` 是用户请求大小,`_flags` 是 MEMFLAGS(类别,占低字节,memTracker.cpp:59-61 有静态断言),`_pos_idx`/`_bucket_idx` 是 **call-site 表里的桶号与链内位置**(只有 detail 级别才写)。构造时按级别分派(mallocTracker.hpp:264-287): **minimal 级别直接 return,header 一个字都不写,纯占位**——free 的 release 路径同样在 `tracking_level() <= NMT_minimal` 时直接跳过(mallocTracker.cpp:68-70),只保持"用户指针后移 header 大小"的布局一致;summary 级别做 `MallocMemorySummary::record_malloc`(见 §3);detail 级别再调 `record_malloc_site` 把 (bucket_idx, pos_idx) 记进 header。**header 自身也记账**(:286,`record_new_malloc_header(sizeof(MallocHeader))`)——报告里的 "tracking overhead" 就是所有 header 的累计大小。
 
-*关键设计: header 不存调用栈本身,只存表索引*——栈快照(4 帧 × 8 字节)是几十字节,索引只要 7 字节,全部分配(哪怕极小的 16 字节)也只需固定 16 字节 header 开销。对应着"追踪自身花多少"的可控性。
+*关键设计: header 不存调用栈本身,只存表索引*——栈快照(4 帧 × 8 字节)是几十字节,索引只要 7 字节,全部分配(哪怕极小的 16 字节)也只需固定 16 字节 header 开销。对应着"追踪自身花多少"的可控性。**追踪范围只覆盖走 `os::malloc` 通道的分配**——JNI 库直接调 libc `malloc` 拿到的内存不经过这里,自然不在账本上。
 
 ## 3. summary 级别: 只做原子加减
 
