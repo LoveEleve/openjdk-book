@@ -361,6 +361,7 @@
 - **事件数**: metadata.xml 124 个 Event(1168 行);运行期 143 个 jdk.* 类型(summary 实证)
 - **实证方法论**: bin/jfr print --events 'jdk.ThreadStart'(reader 按 metadata schema 解析实例,字段名从 metadata 来);grep -o 'category="..."' 统计;注意 jfr print --events 需要 filter 参数(裸 --events 报 "missing value")
 - **第 3 轮** 418b993: 采样器引用补行号(文字锚纪律)
+- **第 4 轮** a2e168a: ①"全部事件类型"限定"内置事件类型"(动态事件不在 XML);②"XML 不会在运行期被解析"限定为 C++ 事件类(避免与 MetadataHandler 运行期解析矛盾);③143 vs 124 关系补注(XML 124+Java 侧注册其余)
 - 实证: 32-jfr-metadata-demo.txt(素材清单见 §五)
 
 ### 6.46 32-jfr/01(Recorder Engine,32 域 1/4,大纲 9 组漂移含 4 处机制编造 + 深审 2 轮,2026-08-14)
