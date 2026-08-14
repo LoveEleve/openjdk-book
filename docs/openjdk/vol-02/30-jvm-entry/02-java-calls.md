@@ -88,7 +88,7 @@ intptr_t* JavaCallArguments::parameters() {
 
 `call_helper`(javaCalls.cpp:346-475)是执行管线,按序:
 
-1. **三断言**(:349-352): 调用者必须是 Java 线程;**`!SafepointSynchronize::is_at_safepoint()`——"call to Java code during VM operation"**: safepoint 里所有 Java 线程都停着,没人能执行 Java 代码(VM 操作里要调 Java 得先结束 safepoint);
+1. **四断言**(:349-352): 调用者必须是 Java 线程;method 非空;**`!SafepointSynchronize::is_at_safepoint()`——"call to Java code during VM operation"**: safepoint 里所有 Java 线程都停着,没人能执行 Java 代码(VM 操作里要调 Java 得先结束 safepoint);`!handle_area()->no_handle_mark_active()`(NoHandleMark 区段内不许外调);
 2. **参数校验**(:361-364): CheckJNICalls 时 `args->verify`(签名对参数);
 3. **空方法直接返回**(:370-373);
 4. **`CompilationPolicy::compile_if_required(method, CHECK)`**(:385)——调用前按分层策略决定是否触发编译(13 域);
@@ -103,11 +103,11 @@ intptr_t* JavaCallArguments::parameters() {
 
 30-01 看了 `lookup`(:527)与 `lookup_base`(:330)的骨架,这里补全内部:
 
-**名字生成**(nativeLookup.cpp:165-222): `pure_jni_name`(:165)= `Java_` + 类名(转义)+ `_` + 方法名——[实证:](planning/outlines/00-jvm-tools/materials/commands/30-java-calls-demo.txt) `nm` 显示 libjava.so 里 **207 个 `T Java_java_*_*` 符号**(`Java_java_io_Console_echo`...);`critical_jni_name`(:182)= `JavaCritical_` 前缀(临界 native);`long_jni_name`(:199)= 追加 `__` + 签名参数部分(去括号去返回类型,重载消歧);`compute_complete_jni_name`(:304-313)再按平台风格加前后缀(Windows 的 `_64` 等)。
+**名字生成**(nativeLookup.cpp:165-222): `pure_jni_name`(:165)= `Java_` + 类名(转义)+ `_` + 方法名——[实证:](planning/outlines/00-jvm-tools/materials/commands/30-java-calls-demo.txt) `nm` 显示 libjava.so 里 **207 个 `T Java_java_*_*` 符号**(`Java_java_io_Console_echo`...);`critical_jni_name`(:182)= `JavaCritical_` 前缀(临界 native);`long_jni_name`(:199)= 追加 `__` + 签名参数部分(去括号去返回类型,重载消歧);`compute_complete_jni_name`(:304-313)再按平台风格加前后缀(`os_style` 参数,Linux 无前后缀)。
 
-**查找顺序**(`lookup_entry`,:255-300): ①查**特殊表** `lookup_special_native_methods`(:228-238)——`Java_jdk_internal_misc_Unsafe_registerNatives → JVM_RegisterJDKInternalMiscUnsafeMethods`、`Java_java_lang_invoke_MethodHandleNatives_registerNatives → JVM_RegisterMethodHandleMethods`、`Java_jdk_internal_perf_Perf_registerNatives → JVM_RegisterPerfMethods`、`Java_sun_hotspot_WhiteBox_registerNatives → JVM_RegisterWhiteBoxMethods`(另有 JVMCI/JFR 的条件条目)——**JVM_* 函数挂上 native 方法的另一条通道**(31 域的 Unsafe/WhiteBox 注册、38 域的 Perf 计数就是走它);②`os::dll_lookup(os::native_java_library(), jni_name)`(:267)——在 **libjava** 库里按名字查(dlsym 封装);③未命中走 `lookup_entry_prefixed`(:294,JVMTI 前缀方法);④还找不到就 `UnsatisfiedLinkError`(:337-344,[实证:] 30-java-calls-demo.txt: `'int NoImplDemo.notImplemented(int)'`——消息=方法名+签名)。
+**查找顺序**: `lookup_base`(:511)→`lookup_entry`(:327: 按 short 风格/带签名 long 风格/无 OS 前后缀三种名字逐一尝试)→核心在 `lookup_style`(:253): **按类加载器分流**——①系统类(loader 为 null,注释 :258-261 说明这是 bootstrapping 关键): 查**特殊表** `lookup_special_native_methods`(:263,7 条: `Java_jdk_internal_misc_Unsafe_registerNatives → JVM_RegisterJDKInternalMiscUnsafeMethods`、MethodHandleNatives、`Java_jdk_internal_perf_Perf_registerNatives → JVM_RegisterPerfMethods`、WhiteBox + JVMCI/JFR 条件条目——**JVM_* 函数挂上 native 方法的另一条通道**,31 域的 Unsafe/WhiteBox、38 域的 Perf 就走它)→ `os::dll_lookup(libjava)`(:265,dlsym 封装);②**应用类(loader 非空): `JavaCalls::call_static` 调 `ClassLoader.findNative(jni_name)`**(:277-285)——native 方法查找在这里**绕回 Java 侧**(用户类加载器决定找哪个库,`System.loadLibrary` 的链路),找到的地址经 `result.get_jlong()` 取回;③agent 库兜底(:293-297);仍未命中→`lookup_entry_prefixed`(:476,JVMTI 前缀方法)→`UnsatisfiedLinkError`(:522-527,[实证:] 30-java-calls-demo.txt: `'int NoImplDemo.notImplemented(int)'`——消息=方法名+签名)。
 
-**两条解析路径的对照**: JVM_*(JDK 专属)走 30-01 的编译期链接;用户 native 方法走这里——**名字生成 + libjava 里 dlsym**,或者更早被 RegisterNatives/JNI_OnLoad 注册过(has_native_function 直接跳过)。
+**两条解析路径的对照**: JVM_*(JDK 专属)走 30-01 的编译期链接;用户 native 方法走这里——名字生成后**按类加载器分流**(系统类在 libjava 里查、应用类经 `ClassLoader.findNative` 由用户类加载器定位库),或者更早被 RegisterNatives/JNI_OnLoad 注册过(has_native_function 直接跳过)。
 
 ## 核心悬念
 
