@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3/4 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 34-nmt/01(Native Memory Tracking,大纲 `planning/outlines/34-nmt/01-*.md`;32 域六篇全部完结后,第 5 批顺序 32-jfr 后 = 34-nmt)。
+**下一步(唯一,无选择)**: 34-nmt/01(Native Memory Tracking,大纲 `planning/outlines/34-nmt/01-tracking.md`;32 域六篇全部完结后,第 5 批顺序 32-jfr 后 = 34-nmt)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,96 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -589,7 +589,7 @@
 - [x] 27-jni/01-03——✅ 完结(正文 f64d2af/1ec9012/9f523af,commit 见 §二);**27 域完结**
 - [x] 30-jvm-entry/01-03——✅ 完结(正文 9ed479d/bf0d15f/cfd6484,commit 见 §二);**30 域完结**
 - [x] 32-jfr/01-06——✅ 完结(正文 0856326/1f5d2d3/6daa7f1/328c92f/b595e6b/f2a2c2f,commit 见 §二);**32 域完结**
-- [ ] **34-nmt/01**(Native Memory Tracking)——**下一篇**;大纲 `planning/outlines/34-nmt/01-*.md`;32 域收官后批次顺序
+- [ ] **34-nmt/01**(Native Memory Tracking)——**下一篇**;大纲 `planning/outlines/34-nmt/01-tracking.md`;32 域收官后批次顺序
 - [ ] 34-nmt 后 → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 5 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
