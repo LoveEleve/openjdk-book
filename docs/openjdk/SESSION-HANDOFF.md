@@ -361,6 +361,7 @@
 - **悬念指向 05 ✓**(32 域规划 **6 篇** 01-06,05-leak-profiler/06-jni-instrumentation;批次顺序先写完 32 域再进 34-nmt)
 - **实证方法论**: jfr print --xml(reader 还原 CPULoad 字段);xxd(32-01 交叉)
 - **第 3 轮** 329733b: STRING_CONSTANT 表述收敛(常量池条目字符串,非"写字符串时按需登记"推测)
+- **第 4 轮** a33ec4c: ①"长度头用 be_write"修正(字符串长度走 write 变长编码,数据体 be_write 直拷);②事件格式补 **u4 大小槽**(begin_event_write reserve :56-60/end_event_write 回填 :62-76,write_padded_at_offset)
 - 实证: 32-jfr-binary-demo.txt(素材清单见 §五)
 
 ### 6.48 32-jfr/03(Periodic Sampling,32 域 3/4,大纲 9 组漂移含 4 处机制编造 + 深审 2 轮,2026-08-14)
