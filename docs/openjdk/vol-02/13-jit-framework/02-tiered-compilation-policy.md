@@ -94,7 +94,7 @@ bool TieredThresholdPolicy::call_predicate_helper(int i, int b, double scale, Me
 }
 ```
 
-判定是"**单计数达标 或 双计数协同达标**": `i >= TierXInvocationThreshold || (i >= TierXMinInvocationThreshold && i+b >= TierXCompileThreshold)`。默认值([实证:](planning/outlines/00-jvm-tools/materials/commands/13-jit-tiered-demo.txt) PrintFlagsFinal):
+判定是"**单计数达标 或 双计数协同达标**": `i >= TierXInvocationThreshold || (i >= TierXMinInvocationThreshold && i+b >= TierXCompileThreshold)`。一个容易被忽略的细节: **level 3→4 的判定看的是 MDO 的计数增量**(common 的 full_profile 分支: `mdo->invocation_count_delta()`/`backedge_count_delta()`,tieredThresholdPolicy.cpp:802-803——即 level 3 编译代码运行期间新增的计数,而非方法原始计数);`would_profile()` 返回 false(MDO 已收够数据)时更是直接升 4(:807-809)。默认值([实证:](planning/outlines/00-jvm-tools/materials/commands/13-jit-tiered-demo.txt) PrintFlagsFinal):
 
 - **解释器→C1(Tier3 档)**: `Tier3InvocationThreshold=200`、`Tier3MinInvocationThreshold=100`、`Tier3CompileThreshold=2000`——调用 200 次,或 100 次后调用+回边共 2000;
 - **C1→C2(Tier4 档)**: `Tier4InvocationThreshold=5000`、`Tier4MinInvocationThreshold=600`、`Tier4CompileThreshold=15000`;
@@ -125,7 +125,7 @@ bool TieredThresholdPolicy::call_predicate_helper(int i, int b, double scale, Me
 }
 ```
 
-- **method_invocation_event(:884)**: 先 `create_mdo`(需要 profile 就现场建 MDO,:886-888,12-ci/03 的 `build_interpreter_method_data` 在这里被调)——注意**解释器阶段就会提前开 profile**(`should_create_mdo`,:638-648,注释 "start profiling without waiting for the compiled method to arrive",阈值乘 `Tier0ProfilingStartPercentage`=200%): 数据在 C1 编译前就已积累,level 3 接手时 profile 已"熟";→ `call_event`(:889)算下一级 → 级别变了且编译可用 → `compile(mh, InvocationEntryBci, next_level)`(:896)——**普通编译**,入口是方法入口;
+- **method_invocation_event(:884)**: 先 `create_mdo`(需要 profile 就现场建 MDO,:886-888,12-ci/03 的 `build_interpreter_method_data` 在这里被调)——注意判定条件是 `should_create_mdo`(:638-648): 方法**还在解释器、且计数达到 C1 阈值的 `Tier0ProfilingStartPercentage`=200%**(足够"老")时,就在解释器里提前建 MDO 开 profile——不用等 C1 版本到场(注释 "start profiling without waiting for the compiled method to arrive");→ `call_event`(:889)算下一级 → 级别变了且编译可用 → `compile(mh, InvocationEntryBci, next_level)`(:896)——**普通编译**,入口是方法入口;
 - **method_back_branch_event(:903)**: 回边溢出——`loop_event` 算下一级 → `compile(imh, bci, next_osr_level)`(:918)——**OSR 编译**,入口是回边的 bci;顺带借这个事件检查"该不该顺便普通编译"(:921-932);**编译完成且级别更高时直接把新 nmethod 交给解释器跳转**(:398-402,OSR 的执行入口);
 - `call_event` 里有个巧妙的**级别均衡**(:827-834): 方法已有 C2 OSR 版本时,把普通编译级别提到 C2——否则每次调用都 OSR 一次(注释: "avoid OSRs during each invocation")。
 
