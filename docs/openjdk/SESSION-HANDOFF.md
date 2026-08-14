@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **81/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 8) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 8/13,**11-cds/12-ci/13-jit-framework 域完结**,18-safepoint 1/2 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **82/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 9) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 9/13,**11-cds/12-ci/13-jit-framework/18-safepoint 域完结** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -96,6 +96,7 @@
 **13-jit-framework/01(CompileBroker 编译队列,13 域 1/2)**: 正文 934721b → 回填 1977a6b(⚠️ 7 条)→ README 888bfee(79/152,13 域 1/2,第 5 批 6/13)→ 素材 13-jit-broker-demo.txt(gitignore)→ **第 3 轮** de6faed(①"FIFO 无优先级"错——队列是 FIFO 链表但 **get 时策略 select_task 按 weight 重选热点**(compileBroker.cpp:464→tieredThresholdPolicy.cpp:285-312;weight=(rate+1)×(inv+1)×(backedge+1) :529-533;rate=每 ms 事件数 update_rate :471-500)——大纲 compute_priority 函数名编造但"热点优先"精神真实;②stale 精确化: is_unloaded 或排队超 TieredCompileTaskTimeout=50ms(globals.hpp:2337)且无事件(,is_stale :509-520);is_old(5万/50万)不移除 rate 清零(:523-527);③post_compile=mark_success+检查 task->code()!=NULL(:2174)——nmethod 注册是 ciEnv::register_method 干的;④code cache 满: UseCodeCacheFlushing 时暂停(可恢复)否则 disable_compilation_forever(:2319-2329))
 **13-jit-framework/02(TieredThresholdPolicy,13 域收官)**: 正文 fe61eae → 回填 b5ff7e1(⚠️ 8 条)→ README c526e7d(80/152,13 域完结,第 5 批 7/13)→ 素材 13-jit-tiered-demo.txt(gitignore)→ **第 3 轮** fd742ad(①level 3→4 判定用 **MDO 计数增量**(invocation_count_delta/backedge_count_delta,common :802-803,非方法原始计数;would_profile false 直接升 4 :807-809);②should_create_mdo 语义: 计数达 C1 阈值的 **200%**(Tier0ProfilingStartPercentage)才在解释器建 MDO("足够老"),非"提前"——200% 是阈值翻倍)
 **18-safepoint/01(Safepoint 编排,18 域 1/2)**: 正文 1b4b441 → 回填 b24f7fa(⚠️ 8 条)→ README b6ed56d(81/152,18 域 1/2,第 5 批 8/13)→ 素材 18-safepoint-demo.txt(gitignore)→ **第 3 轮** a10d2f5(①**x86_64 默认 thread-local poll**——THREAD_LOCAL_POLL 宏(globalDefinitions_x86.hpp:68),SafepointMechanism 构造 set_uses_thread_local_poll(safepointMechanism.cpp:37-39);编译代码/解释器轮询=testb 线程自己的 _polling_page 字段(macroAssembler_x86.cpp:3744-3756,interp_masm_x86.cpp:832-834 "Thread-local Safepoint poll"),**不触发 SIGSEGV**——01-os/04 的轮询页是全局页模式,JDK11 x86 非默认,别混;②os::serialize_thread_states 只在 !UseMembar(x86 默认 true)时执行(:256-258);③全局页模式解释器才切 dispatch 表+编译代码 SIGSEGV)
+**18-safepoint/02(轮询与 NoSafepointVerifier,18 域收官)**: 正文 e2896a5 → 回填 a0a97bf(⚠️ 10 条)→ README 2e63aeb(82/152,18 域完结,第 5 批 9/13)→ 素材 18-safepoint-polling-demo.txt(gitignore)
 
 **本会话新增素材**(全部 gitignore 不入库,在 materials/commands/):
 - `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
@@ -188,7 +189,7 @@
 | 命令输出 | `materials/commands/` 140+ 文件 | jcmd/jstat/jmap 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材**(详见 §二 commit 清单,共 17 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt / 13-jit-broker-demo.txt / 13-jit-tiered-demo.txt / 18-safepoint-demo.txt
+**本会话新增素材**(详见 §二 commit 清单,共 18 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt / 13-jit-broker-demo.txt / 13-jit-tiered-demo.txt / 18-safepoint-demo.txt / 18-safepoint-polling-demo.txt
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
@@ -313,7 +314,20 @@
 - **第 3 轮**: 实证解读修正([ long, long ] 是 2 个 long 变量(loop 的 sum+i),双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 `fd 00 05 04 04 04`)
 - 实证: 08-verificationtype-javap.txt
 
+### 6.37 18-02(轮询与 NoSafepointVerifier,18 域收官,大纲 10 处漂移含 4 处编造 + 深审 2 轮,2026-08-13)
+- **"NoSafepointVerifier 伪代码(记录 counter+析构断言)" 编造**: JDK11=**线程计数**(safepointVerifiers.hpp:89-104: 构造 _allow_safepoint_count++/_allow_allocation_count++,析构减;thread.hpp:335 "If 0, thread allow a safepoint to happen");检查点 check_for_valid_safepoint_state(thread.cpp:995-1006)计数非零→fatal("Possible safepoint reached by thread that does not allow it");调用点=memAllocator.cpp:186(分配)/mutex.cpp:1370(阻塞)/vmThread.cpp:672(VM op);release 空实现;**NoGCVerifier 才是计数断言**(total_collections,safepointVerifiers.cpp:8-28);PauseNoSafepointVerifier 嵌套;JRTLeafVerifier(interfaceSupport.inline.hpp:372)
+- **"ServiceThread::armed_value" 编造**: 不存在
+- **"Thread::_polling_page 地址切换" 半对**: JDK11=值方案——armed=8|bad_page(受保护)、disarmed=good_page(safepointMechanism.cpp:50-76);arm/disarm=set_polling_page 一次写(safepointMechanism.inline.hpp:50-57);local_poll_armed=mask_bits_are_true(poll_word, poll_bit())(:32-35);非 Java 线程退化 global_poll(:38-46);block_if_requested 未 armed 直接 return(:55-60)
+- **"polling page 两个偏移 8 字节" 错(旧版)**: JDK11=bad/good **两个连续页**(实证日志 "SafePoint Polling address, bad (protected) page:0x..., good (unprotected) page:0x...",safepointMechanism.cpp:69);值兼作地址兼容页方案
+- **"local_poll 读 safepoint_state()->_thread_local_poll" 错**: 读 Thread::_polling_page 字段(thread.hpp:708)
+- **x86 默认**: ThreadLocalHandshakes pd product 默认 true→thread-local poll(实证);轮询=testb 线程 poll 字段第 3 位(macroAssembler_x86.cpp:3744-3761),不 SIGSEGV;全局页模式信号侧 01-os/04(JDK11 x86 非默认)
+- **critical native 归 27-jni 域**(check_for_lazy_critical_native 属 18-01 点名的一部分,safepoint.cpp:781)
+- **悬念指向错**: 大纲 →19 域(已完结);正确 →20-vm-operations/01-vm-operation.md
+- **实证方法论**: -Xlog:os 看轮询页地址;ThreadLocalHandshakes 开关对照(全局页模式 safepoint 照常);NoSafepointVerifier 是 ASSERT-only 无法 release 实证(讲机制即可)
+- 实证: 18-safepoint-polling-demo.txt(素材清单见 §五)
+
 ### 6.36 18-01(Safepoint 编排,18 域 1/2,大纲 8 处漂移含 2 处编造 + 深审 2 轮,2026-08-13)
+
 - **"两阶段 spin→block" 简化**: 真实三档递进(safepoint.cpp:390-398): SpinPause→naked_yield(4000 次前,_defer_thr_suspend_loop_count=4000 :148)→naked_short_sleep(1)(OS 取整 10ms 注释 :338-339);然后 Safepoint_lock->wait(:423),最后线程 notify_all 唤醒 VM 线程(:866-867);:327-378 大注释讲自旋权衡
 - **"safepoint_counter 快速路径=一条 testb+jnz" 简化**: JDK11=jniFastGetField 汇编(jniFastGetField.hpp:29-49): 偶数→投机读字段+**二次加载 counter 校验**(双加载防读取中 GC);counter 消费者还有 ciMethodData::has_safepointed(ciMethodData.cpp:59-81,编译期 safepoint 检测,12-ci 呼应)+dependencyContext 断言(dependencyContext.hpp:121-127)
 - **"end 里 Safepoint_lock->notify_all 叫醒等待线程" 错**: 等待线程阻塞在 **Threads_lock**(block :882),end() unlock 放行(:590);Safepoint_lock 的 notify_all 只唤醒 VM 线程本人
@@ -447,8 +461,9 @@
 - [x] **13-jit-framework/01**(CompileBroker 编译队列)——✅ 完结(正文 934721b/回填 1977a6b/README 888bfee,commit 见 §二);13 域 1/2
 - [x] **13-jit-framework/02**(TieredThresholdPolicy)——✅ 完结(正文 fe61eae/回填 b5ff7e1/README c526e7d,commit 见 §二);**13 域完结,第 5 批 7/13**
 - [x] **18-safepoint/01**(Safepoint 编排)——✅ 完结(正文 1b4b441/回填 b24f7fa/README b6ed56d,commit 见 §二);18 域 1/2
-- [ ] **18-safepoint/02**(轮询与验证器)——**下一篇**;大纲 `planning/outlines/18-safepoint/02-polling-verifiers.md`;18-01 悬念指向它: 线程怎么看到安全点
-- [ ] 18-safepoint 完结后 → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 8 域)
+- [x] **18-safepoint/02**(轮询与 NoSafepointVerifier)——✅ 完结(正文 e2896a5/回填 a0a97bf/README 2e63aeb,commit 见 §二);**18 域完结,第 5 批 9/13**
+- [ ] **20-vm-operations/01**(VM_Operation 从提交到执行)——**下一篇**;大纲 `planning/outlines/20-vm-operations/01-vm-operation.md`;18-safepoint/02 悬念指向它: 谁发起 safepoint
+- [ ] 20-vmops 完结后 → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 8 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -487,11 +502,11 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/18-safepoint/02-polling-verifiers.md(注意 ⚠️ 块——18-01 大纲已回填 8 条,02 大概率同样漂移;18-01 悬念指向它: 线程怎么看到安全点)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;02 是轮询机制,重点: SafepointMechanism(thread-local poll vs global page poll,JDK11 用哪种)、解释器 dispatch 的 safepoint 检查(08-02 呼应)、编译代码轮询点(safepoint_poll)、native 返回检查、轮询的"零开销"设计;01-os/04 已讲信号侧,02 篇聚焦轮询本身别重复;实证: jdk11 观察 safepoint 频率与轮询(可用 -Xlog:safepoint+vmoperation?)
+1. 读 planning/outlines/20-vm-operations/01-vm-operation.md(注意 ⚠️ 块——18-02 大纲已回填 10 条,20 域大纲大概率同样漂移;18-safepoint/02 悬念指向它: 谁发起 safepoint)
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;20-vmops 是 VM 操作编排,重点: VM_Operation 的类别体系(vm_op_type 枚举)、提交链(VMThread::execute/VM_Operation 入队)、VMThread::loop 取操作、evaluate 执行与 safepoint 关系(begin/end 在哪)、GCLocker 与 critical 交互、jcmd GC.run 的调用链(实证入口);与 18-safepoint(VM op 触发 safepoint)、13-01(broker 的 Compile_lock 等 VM op 类型)衔接;实证: jdk11 -Xlog:safepoint+vmoperation 或 jcmd 触发观察)
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
-5. 18-safepoint 完结后 → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 8 域)
+5. 20-vmops 完结后 → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 8 域)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
