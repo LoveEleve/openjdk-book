@@ -14,7 +14,9 @@
 
 最值得注意的字段是 **`_compile_reason`——编译原因枚举**(compileTask.hpp:48-59),九种: `Reason_InvocationCount`(方法调用计数)、`Reason_BackedgeCount`(回边计数→OSR)、`Reason_Tiered`(分层策略主动升级)、`Reason_CTW`/`Reason_Replay`/`Reason_Whitebox`(调试工具)、`Reason_MustBeCompiled`(VM 要求,如 LinkResolver 需要)、`Reason_Bootstrap`。原因不是装饰: `can_become_stale`(compileTask.hpp:124-133)判断**任务会不会过期**——只有非阻塞的计数触发任务(InvocationCount/BackedgeCount/Tiered)会过期;过期的任务(`remove_and_mark_stale`/`purge_stale_tasks`,compileBroker.hpp:86/104)会被队列清掉——**方法可能已经卸载或有了新结果,排队里的旧请求就不值得编译了**。
 
-**compile_id 从哪来**: `assign_compile_id`(compileBroker.cpp:1479)——一个全局递增计数器(`_compilation_id`,`Atomic::add`),release 构建下普通与 OSR 共用;develop 构建的 `CICountOSR` 会给 OSR 单独编号。它同时出现在三处: PrintCompilation 的第二个数字、DumpReplay 文件名里的 `compid%d`(12-ci/03 的实证: compid76/77/78)——**同一个编译的三副面孔**;还有 `CIStart/CIStop` 可以限定编译 id 范围(调试用)。被放弃的过期任务会记上 `failure_reason = "stale task"` 再释放(purge_stale_tasks,compileBroker.cpp:484-501)。
+**compile_id 从哪来**: `assign_compile_id`(compileBroker.cpp:1479)——一个全局递增计数器(`_compilation_id`,`Atomic::add`),release 构建下普通与 OSR 共用;develop 构建的 `CICountOSR` 会给 OSR 单独编号。它同时出现在三处: PrintCompilation 的第二个数字、DumpReplay 文件名里的 `compid%d`(12-ci/03 的实证: compid76/77/78)——**同一个编译的三副面孔**;还有 `CIStart/CIStop` 可以限定编译 id 范围(调试用)。
+
+**任务会"变旧"**: `can_become_stale`(compileTask.hpp:124-133)定义条件——只有非阻塞的计数触发任务可能过期;取任务时(`select_task`)检查两件事: 方法被卸载、或 **排队期间毫无新事件**(`is_stale`,距上次测量超 `TieredCompileTaskTimeout`=50ms 且事件数为 0,tieredThresholdPolicy.cpp:509-520)——满足就 `remove_and_mark_stale` 移出队列,最终被 `purge_stale_tasks`(compileBroker.cpp:484-501)清掉,失败原因记 `"stale task"`。另外 `is_old`(计数超 5 万/回边超 50 万)的方法不移出队列但 rate 清零(:523-527)——任务在排队期间,世界在变。
 
 **任务生命周期**: `create_compile_task`(compileBroker.cpp:1532)——`CompileTask::allocate()`(空闲列表复用)+ `initialize` + `queue->add`;编译线程 `queue->get()` 取走;`CompileTaskWrapper`(compileBroker.hpp:129-133)把任务"分配"给当前编译线程,编译完成时 wrapper 析构负责收尾:
 
@@ -43,11 +45,11 @@ CompileTaskWrapper::~CompileTaskWrapper() {
 
 大纲说队列"按优先级排序,compute_priority = invocation_count + backedge_count×ratio"——**编造**。真相:
 
-**两个队列,按编译级别分流**。`_c1_compile_queue`/`_c2_compile_queue`(compileBroker.hpp:179-180),`compile_queue(comp_level)`(compileBroker.cpp)按级别选: C2 级别(4)进 C2 队列,C1 级别(1-3)进 C1 队列。`CompileQueue::add`(compileBroker.cpp:485 附近)把任务**追加到队尾**——FIFO,没有优先级插入;"优先级"只体现在编译器线程的 OS 线程优先级上(`NearMaxPriority`,compileBroker.cpp:803——编译线程比普通 Java 线程优先被调度,这是 OS 概念,不是队列排序)。
+**两个队列,按编译级别分流**。`_c1_compile_queue`/`_c2_compile_queue`(compileBroker.hpp:179-180),`compile_queue(comp_level)`(compileBroker.cpp)按级别选: C2 级别(4)进 C2 队列,C1 级别(1-3)进 C1 队列。`CompileQueue::add`(compileBroker.cpp:485 附近)把任务**追加到队尾**——链表是 FIFO 结构,但**取任务不是 FIFO**: `CompileQueue::get` 内部调 `CompilationPolicy::policy()->select_task`(compileBroker.cpp:464)——Tiered 策略遍历队列,算每个任务的 **weight**((rate+1)×(计数+1)×(回边+1),tieredThresholdPolicy.cpp:529-533),**weight 最高的先编译**(rate 是方法的热度变化率: 每毫秒新增的计数事件,`update_rate` :471-500,25ms 无事件清零);顺带在这里清理 stale 任务(上一节)。大纲说的 "compute_priority = invocation_count + backedge_count×ratio" 函数不存在,但"热点优先"的精神以 rate/weight 的形式真实存在。"优先级"的另一层是 OS 线程优先级: 编译线程以 `NearMaxPriority`(compileBroker.cpp:803)被调度,高于普通 Java 线程。
 
 **编译线程是 JavaThread 子类**(`CompilerThread`,17 域线程层级): 有自己的 Java 栈、可以进 safepoint、被 GC 阻塞——所以编译可以"安全地挂起"。线程数不是硬编码 1+2: `TieredThresholdPolicy::initialize`(tieredThresholdPolicy.cpp:202-247)按 CPU 数**自适应**(LP64 默认 `CICompilerCountPerCPU`): `count = MAX2(log2(cpu) * log2(log2(cpu)) * 3/2, 2)`(:214,log n × log log n 的增速),还要受 CodeCache 缓冲容量的上限约束(:219-223),然后 **C1 拿 1/3、C2 拿 2/3**(`c1_count = MAX2(count/3,1)`,:244-245)。[实证:](planning/outlines/00-jvm-tools/materials/commands/13-jit-broker-demo.txt) 本机 `CICompilerCount = 15 (ergonomic)`;`jcmd Thread.print` 能看到活的 `"C2 CompilerThread0"`/`"C1 CompilerThread0"`(daemon,prio=9)与 `"Sweeper thread"`(CodeCache 清扫器,16 域)。`UseDynamicNumberOfCompilerThreads` 默认开——编译线程空闲够久可以自己退出(compiler_thread_loop 里 `can_remove`,compileBroker.cpp:1836-1851)。
 
-**编译线程的主循环** `compiler_thread_loop`(compileBroker.cpp:1790): 第一个到场的线程先做一件大事——`ciObjectFactory::initialize()`(:1802-1804,**01 篇的全局共享镜像就是在这里诞生的**,注释还强调这个 ResourceMark 要持有共享对象);然后无限循环: `queue->get()` 取任务(空队列 `wait` 5 秒,:449;取到任务前先 `purge_stale_tasks` 清过期任务,:478)→ `CompileTaskWrapper ctw(task)`(:1864,注释: "keeps the `Method*` from being deallocated if redefinition occurs")→ 编译。**代码缓存满时编译会被禁用**(`is_compilation_disabled_forever`,get 里先检查)——编译资源与代码缓存同进退。
+**编译线程的主循环** `compiler_thread_loop`(compileBroker.cpp:1790): 第一个到场的线程先做一件大事——`ciObjectFactory::initialize()`(:1802-1804,**01 篇的全局共享镜像就是在这里诞生的**,注释还强调这个 ResourceMark 要持有共享对象);然后无限循环: `queue->get()` 取任务(空队列 `wait` 5 秒,:449;取到任务前先 `purge_stale_tasks` 清过期任务,:478)→ `CompileTaskWrapper ctw(task)`(:1864,注释: "keeps the `Method*` from being deallocated if redefinition occurs")→ 编译。**代码缓存满时编译会暂停**: `UseCodeCacheFlushing` 开启时 `set_should_compile_new_jobs(stop_compilation)`(sweeper 腾出空间后可恢复),否则 `disable_compilation_forever()`(:2319-2329)——编译资源与代码缓存同进退。
 
 ## 3. 执行: 从任务到 nmethod
 
@@ -56,7 +58,7 @@ CompileTaskWrapper::~CompileTaskWrapper() {
 - **PrintCompilation 在这里打印**(:2064-2067)——实证里 `29 76 % 3 CiDemo::work @ 5 (45 bytes)` 一行: 时间戳/compile_id/`%`=OSR/级别/方法 `@ 5`=osr_bci/字节数,全来自任务字段;
 - **`push_jni_handle_block()`**(:2110)——开一个新的 JNI handle block: 这是 ci 对象(01 篇)的 local handle 们的容器,编译结束 pop 掉,handle 随之一并释放(03 篇说过的"handle 随线程 handle block 清理"就是这里);
 - **`ciEnv ci_env(task)`**(:2150)——**ciEnv 的创建点**(12-ci 全系的入口): 编译线程在此进入 VM 状态,之后 `ciEnv::get_method_from_handle` 拿 ciMethod、`comp->compile_method(&ci_env, target, osr_bci, directive)`(:2180)进入 C1 的 `Compilation` 或 C2 的 `Compile`(12-ci/01 的 `Compile::Compile` 构造);
-- 完成后 `post_compile` 登记结果(成功 → `task->set_code_handle(nm)`,nmethod 进 CodeCache;失败 → `record_method_not_compilable` 记录原因);
+- 完成后 `post_compile` 登记结果: 成功则 `mark_success` + 记录内联字节数(ciEnv.cpp 侧的 `register_method` 早已把 nmethod 装进 CodeCache 并挂到 task,`task->code()` 可查;这里只检查 `task->code() != NULL`(:2174)并记账),失败则 `record_method_not_compilable` 记录原因;
 - `CompileTaskWrapper` 析构收尾(上一节代码块): 清任务指针、丢代码句柄、`set_env(NULL)`、阻塞任务 `mark_complete()` + `notify_all()`。
 
 **阻塞编译**: `_is_blocking` 的任务(CTW/Replay/WhiteBox/MustBeCompiled 等)会让请求线程**等结果**而不是提交完就走——JVMCI 有专门的 `wait_for_jvmci_completion`(compileBroker.cpp:1573,10 次×1 秒无进展才放弃)。普通计数触发的编译都是非阻塞的: 请求线程把任务扔进队列立刻返回,继续跑解释器——**这就是"编译异步进行"的全部含义**。
