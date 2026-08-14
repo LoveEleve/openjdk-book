@@ -3,6 +3,15 @@
 > 🟡 Working | 2 KP 中的文件格式
 > 读者处境: `recording.dump("flight.jfr")` → JFR 把 recording 写到 .jfr 文件。这个文件是二进制 chunk 格式——header+constant pool+metadata+events——用 LEB128 编码压缩。
 
+> ⚠️ 写作期修正(2026-08-14, vol-02/32-jfr/04 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"jfrBinaryWriter.cpp" 编造**: 不存在;写出=**WriterHost 模板**(jfrWriterHost.hpp/inline): BE(大端,BigEndianEncoderImpl jfrEncoders.hpp:52,be_write :118 浮点/布尔/长度头)+IE(整数编码,Varint128EncoderImpl :159)+存储策略(JfrEventWriter 事件/JfrCheckpointWriter 常量池/JfrChunkWriter 文件)
+> - **"magic(0xCAFEBABE)" 编造**: 32-01 实证 **"FLR\0"**(464c5200)+版本 2.0+6×8 头槽+频率+compressed 标志;0xCAFEBABE 是 class 文件 magic
+> - **"jfrLeb128.hpp/cpp" 编造**: 真实=**jfrEncoders.hpp Varint128EncoderImpl**(:159-210,ext_bit=0x80 每字节 7 位数据+扩展位,LEB128 同族);**compressed_integers 恒 true**(jfrOptionSet.cpp:146-149 "Set this to false for debugging purposes"——默认格式不可关);write 分派(jfrWriterHost.inline.hpp:84-89: _compressed_integers ? IE::write : BE::write);**size_safety_cushion=1**(:145-153 注释: 负值 s1(-1) 编码 0xff 0x0f 2 字节,最费字节)
+> - **"压缩 ~3-5x/100MB→25MB" 无依据**(删除)
+> - **缺机制(重要)**: ①**字符串编码** JfrStringEncoding(jfrEncoding.hpp: NULL_STRING=0/EMPTY_STRING/STRING_CONSTANT/UTF8/UTF16/LATIN1)+write_utf8(:92-100 NULL→NULL_STRING 标记;否则 UTF8 标记+len+数据)/write_utf16(:107-114);②STRING_CONSTANT 常量池引用(与栈去重同构);③chunk 布局回顾(32-01 实证)
+> - **悬念指向 05-leak-profiler ✓**(正确,存在)
+> - **实证**: 32-jfr-binary-demo.txt(jfr print --xml 还原 CPULoad 字段;Varint128 结构;字符串编码)
+
 ### 1. "Chunk format — 文件结构"
 
 场景: JMC 打开 100MB .jfr 文件 → 不是 sequential scan——是用 chunk boundaries 做随机访问——找到感兴趣的 time range → 解析对应 chunk。
