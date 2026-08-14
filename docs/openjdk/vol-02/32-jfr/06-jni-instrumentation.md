@@ -14,7 +14,7 @@ Java 侧 `jdk.jfr.internal.JVM` 的 native 方法全部落在 `jfrJniMethod.cpp`
 
 ## 2. 事件类转换器: 类加载期的 schema 补全
 
-用户写的 `class MyEvent extends jdk.jfr.Event` 只有字段声明——`isEnabled()/commit()` 等方法体是**类加载时补全**的。机制不是大纲的 "JfrClassAdapter 在方法入口插桩",而是**类文件解析层的 Klass 替换**(jfrEventClassTransformer.cpp):
+用户写的 `class MyEvent extends jdk.jfr.Event` 只有字段声明——`isEnabled()/commit()` 等方法体是**类加载时补全**的([实证:](planning/outlines/00-jvm-tools/materials/commands/32-jfr-jni-instrumentation-demo.txt) 转换器/JNI 表/DCmd 链核对)。机制不是大纲的 "JfrClassAdapter 在方法入口插桩",而是**类文件解析层的 Klass 替换**(jfrEventClassTransformer.cpp):
 
 ```cpp
 // klassFactory.cpp:216-222(截取核心,逐字)
