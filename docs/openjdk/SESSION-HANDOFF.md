@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-14 | 卷 2 写作中: **96/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 23) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 23/23,**11/12/13/18/20/27/30/32 八个域完结(本会话),本会话 13 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6)**,下一篇 34-nmt/01 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-14 | 卷 2 写作中: **97/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 24) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 24/23=24,11/12/13/18/20/27/30/32 八个域完结,**34-nmt 域 1/2 完成(本会话 14 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(1))**,下一篇 34-nmt/02 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3/4 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 34-nmt/01(Native Memory Tracking,大纲 `planning/outlines/34-nmt/01-tracking.md`;32 域六篇全部完结后,第 5 批顺序 32-jfr 后 = 34-nmt)。
+**下一步(唯一,无选择)**: 34-nmt/02(NMT 报告与对比,大纲 `planning/outlines/34-nmt/02-nmt-report.md`;34 域两篇,01 已完结)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,96 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -45,12 +45,12 @@
 第 2 批(原语): 02(4) → 03(2) → 04(2) → 06(6) → 16(5) → 38(2) → 41(2) → 42(3)   ✅ 完结 26/26
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
-第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6)** → 34 → 36 → 37 → 39 → 46   🚧 进行中
+第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(1/2)** → 36 → 37 → 39 → 46   🚧 进行中
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 96 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 97 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -84,6 +84,7 @@
 | **27-jni** | 1-3 | `27-jni/01-handle-system.md`(171)+`02-jni-fast-path.md`(189)+`03-jni-check-platform.md`(79) | ✅ **27 域完结(本会话)** |
 | **30-jvm-entry** | 1-3 | `30-jvm-entry/01-jvm-entry-points.md`(138)+`02-java-calls.md`(118)+`03-reflection-stackwalk.md`(111) | ✅ **30 域完结(本会话)** |
 | **32-jfr** | 1-6 | `32-jfr/01-recorder-engine.md`(139)+`02-event-metadata.md`(47)+`03-periodic-sampling.md`(67)+`04-binary-writer.md`(95)+`05-leak-profiler.md`(88)+`06-jni-instrumentation.md`(61) | ✅ **32 域完结(本会话)** |
+| **34-nmt** | 1-2 | `34-nmt/01-tracking.md`(164) | ✅ 01 完结(本会话),**34 域 1/2** |
 
 ### 本会话 13 篇的 commit 清单(按 git log 为准,2026-08-14)
 
@@ -207,6 +208,7 @@
 - `32-jfr-binary-demo.txt`(jfr print --xml 还原 CPULoad 字段;Varint128 结构;字符串编码)
 - `32-jfr-leakprofiler-demo.txt`(采样链/路径追踪/序列化源码核对)
 - `32-jfr-jni-instrumentation-demo.txt`(转换器/JNI 表/DCmd 链核对)
+- `34-nmt-tracking-demo.txt`(NMTDemo summary 退出报告 82 行: Total reserved=18058807559/committed=1165695239,20 类,thread #18,"malloc=343389 #3287",tracking overhead=263488;detail 段: 虚拟内存区域+4 帧栈/malloc callsite 段 4 帧(PerfStringConstant 等)/线程栈 reserved 1048576+committed 8192 守卫页)备注: -XX:+PrintNMTStatistics 需先 -XX:+UnlockDiagnosticVMOptions(diagnostic flag)
 
 **旧素材 19 个**(前会话): 08-bytecodes-javap / 08-interpreter-templates / 08-interpreter-counterdemo / 08-linkresolve-javap / 08-unsafe-demo / 08-whitebox-demo / 08-verifier-demo / 08-verificationtype-javap / 08-cds-demo / 08-cds-dump-full / 11-cds-load-demo / 12-ci-inlining-demo / 12-ci-typeflow-escape-demo / 12-ci-replay-demo / 13-jit-broker-demo / 13-jit-tiered-demo / 18-safepoint-demo / 18-safepoint-polling-demo / 20-vmops-demo
 
@@ -549,6 +551,17 @@
 - **第 3 轮**: quick reject 表述修正(栈记录在 sample 入口已发生)
 - 实证: 32-jfr-leakprofiler-demo.txt
 
+### 6.52 34-nmt/01(NMT 追踪系统,34 域 1/2,大纲 9 组漂移含 3 处机制编造 + 深审 2 轮 + 第 3 轮,2026-08-14)
+- **"MallocHeader {_size,_flags,_unused,_stack}" 错(重要)**: 真实=**位域打包的两个机器字**(mallocTracker.hpp:246-262,LP64 16 字节): `_size:64/_flags:8/_pos_idx:16/_bucket_idx:40`——**不存调用栈指针,只存 call-site 表索引**(detail 才写);**minimal 级别构造直接 return,header 纯占位连 size 都不写**,release 在 `<= NMT_minimal` 直接跳过(mallocTracker.cpp:68-70)
+- **"~30 MEMFLAGS" 错**: `enum MemoryType`(allocation.hpp:114-141)**20 类**+哨兵 mtNone→"Unknown"(nmtCommon.cpp:31-51)
+- **"三档 off/summary/detail" 错**: 真实**四档**(nmtCommon.hpp:35-41,off/minimal/summary/detail);minimal=shutdown 后残余态;**transition 只降不升**(memTracker.cpp:164-184 "Upgrading tracking level is not supported");shutdown 只能降到 minimal(:157-162)
+- **"NativeCallStack ~4-10 frame" 错**: **固定 4 帧**(NMT_TrackingStackDepth=4,nmtCommon.hpp:45 构建期决策);os::get_native_stack 走帧指针链(os_posix.cpp:120-140)非 backtrace;CURRENT_PC/CALLER_PC 宏**只有 detail 且 NMT_stack_walkable 才真抓栈**(memTracker.hpp:88-91)
+- **"VirtualMemoryTracker per-call-site 聚合" 错**: 虚拟内存**不用哈希**——按地址排序的 ReservedMemoryRegion 链表+CommittedMemoryRegion 子链表(每段自己的栈);add 合并相邻同栈(try_merge_with),release 从中间切割(:437-488);ThreadCritical 保护(memTracker.hpp:214)
+- **缺机制(重要)**: ①开关经 **launcher 环境变量 NMT_LEVEL_<pid>** 传递(java.c:825-880 putenv;JVM 侧 init_tracking_level memTracker.cpp:58-96 读+unsetenv :84)——参数必须在任何 malloc 前就位;arguments.cpp:3685-3701 双保险;②MallocSiteTable 静态 511 桶(128*4-1),链尾 CAS 插入(:142-185),无删除;表入口分配用伪调用栈防递归(:75-113),最早 os::malloc 来自 C 运行时链接器;③AccessLock 共享/排他(计数器 CAS 成负 min_jint,排他后共享永拒);④**OOM 自动降级 summary**(mallocTracker.cpp:79-90);⑤header 自身记账 tracking overhead(:286);⑥线程栈借 mtThreadStack malloc 计数器记线程数(memTracker.hpp:256-263),committed 用 os::committed_in_range 快照时现测
+- **追踪范围**: 只覆盖 os::malloc 通道——JNI 直接 libc malloc 不入账(第 3 轮补)
+- **实证方法论**: PrintNMTStatistics 是 diagnostic flag 需 UnlockDiagnosticVMOptions;summary 退出报告直接可当素材;detail 输出 13281 行(截片段);NMT 无 -Xlog 标签;无周期任务(与 20-02 呼应,素材 jcmd-VM.native_memory.txt 的未启用失败输出是"运行期补不开"证据)
+- 实证: 34-nmt-tracking-demo.txt
+
 ### 6.51 32-jfr/06(JNI Interface + Instrumentation + DCmd,32 域收官,大纲 10 组漂移含 6 处机制编造 + 深审 2 轮,2026-08-14)
 - **"JfrClassAdapter::transform" 编造**: 真实=JfrEventClassTransformer::on_klass_creation(jfrEventClassTransformer.cpp:1515);调用点 klassFactory.cpp:222 JFR_ONLY(ON_KLASS_CREATION)(jfrKlassExtension.hpp:41 宏,IS_EVENT_KLASS trace_id 标记)——**类文件解析层拦截 jdk.jfr.Event 子类首次加载**,重写字节→新 InstanceKlass 替换+tag_as;日志字符串 "JfrClassAdapter:"(:1522)是旧名唯一来源
 - **"方法入口 ASM 插桩" 错**: 注入=**事件类 schema**(5 方法壳 commit/begin/end/isEnabled/shouldCommit,:120-145 空方法体字节+3 字段 EventHandler,:60-61);急切模式调 Java EventInstrumentation.java:60(ASM 生成方法体)经 JfrUpcalls::new_bytes_eager_instrumentation(jfrUpcalls.cpp:146;Jfr::is_recording()||force_instrumentation :1406-1428)
@@ -589,7 +602,8 @@
 - [x] 27-jni/01-03——✅ 完结(正文 f64d2af/1ec9012/9f523af,commit 见 §二);**27 域完结**
 - [x] 30-jvm-entry/01-03——✅ 完结(正文 9ed479d/bf0d15f/cfd6484,commit 见 §二);**30 域完结**
 - [x] 32-jfr/01-06——✅ 完结(正文 0856326/1f5d2d3/6daa7f1/328c92f/b595e6b/f2a2c2f,commit 见 §二);**32 域完结**
-- [ ] **34-nmt/01**(Native Memory Tracking)——**下一篇**;大纲 `planning/outlines/34-nmt/01-tracking.md`;32 域收官后批次顺序
+- [x] 34-nmt/01——✅ 完结(正文 cb24e2a/回填 ⚠️ 9 组/README 0f2abb7/第 3 轮 58866ce);**34 域 1/2**
+- [ ] **34-nmt/02**(NMT 报告与对比,MEMFLAGS 分类输出/baseline/diff/DCmd)——**下一篇**;大纲 `planning/outlines/34-nmt/02-nmt-report.md`;01 篇悬念已指向 02
 - [ ] 34-nmt 后 → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 5 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -629,9 +643,9 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/34-nmt/01-*.md(注意 ⚠️ 块——32 域六篇各回填 9/10/9/9/8/10 组,34 域大概率同样漂移;32 域收官后批次顺序=34-nmt)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;34 域 01 重点: services/memTracker.cpp(hotspot/share/services)的 MemTracker 体系(NMT 三档 off/summary/detail、命令行 NMT=summary 解析 arguments、malloc 记录 mallocTracker.cpp、虚拟内存 virtualMemoryTracker.cpp、NMT 输出 jcmd VM.native_memory(容器 jcmd 不可用则替代)、与 20-02 的"NMTSweeper 编造"教训呼应——NMT 无周期任务);实证: -XX:NativeMemoryTracking=summary 启动日志)
-3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证;jcmd 在当前容器 attach 不可用,实证可用 kill -3(SIGQUIT)线程转储或命令行 -Xlog/-verbose:jni,自写 demo 用 gcc 编译(acbench/jniref/ 模式,printf 要 fflush)
+1. 读 planning/outlines/34-nmt/02-*.md(注意 ⚠️ 块——34-nmt/01 回填 9 组,02 大概率同样漂移;02 重点: services/memReporter.cpp(772 行)/memBaseline.cpp(328 行)/nmtDCmd.cpp(216 行)的报告链路——MemBaseline::baseline(快照 MallocSiteTable+VirtualMemoryTracker+MetaspaceSnapshot)、MemSummaryReporter/MemDetailReporter(report_site 迭代表打印调用栈)、DCmd VM.native_memory summary/detail/baseline/diff(scale 参数 KB/MB/GB);大纲的 "~30 分类/每类 reserved+committed" 已是 01 篇修正后的 20 类;与 01 篇已述机制衔接: tracking overhead/MemBaseline 的 snapshot 双区/query_lock)
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律与 6.52 的 34-nmt/01 经验)
+3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证;jcmd 在当前容器 attach 不可用,实证可用 kill -3(SIGQUIT)线程转储或命令行 -Xlog/-verbose:jni;NMT 实证可直接跑 NMTDemo + PrintNMTStatistics(见 6.52);jcmd VM.native_memory 输出素材已有 jcmd-VM.native_memory.txt(未启用失败)+ annotated
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3/4 轮)→ 回填大纲 → 提交 → 更新 README
 5. 34-nmt 后 → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 5 域)
 ```
