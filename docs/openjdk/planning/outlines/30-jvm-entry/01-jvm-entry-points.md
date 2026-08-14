@@ -3,6 +3,15 @@
 > 🔴 Deep | 2 KP 中的 JDK↔JVM 桥
 > 读者处境: `System.currentTimeMillis()` 是纯 Java 代码——但它的 native 实现是 `JVM_CurrentTimeMillis()`。这是 JDK 和 JVM 之间的唯一接口——~200 个 JVM_* 函数。
 
+> ⚠️ 写作期修正(2026-08-14, vol-02/30-jvm-entry/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"jvm.h:40-1342" 微漂**: jvm.h 1342 行、**182 个 JNIEXPORT**(非 ~200 函数);版权 1-36、头注释 38-55、函数自 :59;JVM_INTERFACE_VERSION 6(:57)
+> - **"dlsym 动态查找" 编造**: 真实=System.c:39 `(void *)&JVM_CurrentTimeMillis` **编译期取址** + libjava.so 以 ELF 链接期 UND 符号引用(nm 实证 131 个 `U JVM_*@SUNWprivate_1.1`)+ 运行时动态链接器解析;**导出名单=版本脚本 hotspot/jvm_sym.ver**(`JNI_*; JVM_*; jio_*; AsyncGetCallTrace; local: *;`,SUNWprivate_1.1 节点)
+> - **"JVM_* 分五大类(Thread/Class/Memory/System/IO)" 编造**: 真实=jvm.h:38-55 头注释 **"three parts"**(①标准 API 的 native 库需要的 VM 函数(如 Object wait/notify)②字节码验证器/类文件格式检查器函数 ③标准 I/O 与网络 API);jvm.cpp(3793 行)非分节,按需排布(CurrentTimeMillis :271/IHashCode :605/GetCallerClass :706/DefineClass :949/FindLoadedClass :962/StartThread :2857)
+> - **"jvm.cpp:100-2000" 漂**: 函数分布 :263-:3790
+> - **缺机制(重要)**: ①**注册链**: System.java:396 native currentTimeMillis → System.c:25-48 注册表(注释 "Only register the performance-critical methods",仅 3 个: currentTimeMillis/nanoTime/arraycopy)→ Java_java_lang_System_registerNatives(:44-51)RegisterNatives;②**运行时解析**: NativeLookup::lookup(nativeLookup.cpp:527-546): has_native_function() 检查→lookup_base 动态解析(PrintJNIResolving,`-verbose:jni` 打印 "[Dynamic-linking native method ...]")→set_native_function;注册的方法不再动态解析(实证 [Registering JNI native method ...] 后无 Dynamic-linking);③**JVM_ENTRY vs JVM_LEAF 判据=碰不碰堆**: ENTRY(interfaceSupport.inline.hpp:558-565)=thread_from_jni_environment+ThreadInVMfromNative+VM_ENTRY_BASE;LEAF(:588-592)=VM_Exit::block_if_vm_exited+NoHandleMark,不转状态不碰堆(CurrentTimeMillis/NanoTime/GetInterfaceVersion/SupportsCX8 用 LEAF);JVM_ENTRY 与 JNI_ENTRY 差异=JNI_ENTRY 多 WeakPreserveExceptionMark;JVMWrapper(jvm.cpp:254-256,CountJNICalls 计数)
+> - **悬念指向 02-java-calls ✓**(正确,保留)
+> - **实证**: 30-jvm-entry-demo.txt(-verbose:jni 的 Dynamic-linking vs Registering 对照;nm libjava.so UND 符号;jvm.h 结构)
+
 ### 1. "jvm.h — 200 个入口的声明"
 
 场景: JDK 编译时链接 `jvm.lib`——每个 `native` 方法的 JVM 侧实现在 jvm.cpp 中的对应 `JVM_*` 函数。
