@@ -358,7 +358,7 @@
 - **运行时解析**: NativeLookup::lookup(nativeLookup.cpp:527-546): has_native_function()→lookup_base 动态解析(PrintJNIResolving=**-verbose:jni** 非 -Xlog,JDK11 无 jni,resolve 标签)→set_native_function;注册的方法 has_native_function=true 不再动态解析(实证: [Registering JNI native method java.lang.System.currentTimeMillis] 后整次无 Dynamic-linking)
 - **JVM_ENTRY vs JVM_LEAF 判据=碰不碰堆**: ENTRY(interfaceSupport.inline.hpp:558-565)=thread_from_jni_environment+ThreadInVMfromNative+VM_ENTRY_BASE(HandleMark);LEAF(:588-592)=VM_Exit::block_if_vm_exited+NoHandleMark,不转状态不碰堆不建引用不抛异常(CurrentTimeMillis/NanoTime/GetInterfaceVersion/SupportsCX8);JVM_ENTRY 与 JNI_ENTRY 差异=JNI_ENTRY 多 WeakPreserveExceptionMark(:515-517);JVMWrapper(jvm.cpp:254-256,CountJNICalls 计数)
 - **实证方法论**: -verbose:jni 观察注册链;nm -D libjava.so 验证链接期符号(SUNWprivate_1.1 版本节点=jvm_sym.ver);javap -s 看 native 签名
-- 实证: 30-jvm-entry-demo.txt(素材清单见 §五)
+- 实证: 30-jvm-entry-demo.txt(素材清单见 §五)→ **第 4 轮** 328791b(①注册表行号 System.c:38;②JVM_ENTRY/JNI_ENTRY 差异只陈述事实;③libjvm.so 实际导出 **174 个 JVM_* + 5 个 jio_***,jvm.h 182 个 JNIEXPORT 含 jio_*;④JVM_MonitorWait :81 例证验证;⑤131 个 UND 全为 U;⑥PrintJNIResolving 由 -verbose:jni 设置 arguments.cpp:2413)
 
 ### 6.42 27-jni/03(JNI Check + 平台层,27 域收官,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
