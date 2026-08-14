@@ -6,7 +6,7 @@
 
 ## "潜在内存泄漏"怎么定位
 
-`jdk.OldObjectSample` 事件(metadata.xml:579-586,description "A potential memory leak")回答"这个对象为什么还活着"——JMC 里显示的不只是样本,还有**从 GC root 到该对象的一条引用链**。这篇拆三段的完整机制: 采样侧(谁在分配时采样、怎么保留下有价值的样本)、追踪侧(在 safepoint 里怎么从样本反追到 root)、序列化侧(chain 怎么写进文件)。
+`jdk.OldObjectSample` 事件(metadata.xml:579-586,description "A potential memory leak")回答"这个对象为什么还活着"——**配置 cutoff 大于 0 时**,JMC 里显示的不只是样本,还有**从 GC root 到该对象的一条引用链**(默认 memory-leak-detection-cutoff=0ns 只记样本无链)。这篇拆三段的完整机制: 采样侧(谁在分配时采样、怎么保留下有价值的样本)、追踪侧(在 safepoint 里怎么从样本反追到 root)、序列化侧(chain 怎么写进文件)。
 
 ## 1. 采样侧: TLAB 分配钩子 + 优先级队列
 
@@ -42,7 +42,7 @@ void ObjectSampler::sample(HeapWord* obj, size_t allocated, JavaThread* thread) 
 
 ## 2. 追踪侧: safepoint 里的 BFS,满队列时 DFS
 
-录制停止/检查点时,`PathToGcRootsOperation`(VM 操作)在 **safepoint** 内运行(pathToGcRootsOperation.cpp:81-131):
+事件发出时(`EventEmitter::emit`,eventEmitter.cpp:55-70): **cutoff ≤ 0 只发样本无链**(:58-63);**cutoff > 0 才执行 `PathToGcRootsOperation`**(VM 操作,:66-68)——在 **safepoint** 内运行(pathToGcRootsOperation.cpp:81-131):
 
 ```cpp
 // pathToGcRootsOperation.cpp:81-124(截取核心,逐字)
