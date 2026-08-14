@@ -18,7 +18,7 @@ JFR 采集 130+ 种事件(方法采样、GC、锁、分配……),目标开销�
   mutable JfrBuffer* _native_buffer;
 ```
 
-**Java 事件(jdk.jfr.Event 子类)写 `_java_buffer`,native 事件(GC/锁等埋桩)写 `_native_buffer`**——两类事件的产生节奏差异大(Java 事件由业务线程提交,native 事件由 VM 代码提交),分开互不污染。`JfrBuffer` 本身是极简的环形语义线性区(jfrBuffer.hpp:33-57):
+**Java 事件(jdk.jfr.Event 子类)写 `_java_buffer`,native 事件(GC/锁等埋桩)写 `_native_buffer`**——两类事件的产生节奏差异大(Java 事件由业务线程提交,native 事件由 VM 代码提交),分开互不污染。`JfrBuffer` 本身是极简的线性区(jfrBuffer.hpp:33-57,刷空后回收复用):
 
 ```cpp
 // jfrBuffer.hpp:33-57(截取核心,逐字)
