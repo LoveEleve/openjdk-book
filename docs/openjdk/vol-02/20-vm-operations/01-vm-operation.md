@@ -1,7 +1,7 @@
 # 01. "帮我做 GC"——VM_Operation 从提交到执行
 
 > **前置依赖**:[18-safepoint/01 — JVM 怎么让所有线程同时停住？— Safepoint 编排](openjdk/vol-02/18-safepoint/01-safepoint-orchestration.md):VM 操作是 safepoint 的发起者——begin/end 就在本篇的 loop 里;[17-threads/01 — 线程层级与生命周期](openjdk/vol-02/17-threads/01-thread-hierarchy.md):VMThread 是 NamedThread 不是 JavaThread;[18-safepoint/02 — 线程怎么知道自己该停了？— 轮询机制与 NoSafepointVerifier](openjdk/vol-02/18-safepoint/02-polling-verifiers.md):提交时先过 check_for_valid_safepoint_state
-> → **后续**:[20-vm-operations/02 — 后台任务与初始化](02-background-init.md):谁在后台周期性干活
+> → **后续**:[20-vm-operations/02 — 谁在后台周期性干活?— PeriodicTask、WatcherThread 与启动序列](02-background-init.md):谁在后台周期性干活
 > 关联域: 25-gc(GC 是最重的 VM 操作)、27-jni、30-jvm-entry
 
 ## "GC 我不能自己来"
@@ -100,4 +100,4 @@ VM 操作链拆完了: 操作(4 模式 × ~85 种,多态统一接口)、队列(�
 
 但还有一个问题: 谁在**后台周期性**干活?偏向锁为什么 10 次撤销?JFR checkpoint、周期任务怎么被调度?下一篇: 后台任务与初始化。
 
-> → [20-vm-operations/02 — 后台任务与初始化](02-background-init.md)
+> → [20-vm-operations/02 — 谁在后台周期性干活?— PeriodicTask、WatcherThread 与启动序列](02-background-init.md)

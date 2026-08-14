@@ -2,7 +2,7 @@
 
 > **前置依赖**:[20-vm-operations/01 — "帮我做 GC"——VM_Operation 从提交到执行](openjdk/vol-02/20-vm-operations/01-vm-operation.md):本篇的部分周期任务干的事就是提交 VM 操作(EnableBiasedLockingTask),async 模式派上用场;[17-threads/01 — JVM 里有多少种线程?— Thread 层次体系](openjdk/vol-02/17-threads/01-thread-hierarchy.md):WatcherThread 是 NonJavaThread 不是 JavaThread;[38-perfdata/02 — StatSampler — 谁在周期性刷新计数器](openjdk/vol-02/38-perfdata/02-stat-sampler.md):第一个 PeriodicTask 实例的采样细节
 > → **后续**:[27-jni/01 — jobject 在 JVM 内部怎么存的?— JNI Handle 系统](01-handle-system.md)
-> 关联域: 16-code-cache(sweeper 线程)、32-jfr(采样器线程)、04-logging
+> 关联域: 16-code-cache(sweeper 线程)、32-jfr(采样器线程)、39-runtime-mon
 
 ## 显式请求之外,还有一堆定时家务
 
@@ -19,7 +19,7 @@
 // timer interrupts exists on the platform.
 ```
 
-**设计意图: 模拟定时器中断**——HotSpot 不希望依赖 OS 的周期性信号(ITIMER/SIGALRM 之类)来做内部调度,于是自己养一个线程,周期醒来"滴答"一下,把时间分发给注册在案的任务。
+**设计意图: 模拟定时器中断**——HotSpot 选择自己养一个线程来模拟"定时器中断",而不是依赖某个平台的定时器信号机制: 周期醒来"滴答"一下,把时间分发给注册在案的任务。这个线程本身被当作"模拟中断"的抽象层(注释说它将来"should be replaced by an abstraction over whatever native support for timer interrupts exists on the platform")。
 
 ### 主循环: 睡到最近的任务到期
 
