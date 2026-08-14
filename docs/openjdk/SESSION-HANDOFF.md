@@ -94,7 +94,7 @@
 **12-ci/02(ciTypeFlow + bcEscapeAnalyzer,12 域 2/3)**: 正文 f06d6fa → 回填 63c7534(⚠️ 10 条)→ README b9aeac8(77/152,12 域 2/3)→ 素材 12-ci-typeflow-escape-demo.txt(gitignore)→ **第 3 轮** d4d2fe8(①is_recursive_call 语义错——_parent 链用于**递归检测**(callee 是否在调用链上,:206-207),非"借用父分析";②get_start_state 行号 :346→:363;③Parse 消费方式精确化——解析以 flow 块图为骨架(rpo_at/successors/exceptions,parse1.cpp:1250/1274-1275),OSR 场景才用块类型(:223/346);④do_analysis 入口跳过条件补全: abstract/native/持有者未初始化/深度超 MaxBCEAEstimateLevel/大小超 MaxBCEAEstimateSize→全保守(:1302-1316))
 **12-ci/03(ciObjectFactory + ciReplay,12 域收官)**: 正文 aef0f86 → 回填 55ece51(⚠️ 9 条)→ README 524cb48(78/152,12 域完结,第 5 批 5/13)→ 素材 12-ci-replay-demo.txt(gitignore)→ **第 3 轮** c1353f2(①ciInstanceKlass 行解读错——真实=is_linked/is_initialized/cp_length+**常量池 tags**(ciInstanceKlass.cpp:713),不是"布局信息";②staticfield 行=**static final 字段**(is_initialized() 才打印,:740-744,注释 "in case the compilation relies on their value"),非所有静态字段;③orig 段措辞: 计数器"藏于头部字节"非"前两个值就是计数"(小端字节);④共享镜像长命 Arena 例外补注)
 **13-jit-framework/01(CompileBroker 编译队列,13 域 1/2)**: 正文 934721b → 回填 1977a6b(⚠️ 7 条)→ README 888bfee(79/152,13 域 1/2,第 5 批 6/13)→ 素材 13-jit-broker-demo.txt(gitignore)→ **第 3 轮** de6faed(①"FIFO 无优先级"错——队列是 FIFO 链表但 **get 时策略 select_task 按 weight 重选热点**(compileBroker.cpp:464→tieredThresholdPolicy.cpp:285-312;weight=(rate+1)×(inv+1)×(backedge+1) :529-533;rate=每 ms 事件数 update_rate :471-500)——大纲 compute_priority 函数名编造但"热点优先"精神真实;②stale 精确化: is_unloaded 或排队超 TieredCompileTaskTimeout=50ms(globals.hpp:2337)且无事件(,is_stale :509-520);is_old(5万/50万)不移除 rate 清零(:523-527);③post_compile=mark_success+检查 task->code()!=NULL(:2174)——nmethod 注册是 ciEnv::register_method 干的;④code cache 满: UseCodeCacheFlushing 时暂停(可恢复)否则 disable_compilation_forever(:2319-2329))
-**13-jit-framework/02(TieredThresholdPolicy,13 域收官)**: 正文 fe61eae → 回填 b5ff7e1(⚠️ 8 条)→ README c526e7d(80/152,13 域完结,第 5 批 7/13)→ 素材 13-jit-tiered-demo.txt(gitignore)
+**13-jit-framework/02(TieredThresholdPolicy,13 域收官)**: 正文 fe61eae → 回填 b5ff7e1(⚠️ 8 条)→ README c526e7d(80/152,13 域完结,第 5 批 7/13)→ 素材 13-jit-tiered-demo.txt(gitignore)→ **第 3 轮** fd742ad(①level 3→4 判定用 **MDO 计数增量**(invocation_count_delta/backedge_count_delta,common :802-803,非方法原始计数;would_profile false 直接升 4 :807-809);②should_create_mdo 语义: 计数达 C1 阈值的 **200%**(Tier0ProfilingStartPercentage)才在解释器建 MDO("足够老"),非"提前"——200% 是阈值翻倍)
 
 **本会话新增素材**(全部 gitignore 不入库,在 materials/commands/):
 - `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
@@ -320,6 +320,7 @@
 - **TieredStopAtLevel 实证**: =1 只出 %1/1;=3 只出 %3/3;common 返回 MIN2(next, stop)(:815)
 - **大纲 CompilerDirectives/CompileLog 未展开**: CompileCommand 散布(CompileThresholdScaling/ExcludeOption/DirectiveSet);CompileLog 属工具域
 - **实证方法论**: 循环热点先 %3 后 3(OSR 先于普通入口);PrintFlagsFinal 阈值全表可作对照
+- **第 3 轮**: ①level 3→4 判定=**MDO delta 计数**(mdo->invocation_count_delta(),common full_profile 分支 :802-803)——level 3 代码运行期间的新增;would_profile()=false 直接升 4(:807-809);②should_create_mdo(:638-648)的 Tier0ProfilingStartPercentage=200% 是"计数达 C1 阈值 2 倍(足够老)才建 MDO",不是"提前"——语义: 解释器里就开 profile 等 C1/C2 接手
 - 实证: 13-jit-tiered-demo.txt(素材清单见 §五)
 
 ### 6.34 13-01(CompileBroker 编译队列,13 域 1/2,大纲 7 处漂移含 3 处编造 + 深审 2 轮,2026-08-13)
