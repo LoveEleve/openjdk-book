@@ -10,7 +10,7 @@
 
 ## 1. 定义源: metadata.xml
 
-全部事件类型定义在**一个 XML 文件**(hotspot/share/jfr/metadata/metadata.xml,1168 行,**124 个 Event**),比如 ThreadStart:
+**内置事件类型**全部定义在**一个 XML 文件**(hotspot/share/jfr/metadata/metadata.xml,1168 行,**124 个 Event**),比如 ThreadStart:
 
 ```xml
 <!-- metadata.xml:29-32(截取核心,逐字) -->
@@ -24,7 +24,7 @@
 
 ## 2. 构建期生成: metadata.xml → C++ 事件类
 
-XML 不会在运行期被解析成事件类——**构建期**由 Java 工具 `build.tools.jfr.GenerateJfrFiles` 生成 C++ 头文件(make/hotspot/gensrc/GensrcJfr.gmk: `TOOL_JFR_GEN := ... build.tools.jfr.GenerateJfrFiles`,输出到 `gensrc/jfrfiles/`):
+C++ 事件类不会在运行期生成——**构建期**由 Java 工具 `build.tools.jfr.GenerateJfrFiles` 把 XML 生成 C++ 头文件(make/hotspot/gensrc/GensrcJfr.gmk: `TOOL_JFR_GEN := ... build.tools.jfr.GenerateJfrFiles`,输出到 `gensrc/jfrfiles/`):
 
 - 产物: **`jfrEventClasses.hpp` + `jfrEventIds.hpp`**(生成目录,不在源码树——大纲的 "jfrEventClasses.hpp:30-120 enum" 看不到源码,因为它就是生成物);
 - 入口: `jfrEvents.hpp` 顶部注释 "Declare your event in jfr/metadata/metadata.xml."(:28),:32 `#include "jfrfiles/jfrEventClasses.hpp"`——**事件类型的新增/修改只动 XML,代码生成负责同步 C++**;
@@ -36,7 +36,7 @@ XML 不会在运行期被解析成事件类——**构建期**由 Java 工具 `b
 
 - **内置 `jdk.*` 事件**: `MetadataRepository.initializeJVMEventTypes`(jdk.jfr/internal/MetadataRepository.java:66-86)——`MetadataHandler` 解析 metadata.xml 后遍历 `TypeLibrary` 的 `PlatformEventType`,包成 `EventType`,检查 `@Threshold/@StackTrace/@Cutoff/@Period` 注解(决定"这个事件要带时长/栈/周期"),周期事件挂 `RequestHook`(下一篇的主角),并建 `EventControl` 与 native 的启用位对接(32-01 的 JfrEventSetting);
 - **动态事件**(EventFactory): `EventClassBuilder`(jdk.jfr/internal/EventClassBuilder.java:45)用 **ASM 在运行期生成字节码类**("jdk.jfr.DynamicEvent"+自增 id)——jdk.jfr 的用户自定义事件不用预编译;
-- **metadata 二进制回传**: `JfrMetadataEvent`(jfrMetadataEvent.hpp:31-43)的注释是权威——"Metadata is continuously updated in Java as event classes are loaded / unloaded. Using update(), Java stores a binary representation back to native."——**Java 侧维护一份二进制 metadata(类型注册/注销时更新),update() 存回 native;chunk 关闭时 write() 写进文件**,偏移填进 32-01 的文件头"metadata section offset"槽。这就是为什么 `jfr summary`/`jfr print` 能读出 143 种类型与字段。
+- **metadata 二进制回传**: `JfrMetadataEvent`(jfrMetadataEvent.hpp:31-43)的注释是权威——"Metadata is continuously updated in Java as event classes are loaded / unloaded. Using update(), Java stores a binary representation back to native."——**Java 侧维护一份二进制 metadata(类型注册/注销时更新),update() 存回 native;chunk 关闭时 write() 写进文件**,偏移填进 32-01 的文件头"metadata section offset"槽。这就是为什么 `jfr summary`/`jfr print` 能读出 143 种类型与字段(XML 的 124 个内置 + Java 侧注册的其余类型)。
 
 ## 核心悬念
 
