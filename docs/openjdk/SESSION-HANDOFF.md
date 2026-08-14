@@ -11,9 +11,9 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 13-jit-framework/02(TieredThresholdPolicy,大纲 `planning/outlines/13-jit-framework/02-tiered-compilation-policy.md`;"5 层编译策略";13-jit-framework/01 悬念指向它: 为什么 tier3→%tier4→tier4)。
+**下一步(唯一,无选择)**: 20-vm-operations/02(后台任务与初始化,大纲 `planning/outlines/20-vm-operations/02-background-init.md`;20-vm-operations/01 悬念指向它: 谁在后台周期性干活——PeriodicTask/WatcherThread/CodeCache sweeper 等)。
 
-**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,74 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
+**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,83 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
 ---
 
@@ -44,12 +44,12 @@
 第 2 批(原语): 02(4) → 03(2) → 04(2) → 06(6) → 16(5) → 38(2) → 41(2) → 42(3)   ✅ 完结 26/26
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
-第 5 批(VM 核心): **11(1/2)** → 12 → 13 → 18 → 20 → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46   🚧 进行中
+第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20(1/2)** → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46   🚧 进行中
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 74 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 83 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -77,8 +77,11 @@
 | **44-class-verification** | 1-2 | `44-class-verification/01-verifier.md`(316)/02-verification-type.md(149) | ✅ **44 域完结,第 4 批收官(本会话)** |
 | **11-cds** | 1-2 | `11-cds/01-cds-overview-dump.md`(138)+`02-cds-load-shared.md`(322) | ✅ **11 域完结(本会话)** |
 | **12-ci** | 1-3 | `12-ci/01-ci-overview-mirror.md`(176)+`02-ci-typeflow-escape.md`(164)+`03-ci-factory-runtime.md`(128) | ✅ **12 域完结(本会话)** |
+| **13-jit-framework** | 1-2 | `13-jit-framework/01-compile-broker-queue.md`(74)+`02-tiered-compilation-policy.md`(146) | ✅ **13 域完结(本会话)** |
+| **18-safepoint** | 1-2 | `18-safepoint/01-safepoint-orchestration.md`(121)+`02-polling-verifiers.md`(95) | ✅ **18 域完结(本会话)** |
+| **20-vm-operations** | 1-2 | `20-vm-operations/01-vm-operation.md`(103) | 🚧 20 域 1/2(本会话) |
 
-### 本会话 9 篇的 commit 清单(按 git log 为准)
+### 本会话 16 篇的 commit 清单(按 git log 为准)
 
 **08-interpreter/01(Bytecodes 定义表)**: 正文 b34880a → 大纲回填 05d5c11(⚠️ 11 条)→ README 4ee15e1(66/152)→ HANDOFF 66ae707 → **第 3 轮 REVIEW** e4d5f42+24da2f2(is_aload 枚举不连续/快速化闭环 templateTable_x86.cpp:973/getfield patch :2929/verifier.cpp:754 语义/BcDemo 六方法)
 **08-interpreter/02(Template Interpreter)**: 正文 9c80ab1(含 01 篇 0xCB-0xFF 修正: 真正未定义是 0xEF-0xFF 17 个,0xCB-0xEE 是 fast 系列)→ 回填 e6c2f3e(⚠️ 11 条)→ README b6e7dbf(67/152)→ HANDOFF 08ec0b4 → **第 3 轮** 2c55647(wide 链 jump _wentry_point :4504-4510/iadd=pop_i+addl iop2 :1337-1340/deopt 三态/deopt_reexecute_entry 特判/bytecodes_init init.cpp:104)
@@ -198,7 +201,7 @@
 
 ## 六、本会话实战经验(最重要,新 AI 必读)
 
-### 6.1 大纲漂移的规律(74 篇全部出现,2-15 处/篇;旧会话沉淀 02/03/04/45/48/06/16/38/41/42/07/09/17/10/19/23/24 域,本会话沉淀 08/31/44/11 域)
+### 6.1 大纲漂移的规律(83 篇全部出现,2-15 处/篇;旧会话沉淀 02/03/04/45/48/06/16/38/41/42/07/09/17/10/19/23/24 域,本会话沉淀 08/31/44/11/12/13/18/20 域)
 **任何机制描述/行号/值/专有名词,一律当"线索"而非"事实"**。高频漂移类型:
 1. **机制编造**(最严重): 大纲把"想当然的实现"写成机制——实证全部是编造
 2. **版本漂移**: 大纲写的是 JDK 8/其他版本的机制(31-01 的 CAS 单路径是 JDK8 形态;11-01 的 od region 是旧版)
@@ -222,7 +225,7 @@
 ### 6.4 平台/环境事实(写作时已确认)
 - **jdk11u 源码树只含 x86 平台**(cpu/ 只有 x86,os/ 只有 linux/posix)——不要断言其他平台的实现细节
 - 常用实证: **Temurin OpenJDK 11.0.32 在 /data/tmp/opencode/jdk11**(与 jdk11u 同版本,实证首选);Temurin 17 在 /data/tmp/opencode/jdk17(含 src.zip 可查 API 变迁);TencentKona 17/21 在 /opt/codev/
-- 本会话关键源码位置: templateInterpreter.cpp/hpp、templateTable.cpp、interpreterRuntime.cpp(:148-215 ldc/resolve_ldc、:217 _new、:749 monitorenter、:1176 at_safepoint、:1008 frequency_counter_overflow)、interfaceSupport.inline.hpp(:445 IRT_ENTRY、:468 JRT_ENTRY、:111-123 ThreadStateTransition)、unsafe.cpp(1122 行)、whitebox.cpp(2360 行)、forte.cpp(668 行)、verifier.cpp(2913 行)、verificationType.hpp/cpp、metaspaceShared.cpp(2184 行)、filemap.hpp/cpp(1515 行)、systemDictionaryShared.cpp(1071 行)、compactHashtable.cpp(529 行)、heapShared.cpp(862 行)
+- 本会话关键源码位置: templateInterpreter.cpp/hpp、templateTable.cpp、interpreterRuntime.cpp(:148-215 ldc/resolve_ldc、:217 _new、:749 monitorenter、:1176 at_safepoint、:1008 frequency_counter_overflow)、interfaceSupport.inline.hpp(:445 IRT_ENTRY、:468 JRT_ENTRY、:111-123 ThreadStateTransition)、unsafe.cpp(1122 行)、whitebox.cpp(2360 行)、forte.cpp(668 行)、verifier.cpp(2913 行)、verificationType.hpp/cpp、metaspaceShared.cpp(2184 行)、filemap.hpp/cpp(1515 行)、systemDictionaryShared.cpp(1071 行)、compactHashtable.cpp(529 行)、heapShared.cpp(862 行);ci 系: ciObject.cpp(handle 双通道)/ciObjectFactory.cpp(728 行,工厂缓存 :305-334)/ciInstanceKlass.cpp(:599 implementor,:713 dump_replay_data)/ciMethod.cpp(:965 ensure_method_data)/ciField.cpp(:246 initialize_from,:257-291 is_constant)/ciMethodData.cpp(:170 load_data)/ciTypeFlow.cpp(3048 行,:272 type_meet,:2727 flow_types)/bcEscapeAnalyzer.cpp(:167 set_global_escape,:1201 do_analysis)/ciReplay.cpp(:1074 replay_impl,:1115/:1206 initialize)/ciEnv.cpp(:215 析构,:1231 dump_replay_data_unsafe,:947 register_method);编译器系: compileBroker.cpp(2841 行,:464 select_task 调用,:1479 assign_compile_id,:2062 invoke_compiler_on_method,:1532 create_compile_task)/compileTask.hpp(CompileReason :48-59)/tieredThresholdPolicy.cpp(980 行,:44/:65 predicate helper,:202 initialize 线程数,:285 select_task,:371 event,:715 common,:676-712 转换图注释,:884/:903 两事件)/compilerDefinitions.hpp(CompLevel :54-63);safepoint 系: safepoint.hpp(三态 :61-66,counter :112-119,ThreadSafepointState :228-277)/safepoint.cpp(1474 行,:155 begin,:499 end,:731 do_cleanup_tasks,:647 ParallelSPCleanupTask::work,:816 block,:1045 examine_state_of_thread,:440 no_op_safepoint_needed)/safepointMechanism.cpp(:36 default_initialize,armed/disarmed 值 :50-76)/safepointMechanism.inline.hpp(local_poll_armed :32-35,arm/disarm :50-57)/safepointVerifiers.hpp(NoSafepointVerifier :89-104 线程计数)/safepointVerifiers.cpp(NoGCVerifier :8-28 total_collections)/jniFastGetField.hpp(:29-49 双加载)/macroAssembler_x86.cpp(:3744-3761 safepoint_poll)/c1_LIRAssembler_x86.cpp(:558-593 C1 deref 轮询)/x86_64.ad(:1099-1102 C2 deref 轮询)/vmOperations.hpp(VM_OPS_DO :48-132 ~84 种,Mode :136-141)/vmThread.hpp(VMOperationQueue :39-85,queue_peek lock-free :68)/vmThread.cpp(:457 loop,:663 execute,:403 evaluate_operation,:622-624 每轮 notify_all,:494-505 超时空 safepoint)
 
 ### 6.5 实证方法论新增(本会话沉淀)
 - **javap 原始字节分析**: javap 显示是"解释过的",原始证据要 xxd/hexdump——44-02 的双槽证据是 `fd 00 05 04 04 04`(append 的 number_of_locals=4 vs 类型项 2 个),不是 javap 的 `[ long, long ]`
@@ -231,6 +234,11 @@
 - **CDS 实证**: -Xshare:dump 生成 jsa;-Xlog:cds 看校验;-Xlog:class+load 看 "shared objects file" 来源
 - **JDK 版本对比**: 用 Temurin 17 的 src.zip 验证 API 变迁(defineAnonymousClass 在 17 已移除)
 - **JDK11 的 --illegal-access=permit**: 反射非导出包仅告警仍可用(实测无 --add-opens 通过);JDK16+ 才需 --add-opens
+- **-Xlog 标签库(本会话高频)**: -Xlog:cds/class+load(CDS)、-Xlog:compilation 无(JDK11 用 PrintCompilation)、-Xlog:safepoint(Entering/Leaving/Total time stopped)、-Xlog:vmthread=debug(Adding→Evaluating 对)、-Xlog:os(轮询页地址);diagnostic 可用: CIPrintCompileQueue(globals.hpp:1110)、CIPrintRequests 是 develop 不可用
+- **开关对照实验**: -XX:-EliminateAllocations/-XX:-DoEscapeAnalysis(标量替换证明,12-02);-XX:TieredStopAtLevel=1/3(分层阶梯实证,13-02);-XX:-ThreadLocalHandshakes(轮询模式对照,18-02)
+- **develop/notproduct flag 清单(release 不可用,别在实证里用)**: CITraceTypeFlow/CIPrintTypeFlow(globals.hpp:1139/1142)、CIPrintRequests(:1114)、ReplayCompiles(globals.hpp:2048)、PrintEscapeAnalysis/PrintEliminateAllocations(c2_globals.hpp:537/543)、CICountOSR、CIStart/CIStop;PrintSafepointStatistics 是 product 但 JDK11 deprecated(可用)
+- **DumpReplay 可在 release 用**(CompileCommand option),生成 replay_pid%p_compid%d.log;replay 文件行格式先读 dump_replay_data 源码再解读(ciMethod 行 5 数字/ciMethodData orig/data/oops 段/compile 行内联树)
+- **jcmd 触发链实证**: GC.run→G1CollectFull 操作、Thread.print→PrintThreads+FindDeadlocks;每个 safepoint 原因=一个 VM_Operation 名
 - **static final 陷阱**: 静态块里用限定名(ClassName.field)给 final 赋值,javac 报 "cannot assign a value to final variable"(非限定名 OK)
 
 ### 6.6-6.20 旧会话经验(06/16/38/41/42/07/09/17/10/19/23/24 域)——略,详见 git 历史
