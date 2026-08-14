@@ -3,6 +3,16 @@
 > 🔴 Deep | 2 KP 中的核心同步原语
 > 读者处境: GC 需要扫描所有线程的栈——不能有线程在修改对象。怎么让 200 个线程在同一个瞬间全部停下来，然后 GC 做完再一起继续？
 
+> ⚠️ 写作期修正(2026-08-13, vol-02/18-safepoint/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"两阶段 spin→block" 简化**: 真实三档递进(safepoint.cpp:390-398): SpinPause(PAUSE)→naked_yield(_defer_thr_suspend_loop_count=4000 前,safepoint.cpp:148)→naked_short_sleep(1)(注释 :338-339: OS 把短睡取整到 10ms);然后 Safepoint_lock->wait(:423),最后线程到达 notify_all 唤醒 VM 线程(:866-867)
+> - **"safepoint_counter 快速路径=一条 testb+jnz" 简化**: JDK11 是 jniFastGetField 汇编(jniFastGetField.hpp:29-49): 偶数时**投机读字段+二次加载 counter 校验**(双加载,防读取中 GC);counter 还有两个消费者: ciMethodData::has_safepointed(ciMethodData.cpp:59-81,编译期 safepoint 检测)+dependencyContext 断言(dependencyContext.hpp:121-127)
+> - **"end 里 Safepoint_lock->notify_all 叫醒等待线程" 错**: 等待线程阻塞在 **Threads_lock** 上(block :882 lock_without_safepoint_check),end() 的 Threads_lock->unlock(:590)放行;Safepoint_lock 的 notify_all 只唤醒 VM 线程本人(最后线程到达时 :866-867)
+> - **"do_cleanup_tasks 用 SerialSafepointCleanupTask 串行执行 7 项" 类名编造**: 真实=do_cleanup_tasks(safepoint.cpp:731)用 **GC WorkGang 并行或 VM 线程串行**跑 `ParallelSPCleanupTask::work`(:647): 线程级(deflate monitors+mark nmethods)+7 子任务(is_task_claimed: deflate idle monitors/update IC/compilation policy/Symbol rehash/String rehash/CLD purge/dictionary resize);**cleanup 在 begin() 内**(同步完成后 :481),不是独立阶段
+> - **is_cleanup_needed 用途补**: `no_op_safepoint_needed`(vmThread.cpp:440)——**无待办 VM op 时**决定是否发"空 safepoint"做 cleanup(或 GuaranteedSafepointInterval 兜底);实证日志 "Entering safepoint region: Cleanup"
+> - **begin 细节**: Threads_lock(:169)防线程进出;waiting_to_block=nof_threads(:185);_state=_synchronizing(:242);thread-local poll(arm_local_poll :244-252)或全局 page(PageArmed+make_polling_page_unreadable+Interpreter::notice_safepoints :260-268,信号侧 01-os/04);serialize_thread_states(:257,mprotect 序列化写);examine_state_of_thread(:1045)逐线程点名(挂起/安全→_at_safepoint;vm→_call_back;其他保持 running)
+> - **end 细节**: counter++ 偶数(:503,先于 state 复位——JNI fast path 语义);disarm page(:527-532)+ignore_safepoints(:534);thread-local: 先 state 复位再逐线程 restart+disarm(:544-553);全局: state 复位+逐个 restart(:554-583);Threads_lock->unlock(:590);_end_of_last_safepoint(:597)
+> - **实证**: 18-safepoint-demo.txt(-Xlog:safepoint: Entering/Leaving/Total time stopped/Stopping threads took/Application time;PrintSafepointStatistics product flag JDK11 deprecated 可用,统计表 vmop[threads: total/initially_running/wait_to_block][time: spin/block/sync/cleanup/vmop] page_trap_count;Cleanup 空 safepoint)
+
 ### 1. "三态机 — 从奔跑→停下→奔跑"
 
 场景: VM thread 发起一次 safepoint（如做 GC）——它要协调所有 Java 线程从"在跑 Java code"切换到"停在安全点等 VM thread"。
