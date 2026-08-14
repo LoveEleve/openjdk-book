@@ -37,7 +37,7 @@
 
 ## 2. JDK 侧怎么接上: 注册表 + 链接期符号
 
-`System.currentTimeMillis` 的 native 声明(System.java:396)怎么连到 `JVM_CurrentTimeMillis`?看 **libjava 的 System.c:39**(注册表):
+`System.currentTimeMillis` 的 native 声明(System.java:396)怎么连到 `JVM_CurrentTimeMillis`?看 **libjava 的 System.c:38**(注册表):
 
 ```cpp
 // System.c:25-48(截取核心,逐字)
@@ -117,7 +117,7 @@ extern "C" {                                                         \
     VM_ENTRY_BASE(result_type, header, thread)
 ```
 
-**`JVM_ENTRY` = 27 域 JNI_ENTRY 的同族**(差异: JNI_ENTRY 还带 `WeakPreserveExceptionMark` 保护挂起异常,jvm.cpp 的入口不需要;调试包装 `VMNativeEntryWrapper` 是 debug-only): `thread_from_jni_environment(env)` 从 JNIEnv 反查线程 + `ThreadInVMfromNative` 状态转换(native→VM,17-04 的通道)+ `VM_ENTRY_BASE` 建 HandleMark。绝大多数 JVM_* 用它——`JVM_StartThread`(jvm.cpp:2857)进来后创建 JavaThread、`JVM_DefineClass`(:949)进入类定义流程、`JVM_FindLoadedClass`(:962)查已加载类(11 域的 AppCDS 拦截点就是它)。少数**纯函数**用 `JVM_LEAF`(:588-592: `VM_Exit::block_if_vm_exited` + `VM_LEAF_BASE` 的 `NoHandleMark`,不做状态转换不碰堆)——`JVM_CurrentTimeMillis`(:271-274)正是 JVM_LEAF:
+**`JVM_ENTRY` = 27 域 JNI_ENTRY 的同族**(差异: JNI_ENTRY 还带 `WeakPreserveExceptionMark`,JVM_ENTRY 没有;调试包装 `VMNativeEntryWrapper` 是 debug-only): `thread_from_jni_environment(env)` 从 JNIEnv 反查线程 + `ThreadInVMfromNative` 状态转换(native→VM,17-04 的通道)+ `VM_ENTRY_BASE` 建 HandleMark。绝大多数 JVM_* 用它——`JVM_StartThread`(jvm.cpp:2857)进来后创建 JavaThread、`JVM_DefineClass`(:949)进入类定义流程、`JVM_FindLoadedClass`(:962)查已加载类(11 域的 AppCDS 拦截点就是它)。少数**纯函数**用 `JVM_LEAF`(:588-592: `VM_Exit::block_if_vm_exited` + `VM_LEAF_BASE` 的 `NoHandleMark`,不做状态转换不碰堆)——`JVM_CurrentTimeMillis`(:271-274)正是 JVM_LEAF:
 
 ```cpp
 // jvm.cpp:271-274(逐字)
