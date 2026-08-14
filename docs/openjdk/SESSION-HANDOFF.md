@@ -88,7 +88,7 @@
 **44-class-verification/01(ClassVerifier)**: 正文 f510ced → 回填 8c22eb0(⚠️ 7 条,大纲行号全对,补充机制为主)→ README 471a9da(72/152)→ HANDOFF ac47702 → **第 3 轮** 943f66b(接口可赋值特例 数组只可赋 Cloneable/Serializable verificationType.cpp:47-77/<init> 必须 void :2725-2742)
 **44-class-verification/02(VerificationType)**: 正文 97cceb3 → 回填 9ec3c4b(⚠️ 7 条)→ README 838b56d(73/152,**第 4 批收官**)→ HANDOFF bb16581 → **第 3 轮** 0bd8215(实证解读修正: [ long, long ] 是 2 个 long 变量,双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 fd 00 05 04 04 04)
 **11-cds/01(CDS 全景与 Dump)**: 正文 171bf24 → 回填 a9dafe0(⚠️ 8 条)→ README a35de82(74/152,第 5 批开篇)→ HANDOFF ca5ccc8 → **第 3 轮** 5375e05(java_mirror 移除与 remove_unshareable 分列两函数 :501/:489/narrow_klass_base 重合=主动设计 set_narrow_klass_base(_shared_rs.base()) :305/classlist 行数断言删除)
-**11-cds/02(CDS Load 端,11 域收官)**: 正文 e8f9905 → 回填 2e9bc6c(⚠️ 13 条)→ README 529c91d(75/152,11 域完结,第 5 批 2/13)→ 素材 11-cds-load-demo.txt(gitignore)
+**11-cds/02(CDS Load 端,11 域收官)**: 正文 e8f9905 → 回填 2e9bc6c(⚠️ 13 条)→ README 529c91d(75/152,11 域完结,第 5 批 2/13)→ 素材 11-cds-load-demo.txt(gitignore)→ **第 3 轮** ff00933(①SymbolTable lookup 顺序表述错——实际初始先查动态表,_lookup_shared_first 是"最近命中方优先"启发式,symbolTable.cpp:242-258,字符串表才固定先共享;②_adapter_trampoline 位置错——在 ConstMethod(constMethod.hpp:212),指向 RW 区槽初始 NULL,非"RW 区字段";③MAP_FIXED 不报错(占用时静默替换),兜底靠 map_region 的 base != requested_addr;顺带补 COW 细节: ro 纯共享、rw/mc 写脏后 COW;④01 篇承诺的"rw 区加载期 patch"明确化(方法入口 trampoline/adapter 槽,第 6 节);⑤lookup_from_stream 调用行号 :1074→:1072)
 
 **本会话新增素材**(全部 gitignore 不入库,在 materials/commands/):
 - `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
@@ -318,6 +318,7 @@
 - **验证约束兑现**: 共享类 link_class 跳过 verify/rewrite 改 check_verification_constraints(instanceKlass.cpp:805-807→systemDictionaryShared.cpp:911-941);dump 端记录触发点 verificationType.cpp:97-103
 - **实证方法论**: 默认归档路径实测=lib/server/classes.jsa(jvm_path 解析);坏 magic 用 dd 改前 4 字节(printf '\x00\x00\x00\x00'|dd of=... bs=1 seek=0 conv=notrunc);classpath mismatch 需先归档应用类(SharedClassListFile 加 T,jar 路径——非空目录 dump 直接拒绝 "Cannot have non-empty directory in paths");Xmx1g 触发 oop 编码不匹配但归档照用(delta=-28991029248)
 - 实证: 11-cds-load-demo.txt(素材清单见 §五)
+- **第 3 轮**: ①SymbolTable::lookup 顺序(symbolTable.cpp:242-258)初始 false=先动态后共享,共享命中置 true 后先共享,"最近命中方优先"启发式——字符串表才固定先共享(stringTable.cpp:240-249);②_adapter_trampoline 在 ConstMethod(constMethod.hpp:212)指向 RW 槽,非 RW 字段;③MAP_FIXED 占用即静默替换不报错,靠 base != requested_addr 兜底;ro 纯共享、rw/mc 写脏 COW;④rw 区加载期 patch=01 篇承诺的尾巴,文中明确(第 3 节关键设计+第 6 节);⑤lookup_from_stream 调用点 parse_stream=systemDictionary.cpp:1072(非 1074)
 
 ### 6.29 11-01(CDS 全景与 Dump,第 5 批开篇,大纲 8 处漂移含 2 处机制编造 + 第 3 轮 REVIEW,2026-08-13)
 
