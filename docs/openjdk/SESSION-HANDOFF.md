@@ -351,6 +351,18 @@
 - **深审抓到的实质错误**: ①批量撤销触发机制(update_heuristics 计数,非"堆扩容");②ChunkPoolCleaner 真实语义(BlocksToKeep=5 其余 os::free);③StubRoutines 两阶段原因(RuntimeStub 可重定位,非代码缓存);④停机顺序(先停线程后注销任务,初稿写反);⑤VMThread 优先级注释("must be lower",初稿"不能高于"半对);⑥init.cpp:124 注释凭记忆多加 ", loads primordial classes"(真实在 :68 声明处)
 - 实证: 20-background-init-demo.txt(素材清单见 §五)
 
+### 6.49 32-jfr/04(Binary Writer + Chunk Format,32 域 4/6,大纲 9 组漂移含 4 处机制编造 + 深审 2 轮,2026-08-14)
+
+- **"jfrBinaryWriter.cpp" 编造**: 写出=WriterHost 模板(jfrWriterHost.hpp/inline): BE 大端(BigEndianEncoderImpl jfrEncoders.hpp:52,be_write :118 浮点/布尔/长度头)+IE(Varint128EncoderImpl :159)+存储策略(JfrEventWriter/JfrCheckpointWriter/JfrChunkWriter)
+- **"magic(0xCAFEBABE)" 编造**: 32-01 实证 FLR\0(464c5200)+版本 2.0+6×8 头槽+频率+compressed 标志;0xCAFEBABE 是 class 文件 magic
+- **"jfrLeb128.hpp/cpp" 编造**: 真实=jfrEncoders.hpp **Varint128EncoderImpl**(:159-210: ext_bit=0x80,7 位数据+扩展位,LEB128 同族);**compressed_integers 恒 true**(jfrOptionSet.cpp:146-149 "Set this to false for debugging purposes"——不可关);write 分派(jfrWriterHost.inline.hpp:84-89 _compressed_integers ? IE : BE);**负值最费字节**(size_safety_cushion=1,:145-153 注释 s1(-1)→0xff 0x0f 2 字节)
+- **字符串五编码**: JfrStringEncoding(jfrEncoding.hpp NULL_STRING=0/EMPTY_STRING/STRING_CONSTANT/UTF8/UTF16/LATIN1);write_utf8(:92-100 NULL→NULL_STRING 标记)/write_utf16(:107-114);STRING_CONSTANT=线程/类/符号常量池条目字符串(事件写引用,与栈去重同构)
+- **"压缩 ~3-5x/100MB→25MB" 无依据**(删除)
+- **悬念指向 05 ✓**(32 域规划 **6 篇** 01-06,05-leak-profiler/06-jni-instrumentation;批次顺序先写完 32 域再进 34-nmt)
+- **实证方法论**: jfr print --xml(reader 还原 CPULoad 字段);xxd(32-01 交叉)
+- **第 3 轮** 329733b: STRING_CONSTANT 表述收敛(常量池条目字符串,非"写字符串时按需登记"推测)
+- 实证: 32-jfr-binary-demo.txt(素材清单见 §五)
+
 ### 6.48 32-jfr/03(Periodic Sampling,32 域 3/4,大纲 9 组漂移含 4 处机制编造 + 深审 2 轮,2026-08-14)
 
 - **"AsyncGetCallTrace 采样" 错(重要)**: 31-02 已证 JDK11 JFR 采样用 os::SuspendedThreadTask(jfrThreadSampler.cpp:114);采样循环 :452-500(semaphore+双间隔 next_j/next_n),每轮 5 个(:285 MAX_NR_OF_JAVA_SAMPLES)+next_thread 游标分摊
