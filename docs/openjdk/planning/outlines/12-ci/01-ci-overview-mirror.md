@@ -3,6 +3,18 @@
 > 🔴 Deep | 11 KP 中的 3 个核心机制
 > 读者处境: C2 编译 `String.length()`——它需要知道 String 的 `value` 字段在哪 (offset)。不能直接读 InstanceKlass——多了 C++ 虚函数和锁。ci 层是纯净的编译器镜像。
 
+> ⚠️ 写作期修正(2026-08-13, vol-02/12-ci/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"JIT 编译运行在 safepoint 中" 错**: 编译在编译线程并发跑,GC 时只是阻塞,编译状态跨 GC 存活;GC 安全靠双通道引用——oop→JNI local handle(ciObject.cpp:53-59,GC 重定位),Metadata(Metaspace 不移动)→裸指针;类注释 ciObject.hpp:40-44 "GC and compilation can proceed independently"
+> - **"ciObject 与 Klass 无继承关系/零虚函数" 半对**: ci 层有自己的层级(ciBaseObject→ciObject/ciMetadata);is_interface() 在 ciKlass 是 virtual,但 ciInstanceKlass 版本=ciFlags 位测试(内联,ciInstanceKlass.hpp:231→ciFlags.hpp:59)——"零虚函数"指热路径查询降级为快照位读
+> - **"多次编译同一个 Klass 返回同一个 ciKlass" 只对 well-known 类成立**: 工厂 per-编译(ciEnv 构造 ciEnv.cpp:131);全局共享部分=vmSymbols 全部 ciSymbol+基本类型 ciType+WK_KLASSES_DO 的 well-known ciInstanceKlass(ciObjectFactory.cpp:123-206,ciEnv::_Object 等静态);ident 分段 _shared_ident_limit(:204)
+> - **"oop→ciObject 映射 GrowableArray" 半对**: 两个缓存——_ci_metadata 排序数组(Metadata 指针不移动,find_sorted 二分,ciObjectFactory.cpp:292-335)+_non_perm_bucket[61] 哈希桶(oop 会移动不能排序,get :238-259)
+> - **"unique_concrete_method / DFA / _implementors 列表" 编造**: 真实=①implementor() 三态指针 _implementor(ciInstanceKlass.hpp:70-74: NULL/一个/自身=多个,nof_implementors :165;懒计算+备忘 ciInstanceKlass.cpp:599;**共享类假设无唯一实现者** :604);②unique_concrete_subklass(ciInstanceKlass.cpp:370)=up_cast_abstract(:376),无 "DFA" 概念
+> - **"is_c1_compilable 检查方法大小/MDO 充足" 错**: =Method access_flags 的两个位(is_not_c1_compilable,method.hpp:949),ciMethod 构造抄取(ciMethod.cpp:88-89);方法大小=_code_size 快照(:82),内联规模决策用
+> - **"is_constant=final+static" 太粗**: 完整判定(ciField.cpp:257-291)=①static final(排除 System.in/out/err 按偏移,:261-270)或 @Stable(FoldStableValues,:257-258)→true;②非 static final 需信任名单 trust_final_non_static_fields(:216: java.lang.invoke/sun.invoke 包/匿名类/装箱类/String/Atomic*FieldUpdater/TrustFinalNonStaticFields flag);③CallSite.target 特例(:281-286);否则 false
+> - **"is_subtype_of 查缓存 subtype list" 错**: 直接转发 Klass::is_subtype_of(ciKlass.cpp:68-80,VM_ENTRY_MARK 进 VM;VM 侧是 super_check_offset 指针比较,06 域)
+> - **缺机制(大纲无)**: ①共享类(CDS)快照特殊处理 update_if_shared(ciInstanceKlass.hpp:109-113)——归档类 _init_state 旧值,is_initialized/is_linked 查询时 compute_shared_init_state 现算(11 域呼应);②hotswap 检查 Dependencies::check_evol_method(ciMethod.cpp:102-110,redefine 过的方法两 compilable 置 false);③依赖登记: ciEnv 持 Dependencies(ciEnv.hpp:57/313),validate_compile_task_dependencies(ciEnv.cpp:933)——编译假设失效→nmethod 作废(22 域);④unloaded 镜像语义 is_loaded()=handle()!=NULL||is_classless(ciObject.hpp:138),编译器必须处理"缺失";⑤解释器计数快照(ciMethod.cpp:137-148,"commensurate with the MDO");⑥lazy 字段体系(_super/_java_mirror/_nonstatic_fields/compute_nonstatic_fields,ciInstanceKlass.hpp:63-68/:105)
+> - **实证**: 12-ci-inlining-demo.txt(PrintCompilation+PrintInlining: CiDemo::work 内联树 String::length(11 bytes)→coder→isLatin1;接口调用 ShapeHolder.shape()→Square.area() 内联,依据 \-> TypeProfile (87426/87426 counts)=CiDemo$Square;tier3→%tier4→made not entrant :32/39/40);编译链对照 08-interpreter-counterdemo.txt
+
 ### 1. ci 层是什么 — 为什么需要镜像？
 
 场景: JIT 编译器 (C1/C2) 运行在 safepoint 中——它需要读 Klass/Method/Field 的元数据——但 Klass 是 C++ 虚基类——每次 `klass->is_interface()` 是虚函数 dispatch。**编译器中大量重复调用——虚函数开销不可接受。且 Klass 可能被 GC 改变 (class redefine)。**
