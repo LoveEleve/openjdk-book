@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **78/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 5) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 5/13,**11-cds/12-ci 域完结** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **79/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 6) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 6/13,**11-cds/12-ci 域完结**,13-jit-framework 1/2 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 13-jit-framework/01(CompileBroker 编译队列,大纲 `planning/outlines/13-jit-framework/01-compile-broker-queue.md`;12-ci/03 悬念指向它: 编译任务怎么排队)。
+**下一步(唯一,无选择)**: 13-jit-framework/02(TieredThresholdPolicy,大纲 `planning/outlines/13-jit-framework/02-tiered-compilation-policy.md`;"5 层编译策略";13-jit-framework/01 悬念指向它: 为什么 tier3→%tier4→tier4)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,74 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -93,6 +93,7 @@
 **12-ci/01(ciObject 镜像体系,12 域开篇)**: 正文 4fe2ebf → 回填 13bae76(⚠️ 9 条)→ README e7ee1d1(76/152,12 域 1/3)→ 素材 12-ci-inlining-demo.txt(gitignore)→ **第 3 轮** 3dc78e4(①"资源区"错——ciEnv 的 _ciEnv_arena 是 C 堆上的 mtCompiler Arena,非 ResourceMark 资源区;②is_interface 虚分派细节——ciKlass.hpp:97 基类仍 virtual,内联位测试仅当静态类型是 ciInstanceKlass 时才成立,大纲"零虚函数"只对了一半;③update_if_shared 是"快照值与查询目标不一致才现算"(ciInstanceKlass.hpp:109-113),非每次查询;④will_link 引用节号 6→5)
 **12-ci/02(ciTypeFlow + bcEscapeAnalyzer,12 域 2/3)**: 正文 f06d6fa → 回填 63c7534(⚠️ 10 条)→ README b9aeac8(77/152,12 域 2/3)→ 素材 12-ci-typeflow-escape-demo.txt(gitignore)→ **第 3 轮** d4d2fe8(①is_recursive_call 语义错——_parent 链用于**递归检测**(callee 是否在调用链上,:206-207),非"借用父分析";②get_start_state 行号 :346→:363;③Parse 消费方式精确化——解析以 flow 块图为骨架(rpo_at/successors/exceptions,parse1.cpp:1250/1274-1275),OSR 场景才用块类型(:223/346);④do_analysis 入口跳过条件补全: abstract/native/持有者未初始化/深度超 MaxBCEAEstimateLevel/大小超 MaxBCEAEstimateSize→全保守(:1302-1316))
 **12-ci/03(ciObjectFactory + ciReplay,12 域收官)**: 正文 aef0f86 → 回填 55ece51(⚠️ 9 条)→ README 524cb48(78/152,12 域完结,第 5 批 5/13)→ 素材 12-ci-replay-demo.txt(gitignore)→ **第 3 轮** c1353f2(①ciInstanceKlass 行解读错——真实=is_linked/is_initialized/cp_length+**常量池 tags**(ciInstanceKlass.cpp:713),不是"布局信息";②staticfield 行=**static final 字段**(is_initialized() 才打印,:740-744,注释 "in case the compilation relies on their value"),非所有静态字段;③orig 段措辞: 计数器"藏于头部字节"非"前两个值就是计数"(小端字节);④共享镜像长命 Arena 例外补注)
+**13-jit-framework/01(CompileBroker 编译队列,13 域 1/2)**: 正文 934721b → 回填 1977a6b(⚠️ 7 条)→ README 888bfee(79/152,13 域 1/2,第 5 批 6/13)→ 素材 13-jit-broker-demo.txt(gitignore)
 
 **本会话新增素材**(全部 gitignore 不入库,在 materials/commands/):
 - `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
@@ -185,7 +186,7 @@
 | 命令输出 | `materials/commands/` 140+ 文件 | jcmd/jstat/jmap 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材**(详见 §二 commit 清单,共 14 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt
+**本会话新增素材**(详见 §二 commit 清单,共 15 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt / 13-jit-broker-demo.txt
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
@@ -310,7 +311,18 @@
 - **第 3 轮**: 实证解读修正([ long, long ] 是 2 个 long 变量(loop 的 sum+i),双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 `fd 00 05 04 04 04`)
 - 实证: 08-verificationtype-javap.txt
 
+### 6.34 13-01(CompileBroker 编译队列,13 域 1/2,大纲 7 处漂移含 3 处编造 + 深审 2 轮,2026-08-13)
+- **"compute_priority 优先级排序" 编造**: 双 FIFO 队列(_c1/_c2_compile_queue,compileBroker.hpp:179-180),compile_queue(comp_level) 按级别分流(C1 1-3/C2 4);add 队尾追加;NearMaxPriority(:803)=OS 线程优先级
+- **"状态机 in_queue→assigned→compiling→compiled→failed" 编造**: 只有 _is_complete/_is_success/_is_blocking(compileTask.hpp:83-85);"进行中"=CompileTaskWrapper 存活期(构造 assign :250,析构收尾 :262: set_task(NULL)+set_code_handle(NULL)+set_env(NULL)+mark_complete+notify_all)
+- **"超时 2min" 编造**: _time_queued 只用于日志(compileTask.cpp:317);无超时取消;JVMCI wait_for_jvmci_completion(:1573,10×1s)
+- **"c1 1 线程/c2 2 线程" 半对**: CI_COMPILER_COUNT=2(C2 构建,globals.hpp:104),但 LP64 默认 CICompilerCountPerCPU 自适应(count=MAX2(log2cpu×log2log2cpu×3/2,2),tieredThresholdPolicy.cpp:214)+code cache 缓冲上限(:219-223);c1=MAX2(count/3,1)/c2=MAX2(count-c1,1)(:244-245);实证本机 15(ergonomic)
+- **缺机制**: ①CompileReason 九种(compileTask.hpp:48-59)+can_become_stale(:124,非阻塞计数任务才可过期)+purge_stale_tasks("stale task" 原因,compileBroker.cpp:484-501);②compile_id=全局递增 Atomic::add(assign_compile_id :1479,OSR 在 develop CICountOSR 独立)+CIStart/CIStop;③拒绝链(compilation_is_in_queue :1080/complete :1062/is_old :1320/native 预查 :1307/C2 签名类解析 :1295);④执行段: push_jni_handle_block(:2110,ci local handle 容器)→ciEnv ci_env(task)(:2150)→comp->compile_method(:2180)→post_compile;⑤第一个编译线程 ciObjectFactory::initialize(:1802);⑥阻塞编译 should_wait_for_compilation(compileTask.hpp:135-147);⑦UseDynamicNumberOfCompilerThreads 线程退出(:1836-1851)
+- **OopMap 不属于本篇**: 消费侧 24-03 已讲,生成侧属 C2 寄存器分配——大纲放错
+- **实证方法论**: CIPrintCompileQueue 是 diagnostic flag(globals.hpp:1110)release 可用;CICompilerCountPerCPU 自适应;compile_id 与 DumpReplay compid 同源(PrintCompilation 76/77/78 ↔ replay compid76/77/78)
+- 实证: 13-jit-broker-demo.txt(素材清单见 §五)
+
 ### 6.33 12-03(ciObjectFactory + ciReplay,12 域收官,大纲 9 处漂移含 4 处编造 + 深审 2 轮,2026-08-13)
+
 - **"析构遍历释放" 编造**: ciEnv::~ciEnv(ciEnv.cpp:215)只有两件事=remove_symbols+set_env(NULL)(GUARDED_VM_ENTRY,注释 "RedefineClasses might be reading it");所有 ci 对象在 _ciEnv_arena,**Arena 随 ciEnv 析构一次释放**,无逐个 delete
 - **"ciEnv::initialize_from_replay/create_from_replay_data" 编造**: 真实=主线程启动处 jni.cpp:4050 `if (ReplayCompiles) ciReplay::replay(thread)`(debug-only)→replay_impl(ciReplay.cpp:1074)CompileReplay 读文件 process→**编译照常走工厂**+ciReplay::initialize 钩子(ciMethodData* :1115: 录制类/方法指针经 env->get_metadata 在当前环境重解析 :1146/:1152 后回填 data;ciMethod* :1206: 回填解释器计数+MethodCounters 计数)覆盖录制值
 - **"ciMethodData 在 ciMethod 构造时创建/一次性复制" 错**: 懒创建 ensure_method_data(ciMethod.cpp:965)——native/abstract/accessor 跳过(:967),无 MDO 当场 build_interpreter_method_data(:971),失败空 MDO(:980);load_data(ciMethodData.cpp:170)=原子拷贝(disjoint_words_atomic)MDO 头+data 进 ciEnv Arena(:205-215,注释 "Any concurrently executing threads may be changing the data as we copy it" :181)+oop 翻译(:224-229);构造仅占位(:40-54 全初值)
@@ -404,7 +416,8 @@
 - [x] **12-ci/01**(ciObject 镜像体系)——✅ 完结(正文 4fe2ebf/回填 13bae76/README e7ee1d1,commit 见 §二);12 域 1/3
 - [x] **12-ci/02**(ciTypeFlow + bcEscapeAnalyzer)——✅ 完结(正文 f06d6fa/回填 63c7534/README b9aeac8,commit 见 §二);12 域 2/3
 - [x] **12-ci/03**(ciObjectFactory + ciReplay)——✅ 完结(正文 aef0f86/回填 55ece51/README 524cb48,commit 见 §二);**12 域完结,第 5 批 5/13**
-- [ ] **13-jit-framework/01**(CompileBroker 编译队列)——**下一篇**;大纲 `planning/outlines/13-jit-framework/01-compile-broker-queue.md`(注意目录名 13-jit-framework,大纲文件名 01-compile-broker-queue.md);12-ci/03 悬念指向它
+- [x] **13-jit-framework/01**(CompileBroker 编译队列)——✅ 完结(正文 934721b/回填 1977a6b/README 888bfee,commit 见 §二);13 域 1/2
+- [ ] **13-jit-framework/02**(TieredThresholdPolicy)——**下一篇**;大纲 `planning/outlines/13-jit-framework/02-tiered-compilation-policy.md`;13-01 悬念指向它: 为什么 tier3→%tier4→tier4→made not entrant
 - [ ] 13-jit-framework 完结后 → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 9 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -444,8 +457,8 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/13-jit-framework/01-compile-broker-queue.md(注意 ⚠️ 块——12-ci/03 大纲已回填 9 条,13 域大纲大概率同样漂移;12-ci/03 悬念指向它: 编译任务怎么排队)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;13-jit-framework 是编译调度,重点: CompileBroker::compile_method(谁触发编译)、compile queue 结构(CompileQueue: 普通/OSR 队列?)、CompilerThread 生命周期、编译任务状态机(CompileTask: in_compile/in_queue/waiting 等)、与 08-03 计数器(CompileThreshold 触发)和 12-ci(ciEnv 创建点)的衔接;实证: jdk11 的 -Xlog:compilation 或 PrintCompilation(08-interpreter-counterdemo.txt 已有 tier 链素材)+ jcmd Compiler.* 命令)
+1. 读 planning/outlines/13-jit-framework/02-tiered-compilation-policy.md(注意 ⚠️ 块——13-01 大纲已回填 7 条,02 大概率同样漂移;13-01 悬念指向它: 为什么 tier3→%tier4→tier4→made not entrant)
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;02 是分层编译策略,重点: TieredThresholdPolicy 的阈值体系(Tier*InvokeThreshold/Tier*BackEdgeThreshold)、方法成熟度(rate 计算/mature)、级别推进规则(何时从 tier2→tier3、tier3→tier4)、OSR 与普通编译的不同策略、method_data 在策略中的作用;与 08-03 计数器、13-01 broker、08-interpreter-counterdemo.txt 素材的衔接;实证: jdk11 跑 CounterDemo 系观察 tier 链 + PrintFlagsFinal 看阈值)
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
 5. 13-jit-framework 完结后 → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 9 域)
