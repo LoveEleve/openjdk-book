@@ -22,7 +22,7 @@ inline u1* WriterHost<BE, IE, WriterPolicyImpl>::write(const T* value, size_t le
 }
 ```
 
-- **BE**(大端编码器,`BigEndianEncoderImpl`,jfrEncoders.hpp:52): 固定宽度大端——浮点/布尔/长度头用 `be_write`(jfrWriterHost.inline.hpp:118);
+- **BE**(大端编码器,`BigEndianEncoderImpl`,jfrEncoders.hpp:52): 固定宽度大端——浮点/布尔用 `be_write`(jfrWriterHost.inline.hpp:118-129);字符串数据体也经 be_write 直拷(标记与长度走 write 变长编码,见 §3);
 - **IE**(整数编码器): 默认 `Varint128EncoderImpl`(jfrEncoders.hpp:159)——见 §2;
 - **存储策略**: 事件写进 JfrBuffer(`JfrEventWriter`)、检查点写常量池(`JfrCheckpointWriter`)、chunk 写文件(`JfrChunkWriter`)——同一套编码,三种落地。
 
@@ -79,7 +79,8 @@ void WriterHost<BE, IE, WriterPolicyImpl>::write_utf8(const char* value) {
          start nanos/duration/start ticks)+ 频率 + compressed 标志]
 [initial checkpoint: 常量池(线程/类/栈轨迹/字符串)]
 [metadata: 事件类型 schema(32-02)]
-[事件数据: [type_id][时间戳][字段...]——整数字段 Varint128,字符串编码标记+长度+数据]
+[事件数据: [u4 事件大小][type_id][时间戳][字段...]——大小槽在 begin 时预留、end 时回填
+         (jfrEventWriterHost.inline.hpp:56-76),整数字段 Varint128,字符串=编码标记+长度+数据]
 [chunk 结束: 写回头部偏移,轮转(32-01)]
 ```
 
@@ -87,7 +88,7 @@ void WriterHost<BE, IE, WriterPolicyImpl>::write_utf8(const char* value) {
 
 ## 核心悬念
 
-二进制层拆完: 写出一套 `WriterHost` 模板(大端固定宽 + Varint128 变长 + 存储策略),压缩整数是默认格式(恒 true 不可关),字符串按编码标记(NULL/常量/UTF8/UTF16/LATIN1)+长度+数据写,事件体=type_id+时间戳+字段——reader 按同一规则还原([实证](planning/outlines/00-jvm-tools/materials/commands/32-jfr-binary-demo.txt) `jfr print --xml` 的字段值就是这么来的)。chunk 自包含使 .jfr 可流式消费、可随机访问。
+二进制层拆完: 写出一套 `WriterHost` 模板(大端固定宽 + Varint128 变长 + 存储策略),压缩整数是默认格式(恒 true 不可关),字符串按编码标记(NULL/常量/UTF8/UTF16/LATIN1)+长度+数据写,事件体=u4 大小槽+type_id+时间戳+字段——reader 按同一规则还原([实证](planning/outlines/00-jvm-tools/materials/commands/32-jfr-binary-demo.txt) `jfr print --xml` 的字段值就是这么来的)。chunk 自包含使 .jfr 可流式消费、可随机访问。
 
 但 JFR 还有一个重量级的附加子系统没拆: **泄漏剖析(Leak Profiler)**——它利用 JFR 的事件与栈信息定位"对象从哪泄漏"(老年代对象/路径追踪),有自己的采样与检查点通道。下一篇: 泄漏剖析。
 
