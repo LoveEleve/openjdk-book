@@ -361,6 +361,7 @@
 - **"JfrDCmd" 编造**: JfrStartFlightRecordingDCmd 等 5 个(jfrDcmds.hpp:30-141);execute(jfrDcmds.cpp:376)=参数翻译→构造 jdk/jfr/internal/dcmd/DCmdStart→JavaCalls run()→Recording.start()→JVM 接口
 - **悬念指向 33 ✓**(目录=33-jmx-management)
 - **实证方法论**: 转换器/JNI 表/DCmd 链源码核对(32-jfr-jni-instrumentation-demo.txt)
+- **第 4 轮** bacb90a: 急切注入条件精确化('JfrRecording 中'→'Jfr::is_recording() 或 force_instrumentation')
 - 实证: 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
 
 ### 6.50 32-jfr/05(Old Object Sampling,32 域 5/6,大纲 8 组漂移含 2 处机制编造 + 深审 2 轮,2026-08-14)
