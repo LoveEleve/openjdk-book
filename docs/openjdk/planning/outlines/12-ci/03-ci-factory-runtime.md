@@ -3,6 +3,17 @@
 > 🟡 Working | 11 KP 中的 3 个辅助机制
 > 读者处境: ciObject 在编译中创建——编译后怎么释放？同一个 Klass 被多次编译——ciObject 复用了吗？调试 JIT bug 时——怎么重现编译？
 
+> ⚠️ 写作期修正(2026-08-13, vol-02/12-ci/03 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"ciObjectFactory::~ciObjectFactory 遍历释放" 编造**: 无析构遍历;ciEnv::~ciEnv(ciEnv.cpp:215)只有两件事=remove_symbols(归还符号引用计数)+set_env(NULL)(GUARDED_VM_ENTRY 下,注释 "RedefineClasses might be reading it");所有 ci 对象在 _ciEnv_arena 里,**Arena 随 ciEnv 析构一次释放**
+> - **"GC 安全: 编译在 safepoint 中" 错(01 篇已纠正)**: Metadata 安全靠 Metaspace 不移动;oop 走 JNI handle(随编译线程 handle block 清理)
+> - **"_unloaded_methods/_loaded_methods/_klasses 三表 lookup" 错**: lookup 是 _ci_metadata 排序数组二分(get_metadata,01 篇);_unloaded_methods/_unloaded_klasses/_unloaded_instances 只是未加载对象列表(ciObjectFactory.hpp:50-52)
+> - **"get(oop): _oop_ci_objects hashtable" 错**: 真实=_non_perm_bucket[61] 哈希(01 篇);"编译后 _oop_ci_objects 清除"→实际是 arena 整体释放
+> - **"ciEnv::initialize_from_replay/create_from_replay_data" 编造**: 不存在;真实=主线程启动处 jni.cpp:4050 `if (ReplayCompiles) ciReplay::replay(thread)`(debug-only)→replay_impl(ciReplay.cpp:1074)CompileReplay 读文件 process→**编译照常走工厂**+ciReplay::initialize 钩子(ciMethodData* :1115 / ciMethod* :1206)用录制值覆盖(类/方法指针经 env->get_metadata 在当前环境重新解析 :1146/:1152)
+> - **"ciMethodData 在 ciMethod 构造时创建/一次性复制" 错**: 懒创建 ensure_method_data(ciMethod.cpp:965)——native/abstract/accessor 跳过(:967);无 MDO 当场 Method::build_interpreter_method_data(:971);失败空 MDO(:980);load_data(ciMethodData.cpp:170)=原子拷贝 MDO 头+data 进 ciEnv Arena(:205-215,注释 "Any concurrently executing threads may be changing the data as we copy it" :181)+翻译 oop(:224-229);构造仅占位(ciMethodData.cpp:40-54 全初值)
+> - **"防止 safepoint 中 MDO 被 GC 修改" 错**: MDO 在 Metaspace 不移动不被动;真问题是**解释器并发写 MDO**→快照保自洽
+> - **缺机制(大纲无)**: ①录制三条途径: DumpReplayDataOnError(product,默认 true,globals.hpp:2071,崩溃自动写 replay_pid%p.log)/CompileCommand option DumpReplay(compile.cpp:899-900→env()->dump_replay_data(compile_id) ciEnv.cpp:1255)/SA 从 core(ciReplay.hpp:41-57);②replay 文件格式(dump_replay_data_unsafe ciEnv.cpp:1231): Jvmti 状态+# N ciObject found+每个 ciMetadata 快照+compile 行;ciMethod 行=5 个数字 invocation/backedge raw+解释器计数+throwout+instructions_size(ciMethod.cpp:1335-1347);ciMethodData 行=_state/mileage+orig 段+data 段+oops 段(偏移+类名,TypeProfile 接收者!)(ciMethodData.cpp:673);compile 行=entry_bci+comp_level+内联树(dump_compile_data ciEnv.cpp:1203);③ReplayCompiles 是 develop flag(globals.hpp:2048),ciReplay.hpp:36 "only exist in debug version of VM"——**release 能录(DumpReplay 实证)不能放**
+> - **实证**: 12-ci-replay-demo.txt(-XX:CompileCommand=option,CiDemo::work,DumpReplay 生成 replay_pid*_compid76/77/78.log,123 ciObject;关键行: ciMethodData ... oops 2 14 CiDemo$ShapeHolder 21 CiDemo$Square=01 篇 TypeProfile 的原料;compile 行内联树与 PrintInlining 对应)
+
 ### 1. ciObjectFactory — ciObject 的创建者与缓存
 
 场景: C2 编译 `ArrayList.add()`——需要 ciKlass(ArrayList)、ciKlass(Object[])、ciMethod(add)、ciField(elementData)——四个 ciObject——全部通过 ciObjectFactory 获取。
