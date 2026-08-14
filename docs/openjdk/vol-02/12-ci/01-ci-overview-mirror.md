@@ -41,9 +41,9 @@ ci 层把 VM 的 oop 与 Klass 两条层级(oopHierarchy 与 Klass 体系)合并
 - **oop(堆对象,会移动)→ JNI handle**: `ciObject::ciObject(oop o)` 里 `_handle = JNIHandles::make_local(o)`(ciObject.cpp:53-59)。JNI 句柄被 GC 跟踪,GC 搬对象时句柄跟着更新——编译线程恢复执行后,`get_oop()` 读到的是新地址;
 - **Metadata(Metaspace 对象,不移动)→ 直接指针**: ciKlass/ciMethod 的 `_metadata`(ciBaseObject)直接指向 Metaspace 里的 InstanceKlass/Method。Metaspace 不参与堆 GC 的搬移(10 域),所以裸指针安全,查询不用绕句柄。
 
-**关键设计 (斜体)**: *ciObject 本身不是 oop——它活在编译线程的 Arena(资源区)里,GC 不扫描它、也不管它的生命期;它的生命期随 `ciEnv`(一次编译的上下文)走,编译结束随 Arena 一起释放(well-known 类/符号的共享镜像例外,活在启动期就建好的长命 Arena 里,见第 2 节)。VM 侧的 oop 用句柄引用、Metadata 用裸指针引用——"移动的"绕一层,"不动的"直接用——这就是"编译与 GC 互不干扰"的全部秘密。*
+**关键设计 (斜体)**: *ciObject 本身不是 oop——它活在编译专属的 Arena 里(ciEnv 的 `_ciEnv_arena`,C 堆上、mtCompiler 内存类型,不是资源区),GC 不扫描它、也不管它的生命期;它的生命期随 `ciEnv`(一次编译的上下文)走,编译结束随 Arena 一起释放(well-known 类/符号的共享镜像例外,活在启动期就建好的长命 Arena 里,见第 2 节)。VM 侧的 oop 用句柄引用、Metadata 用裸指针引用——"移动的"绕一层,"不动的"直接用——这就是"编译与 GC 互不干扰"的全部秘密。*
 
-还有个关键语义: **ci 对象可以"未加载"**。`is_loaded()` 的定义是 `handle() != NULL || is_classless()`(ciObject.hpp:138-140)——类还没解析、方法还没找到时,ci 层照样构造镜像(`get_unloaded_klass`/`get_unloaded_method`,ciObjectFactory.hpp:110-118),只是字段残缺。编译器必须能处理"这个类不存在"的情况: 编译期就发现链接错误,总比编出必崩的代码强(ciField::will_link 就是干这个的,第 6 节)。
+还有个关键语义: **ci 对象可以"未加载"**。`is_loaded()` 的定义是 `handle() != NULL || is_classless()`(ciObject.hpp:138-140)——类还没解析、方法还没找到时,ci 层照样构造镜像(`get_unloaded_klass`/`get_unloaded_method`,ciObjectFactory.hpp:110-118),只是字段残缺。编译器必须能处理"这个类不存在"的情况: 编译期就发现链接错误,总比编出必崩的代码强(ciField::will_link 就是干这个的,第 5 节)。
 
 ## 2. ciObjectFactory: 一次编译一工厂,一份对象一份镜像
 
@@ -104,11 +104,11 @@ ci 层把 VM 的 oop 与 Klass 两条层级(oopHierarchy 与 Klass 体系)合并
   jint                   _nonstatic_oop_map_size;
 ```
 
-[C++:] 注意 `_flags` 不是一堆 bool,而是 **ciFlags——打包的 access_flags 位图**。于是 `is_interface()` 只是 `flags().is_interface()`(ciInstanceKlass.hpp:231 → ciFlags.hpp:59 一次按位与),`is_final`/`is_abstract`/`is_public` 同理——编译器热路径上的"这玩意是不是接口"是**内联的位测试**,零虚函数、零锁。这是镜像层的核心收益: VM 侧的同类查询(`InstanceKlass::is_interface()` 要经过 accessFlags 对象与各种断言)在这里被降级成一次快照后的位读。
+[C++:] 注意 `_flags` 不是一堆 bool,而是 **ciFlags——打包的 access_flags 位图**。于是 `is_interface()` 只是 `flags().is_interface()`(ciInstanceKlass.hpp:231 → ciFlags.hpp:59 一次按位与),`is_final`/`is_abstract`/`is_public` 同理。严格说 `ciKlass::is_interface` 在基类里仍是 **virtual**(ciKlass.hpp:97)——编译器把镜像当具体 `ciInstanceKlass` 用时是内联位测试,只有当静态类型退化成基类 `ciKlass*` 才付出虚分派。这是镜像层的核心收益: VM 侧的同类查询(要经过 accessFlags 对象与各种断言)在这里被降级成一次快照后的位读。
 
 **懒字段是另一半**: `_super`、`_java_mirror`、`_field_cache`、`_nonstatic_fields`(ciInstanceKlass.hpp:63-68)都是 NULL 起步、首次访问才计算(`compute_nonstatic_fields` :105,递归父类合并非静态字段表)——因为字段表可能很大,编译没用到就不该建。快照 + 按需展开,是"镜像层"对"拷贝层"的取舍: 拷全了省心但贵,拷常用标量 + 懒展开大头。
 
-**共享类(CDS)有专门处理**: `update_if_shared`(ciInstanceKlass.hpp:109-113)——归档类的 `_init_state` 是 dump 时的旧值,`is_initialized()`/`is_linked()` 查询时先 `compute_shared_init_state()` 现算(11-cds 域: 归档类的状态要在 load 端重新推演)。`implementor()`(ciInstanceKlass.cpp:599)对共享接口干脆**假设没有唯一实现者**(:602-604,`is_shared()` 时 `impl = this` 返回"多个")——因为 CDS 没保证把所有子类都归档,保守才不会编错。
+**共享类(CDS)有专门处理**: `update_if_shared`(ciInstanceKlass.hpp:109-113)——归档类的 `_init_state` 是 dump 时的旧值,**快照值与查询目标不一致时**现算(`is_initialized()` 查 fully_initialized、`is_linked()` 查 linked 都会触发 `compute_shared_init_state()`,11-cds 域: 归档类的状态要在 load 端重新推演)。`implementor()`(ciInstanceKlass.cpp:599)对共享接口干脆**假设没有唯一实现者**(:602-604,`is_shared()` 时 `impl = this` 返回"多个")——因为 CDS 没保证把所有子类都归档,保守才不会编错。
 
 **类层次查询其实转发回 VM**: `ciKlass::is_subtype_of(ciKlass* that)`(ciKlass.cpp:68)不是自己遍历继承链,而是 `VM_ENTRY_MARK` 进 VM 后调 `this_klass->is_subtype_of(that_klass)`(:80)——VM 侧的实现本身是 O(1) 的(super_check_offset 指针比较,06 域),不值得在 ci 层重造。镜像层只在"每次都要查、且能快照"的地方做缓存。
 
