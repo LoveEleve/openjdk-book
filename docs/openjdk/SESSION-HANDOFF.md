@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **75/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 2) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 2/13,**11-cds 域完结** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **76/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 3) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 3/13,**11-cds 域完结**,12-ci 1/3 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 12-ci/01(ciObject 镜像体系,大纲 `planning/outlines/12-ci/01-ci-overview-mirror.md`;"JIT 怎么看到 Java 类?";11-cds/02 悬念指向它)。
+**下一步(唯一,无选择)**: 12-ci/02(ciTypeFlow + bcEscapeAnalyzer,大纲 `planning/outlines/12-ci/02-ci-typeflow-escape.md`;"类型流与逃逸分析";12-ci/01 悬念指向它: 编译器看到的类型从哪来——profile + 字节码静态推导)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,74 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -76,6 +76,7 @@
 | **31-unsafe** | 1-2 | `31-unsafe-whitebox/01-unsafe-api.md`(151)/02-whitebox-forte.md(132) | ✅ **31 域完结(本会话)** |
 | **44-class-verification** | 1-2 | `44-class-verification/01-verifier.md`(316)/02-verification-type.md(149) | ✅ **44 域完结,第 4 批收官(本会话)** |
 | **11-cds** | 1-2 | `11-cds/01-cds-overview-dump.md`(138)+`02-cds-load-shared.md`(322) | ✅ **11 域完结(本会话)** |
+| **12-ci** | 1-3 | `12-ci/01-ci-overview-mirror.md`(176) | 🚧 12 域 1/3(本会话) |
 
 ### 本会话 9 篇的 commit 清单(按 git log 为准)
 
@@ -89,6 +90,7 @@
 **44-class-verification/02(VerificationType)**: 正文 97cceb3 → 回填 9ec3c4b(⚠️ 7 条)→ README 838b56d(73/152,**第 4 批收官**)→ HANDOFF bb16581 → **第 3 轮** 0bd8215(实证解读修正: [ long, long ] 是 2 个 long 变量,双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 fd 00 05 04 04 04)
 **11-cds/01(CDS 全景与 Dump)**: 正文 171bf24 → 回填 a9dafe0(⚠️ 8 条)→ README a35de82(74/152,第 5 批开篇)→ HANDOFF ca5ccc8 → **第 3 轮** 5375e05(java_mirror 移除与 remove_unshareable 分列两函数 :501/:489/narrow_klass_base 重合=主动设计 set_narrow_klass_base(_shared_rs.base()) :305/classlist 行数断言删除)
 **11-cds/02(CDS Load 端,11 域收官)**: 正文 e8f9905 → 回填 2e9bc6c(⚠️ 13 条)→ README 529c91d(75/152,11 域完结,第 5 批 2/13)→ 素材 11-cds-load-demo.txt(gitignore)→ **第 3 轮** ff00933(①SymbolTable lookup 顺序表述错——实际初始先查动态表,_lookup_shared_first 是"最近命中方优先"启发式,symbolTable.cpp:242-258,字符串表才固定先共享;②_adapter_trampoline 位置错——在 ConstMethod(constMethod.hpp:212),指向 RW 区槽初始 NULL,非"RW 区字段";③MAP_FIXED 不报错(占用时静默替换),兜底靠 map_region 的 base != requested_addr;顺带补 COW 细节: ro 纯共享、rw/mc 写脏后 COW;④01 篇承诺的"rw 区加载期 patch"明确化(方法入口 trampoline/adapter 槽,第 6 节);⑤lookup_from_stream 调用行号 :1074→:1072)
+**12-ci/01(ciObject 镜像体系,12 域开篇)**: 正文 4fe2ebf → 回填 13bae76(⚠️ 9 条)→ README e7ee1d1(76/152,12 域 1/3)→ 素材 12-ci-inlining-demo.txt(gitignore)
 
 **本会话新增素材**(全部 gitignore 不入库,在 materials/commands/):
 - `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
@@ -181,7 +183,7 @@
 | 命令输出 | `materials/commands/` 140+ 文件 | jcmd/jstat/jmap 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材**(详见 §二 commit 清单,共 11 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt
+**本会话新增素材**(详见 §二 commit 清单,共 12 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
@@ -306,7 +308,21 @@
 - **第 3 轮**: 实证解读修正([ long, long ] 是 2 个 long 变量(loop 的 sum+i),双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 `fd 00 05 04 04 04`)
 - 实证: 08-verificationtype-javap.txt
 
+### 6.31 12-01(ciObject 镜像体系,12 域开篇,大纲 9 处漂移含 3 处编造 + 深审 2 轮,2026-08-13)
+- **"JIT 编译运行在 safepoint 中" 错(重要)**: 编译在编译线程并发跑,GC 时只是阻塞,编译状态跨 GC 存活;GC 安全=双通道引用——oop→JNI local handle(ciObject.cpp:53-59,GC 重定位),Metadata(Metaspace 不移动)→裸指针;ciObject.hpp:40-44 注释 "GC and compilation can proceed independently";编译线程进出 VM 用 VM_ENTRY_MARK/GUARDED_VM_ENTRY(ciUtilities.inline.hpp:34-38,ThreadInVMfromNative,17 域呼应)
+- **"多次编译同一个 Klass 返回同一个 ciKlass" 只对 well-known 类成立**: 工厂 per-编译(ciEnv.cpp:131 new ciObjectFactory);全局共享=vmSymbols 全部 ciSymbol(_shared_ci_symbols)+基本类型+WK_KLASSES_DO 的 well-known ciInstanceKlass(ciObjectFactory.cpp:123-206,ciEnv::_Object 等静态,ident 分段 _shared_ident_limit :204)
+- **"unique_concrete_method / DFA / _implementors 列表" 编造**: 真实=①implementor() 三态指针(ciInstanceKlass.hpp:70-74: NULL/一个/自身=多个;懒+备忘 ciInstanceKlass.cpp:599;共享类假设无唯一实现者 :604——CDS 没归档全部子类,保守);②unique_concrete_subklass(:370)=up_cast_abstract(:376)
+- **"is_c1_compilable 检查方法大小/MDO" 错**: =Method access_flags 位(is_not_c1_compilable,method.hpp:949),构造抄取(ciMethod.cpp:88-89);大小=_code_size 快照(:82)
+- **"is_constant=final+static" 太粗**: 完整判定(ciField.cpp:257-291)=static final(排除 System.in/out/err 偏移,:261-270)/@Stable(FoldStableValues)/非 static final 信任名单(trust_final_non_static_fields :216: invoke 包/匿名类/装箱类/String/Atomic*FieldUpdater/flag)/CallSite.target 特例(:281-286)
+- **"is_subtype_of 查缓存 subtype list" 错**: 转发 Klass::is_subtype_of(ciKlass.cpp:68-80,VM_ENTRY_MARK;VM 侧 super_check_offset O(1))
+- **工厂双缓存**: _ci_metadata 排序数组(指针不移动,find_sorted 二分,:292-335)+_non_perm_bucket[61] 哈希(oop 移动不能排序,:67-68/:238-259);get_symbol 分档(vmSymbols SID→共享,:209)
+- **快照+懒字段体系**: 标量(_flags/_init_state/_nonstatic_field_size...,ciInstanceKlass.hpp:50-61)+懒(_super/_java_mirror/_nonstatic_fields,compute_nonstatic_fields :105);is_interface=ciFlags 位测试(ciInstanceKlass.hpp:231→ciFlags.hpp:59)
+- **缺机制补录**: ①共享类(CDS)update_if_shared(ciInstanceKlass.hpp:109-113,init_state 现算);②hotswap 检查 Dependencies::check_evol_method(ciMethod.cpp:102-110);③依赖登记 Dependencies(ciEnv.hpp:57/313,validate_compile_task_dependencies ciEnv.cpp:933)→nmethod 作废;④unloaded 镜像 is_loaded(ciObject.hpp:138);⑤解释器计数快照(ciMethod.cpp:137-148)
+- **实证方法论**: PrintInlining 是 ci 层决策的可见产物(内联树+"inline (hot)"/"accessor"/"callee is too large");TypeProfile (87426/87426 counts)=CiDemo$Square 是 MDO 剖面驱动 devirtualize 的证据;made not entrant 三行(升级替换,非依赖失效——别混);CiDemo: 接口调用+String.length 组合,PrintCompilation+PrintInlining 并发编译输出会交错
+- 实证: 12-ci-inlining-demo.txt(素材清单见 §五)
+
 ### 6.30 11-02(CDS Load 端,11 域收官,大纲 13 处漂移含 3 处编造 + 深审 2 轮,2026-08-13)
+
 - **"MAP_SHARED" 错(重要)**: Linux 实现 os::pd_map_memory(os_linux.cpp:6129)**flags=MAP_PRIVATE**(:6133),addr 非空才 |= MAP_FIXED(:6145-6146);跨进程共享页来自 file-backed 页缓存,与 MAP_SHARED 语义无关;映射调用=os::map_memory→pd_map_memory,mmap 直接调用在 :6149
 - **"map_regions()" 编造**: 不存在;真实=map_shared_spaces(metaspaceShared.cpp:2034): reserve_shared_memory(filemap.cpp:869,整块 ReservedSpace 防覆盖 code cache)→逐区 map_region(filemap.cpp:891)→validate_shared_path_table(:2058);布局断言 mc_top==rw_base==ro_base==md_top(:2069-2071)支撑 set_shared_metaspace_range 单区间判定
 - **"initialize_shared_spaces :700-1000" 错**: 装配在 **:2100**(universe.cpp:729 调用);映射在 initialize_runtime_shared_and_meta_spaces(:216,metaspace.cpp:1305);UseSharedSpaces 是参数先定(默认 true=auto 行为,globals.hpp:2484/2491),失败统一走 fail_continue(filemap.cpp:102: 日志+UseSharedSpaces=false+close :124-126,RequireSharedSpaces 则 fail 退出 :114-115)——"成功后置 true"是方向反
@@ -356,7 +372,8 @@
 - [x] 第 4 批 21 篇(10/19/23/24/08/31/44 域)——✅ **第 4 批收官**(commit 见 §二)
 - [x] **11-cds/01**(CDS 全景与 Dump)——✅ 完结(正文 171bf24/回填 a9dafe0/README a35de82,commit 见 §二)
 - [x] **11-cds/02**(Load 端)——✅ 完结(正文 e8f9905/回填 2e9bc6c/README 529c91d,commit 见 §二);**11 域完结,第 5 批 2/13**
-- [ ] **12-ci/01**(ciObject 镜像体系)——**下一篇**;大纲 `planning/outlines/12-ci/01-ci-overview-mirror.md`(注意: 文件名是 01-ci-overview-**mirror**.md,不是 01-ci-overview.md——11-cds/02 大纲的悬念指向错文件名已被回填纠正);11-cds/02 悬念指向它: JIT 怎么消费共享元数据
+- [x] **12-ci/01**(ciObject 镜像体系)——✅ 完结(正文 4fe2ebf/回填 13bae76/README e7ee1d1,commit 见 §二);12 域 1/3
+- [ ] **12-ci/02**(ciTypeFlow + bcEscapeAnalyzer)——**下一篇**;大纲 `planning/outlines/12-ci/02-ci-typeflow-escape.md`;12-ci/01 悬念指向它: 编译器看到的类型从哪来(profile + 字节码静态推导)
 - [ ] 12-ci 完结后 → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 11 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -396,8 +413,8 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/12-ci/01-ci-overview-mirror.md(注意 ⚠️ 块——11-cds/02 大纲已回填 13 条,12-ci 大纲大概率同样漂移;11-cds/02 悬念指向它: JIT 编译器怎么消费共享元数据)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;12-ci 是 JIT 编译器入口,重点: ciEnv/ciInstanceKlass/ciMethod/ciField 镜像构造、ciSymbol/ciType 缓存与 VM 侧 oop 隔离、与 11-cds 共享类的交互——共享 InstanceKlass 的 ci 镜像;实证: 用 jdk11 跑 PrintCompilation 或 -Xlog 观察编译器)
+1. 读 planning/outlines/12-ci/02-ci-typeflow-escape.md(注意 ⚠️ 块——12-ci/01 大纲已回填 9 条,02 大概率同样漂移;12-ci/01 悬念指向它: 编译器看到的类型从哪来——profile(TypeProfile)+字节码静态推导)
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;12-ci/02 是 C2 类型流分析,重点: ciTypeFlow 的构建入口(方法入口/分支/异常处理器)、ciTypeFlow::StateVector 与 push/pop 语义、ciType 判定与合并、bcEscapeAnalyzer 的 ConnectionGraph 或保守标记、与 01 篇 ciMethod/_method_blocks 的衔接;实证: 用 jdk11 跑 CiDemo 系观察内联/逃逸(标量替换可用 -XX:+PrintEliminateAllocations 诊断参数))
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
 5. 12-ci 完结后 → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 11 域)
