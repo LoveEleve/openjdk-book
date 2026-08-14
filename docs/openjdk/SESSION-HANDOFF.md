@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-14 | 卷 2 写作中: **86/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 13) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 13/13,**11-cds/12-ci/13-jit-framework/18-safepoint/20-vm-operations 域完结,27-jni 2/3(本会话)**,下一篇 27-jni/03 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-14 | 卷 2 写作中: **87/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 14) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 14/14,**11-cds/12-ci/13-jit-framework/18-safepoint/20-vm-operations/27-jni 域完结(本会话)**,下一篇 30-jvm-entry | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -44,12 +44,12 @@
 第 2 批(原语): 02(4) → 03(2) → 04(2) → 06(6) → 16(5) → 38(2) → 41(2) → 42(3)   ✅ 完结 26/26
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
-第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2 完结) → 27(2/3)** → 30 → 32 → 34 → 36 → 37 → 39 → 46   🚧 进行中
+第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2 完结) → 27 ✅(3/3 完结)** → 30 → 32 → 34 → 36 → 37 → 39 → 46   🚧 进行中
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 86 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 87 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -80,7 +80,7 @@
 | **13-jit-framework** | 1-2 | `13-jit-framework/01-compile-broker-queue.md`(76)+`02-tiered-compilation-policy.md`(146) | ✅ **13 域完结(本会话)** |
 | **18-safepoint** | 1-2 | `18-safepoint/01-safepoint-orchestration.md`(121)+`02-polling-verifiers.md`(97) | ✅ **18 域完结(本会话)** |
 | **20-vm-operations** | 1-2 | `20-vm-operations/01-vm-operation.md`(103)+`02-background-init.md`(372) | ✅ **20 域完结,第 5 批 11/13(本会话)** |
-| **27-jni** | 1-3 | `27-jni/01-handle-system.md`(171)+`02-jni-fast-path.md`(189) | 🚧 27 域 2/3(本会话) |
+| **27-jni** | 1-3 | `27-jni/01-handle-system.md`(171)+`02-jni-fast-path.md`(189)+`03-jni-check-platform.md`(78) | ✅ **27 域完结(本会话)** |
 
 ### 本会话 16 篇的 commit 清单(按 git log 为准)
 
@@ -103,6 +103,7 @@
 **18-safepoint/02(轮询与 NoSafepointVerifier,18 域收官)**: 正文 e2896a5 → 回填 a0a97bf(⚠️ 10 条)→ README 2e63aeb(82/152,18 域完结,第 5 批 9/13)→ 素材 18-safepoint-polling-demo.txt(gitignore)→ **第 3 轮** 06086f2(①轮询**双实现**——解释器/共享 stub=testb 位测试(MacroAssembler::safepoint_poll),**C1/C2 编译代码=deref 方式**(movptr 线程 poll 值+testl [poll_addr],c1_LIRAssembler_x86.cpp:558-575/x86_64.ad:1099-1102)——armed 值=8|bad_page 落在 PROT_NONE 页→**真 SIGSEGV**→is_poll_address(os.hpp:429)→get_poll_stub(os_linux_x86.cpp:431-432)→safepoint 阻塞;**01-os/04 的轮询页 SIGSEGV 在 JDK11 x86 真实存在(编译代码路径)**,thread-local 只是把被轮询地址从全局页变成线程自己的值;②全局页模式: 编译代码 deref 全局 polling_page(C1 :576-592),解释器退化 cmp32 state;③轮询点归属: 编译代码=C1 LIR/C2 SafePoint 节点,解释器=MacroAssembler)
 **20-vm-operations/01(VM_Operation 从提交到执行,20 域 1/2)**: 正文 b30c2e8 → 回填 b2c8867(⚠️ 7 条)→ README f0ed423(83/152,20 域 1/2,第 5 批 10/13)→ 素材 20-vmops-demo.txt(gitignore)→ **第 3 轮** 7221a66(①doit_prologue 语义——VM_RevokeBias::doit_prologue 检查对象**是否还带 bias 标记**(biasedLocking.cpp:520-534,"avoid a safepoint"),非大纲的"检查线程栈";②唤醒机制——**登记≠唤醒**: evaluate_operation 只 increment_vm_operation_completed_count(:427-429),等待者由 **loop 每轮结束的 VMOperationRequest_lock->notify_all()**(vmThread.cpp:622-624)统一唤醒后自检 ticket;③loop 末尾复查 no_op_safepoint_needed(true)(:625-631,18-01 Cleanup 另一触发点))
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(371 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt(gitignore)→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注脚本覆盖 11 块;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true 注册成立,MemProfiling 恒 false)
+**27-jni/03(JNI Check + 平台层,27 域收官)**: 正文 9f523af(78 行)→ 回填 ⚠️ 10 组 → README 9f523af 同提交(87/152,27 域完结)→ 素材 27-jni-check-demo.txt(gitignore)→ 深审 2 轮(①JNI_ENTRY_CHECKED **不含 ThreadInVMfromNative**——不做整函数状态转换,校验点用 IN_VM 局部转换(与 JNI_ENTRY 的关键差异);②jniExport.hpp 不是 JNI 函数声明而是 JVMTI 接口导出器;jni_NativeInterface 实例在 jni.cpp:3528 非 3550;validate_handle :443/validate_object :469 非 :497)第 3 轮无新增
 **27-jni/02(JNI Fast Path,27 域 2/3)**: 正文 1ec9012(189 行)→ 回填 ⚠️ 10 组 → README 1ec9012 同提交(86/152,27 域 2/3)→ 素材 27-jni-fastpath-demo.txt(gitignore)→ 深审 2 轮(①quicken_jni_functions 在 create_vm **第三段**(thread.cpp:3916)非第四段;②fieldID 偏移=BitsPerWord-2(64 位 62 位),位布局注释 "30" 是 32 位遗留)第 3 轮无新增→ **第 4 轮** da75d76(①安全论证补全——对象移动必然伴随 counter 变号,投机读读到旧位置值也被二次校验丢弃;②补 counter wraparound(hpp:54-55);③"条件 5 选 1"歧义改"替换的 5 个条件";④验证 GetObjectField 普通实现=HeapAccess oop_load_at+make_local(jni.cpp:2076)支撑无快路径断言;⑤验证 jni_GetStaticIntField 仅函数表槽)
 **27-jni/01(Handle 系统,27 域 1/3)**: 正文 f64d2af(171 行)→ 回填 ⚠️ 9 组 → README f64d2af 同提交(85/152,27 域 1/3)→ 素材 27-jni-handles-demo.txt(gitignore)→ **第 3 轮** 6d6b59f(参数 handle 机制精确化——编译代码 object_move sharedRuntime_x86_64.cpp:1157-1180+解释器 pass_object interpreterRT_x86_64.cpp:214-260 lea 取参数槽地址,null 参数传 NULL;06-oops/01 链接文本对齐;jweak 对齐=weak_tag_alignment=2)→ **第 4 轮** 786af8f(①free list 成因精确化——由 rebuild_free_list 扫描清空槽构建(:548-575,"cleared out by a delete call"),非 DeleteLocalRef 直接串链;取用 :519-524;②OopStorage release 细节——CAS 清位 :575-587+空块延迟清理 reduce_deferred_updates :416,区间 :675-682;③悬念"函数表查 env"→"经 JNIEnv 函数表间接调用";④SIGQUIT 摘要行措辞)
 
@@ -197,7 +198,7 @@
 | 命令输出 | `materials/commands/` 140+ 文件 | jcmd/jstat/jmap 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材**(详见 §二 commit 清单,共 22 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt / 13-jit-broker-demo.txt / 13-jit-tiered-demo.txt / 18-safepoint-demo.txt / 18-safepoint-polling-demo.txt / 20-vmops-demo.txt / 20-background-init-demo.txt / 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt
+**本会话新增素材**(详见 §二 commit 清单,共 23 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt / 13-jit-broker-demo.txt / 13-jit-tiered-demo.txt / 18-safepoint-demo.txt / 18-safepoint-polling-demo.txt / 20-vmops-demo.txt / 20-background-init-demo.txt / 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
@@ -348,6 +349,19 @@
 - **深审抓到的实质错误**: ①批量撤销触发机制(update_heuristics 计数,非"堆扩容");②ChunkPoolCleaner 真实语义(BlocksToKeep=5 其余 os::free);③StubRoutines 两阶段原因(RuntimeStub 可重定位,非代码缓存);④停机顺序(先停线程后注销任务,初稿写反);⑤VMThread 优先级注释("must be lower",初稿"不能高于"半对);⑥init.cpp:124 注释凭记忆多加 ", loads primordial classes"(真实在 :68 声明处)
 - 实证: 20-background-init-demo.txt(素材清单见 §五)
 
+### 6.42 27-jni/03(JNI Check + 平台层,27 域收官,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
+
+- **"宏替换,release 展开为空" 半对**: 真实=**整表替换**——jni_functions()(jni.cpp:3876-3881)在 CheckJNICalls 时返回 checked 表;jni_functions_check(jniCheck.cpp:2304-2323): 保存原始表到 unchecked_jni_NativeInterface(:2306,UNCHECKED() 回调)+断言两表结构一致(:2311-2314,"Mismatched JNINativeInterface tables")+返回 checked 表;CheckJNICalls product 默认 false(globals.hpp:913),-Xcheck:jni 置位(arguments.cpp:2868)
+- **JNI_ENTRY_CHECKED 与 JNI_ENTRY 的关键差异(深审抓到)**: JNI_ENTRY_CHECKED(jniCheck.cpp:91-104)**不含 ThreadInVMfromNative**——不做整函数状态转换(线程还在 native),需要摸堆的校验点用 **IN_VM**(:63-68,ThreadInVMfromNative 局部包装)逐点转换;注释 :82-84: 用 CHECKED 而非 QUICK/LEAF 是为了出错时能创建 handle
+- **wrapper 四段**: ①入口(线程存在性/Java 线程→abort "Using JNIEnv in non-Java thread";env 归属→fatal "Using JNIEnv in the wrong thread")②functionEnter(:222-228: in_critical 警告+check_pending_exception :184-197 两类警告)③IN_VM 参数校验(validate_handle :443/validate_object :469/validate_jmethod_id :453-466→Method::checked_resolve_jmethod_id method.cpp:2191-2202)④UNCHECKED() 回调+functionExit(:239-252 **本地引用泄漏**: live>planned 警告,add_planned_handle_capacity :202-207=capacity+live+32,CHECK_JNI_LOCAL_REF_CAP_WARN_THRESHOLD=32 :47;PushLocalFrame :720-731/EnsureLocalCapacity :823-835 设置 planned——01 篇 _planned_capacity 伏笔落地)
+- **"方法签名匹配" 编造/过度**: 实际=methodID 解析+类匹配(validate_call_object/validate_call_class),无签名匹配检查
+- **"jniPeriodicChecker 每 ~1 秒检查全局引用泄漏" 编造**: 20-02 已证=JniPeriodicCheckerTask 10ms+os::run_periodic_checks(信号完整性 DO_SIGNAL_CHECK,os_linux.cpp:5381-5394);泄漏检查在 functionExit
+- **平台层**: 结构 JNINativeInterface_ 在 JDK 侧 **jni.h:214**;实例 jni_NativeInterface 在 **jni.cpp:3528**-3806;jniExport.hpp 是 **JVMTI 接口导出器**(JniExportedInterface::GetExportedInterface :28-38)非 JNI 声明(名字误导!);jni_functions_nocheck 绕过检查(:3884-3886)
+- **fatal vs warning 两级**: ReportJNIFatalError(hpp:36-40,VM 态: JNI 栈+os::abort(true))/NativeReport 系(:146-156)IN_VM 包装
+- **悬念指向 28-jvmti 错**: 正确=**30-jvm-entry**(第 5 批,00-domain-writing-order.md:76)
+- **实证方法论**: 自写 JNI demo 触发两类检查(2000 个 NewLocalRef 泄漏→每 32 个警告 33/66/99;FindClass 失败不查异常→"JNI call made with exception pending");**无 -Xcheck:jni 对照 0 警告**;注意 .so 加载路径与 native 方法名匹配
+- 实证: 27-jni-check-demo.txt(素材清单见 §五)
+
 ### 6.41 27-jni/02(JNI Fast Path,27 域 2/3,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
 - **"jni.cpp:2146-2160 正常路径" 行号错**: 2146 起是 jni_GetXXXField_addr() 系列;普通实现=**DEFINE_GETFIELD 宏**(jni.cpp:2082-2106): JNI_QUICK_ENTRY(interfaceSupport.inline.hpp:532-540,VM_QUICK_ENTRY_BASE debug NoHandleMark :434-439)+resolve_non_null+from_instance_jfieldID+should_post_field_access probe+读字段
@@ -361,7 +375,7 @@
 - **try_resolve_jobject_in_native**(barrierSetAssembler_x86.cpp:213-217)=clear_jweak_tag+movptr [obj] 两行,不区分引用类型;G1 无覆盖用基类
 - **实证方法论**: 自写 JNI bench(gcc -shared): C 循环 GetIntField;快路径 2000 万次 ~28ms(1.4ns/次)vs -XX:-UseFastJNIAccessors ~301ms(15ns/次),**约 10 倍**;注意 C 里 printf 要 fflush;GetFieldID 用实例字段(static 字段会 NoSuchFieldError)
 - **写作期血泪**: ①大纲把 create_vm 四段划分与 quicken_jni_functions 位置错配——跨篇引用段号前先核对目标文章段落边界;②"30 位"差点照抄注释——枚举 BitsPerWord-2 为准
-- 实证: 27-jni-fastpath-demo.txt(素材清单见 §五)
+- 实证: 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt(素材清单见 §五)
 
 ### 6.40 27-jni/01(JNI Handle 系统,27 域 1/3,大纲 9 处漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -373,7 +387,7 @@
 - **JNIHandleBlock 内部**: block_size_in_oops=32;allocate_handle 四段(:481-546): _last 块末槽→free list(槽内嵌 next :521)→_last->_next→rebuild_free_list 或追加新块;rebuild 启发式(:548-575): 空闲>一半才下次重建,否则按缺额追加块;_block_free_list 全局池+线程本地 free_handle_block(allocate_block :364-405,deadlock 注释 :374-377);PushLocalFrame/PopLocalFrame 用 _pop_frame_link(jni.cpp:746-783)
 - **实证方法论**: JNI demo(acbench/jniref/): gcc -shared -fPIC -I$JAVA_HOME/include 编译;printf 必须 fflush(stdout)(重定向时全缓冲丢输出);GetObjectRefType 常量 JNILocalRefType=1/JNIGlobalRefType=2/JNIWeakGlobalRefType=3;global/weak handle 值必须存 C 侧(返回 Java 后丢失);SIGQUIT 转储 "JNI global refs: 29, weak refs: 1"(基线 28/0,jniHandles.cpp:305-307)
 - **写作期血泪**: 误判 check.py 文件损坏(HS_MAP 单行超长,实际完好)——插入映射先 grep 确认目标字符串再 replace
-- 实证: 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt(素材清单见 §五)
+- 实证: 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt(素材清单见 §五)
 
 ### 6.38 20-01(VM_Operation 从提交到执行,20 域 1/2,大纲 7 处漂移含 0 处硬编造 + 深审 2 轮,2026-08-13)
 - **模式 4 元组 ✓**(vmOperations.hpp:136-141: _safepoint/_no_safepoint/_concurrent/_async_safepoint);evaluation_mode(:195)/evaluate_at_safepoint(:207-209)/evaluate_concurrently(:211-212)
@@ -542,8 +556,9 @@
 - [x] **20-vm-operations/02**(后台任务与启动序列)——✅ 完结(正文 4e942c1/回填 ⚠️ 14 组/README 7aae8ba,commit 见 §二);**20 域完结,第 5 批 11/13**
 - [x] **27-jni/01**(jobject 怎么在 JVM 内部存——Handle 系统)——✅ 完结(正文 f64d2af/回填 ⚠️ 9 组/README f64d2af 同提交,commit 见 §二);27 域 1/3
 - [x] **27-jni/02**(JNI Fast Path)——✅ 完结(正文 1ec9012/回填 ⚠️ 10 组/README 1ec9012 同提交,commit 见 §二);27 域 2/3
-- [ ] **27-jni/03**(JNI Check + 平台层)——**下一篇**;大纲 `planning/outlines/27-jni/03-jni-check-platform.md`;27-02 悬念指向它: 参数错了谁来抓(-Xcheck:jni 一开快路径就失效)
-- [ ] 27-jni/03 完结后 → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 6 域)
+- [x] **27-jni/03**(JNI Check + 平台层)——✅ 完结(正文 9f523af/回填 ⚠️ 10 组/README 9f523af 同提交,commit 见 §二);**27 域完结**
+- [ ] **30-jvm-entry/01**(System.currentTimeMillis() 怎么进入 JVM)——**下一篇**;大纲 `planning/outlines/30-jvm-entry/01-jvm-entry-points.md`;27-03 悬念指向它
+- [ ] 30-jvm-entry 后 → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 6 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -582,11 +597,11 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/27-jni/03-jni-check-platform.md(注意 ⚠️ 块——01/02 大纲各回填 9/10 组,03 大概率同样漂移;02 悬念指向它: 参数错了谁来抓,-Xcheck:jni 一开快路径就失效)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;27 域 03 重点: jniCheck.cpp/hpp 的检查体系(JNI_ENTRY 包装、check_jni_exception_pending 等)、jni_functions_check 表替换(jni.cpp:3876-3881,CheckJNICalls 时)、jniCheck 的 per-thread 状态、debug vs release(INCLUDE_JNI_CHECK)、jniPeriodicChecker(20-02 已讲)、平台层 jniTypes_x86/jniExport;实证: -Xcheck:jni 的错误输出格式、jni_GetObjectRefType 校验)
+1. 读 planning/outlines/30-jvm-entry/01-jvm-entry-points.md(注意 ⚠️ 块——27 域三篇各回填 9/10/10 组,30 域大概率同样漂移;27-03 悬念指向它: System.currentTimeMillis() 这类入口怎么走)
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;30 域 01 重点: jvm.cpp 的 JVM_ENTRY 宏体系(interfaceSupport.inline.hpp:558-565)、JVM_ENTRY_NO_ENV/JVM_QUICK_ENTRY/JVM_LEAF 变体(:568-603)、jvm.cpp 函数表(JVM_EnqueueOperation 等)、Java 侧 jdk.internal.misc.VM/System.currentTimeMillis 的 native 声明链、与 27-02 JNI_ENTRY 的对比、safepoint 进入检查;实证: -Xlog:jni 或 PrintJNIResolving 观察入口解析、JVMTI 事件?)
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证;jcmd 在当前容器 attach 不可用,实证可用 kill -3(SIGQUIT)线程转储或命令行 -Xlog,自写 JNI demo 用 gcc 编译(acbench/jniref/ 模式,printf 要 fflush)
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
-5. 27-jni 完结后 → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 6 域)
+5. 30-jvm-entry 后 → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 6 域)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
