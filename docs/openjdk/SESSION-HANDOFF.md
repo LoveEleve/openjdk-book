@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **76/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 3) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 3/13,**11-cds 域完结**,12-ci 1/3 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-13 | 卷 2 写作中: **77/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 4) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 4/13,**11-cds 域完结**,12-ci 2/3 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 12-ci/02(ciTypeFlow + bcEscapeAnalyzer,大纲 `planning/outlines/12-ci/02-ci-typeflow-escape.md`;"类型流与逃逸分析";12-ci/01 悬念指向它: 编译器看到的类型从哪来——profile + 字节码静态推导)。
+**下一步(唯一,无选择)**: 12-ci/03(ciObjectFactory + ciReplay,大纲 `planning/outlines/12-ci/03-ci-factory-runtime.md`;"ciObject 生命周期与编译回放";12-ci/02 悬念指向它)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,74 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -76,7 +76,7 @@
 | **31-unsafe** | 1-2 | `31-unsafe-whitebox/01-unsafe-api.md`(151)/02-whitebox-forte.md(132) | ✅ **31 域完结(本会话)** |
 | **44-class-verification** | 1-2 | `44-class-verification/01-verifier.md`(316)/02-verification-type.md(149) | ✅ **44 域完结,第 4 批收官(本会话)** |
 | **11-cds** | 1-2 | `11-cds/01-cds-overview-dump.md`(138)+`02-cds-load-shared.md`(322) | ✅ **11 域完结(本会话)** |
-| **12-ci** | 1-3 | `12-ci/01-ci-overview-mirror.md`(176) | 🚧 12 域 1/3(本会话) |
+| **12-ci** | 1-3 | `12-ci/01-ci-overview-mirror.md`(176)+`02-ci-typeflow-escape.md`(164) | 🚧 12 域 2/3(本会话) |
 
 ### 本会话 9 篇的 commit 清单(按 git log 为准)
 
@@ -91,6 +91,7 @@
 **11-cds/01(CDS 全景与 Dump)**: 正文 171bf24 → 回填 a9dafe0(⚠️ 8 条)→ README a35de82(74/152,第 5 批开篇)→ HANDOFF ca5ccc8 → **第 3 轮** 5375e05(java_mirror 移除与 remove_unshareable 分列两函数 :501/:489/narrow_klass_base 重合=主动设计 set_narrow_klass_base(_shared_rs.base()) :305/classlist 行数断言删除)
 **11-cds/02(CDS Load 端,11 域收官)**: 正文 e8f9905 → 回填 2e9bc6c(⚠️ 13 条)→ README 529c91d(75/152,11 域完结,第 5 批 2/13)→ 素材 11-cds-load-demo.txt(gitignore)→ **第 3 轮** ff00933(①SymbolTable lookup 顺序表述错——实际初始先查动态表,_lookup_shared_first 是"最近命中方优先"启发式,symbolTable.cpp:242-258,字符串表才固定先共享;②_adapter_trampoline 位置错——在 ConstMethod(constMethod.hpp:212),指向 RW 区槽初始 NULL,非"RW 区字段";③MAP_FIXED 不报错(占用时静默替换),兜底靠 map_region 的 base != requested_addr;顺带补 COW 细节: ro 纯共享、rw/mc 写脏后 COW;④01 篇承诺的"rw 区加载期 patch"明确化(方法入口 trampoline/adapter 槽,第 6 节);⑤lookup_from_stream 调用行号 :1074→:1072)
 **12-ci/01(ciObject 镜像体系,12 域开篇)**: 正文 4fe2ebf → 回填 13bae76(⚠️ 9 条)→ README e7ee1d1(76/152,12 域 1/3)→ 素材 12-ci-inlining-demo.txt(gitignore)→ **第 3 轮** 3dc78e4(①"资源区"错——ciEnv 的 _ciEnv_arena 是 C 堆上的 mtCompiler Arena,非 ResourceMark 资源区;②is_interface 虚分派细节——ciKlass.hpp:97 基类仍 virtual,内联位测试仅当静态类型是 ciInstanceKlass 时才成立,大纲"零虚函数"只对了一半;③update_if_shared 是"快照值与查询目标不一致才现算"(ciInstanceKlass.hpp:109-113),非每次查询;④will_link 引用节号 6→5)
+**12-ci/02(ciTypeFlow + bcEscapeAnalyzer,12 域 2/3)**: 正文 f06d6fa → 回填 63c7534(⚠️ 10 条)→ README b9aeac8(77/152,12 域 2/3)→ 素材 12-ci-typeflow-escape-demo.txt(gitignore)
 
 **本会话新增素材**(全部 gitignore 不入库,在 materials/commands/):
 - `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
@@ -183,7 +184,7 @@
 | 命令输出 | `materials/commands/` 140+ 文件 | jcmd/jstat/jmap 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材**(详见 §二 commit 清单,共 12 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt
+**本会话新增素材**(详见 §二 commit 清单,共 13 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
@@ -308,7 +309,19 @@
 - **第 3 轮**: 实证解读修正([ long, long ] 是 2 个 long 变量(loop 的 sum+i),双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 `fd 00 05 04 04 04`)
 - 实证: 08-verificationtype-javap.txt
 
+### 6.32 12-02(ciTypeFlow + bcEscapeAnalyzer,12 域 2/3,大纲 10 处漂移含 4 处编造 + 深审 2 轮,2026-08-13)
+- **"common_type / ciType::top" 名字错**: 真实=StateVector::type_meet/type_meet_internal(ciTypeFlow.cpp:272);类型格=top(T_VOID 占位)/bottom(T_CONFLICT)/long2/double2/null(ciTypeFlow.hpp:175-187);meet 规则: top 吸收/null 恒等/原语→bottom/**接口与非接口→Object(注释 "This is what the verifier does",:299-303,44 域同源)**/数组递归元素(:310-330)/两实例类→least_common_ancestor(:334)
+- **"ConnectionGraph 在 BCEscapeAnalyzer 里" 错(编造)**: ConnectionGraph=C2 opto/escape.cpp(:320);bcEscapeAnalyzer="fast, conservative analysis...at the bytecode level"(bcEscapeAnalyzer.hpp:38-40),输入=ciMethod+ciMethodBlocks(**与 ciTypeFlow 无关**,do_analysis bcEscapeAnalyzer.cpp:1201);输出=位图(_arg_local/_arg_stack/_arg_returned+_return_local/_return_allocated/_allocated_escapes,:54-64);访问器 is_arg_local/is_arg_stack/is_arg_returned/is_return_local/is_return_allocated(:124-147);三档术语 NoEscape/ArgEscape/GlobalEscape 属 ConnectionGraph(escape.hpp:155-160)
+- **"ciMethod::scalar_replacement_possible()" 不存在(编造)**: 真实=ConnectionGraph::scalar_replaceable(escape.cpp:256/273)+find_scalar_replaceable_allocs(:268),替换本体 PhaseMacroExpand(macro.cpp)
+- **"输入含 ciTypeFlow 结果" 错**: bcea 自扫字节码,不依赖 ciTypeFlow
+- **算法**: 乐观初始化(initialize :1233,引用参数全标 local+stack :1242-1254)+降级——putfield/putstatic 被写值→set_global_escape、receiver→set_method_escape+set_modified(:876-888);aaload→set_method_escape+set_dirty(:488-492);invoke 单形态: 被调方"栈逃逸未返回"→set_method_escape+记依赖、否则 global(:336-339);非单形态→全 global+_unknown_modified(:355-363);递归 _parent/_level(is_recursive_call :90);保守 _conservative 全 false
+- **流程**: flow_types(ciTypeFlow.cpp:2727): get_start_state(OSR 取非 OSR 分析 osr_bci 块状态)→DFS→clone_loop_heads(仅 >=full_optimization :2748)→work list fixpoint(:2770-2782);flow_block(:2326)can_trap 先流异常边(:2359-2362);flow_successors 对后继 meet 变化即入队(:2160-2166);meet_exception(:492): locals meet+栈重置 1+tos meet exc(:499-501/:527-535);compute_exceptions(:1790)按异常表建 handler 块,catch_all→Throwable
+- **缺机制补录**: ①bcea 的 _dependencies(bcEscapeAnalyzer.hpp:66,invoke 时 append,与 01 篇 Dependencies 呼应);②can_trap 特例(ldc/aload_0/return/monitorexit 假设不抛,:2169-2197);③push_translate(boolean/char/byte/short→int,ciTypeFlow.cpp:540-552)、long/double 双槽;④OSR: ciTypeFlow 构造带 osr_bci(ciTypeFlow.hpp:57),ciMethod::get_osr_flow_analysis(ciMethod.cpp:369)
+- **实证方法论**: CITraceTypeFlow/CIPrintTypeFlow 是 develop flag(globals.hpp:1139/1142)release 不可用——换宏观证据: 开关对照实验(EscDemo noEscape 400 万 new=1ms vs escape 40 万进 ArrayList=18ms;-XX:-EliminateAllocations 后 5ms/9ms 差异消失=标量替换钉死);PrintEscapeAnalysis/PrintEliminateAllocations 也是 notproduct(c2_globals.hpp:537/543)
+- 实证: 12-ci-typeflow-escape-demo.txt(素材清单见 §五)
+
 ### 6.31 12-01(ciObject 镜像体系,12 域开篇,大纲 9 处漂移含 3 处编造 + 深审 2 轮,2026-08-13)
+
 - **"JIT 编译运行在 safepoint 中" 错(重要)**: 编译在编译线程并发跑,GC 时只是阻塞,编译状态跨 GC 存活;GC 安全=双通道引用——oop→JNI local handle(ciObject.cpp:53-59,GC 重定位),Metadata(Metaspace 不移动)→裸指针;ciObject.hpp:40-44 注释 "GC and compilation can proceed independently";编译线程进出 VM 用 VM_ENTRY_MARK/GUARDED_VM_ENTRY(ciUtilities.inline.hpp:34-38,ThreadInVMfromNative,17 域呼应)
 - **"多次编译同一个 Klass 返回同一个 ciKlass" 只对 well-known 类成立**: 工厂 per-编译(ciEnv.cpp:131 new ciObjectFactory);全局共享=vmSymbols 全部 ciSymbol(_shared_ci_symbols)+基本类型+WK_KLASSES_DO 的 well-known ciInstanceKlass(ciObjectFactory.cpp:123-206,ciEnv::_Object 等静态,ident 分段 _shared_ident_limit :204)
 - **"unique_concrete_method / DFA / _implementors 列表" 编造**: 真实=①implementor() 三态指针(ciInstanceKlass.hpp:70-74: NULL/一个/自身=多个;懒+备忘 ciInstanceKlass.cpp:599;共享类假设无唯一实现者 :604——CDS 没归档全部子类,保守);②unique_concrete_subklass(:370)=up_cast_abstract(:376)
@@ -374,8 +387,9 @@
 - [x] **11-cds/01**(CDS 全景与 Dump)——✅ 完结(正文 171bf24/回填 a9dafe0/README a35de82,commit 见 §二)
 - [x] **11-cds/02**(Load 端)——✅ 完结(正文 e8f9905/回填 2e9bc6c/README 529c91d,commit 见 §二);**11 域完结,第 5 批 2/13**
 - [x] **12-ci/01**(ciObject 镜像体系)——✅ 完结(正文 4fe2ebf/回填 13bae76/README e7ee1d1,commit 见 §二);12 域 1/3
-- [ ] **12-ci/02**(ciTypeFlow + bcEscapeAnalyzer)——**下一篇**;大纲 `planning/outlines/12-ci/02-ci-typeflow-escape.md`;12-ci/01 悬念指向它: 编译器看到的类型从哪来(profile + 字节码静态推导)
-- [ ] 12-ci 完结后 → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 11 域)
+- [x] **12-ci/02**(ciTypeFlow + bcEscapeAnalyzer)——✅ 完结(正文 f06d6fa/回填 63c7534/README b9aeac8,commit 见 §二);12 域 2/3
+- [ ] **12-ci/03**(ciObjectFactory + ciReplay)——**下一篇**;大纲 `planning/outlines/12-ci/03-ci-factory-runtime.md`(标题 "ciObject 生命周期与编译回放");12-ci/02 悬念指向它;注意 03 标题不含 ciMethodData(正文可讲,MDO 收尾)
+- [ ] 12-ci 完结后 → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 10 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -414,11 +428,11 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/12-ci/02-ci-typeflow-escape.md(注意 ⚠️ 块——12-ci/01 大纲已回填 9 条,02 大概率同样漂移;12-ci/01 悬念指向它: 编译器看到的类型从哪来——profile(TypeProfile)+字节码静态推导)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;12-ci/02 是 C2 类型流分析,重点: ciTypeFlow 的构建入口(方法入口/分支/异常处理器)、ciTypeFlow::StateVector 与 push/pop 语义、ciType 判定与合并、bcEscapeAnalyzer 的 ConnectionGraph 或保守标记、与 01 篇 ciMethod/_method_blocks 的衔接;实证: 用 jdk11 跑 CiDemo 系观察内联/逃逸(标量替换可用 -XX:+PrintEliminateAllocations 诊断参数))
+1. 读 planning/outlines/12-ci/03-ci-factory-runtime.md(注意 ⚠️ 块——12-ci/02 大纲已回填 10 条,03 大概率同样漂移;12-ci/02 悬念指向它: 工厂/回放/MDO 收束 ci 域)
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;12-ci/03 重点: ciObjectFactory 的 GC 安全细节(JNI handle block)、ciReplay 录制/回放机制(ciReplay.hpp/cpp)、ciMethodData 与 MDO 的对应(MethodData→ciMethodData,01 篇 TypeProfile 的宿主)、init_shared_objects 已部分讲过别重复;实证: jdk11 跑 -XX:+ReplayCompiles 或 CompileCommand 相关?注意 ReplayCompiles 是 develop/notproduct 检查可用性)
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
-5. 12-ci 完结后 → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 11 域)
+5. 12-ci 完结后 → 13-jit → 18-safepoint → 20-vmops → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 10 域)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
