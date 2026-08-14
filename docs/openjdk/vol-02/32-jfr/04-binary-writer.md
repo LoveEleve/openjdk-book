@@ -68,7 +68,7 @@ void WriterHost<BE, IE, WriterPolicyImpl>::write_utf8(const char* value) {
   ...
 ```
 
-`write_utf16`(:107-114)同构(UTF16 标记+长度+数据)。**常量池引用(STRING_CONSTANT)**由检查点层在写字符串时按需登记: 相同字符串在常量池登记一次,事件里只写引用——与 32-03 的栈去重同构(值去重 + 事件引用 id)。
+`write_utf16`(:107-114)同构(UTF16 标记+长度+数据)。**STRING_CONSTANT(常量池引用)**用于线程/类/符号这类常量池条目的字符串: 值在检查点登记一次,事件侧只写引用——与 32-03 的栈去重同构(值去重 + 事件引用 id)。
 
 ## 4. chunk 结构回顾
 
