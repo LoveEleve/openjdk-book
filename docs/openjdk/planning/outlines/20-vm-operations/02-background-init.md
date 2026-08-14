@@ -3,6 +3,23 @@
 > 🟡 Working | 2 KP 中的后台基础设施
 > 读者处境: JVM 不仅执行显式请求的 VM 操作——还有一堆周期性后台任务: 检查 biased lock 批量撤销、JFR 采样、性能计数器刷新。谁在执行这些？
 
+> ⚠️ 写作期修正(2026-08-14, vol-02/20-vm-operations/02 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"task.hpp:35-80 代码块" 全错**: execute_if_ready 不存在(真实 execute_if_pending,task.hpp:82-92);无 is_enrolled();_tasks 是**静态数组 max_tasks=10**(task.hpp:45-48,task.cpp:32-33)非链表;enroll=尾部追加+满 10 fatal+unpark/start(task.cpp:110-130),disenroll=整体左移(:133-154)
+> - **"WatcherThread 主循环 vmThread.cpp:500-550" 文件错**: WatcherThread 在 thread.cpp(:1453 run);vmThread.cpp 是 VMThread;睡眠**非固定 50ms**——sleep()(thread.cpp:1395-1451)先算 time_to_wait()(task.cpp:80-92,min(interval-counter)),PeriodicTask_lock->wait(remaining),无任务睡到 enroll 被 unpark
+> - **"递减 counter→复位 interval" 反**: execute_if_pending **累加** delay_time,>=interval 执行并清零;counter=距上次执行的毫秒数;time_to_wait 里的真实时间源=WatcherThread 报告的 time_waited
+> - **"JFR 是 PeriodicTask" 编造**: 文件=jfrThreadSampler.cpp(share/jfr/periodic/sampling),JfrThreadSampler 是独立 NonJavaThread(os::create_thread :425+自己 semaphore),**不 enroll 到 WatcherThread**;默认配置采样事件关闭无此线程(实证转储只有 JFR Recorder Thread)
+> - **"PerfDataSampler perfData.cpp:180-230" 错**: 真实 StatSamplerTask(statSampler.cpp:42-46)+StatSampler::engage(:78-90,PerfDataSamplingInterval=50ms)——38-02 已详,本篇只列名
+> - **"BiasedLocking::check_bulk_rebias 周期检查" 编造**: 真实 EnableBiasedLockingTask(biasedLocking.cpp:79-92)**一次性**(interval=BiasedLockingStartupDelay 默认 0=立即执行,globals.hpp:970;AggressiveOpts 500,arguments.cpp:1986-1987),task 提交 async VM_EnableBiasedLocking 后 delete this;批量撤销=VM_BulkRevokeBias(biasedLocking.cpp:566),由 update_heuristics 同类撤销计数(20/40 阈值,:321-372)被动触发(:727),非周期任务
+> - **"NMTSweeper" 编造**: 无 NMT 周期任务;NMT_stack_walkable 只是 init_globals 一行(init.cpp:150)
+> - **缺 4 个真实任务**: VMOperationTimeoutTask(vmThread.cpp:92,204-226;AbortVMOnVMOperationTimeout 时,interval=delay/10,:246-256)、ChunkPoolCleaner(arena.cpp:169-177,5000ms,BlocksToKeep=5 其余 os::free)、JniPeriodicCheckerTask(jniPeriodicChecker.cpp:33-37,10ms,CheckJNICalls,os::run_periodic_checks=DO_SIGNAL_CHECK)、RTMLockingCalculationTask(rtmLocking.cpp:38-47 一次性)+MemProfilerTask(memprofiler.cpp:47,develop-only)
+> - **"VM init 23 步 init.cpp:80-250" 全错**: init.cpp 共 190 行;真实 init_globals=init.cpp:101-160(**30 个函数**,顺序即依赖注释),vm_init_globals=:90-98(7 步);"jintArgumentProlog/10_initPhase2/30_runPhase2" 是 JDK8 旧版编造;StubRoutines 真实顺序=codeCache_init(:107)→stubRoutines_init1(:110)→universe_init(:111),非"StubRoutines 在 CodeCache 前";两阶段是 generate_initial/generate_all 内容差异(stubGenerator_x86_64.cpp:5869/:5974-5977)
+> - **"Threads::create_vm 是 init_globals 一步" 反**: Threads::create_vm(thread.cpp:3702,jni.cpp:4012 调用)调用 vm_init_globals(:3809)+init_globals(:3846);"SystemDictionary::initialize/Universe::genesis/Interpreter::initialize_stub/ClassLoader::initialize/SignalHandlerMark::on/Management::init" 均不存在(真实: management_init/classLoader_init1/codeCache_init/universe_init/interpreter_init/compileBroker_init)
+> - **"VMThread::create 内部等 loop(VMOperationLock)" 错**: create(vmThread.cpp:242-275)只建对象(timeout task/队列/terminate lock/perf counter);线程创建+就绪等待在 create_vm(thread.cpp:3871-3887: os::create_thread+start_thread+**Notify_lock 等 active_handles**,run 里 set_active_handles 后 notify :293-298);"vm_during_initialization flag" 不存在
+> - **"两阶段=数据就绪/服务启动" 错**: vm_init_globals/init_globals 是全局数据两段(init.hpp:38-39 注释),服务启动(VMThread/ServiceThread/编译器/周期任务)在 create_vm 第三四段(:3868-4078);WatcherThread **最后 make_startable+start**(:4066-4078,注释 "All PeriodicTasks should be registered by now",晚注册者第一个 tick 慢)
+> - **停机**: before_exit 先 WatcherThread::stop(java.cpp:503)再 StatSampler::disengage(:507)——先停时钟再注销任务
+> - **悬念指向 21-shared-runtime 错**: 正确=27-jni(层 4,00-domain-writing-order.md:76)
+> - **实证**: 20-background-init-demo.txt(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50;20-vmops-demo.txt [0.024s] EnableBiasedLocking 立即执行)
+
 ### 1. "我不停地跑" — WatcherThread + PeriodicTask
 
 场景: JVM 启动后 WatcherThread 不停循环——每 ~50ms 执行一次 enrolled periodic tasks。这些 task 在初始化时注册。
