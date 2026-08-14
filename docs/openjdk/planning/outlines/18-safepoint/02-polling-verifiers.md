@@ -3,6 +3,17 @@
 > 🔴 Deep | 2 KP 中的检测+保护
 > 读者处境: Java 线程在解释器循环中跑——每 1000 条字节码指令后要检查"现在需要 safepoint 吗？"。这检查可以快（1 cycle 的 volatile read）也可以重（SIGSEGV→signal handler）。
 
+> ⚠️ 写作期修正(2026-08-13, vol-02/18-safepoint/02 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **x86_64 默认 thread-local poll**(JDK10+ 起): `ThreadLocalHandshakes` pd product 默认 true(实证)→ `set_uses_thread_local_poll`(safepointMechanism.cpp:36-39);轮询=**testb 线程 _polling_page 字段第 3 位**(macroAssembler_x86.cpp:3744-3761/interp_masm_x86.cpp:832-834),**不触发 SIGSEGV**——01-os/04 的轮询页 SIGSEGV 是全局页模式(JDK11 x86 非默认)
+> - **"Thread::_polling_page 地址切换" 半对**: JDK11 是**值方案**: armed=8|bad_page(受保护页)、disarmed=good_page(safepointMechanism.cpp:50-76);arm/disarm=一次 8 字节写 set_polling_page(safepointMechanism.inline.hpp:50-57);local_poll_armed=mask_bits_are_true(poll_word, poll_bit())(:32-35);非 Java 线程退化 global_poll(:38-46);block_if_requested 未 armed 直接 return(:55-60)
+> - **"polling page 两个偏移 8 字节" 错(旧版)**: JDK11 是 bad/good **两个连续页**(实证日志 "SafePoint Polling address, bad (protected) page:0x..., good (unprotected) page:0x...",safepointMechanism.cpp:69);值兼作地址(某些路径 dereference 落在 bad/good 页)
+> - **NoSafepointVerifier 伪代码全错(编造)**: 不是"记录 counter+析构断言";JDK11=**线程计数**(构造 `_allow_safepoint_count++`/`_allow_allocation_count++`,析构减,safepointVerifiers.hpp:89-104;thread.hpp:335 "If 0, thread allow a safepoint to happen");检查点 `check_for_valid_safepoint_state`(thread.cpp:995-1006)计数非零→fatal("Possible safepoint reached by thread that does not allow it");调用点=memAllocator.cpp:186(分配)/mutex.cpp:1370(阻塞)/vmThread.cpp:672(VM op);release 空实现;**NoGCVerifier 才是计数断言**(total_collections,safepointVerifiers.cpp:8-28);PauseNoSafepointVerifier 嵌套暂停;JRTLeafVerifier(interfaceSupport.inline.hpp:372)
+> - **"local_poll 读 safepoint_state()->_thread_local_poll" 错**: 读 Thread::_polling_page 值(线程字段,thread.hpp:708)
+> - **"ServiceThread::armed_value" 不存在(编造)**: 无此机制
+> - **critical native(大纲第 3 节)不属于本篇**: check_for_lazy_critical_native(safepoint.cpp:781)是 18-01 begin/点名的一部分;Get/ReleasePrimitiveArrayCritical 属 27-jni 域
+> - **悬念指向错**: 大纲 "→域 19 Synchronization" 过期(19 域已完结);正确指向 20-vm-operations/01-vm-operation.md
+> - **实证**: 18-safepoint-polling-demo.txt(ThreadLocalHandshakes=true pd;轮询页地址日志;对照 -XX:-ThreadLocalHandshakes safepoint 照常)
+
 ### 1. "两种通知方式" — page trap vs thread local poll
 
 场景: GC 需要 safepoint。VM thread 调 begin()→此时 200 个线程中有 195 个在 Java code 中(需要通知)，5 个在 native(不需要通知)。怎么最快地通知那 195 个？
