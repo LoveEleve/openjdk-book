@@ -51,7 +51,7 @@ JNI_END
 
 **IN_VM 的讲究**(jniCheck.cpp:63-68): wrapper 收到调用时线程还在 **native 状态**(JNI 调用方;JNI_ENTRY_CHECKED 不像 JNI_ENTRY 那样自动转换),而校验函数要 `resolve` handle、读 Klass——必须在 VM 状态摸堆。`IN_VM` 就是 `ThreadInVMfromNative` 的局部包装(17-04 的通道): 进 VM → 校验 → 回 native → 调真实函数。错误报告同样分两态: VM 态直接 `ReportJNIFatalError`(hpp:36-40: 打印 "FATAL ERROR in native method: ..." + `print_jni_stack` + `os::abort(true)`);native 态用 `NativeReportJNIFatalError`(:146-150)包一层 IN_VM。
 
-## 3. 查什么: 七个维度
+## 3. 查什么: 八个维度
 
 | 维度 | 检查点 | 失败表现 |
 |---|---|---|
@@ -59,6 +59,7 @@ JNI_END
 | JNIEnv 归属线程 | :100-102 | fatal "Using JNIEnv in the wrong thread" |
 | 引用有效性 | `validate_handle`(:443)→`validate_object`(:469-475) | fatal "Bad global or local ref passed to JNI" |
 | methodID/类匹配 | `validate_jmethod_id`(:453-466)→`Method::checked_resolve_jmethod_id`(method.cpp:2191-2202: 空/NULL、`JNIMethodBlock::_free_method` 标记、loader 存活) | fatal "Wrong object class or methodID passed to JNI call" |
+| 字段 ID 类型 | `checkStaticFieldID`(:256)/`checkInstanceFieldID`(:284): 静态/实例匹配 + 持有者类继承链 + 字段类型 | fatal "Non-static field ID passed to JNI"/"Static field ID passed to JNI"/类型不匹配 |
 | 挂起异常 | `check_pending_exception`(:184-197) | 警告 "JNI call made with exception pending" |
 | 本地引用泄漏 | `functionExit`(:239-252) | 警告 "JNI local refs: N, exceeds capacity: M" |
 | Critical 区内调用 | `functionEnter`(:222-228) | 警告 "Calling other JNI functions in the scope of ..." |
@@ -75,4 +76,4 @@ JNI_END
 
 jniCheck 拆完: 它不碰任何 JNI 函数,靠一张**平行函数表**整体替换(`jni_functions_check` 保存原始表、断言结构一致);每个 wrapper 四段式——入口查线程/env、functionEnter 查挂起异常与 critical 区、IN_VM 参数校验(引用/methodID/数组/字段类型)、回调后 functionExit 数本地引用;fatal 直接 "FATAL ERROR in native method" + JNI 栈 + abort,警告类的问题(异常/泄漏)只打 WARNING 继续跑。`-Xcheck:jni` 一开,02 篇的快路径立刻让位——检查优先于优化。而"函数表可以整体换掉"这个能力还有更野的用法: 工具接口(JVMTI)不只查,还**改**——`copy_jni_function_table` 在 safepoint 里原子替换槽,挂钩子、拦字段访问(02 篇的 `can_post_field_access` 条件就是它)。下一域换主角: 不是 C 调 Java,是 Java 自己调 JVM——`System.currentTimeMillis()` 这类入口怎么走。
 
-> → [30-jvm-entry/01 — System.currentTimeMillis() 怎么进入 JVM?— JVM Entry Points](openjdk/planning/outlines/30-jvm-entry/01-jvm-entry-points.md)
+> → [30-jvm-entry/01 — System.currentTimeMillis() 怎么进入 JVM?— JVM Entry Points](01-jvm-entry-points.md)
