@@ -12,7 +12,7 @@
 
 ## 1. ciTypeFlow: 把方法体当"虚拟机"跑一遍
 
-`ciTypeFlow`(ciTypeFlow.hpp:35)的输入: `ciMethod` + `ciMethodBlocks`(基本块,ciMethod 的另一个懒字段,`get_method_blocks` ciMethod.cpp:1317)+ 一个可选的 `osr_bci`(ciTypeFlow.hpp:57)——**支持从循环内任意 bci 开始的 OSR 分析**(构造时 `is_osr_flow()` 区分,:63)。创建入口是 `ciMethod::get_flow_analysis()`(ciMethod.cpp:352): 懒建 + 缓存(`if (_flow == NULL)`,ciMethod 构造时 `_flow = NULL`,01 篇的懒字段体系);OSR 版本 `get_osr_flow_analysis(osr_bci)`(:369)每次新分析。
+`ciTypeFlow`(ciTypeFlow.hpp:35)的输入: `ciMethod` + `ciMethodBlocks`(基本块,ciMethod 的另一个懒字段,`get_method_blocks` ciMethod.cpp:1317)+ 一个可选的 `osr_bci`(ciTypeFlow.hpp:57)——**支持从循环内任意 bci 开始的 OSR 分析**(构造时 `is_osr_flow()` 区分,:63)。创建入口是 `ciMethod::get_flow_analysis()`(ciMethod.cpp:352): 懒建 + 缓存(`if (_flow == NULL)`,ciMethod 构造时 `_flow = NULL`,01 篇的懒字段体系);OSR 版本 `get_osr_flow_analysis(osr_bci)`(:369)每次新分析。消费端是 C2 的解析器 `Parse`(parse1.cpp:427): 拿到 flow 后先查两件事——`failing()`(分析失败/中途放弃)就直接 `record_method_not_compilable`(:428-429),`has_irreducible_entry()`(不可归约循环)也特殊对待(:433);然后解析以 **flow 的块图为骨架**(`rpo_at`/`successors`/`exceptions`,parse1.cpp:1250/1274-1275)逐块生成 IR,OSR 场景还要用块类型(`local_type_at`/`monitor_count`,parse1.cpp:223/346)。
 
 分析的核心数据结构是 **StateVector**——"某个程序点的类型信息汇总"(ciTypeFlow.hpp:158-160):
 
@@ -88,7 +88,7 @@ ciType* ciTypeFlow::StateVector::type_meet_internal(ciType* t1, ciType* t2, ciTy
 
 ## 3. 主循环: 从入口跑到 fixpoint
 
-`flow_types()`(ciTypeFlow.cpp:2727)是主流程: 入口块喂入初始状态(`get_start_state`: 方法参数类型;OSR 时取非 OSR 分析在 osr_bci 处的块状态作起点,:346 起)→ 深度优先把块逐个 `flow_block` → 有循环时先 `clone_loop_heads`(循环头克隆,让回边有独立的类型状态;**仅限 tier2+**,`comp_level >= CompLevel_full_optimization` 才做,:2747-2762)——然后进入 work list 迭代:
+`flow_types()`(ciTypeFlow.cpp:2727)是主流程: 入口块喂入初始状态(`get_start_state`,:363: 方法参数类型;OSR 时取非 OSR 分析在 osr_bci 处的块状态作起点)→ 深度优先把块逐个 `flow_block` → 有循环时先 `clone_loop_heads`(循环头克隆,让回边有独立的类型状态;**仅限 tier2+**,`comp_level >= CompLevel_full_optimization` 才做,:2747-2762)——然后进入 work list 迭代:
 
 ```cpp
 // ciTypeFlow.cpp:2770-2782(截取核心,逐字)
@@ -145,7 +145,7 @@ ciType* ciTypeFlow::StateVector::type_meet_internal(ciType* t1, ciType* t2, ciTy
   }
 ```
 
-算法是"乐观 + 降级"(`initialize`,bcEscapeAnalyzer.cpp:1233): 起点把所有引用参数都标成 `_arg_local + _arg_stack`(:1242-1254,乐观: 假设它们不逃逸),然后逐字节码追踪——降级点各不相同: **putfield/putstatic 写引用值时,被写的值对象 → `set_global_escape`(可能被任何人读到,:876-878);putfield 的 receiver 本身 → `set_method_escape` + 记录被改偏移(:884-888)**;`aaload` 数组读 → 数组 `set_method_escape` + `set_dirty`(:488-492);调用点 `invoke`(:249)把被调方法的分析结果并进来——被调方说参数"栈逃逸但没返回" → `set_method_escape` 并**记录依赖**;否则 → `set_global_escape`(:336-339);**被调方法不是单形态**(有多个可能实现) → 所有实参直接 `set_global_escape` + `_unknown_modified`(:355-363)。`set_global_escape`(:167)清 local+stack 位,含分配对象时置 `_allocated_escapes`。**递归调用**有自己的处理:`_parent/_level`(bcEscapeAnalyzer.hpp:70-71,调用自己时借用父分析,`is_recursive_call` :90)。保守模式 `_conservative` 下所有访问器返回 false(:49-50,什么都优化不了,但一定安全)。
+算法是"乐观 + 降级"(`initialize`,bcEscapeAnalyzer.cpp:1233): 起点把所有引用参数都标成 `_arg_local + _arg_stack`(:1242-1254,乐观: 假设它们不逃逸),然后逐字节码追踪——降级点各不相同: **putfield/putstatic 写引用值时,被写的值对象 → `set_global_escape`(可能被任何人读到,:876-878);putfield 的 receiver 本身 → `set_method_escape` + 记录被改偏移(:884-888)**;`aaload` 数组读 → 数组 `set_method_escape` + `set_dirty`(:488-492);调用点 `invoke`(:249)把被调方法的分析结果并进来——被调方说参数"栈逃逸但没返回" → `set_method_escape` 并**记录依赖**;否则 → `set_global_escape`(:336-339);**被调方法不是单形态**(有多个可能实现) → 所有实参直接 `set_global_escape` + `_unknown_modified`(:355-363)。`set_global_escape`(:167)清 local+stack 位,含分配对象时置 `_allocated_escapes`。**入口还有一串"直接不分析"的跳过条件**(do_analysis,:1302-1316): 抽象方法、native、持有者未初始化、**分析深度超 `MaxBCEAEstimateLevel`**、方法超 `MaxBCEAEstimateSize`——跳过=保持全保守。**递归有自己的防线**: `_parent` 指针串起"当前分析链",`is_recursive_call`(:206)沿这条链查 callee 是否已在栈上——递归调用不套娃分析(:316),直接按保守处理。保守模式 `_conservative` 下所有访问器返回 false(:49-50,什么都优化不了,但一定安全)。
 
 **关键设计 (斜体)**: *这份分析刻意不精确——不追踪对象图,只追踪"参数/新分配"两类身份,任何看不懂的操作一律降级。它产出的是 C2 的**输入**,不是 C2 的结论: 真正的全局逃逸分析在 C2 的 `ConnectionGraph`(escape.cpp),后者把字节码级结论放进 IR 节点图里做全程序判断;bcea 的结论主要服务**调用点参数**——`meth->get_bcea()` 在 escape.cpp:970/:1154 被取用,判断"这个实参能不能安全优化"。*
 
