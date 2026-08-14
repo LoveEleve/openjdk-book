@@ -74,7 +74,7 @@ JVM 侧在**第一次任何 NMT 动作时**读这个环境变量(memTracker.cpp:
 
 `alloc_size = size + nmt_header_size`(os.cpp:710): **`::malloc` 多要一个 header 的大小**,返回后 `MemTracker::record_malloc` 在块首原地构造 MallocHeader,把**用户指针后移一个 header 返回**(mallocTracker.cpp:120-148,`memblock = malloc_base + sizeof(MallocHeader)`)。于是布局是 `[MallocHeader][user_data...]`,free 时 `header = user_ptr - sizeof(MallocHeader)` 回溯(record_free :150-155),把 header 起点交还 `::free`(os.cpp:818-819)。**用户拿到的指针永远指向 header 之后的区域**——这是让追踪对调用方完全透明的关键。
 
-MallocHeader 本身是个**位域打包的两个机器字**(mallocTracker.hpp:246-262,LP64 下 16 字节,保证 8/16 字节对齐):
+MallocHeader 本身是个**位域打包的两个机器字**(mallocTracker.hpp:240-266: 类注释 "To satisfy malloc alignment requirement, NMT uses 2 machine words for tracking purpose, which ensures 8-bytes alignment on 32-bit systems and 16-bytes on 64-bit systems",LP64 下 16 字节):
 
 ```cpp
 // mallocTracker.hpp:246-262(截取核心,逐字)
@@ -144,7 +144,7 @@ call-site 的键是 `NativeCallStack`——**编译期定死的 4 帧**(nmtCommo
                     NativeCallStack(1, true) : NativeCallStack::empty_stack())
 ```
 
-`os::malloc(size, flags)` 默认参数就是 `CALLER_PC`(os.cpp:681-683)。**只有 detail 级别才真正抓栈**——summary 级别传空栈,连抓栈的开销都没有;这也解释了为什么 [实证:](planning/outlines/00-jvm-tools/materials/commands/34-nmt-tracking-demo.txt) 里 detail 报告的 malloc 归属段总是**恰好 4 帧调用栈**。`NMT_stack_walkable` 是平台标志(memTracker.cpp:43-47,Linux x86 恒 true;Solaris 上 false 是因为栈不可走时宁可不抓)。*关键设计: 抓栈动作是分配路径的一部分,但只在 detail 付这个钱,而且深度封顶 4*——栈深度直接决定表内存: 511 桶、桶内位置索引封顶 `right_n_bits(16)`(MAX_BUCKET_LENGTH,即 2^16-1),全部静态规划。
+`os::malloc(size, flags)` 默认参数就是 `CALLER_PC`(os.cpp:681-683)。**只有 detail 级别才真正抓栈**——summary 级别传空栈,连抓栈的开销都没有;这也解释了为什么 [实证:](planning/outlines/00-jvm-tools/materials/commands/34-nmt-tracking-demo.txt) 里 detail 报告的 malloc 归属段总是**恰好 4 帧调用栈**。`NMT_stack_walkable` 是平台标志(memTracker.cpp:43-47): Linux 恒 true,仅 Solaris 置 false。*关键设计: 抓栈动作是分配路径的一部分,但只在 detail 付这个钱,而且深度封顶 4*——栈深度直接决定表内存: 511 桶、桶内位置索引封顶 `right_n_bits(16)`(MAX_BUCKET_LENGTH,即 2^16-1),全部静态规划。
 
 ## 6. 虚拟内存: 按地址区间记账
 

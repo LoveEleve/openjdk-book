@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-14 | 卷 2 写作中: **97/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 24) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 24/23=24,11/12/13/18/20/27/30/32 八个域完结,**34-nmt 域 1/2 完成(本会话 14 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(1))**,下一篇 34-nmt/02 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-14 | 卷 2 写作中: **97/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 24) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 24 篇(11/12/13/18/20/27/30/32 八域完结,**34-nmt 1/2 完成(本会话 14 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(1))**,下一篇 34-nmt/02 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -86,7 +86,7 @@
 | **32-jfr** | 1-6 | `32-jfr/01-recorder-engine.md`(139)+`02-event-metadata.md`(47)+`03-periodic-sampling.md`(67)+`04-binary-writer.md`(95)+`05-leak-profiler.md`(88)+`06-jni-instrumentation.md`(61) | ✅ **32 域完结(本会话)** |
 | **34-nmt** | 1-2 | `34-nmt/01-tracking.md`(164) | ✅ 01 完结(本会话),**34 域 1/2** |
 
-### 本会话 13 篇的 commit 清单(按 git log 为准,2026-08-14)
+### 本会话 14 篇的 commit 清单(按 git log 为准,2026-08-14)
 
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(372 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true)
 
@@ -113,6 +113,8 @@
 **32-jfr/05(Old Object Sampling,32 域 5/6)**: 正文 b595e6b(88 行)→ 回填 ⚠️ 8 组 → README b595e6b 同提交(95/152)→ 素材 32-jfr-leakprofiler-demo.txt→ 深审 2 轮(①'每 N 字节采样'错(粒度=TLAB refill,AllocTracer 钩子);②span=分配增量;③双锁(JfrTryLock+自旋锁);本篇大纲较准)→ **第 3 轮** f3bdc94(quick reject 表述修正——栈记录在 sample 入口已发生)→ **第 4 轮** acb752b(补 **cutoff 机制**: EventEmitter::emit cutoff≤0 只发样本无链;默认 memory-leak-detection-cutoff=0ns)
 
 **32-jfr/06(JNI Interface + Instrumentation + DCmd,32 域收官)**: 正文 f2a2c2f(61 行)→ 回填 ⚠️ 10 组 → README f2a2c2f 同提交(96/152,32 域完结)→ 素材 32-jfr-jni-instrumentation-demo.txt→ 深审 2 轮(①JfrClassAdapter 编造(真实=JfrEventClassTransformer::on_klass_creation,klassFactory.cpp:222 拦截 Event 子类);②'方法入口 ASM 插桩'错(注入=事件类 schema 5 方法壳+3 字段,急切模式调 EventInstrumentation);③JfrJniMethod::start/JfrDCmd/thread_local_jfr_ref 编造)→ **第 3 轮** c284e32(补实证引用)→ **第 4 轮** bacb90a(急切注入条件精确化: Jfr::is_recording() 或 force_instrumentation)
+
+**34-nmt/01(NMT 追踪系统,34 域 1/2)**: 正文 cb24e2a(164 行,含大纲回填 ⚠️ 9 组)→ README 0f2abb7(97/152)→ 素材 34-nmt-tracking-demo.txt→ 深审 2 轮(①MallocHeader 位域(大小/类别/表索引)非指针;②minimal 构造直接 return 纯占位;③四档只降不升;④固定 4 帧栈;CURRENT_PC 仅 detail 真抓栈;⑤虚拟内存区域链表非 per-site 聚合;⑥OOM 自动降级;⑦链接文本对齐 4 个前置依赖;⑧悬念段跨段(PerfStringConstant 是 malloc 段/G1FromCardCache 是虚拟内存段))→ **第 3 轮** 58866ce(补追踪范围澄清: JNI 直接 libc malloc 不入账;跨段一致性复核;实证数字逐条对素材)→ **第 4 轮**(§5 Solaris 推断删改事实;§2 对齐注释行号精确化 :240-266)
 
 ---
 
@@ -194,7 +196,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 13 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 14 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -249,6 +251,7 @@
 - 常用实证: **Temurin OpenJDK 11.0.32 在 /data/tmp/opencode/jdk11**(与 jdk11u 同版本,实证首选);Temurin 17 在 /data/tmp/opencode/jdk17(含 src.zip 验证 API 变迁);TencentKona 17/21 在 /opt/codev/
 - **本会话关键源码位置**: 20 域: task.hpp/cpp(PeriodicTask 静态数组 10 槽,execute_if_pending 累加,task.cpp:49-78/80-92/110-154)/thread.cpp(WatcherThread :1367-1562,create_vm :3702-4091: vm_init_globals :3809/init_globals :3846/VMThread :3868-3888/周期任务 :4047-4055/WatcherThread :4066-4078)/init.cpp(vm_init_globals :90-98 7 步,init_globals :101-160 30 函数)/biasedLocking.cpp(EnableBiasedLockingTask :79-92,update_heuristics :321-372)/statSampler.cpp(StatSamplerTask :42-46)/arena.cpp(ChunkPoolCleaner :169-177);27 域: jniHandles.hpp/cpp/inline.hpp(make_local :52-87/make_global :101-122/make_weak_global :125-146/allocate_handle 四段 :481-546/rebuild :548-575/resolve_impl :52-66)/oopStorage.hpp/cpp(allocate :410-477,CAS release :575-587)/jniFastGetField_x86_64.cpp(投机 stub :56-138)/jniCheck.cpp(JNI_ENTRY_CHECKED :91-104/functionEnter :222-228/functionExit :239-252 泄漏检查/jni_functions_check :2304-2323)/jfieldIDWorkaround.hpp(BitsPerWord-2 偏移);30 域: jvm.cpp(JVM_CurrentTimeMillis :271/GetCallerClass :706/DefineClass :949/StartThread :2857/InvokeMethod :3571)/jvm.h(182 个 JNIEXPORT,三段注释 :38-55)/System.c(:39 注册表)/nativeLookup.cpp(pure_jni_name :165/特殊表 :228-238/lookup_style :253 分流/ClassLoader.findNative :277-285)/javaCalls.cpp(call_helper :346-475 十步/JavaCallWrapper :54-154)/reflection.cpp(invoke_method :1257/invoke :1072-1255 五段)/stackwalk.cpp(fill_in_frames :108-145 is_hidden 过滤)/StackStreamFactory.java(批大小 :545-556);32 域: jfrThreadLocal.hpp(双 buffer :39-40)/jfrStorage.cpp(flush :480-559)/jfrRecorderThreadLoop.cpp(消息循环 :40-86)/jfrChunkWriter.cpp(open :54-70/write_header :95-107)/jfrEncoders.hpp(Varint128 :159-210)/jfrWriterHost.inline.hpp(write 分派 :84-89/be_write :118/utf8 :92-100/事件大小槽 jfrEventWriterHost.inline.hpp :56-76)/jfrEventClassTransformer.cpp(on_klass_creation :1515/5 方法壳 :120-145)/jfrPeriodic.cpp(45 个 TRACE_REQUEST_FUNC)/RequestEngine.java(execute :66-85/doPeriodic :184)/objectSampler.cpp(sample :138-153/add :155-199/span :167)/pathToGcRootsOperation.cpp(doit :81-131/EdgeQueue 5% :59-63/BFS-DFS :112-124)/objectSampleCheckpoint.cpp(write :398-409)/leakProfiler.cpp(start :41-77)
 - **JDK 侧**: jdk.jfr/internal(MetadataRepository.java:66-86/EventClassBuilder.java:45/EventInstrumentation.java:60/RequestEngine.java/Options.java:44-46);jdk.jfr 资源 metadata.xml(Copy-jdk.jfr.gmk);jfc 配置(default.jfc ExecutionSample 20ms/profile 10ms;OldObjectSample cutoff=0ns)
+- **本会话关键源码位置补(34 域)**: mallocTracker.hpp(MallocHeader 位域 :246-302/MallocMemorySummary :187-237)/mallocSiteTable.hpp/cpp(511 桶 :118-122,lookup_or_add :142-185,静态表+伪栈防递归 :75-113/:201-205,AccessLock :128-166/cpp:243-265)/memTracker.hpp/cpp(CURRENT_PC/CALLER_PC :88-91,init_tracking_level :58-96 环境变量 NMT_LEVEL_<pid>,transition_to 只降不升 :164-184)/nmtCommon.hpp(四档 :35-41,栈深 4 :45)/allocation.hpp(MEMFLAGS 20 类 :114-141)/nativeCallStack.cpp(采集 :33-56,hash :83-95)/os_posix.cpp(get_native_stack 帧指针链 :120-140)/virtualMemoryTracker.cpp(add_reserved_region :332-392/remove_released_region 切割 :437-488/snapshot_thread_stacks :566-569)/java.c(launcher SetJvmEnvironment :825-880,调用点 :303 在 LoadJavaVM 前)/os.cpp(malloc :685-742/free :801-821/reserve_memory :1759-1790)
 
 ### 6.5 实证方法论新增(本会话沉淀)
 - **JNI 系列**: 自写 JNI demo(gcc -shared -fPIC -I$JAVA_HOME/include);printf 要 fflush(stdout)(重定向全缓冲丢输出);GetObjectRefType 常量 1/2/3;jobject 参数是 local ref(传回 Java 再传回变 refType=1)
