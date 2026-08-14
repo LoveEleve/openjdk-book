@@ -25,7 +25,7 @@ ciEnv::~ciEnv() {
 }
 ```
 
-只有两件事: ① `remove_symbols()`——归还本次编译新建的符号引用计数(01 篇说过,非 SID 符号建完要 `decrement_refcount`);② `set_env(NULL)`——清掉编译线程上的 ciEnv 指针。**没有"遍历所有 ciObject 逐个释放"**——大纲的说法不存在: 所有 ci 对象都分配在 Arena 里,Arena 随 ciEnv 析构一次性释放,不需要逐个 delete。oop 镜像的 JNI handle 也随编译线程的 handle block 一起清理;Metadata 引用本就不是 ci 的财产(Metaspace 管)。**注意注释**: 清 env 指针要在 safepoint 语境下做——"RedefineClasses might be reading it"——类重定义时 VM 可能正通过这个指针读取编译上下文,不能裸着清。
+只有两件事: ① `remove_symbols()`——归还本次编译新建的符号引用计数(01 篇说过,非 SID 符号建完要 `decrement_refcount`);② `set_env(NULL)`——清掉编译线程上的 ciEnv 指针。**没有"遍历所有 ciObject 逐个释放"**——大纲的说法不存在: 所有 ci 对象都分配在 Arena 里,Arena 随 ciEnv 析构一次性释放,不需要逐个 delete(well-known 类/符号的共享镜像除外,它们活在启动期建好的长命 Arena 里,01 篇讲过)。oop 镜像的 JNI handle 也随编译线程的 handle block 一起清理;Metadata 引用本就不是 ci 的财产(Metaspace 管)。**注意注释**: 清 env 指针要在 safepoint 语境下做——"RedefineClasses might be reading it"——类重定义时 VM 可能正通过这个指针读取编译上下文,不能裸着清。
 
 **关键设计 (斜体)**: *整个 ci 层的生命周期就是"一次编译 = 一个 ciEnv = 一块 Arena": 构造时建工厂、编译中镜像随用随建、析构时 Arena 整体回收——没有引用计数、没有逐个析构、没有跨编译缓存(well-known 例外,01 篇)。简洁的前提是 per-编译隔离: 镜像的快照可能过期(01 篇依赖机制兜底),所以绝不跨编译复用。*
 
@@ -39,10 +39,10 @@ ciEnv::~ciEnv() {
 
 [实证:](planning/outlines/00-jvm-tools/materials/commands/12-ci-replay-demo.txt) 用 DumpReplay 跑 CiDemo,生成 3 个 replay 文件(compid76/77/78 = CiDemo::work 的三次编译)。文件结构(`dump_replay_data_unsafe`,ciEnv.cpp:1231): Jvmti 状态 3 行 → `# 123 ciObject found` → **每个 ciMetadata 的完整快照** → compile 行。快照行就是"编译输入全集":
 
-- `ciInstanceKlass java/util/Iterator 1 1 53 100 8 ...`——类的布局信息(01 篇 ciInstanceKlass 快照字段的逐项序列化);
-- `staticfield java/lang/System in Ljava/io/InputStream; java/io/BufferedInputStream`——**静态字段的值**(ciField is_constant 的原料);
+- `ciInstanceKlass java/util/Iterator 1 1 53 100 8 ...`——类的状态 + **常量池 tag 数组**(dump_replay_data,ciInstanceKlass.cpp:713: `is_linked`/`is_initialized`/cp 长度 + 逐项 tags——回放时校验哪些不变、按 tag 重新解析类);
+- `staticfield java/lang/System in Ljava/io/InputStream; java/io/BufferedInputStream`——**static final 字段的值**(ciInstanceKlass.cpp:740-744 只在 `is_initialized()` 时打印,注释明说 "in case the compilation relies on their value"——01 篇 ciField is_constant 折叠的原料);
 - `ciMethod CiDemo work (Ljava/lang/String;LCiDemo$ShapeHolder;)J 9 486889 1 0 -1`——方法 + 四个计数/状态 + instructions_size(按 dump_replay_data 的格式,ciMethod.cpp:1335-1347: invocation raw=9、backedge raw=486889、解释器调用=1、throwout=0、_instructions_size=-1 未算);
-- `ciMethodData CiDemo work (sig)J 2 108223 orig 80 158 237 ... data 38 0x90007 ... oops 2 14 CiDemo$ShapeHolder 21 CiDemo$Square methods 0`——**MDO 的完整镜像**(dump_replay_data,ciMethodData.cpp:673): 状态与里程、`orig` 段(MDO 头部原始字节,前两个值 158/237 就是调用计数)、`data` 段(profile 原始字节)、`oops` 段(profile 里的类指针,按 **偏移+类名** 成对: 偏移 14 处 CiDemo$ShapeHolder、偏移 21 处 CiDemo$Square——01 篇 PrintInlining 里 `TypeProfile = CiDemo$Square` 的同一个数据!);
+- `ciMethodData CiDemo work (sig)J 2 108223 orig 80 158 237 ... data 38 0x90007 ... oops 2 14 CiDemo$ShapeHolder 21 CiDemo$Square methods 0`——**MDO 的完整镜像**(dump_replay_data,ciMethodData.cpp:673): 状态与里程、`orig` 段(MDO 头部原始字节,计数器与状态都藏在这里)、`data` 段(profile 原始字节)、`oops` 段(profile 里的类指针,按 **偏移+类名** 成对: 偏移 14 处 CiDemo$ShapeHolder、偏移 21 处 CiDemo$Square——01 篇 PrintInlining 里 `TypeProfile = CiDemo$Square` 的同一个数据!);
 - `compile CiDemo work (sig)J 5 4 inline 5 0 -1 CiDemo work ... 1 14 java/lang/String length ()I ...`——本次编译的任务参数(entry_bci=5、comp_level=4)**连同内联决策树**(dump_compile_data,ciEnv.cpp:1203)——回放时连"内联了谁"都还原。
 
 ## 3. 回放: debug 构建的确定性重现
