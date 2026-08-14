@@ -59,7 +59,7 @@ void WatcherThread::run() {
   ...
 ```
 
-两个环节值得注意。一是 **`sleep()` 的时长是算出来的,不是固定 50ms**(thread.cpp:1395-1451): 它先问任务表"离最近的到期任务还有多久"(`PeriodicTask::time_to_wait()`,task.cpp:80-92,取所有任务 `interval - counter` 的最小值),然后在 `PeriodicTask_lock` 上 `wait(remaining)` 精确睡到那个时刻;任务表为空时 `remaining == 0`,一直睡到有人 `enroll` 把它 `unpark`(task.cpp:124-129)。wait 被 spurious 唤醒或新任务插入时,循环重算 remaining 再睡(thread.cpp:1432-1447)。二是 **`real_time_tick(time_waited)` 把"这次睡了多久"当作参数传给任务表**——时间累积的职责在任务那边,WatcherThread 只负责报告。
+两个环节值得注意。一是 **`sleep()` 的时长是算出来的,不是固定 50ms**(thread.cpp:1395-1451): 它先问任务表"离最近的到期任务还有多久"(`PeriodicTask::time_to_wait()`,task.cpp:80-92,取所有任务 `interval - counter` 的最小值),然后在 `PeriodicTask_lock` 上 `wait(remaining)` 精确睡到那个时刻;任务表为空时 `remaining == 0`,一直睡到有人 `enroll` 把它 `unpark`(task.cpp:124-129)。wait 被 spurious 唤醒或新任务插入时,循环重算 remaining 再睡(thread.cpp:1435-1446)。二是 **`real_time_tick(time_waited)` 把"这次睡了多久"当作参数传给任务表**——时间累积的职责在任务那边,WatcherThread 只负责报告。
 
 ### 优先级: 给到 Java 线程最高档
 
@@ -70,6 +70,7 @@ void WatcherThread::run() {
 `PeriodicTask` 不是链表,而是一张**静态定长数组**(task.cpp:32-33):
 
 ```cpp
+// task.cpp:32-33(逐字)
 int PeriodicTask::_num_tasks = 0;
 PeriodicTask* PeriodicTask::_tasks[PeriodicTask::max_tasks];
 ```
@@ -195,7 +196,7 @@ void BiasedLocking::init() {
 
 ### VMOperationTimeoutTask: VM 操作的"秒表"
 
-`AbortVMOnVMOperationTimeout` 开启时,VM 操作有了超时监控(vmThread.cpp:92,204-213):
+`AbortVMOnVMOperationTimeout`(diagnostic,默认 false,globals.hpp:528)开启时,VM 操作有了超时监控(vmThread.cpp:92,204-213):
 
 ```cpp
 // vmThread.cpp:204-213(截取核心,逐字)
@@ -225,11 +226,11 @@ void VMOperationTimeoutTask::task() {
 WatcherThread 之外,还有一批"周期性干活"的线程,它们**不是** PeriodicTask——各有各的睡眠与唤醒协议:
 
 - **JFR 采样器**: `JfrThreadSampler`(jfrThreadSampler.cpp:311)是独立 `NonJavaThread`,`os::create_thread(this, os::os_thread)` 创建(:425),主循环 `run()`(:452-500)用自己的 semaphore(`_sample`)与 `os::naked_short_sleep` 睡到下一个采样点,Java/native 两档间隔独立计时,到点用 `os::SuspendedThreadTask` 挂起目标线程抓栈(31-02 提过 AGCT 与它的对比)。间隔由 Java 侧 ExecutionSample 事件阈值注入(`set_java_sample_interval`,jfrThreadSampler.hpp:50)——采样线程是"按需创建"的([实证:] 20-background-init-demo.txt 里默认配置的 JFR 录制,线程转储只有 "JFR Recorder Thread",没有采样线程)。细节归 32-jfr 域。
-- **ServiceThread**: `JavaThread`,处理 JVMTI 延迟事件队列、低内存通知等(serviceThread.cpp:41-45),create_vm :3960 启动,注释要求它"在编译器开始发事件之前启动"(thread.cpp:3957-3959)。
+- **ServiceThread**: `JavaThread`,类注释自述职责 "A JavaThread for low memory detection support and JVMTI compiled-method-load events"(serviceThread.hpp:30),`service_thread_entry`(serviceThread.cpp:84)循环处理 JVMTI 延迟事件、GC 通知(GCNotifier)与 DCMD 通知(:107-139);create_vm :3960 启动,注释要求它"在编译器开始发事件之前启动"(thread.cpp:3957-3959)。
 - **CodeCacheSweeperThread**(thread.hpp:2108): 独立 JavaThread,`sweeper_loop`(sweeper.cpp:265-278)睡在 `CodeCache_lock` 上(超时 24 小时),被 `notify` 唤醒后增量清扫 nmethod——16-code-cache/03 已详,这里不展开。
 - **GC 线程族**(G1 Main Marker/Conc#/Refine#/Young RemSet Sampling...): [实证:](planning/outlines/00-jvm-tools/materials/commands/20-background-init-demo.txt) SIGQUIT 转储里的一排 runnable,各自有专门的唤醒协议,归 GC 域。
 
-**关键设计 (斜体)**: *分界线是"活的大小"——毫秒级、几十行以内的轻活挂到 WatcherThread 上共享一颗时钟(任务 ≤10、单线程顺序执行、不参与 safepoint);要持续长时间运行、或者有强实时性要求的活(采样、清扫、GC)开独立线程,自持睡眠与唤醒协议,互不拖累。判断标准其实写在一个注释里: 周期任务的设计目标就是模拟一个"不会丢中断的定时器",而不是做一个多线程调度器。*
+**关键设计 (斜体)**: *分界线是"活的大小"——毫秒级、几十行以内的轻活挂到 WatcherThread 上共享一颗时钟(任务 ≤10、单线程顺序执行、不参与 safepoint);要持续长时间运行、或者有强实时性要求的活(采样、清扫、GC)开独立线程,自持睡眠与唤醒协议,互不拖累。这个定位回到最初的注释: 周期任务的设计目标就是**模拟一个"定时器中断"**(thread.cpp:1369-1371)——它只负责把时间分发给短小的任务,而不是做一个多线程调度器。*
 
 ## 5. 启动序列: 这些后台组件何时被点亮
 
@@ -237,7 +238,7 @@ WatcherThread 之外,还有一批"周期性干活"的线程,它们**不是** Per
 
 ### 第一段: 参数与 OS(thread.cpp:3702-3801)
 
-`os::init()`(:3721)→ 解析参数 `Arguments::parse`(:3743)→ `Arguments::apply_ergo`(:3748,自动调整)→ `os::init_2`(:3774)→ **`SafepointMechanism::initialize()`**(:3784,18 域轮询机制的种子)→ 启动 `-agentlib/-agentpath` 代理(:3798-3801)。注意此时**没有任何 HotSpot 线程**(`_thread_list` 刚清零,:3804-3806)——一切还在 `JNI_CreateJavaVM` 的调用者线程(未来的主线程)上进行。
+`os::init()`(:3721)→ 解析参数 `Arguments::parse`(:3743)→ `Arguments::apply_ergo`(:3748,自动调整)→ `os::init_2`(:3774)→ **`SafepointMechanism::initialize()`**(:3784,18 域轮询机制的种子)→ 启动 `-agentlib/-agentpath` 代理(:3798-3801)。注意此刻**没有任何 HotSpot 线程**(线程列表要到 :3804 才初始化,主线程对象更晚,在 :3821)——代理的 `Agent_OnLoad` 还跑在 `JNI_CreateJavaVM` 的调用者线程上。
 
 ### 第二段: 全局初始化(thread.cpp:3803-3862)
 
@@ -294,7 +295,7 @@ jint init_globals() {
   ...
 ```
 
-后面还有 `referenceProcessor_init` / `jni_handles_init` / `vtableStubs_init` / `InlineCacheBuffer_init` / `compilerOracle_init` / `dependencyContext_init` / **`compileBroker_init()`**(:137,失败返回 JNI_EINVAL)/ `universe_post_init`("must happen after compiler_init",:141)/ **`stubRoutines_init2()`**("note: StubRoutines need 2-phase init",:144)/ `MethodHandles::generate_adapters`(:145)。**StubRoutines 的两阶段**: 两期都把桩生成进 CodeCache 的 BufferBlob,区别在内容——`stubRoutines_init1`(:110)生成 `generate_initial` 的基础桩(forward_exception/call_stub/原子操作等,stubGenerator_x86_64.cpp:5869),`stubRoutines_init2`(:144)生成 `generate_all` 的桩——它们要引用 SharedRuntime 的 C++ 函数地址并以 RuntimeStub 形式可重定位生成(注释 "These entry points require SharedInfo::stack0 to be set up in non-core builds and need to be relocatable, so they each fabricate a RuntimeStub internally",stubGenerator_x86_64.cpp:5974-5977),所以必须排在 `SharedRuntime::generate_stubs`(:123)之后。
+后面还有 `referenceProcessor_init` / `jni_handles_init` / `vtableStubs_init` / `InlineCacheBuffer_init` / `compilerOracle_init` / `dependencyContext_init` / **`compileBroker_init()`**(:137,失败返回 JNI_EINVAL)/ `universe_post_init`("must happen after compiler_init",:141)/ **`stubRoutines_init2()`**("note: StubRoutines need 2-phase init",:144)/ `MethodHandles::generate_adapters`(:145)。**StubRoutines 的两阶段**: 两期都把桩生成进 CodeCache 的 BufferBlob,区别在内容——`stubRoutines_init1`(:110)生成 `generate_initial` 的基础桩(forward_exception/call_stub/原子操作等,stubGenerator_x86_64.cpp:5869),`stubRoutines_init2`(:144)生成 `generate_all` 的桩——它们要引用 SharedRuntime 的 C++ 函数地址并以 RuntimeStub 形式可重定位生成(注释 "These entry points require SharedInfo::stack0 to be set up in non-core builds and need to be relocatable, so they each fabricate a RuntimeStub internally",stubGenerator_x86_64.cpp:5974-5976),所以必须排在 `SharedRuntime::generate_stubs`(:123)之后。
 
 **关键设计 (斜体)**: *大纲把它想象成"23 步",真实是 30 个函数,顺序不是拍脑袋——每个函数头顶的注释就是依赖声明(如 `interpreter_init` 的 "before any methods loaded"、`universe2_init` 声明注释里的 "loads primordial classes",init.cpp:68)。依赖的本质是**单向推进**: 类加载之前解释器要先就绪,解释器之前模板表要先生成,模板表之前 universe 要有……任何一步反序都会在运行时以诡异的方式爆掉。*
 
