@@ -12,7 +12,7 @@
 
 采样器的结构在 31-02 拆过(OSThreadSampler 用 `os::SuspendedThreadTask`,**不是大纲想象的 AsyncGetCallTrace**)。本篇补驱动的两处:
 
-**间隔从哪来**: 没有 `-XX:JfrThreadSamplingInterval` 这类 flag——采样间隔由 **Java 侧 ExecutionSample 事件的周期设置**注入,经 `jfr_set_java_sample_interval`(jfrJniMethod.cpp:250-261)落到 native:
+**间隔从哪来**: 没有 `-XX:JfrThreadSamplingInterval` 这类 flag——采样间隔由 **Java 侧 ExecutionSample 事件的周期设置**注入,经 `jfr_set_method_sampling_interval`(jfrJniMethod.cpp:248-261)落到 native:
 
 ```cpp
 // jfrJniMethod.cpp:250-261(截取核心,逐字)
