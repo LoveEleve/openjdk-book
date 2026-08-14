@@ -100,7 +100,7 @@ oop Reflection::invoke_method(oop method_mirror, Handle receiver, objArrayHandle
 - **HotSpot 侧**: `skip_hidden_frames(mode)`(stackwalk.hpp:133-135,`SHOW_HIDDEN_FRAMES` 位未置时跳过)**只过滤 `is_hidden()` 的帧**——`@LambdaForm.Hidden` 注解的方法(解析时设置,classFileParser.cpp:2180),即 MethodHandle 的 LambdaForm 内部帧;
 - **Java 侧**: 反射帧(NativeMethodAccessorImpl 等)由 `StackStreamFactory.java:249-268`(`skipReflectionFrames`/`isReflectionFrame` 按类判断)过滤——实证日志里 hotspot 把 `invoke0/invoke/DelegatingMethodAccessorImpl/Method.invoke` 全部 fill 进了数组,但默认 Java 输出只剩业务帧。**大纲想象的"反射帧过滤在 stackwalk.cpp"是错的,它在 Java 侧**;hotspot 的 `is_hidden` 只管 LambdaForm。
 
-**分页**: 帧数组用完后 `JVM_MoreStackWalk`(jvm.cpp:580-601)→ `fetchNextBatch` 续取——`StackWalker` 的流式遍历按批(默认 6 帧,`StackWalker.java` 的 batchSize)消费,`BaseFrameStream` 用 magic 校验跨批次的有效性(stackwalk.cpp:42-88)。
+**分页**: 帧数组用完后 `JVM_MoreStackWalk`(jvm.cpp:580-601)→ `fetchNextBatch` 续取——`StackWalker` 的流式遍历按批消费,批大小自适应(StackStreamFactory.java:545-556): 首批 = `Math.min(Math.max(walker.estimateDepth(), SMALL_BATCH), LARGE_BATCH_SIZE)`(SMALL_BATCH=8、LARGE_BATCH_SIZE=256、BATCH_SIZE=32,:68-70),后续批次**翻倍直到 32 封顶**([实证:] 30-reflection-stackwalk-demo.txt 日志首次 batch size 6=estimateDepth 估计值,续批 12);`BaseFrameStream` 用 magic 校验跨批次的有效性(stackwalk.cpp:42-88)。
 
 ## 核心悬念
 
