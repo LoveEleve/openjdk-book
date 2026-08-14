@@ -3,6 +3,15 @@
 > 🔴 Deep | 2 KP 中的引用管理
 > 读者处境: Java 调 native method——传入 `jobject obj`。这个 `jobject` 不是直接指向 oop——而是**handle**(间接指针)。GC 可能移动 oop→但 jobject 不变→JNIHandles 解引用时指向新位置。
 
+> ⚠️ 写作期修正(2026-08-14, vol-02/27-jni/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **行号全漂**: jniHandles.hpp 共 207 行,JNIHandles 类 :35-126,JNIHandleBlock :132-205(block_size_in_oops=32);jniHandles.cpp 共 664 行: make_local :52-87/make_global :101-122/make_weak_global :125-146/destroy :168-185/initialize :203-210;weak tag 常量在 jniHandles.hpp:55-66(weak_tag_size=1/alignment=2/value=1)
+> - **"Local handle 自动释放(Native 返回后 pop)" 半对**: 真实=**native 方法返回时 `_top` 清零**(templateInterpreterGenerator_x86.cpp:1163-1166 + sharedRuntime_x86_64.cpp:2652-2656 编译代码 "reset handle block",critical native 例外),不是"弹出";块内容留着,GC 的 oops_do 只遍历 _top 以内(jniHandles.cpp:453-478);PushLocalFrame/PopLocalFrame 才动链(_pop_frame_link,jni.cpp:746-783)
+> - **resolve 伪代码错(RawAccess/无锁解释)**: 真实 resolve_impl(jniHandles.inline.hpp:52-66)用 **NativeAccess**(jweak 走 ON_PHANTOM_OOP_REF 通道);**assert(!current_thread_in_native())(:55)——resolve 必须在非 native 状态**,大纲"resolve 在 native code 中调用/thread in native"方向反了(JNI 函数入口 ThreadInVMfromNative 先转 VM 状态);null 规范化注释 :61-62;resolve :68-74
+> - **"OopStorage(域 25)" 归属错**: OopStorage 在 share/gc/shared/oopStorage.*,通用 off-heap 引用容器;JNIHandles::initialize(jniHandles.cpp:203-210)建 **"JNI Global"/"JNI Weak" 两个实例**(JNIGlobalAlloc_lock/JNIGlobalActive_lock);allocate 持 _allocation_mutex(:410-477,Block+位图 _allocated_bitmask oopStorage.cpp:208),release 无锁(:675-683);GC 弱清除=weakProcessor.cpp:37(WeakProcessor 阶段写 NULL)
+> - **缺机制(重要)**: ①**jobject 参数=参数帧里 oop 槽的地址**(sharedRuntime_x86_64.cpp:1157-1180 "An oop arg. Must pass a handle not the oop itself",解释器走签名处理器 templateInterpreterGenerator_x86.cpp:932-947);is_frame_handle 识别栈上引用(jniHandles.cpp:270-278);实证: 传回 Java 再传回 native 的引用 GetObjectRefType=1(JNILocalRefType);**把参数当 global handle 传 DeleteGlobalRef 会 SIGSEGV**;②allocate_handle 四段分配链(:481-546): _last 块末槽→free list(槽内嵌 next :521)→_last->_next→rebuild_free_list 或追加新块;rebuild 启发式(:548-575,"空闲不到一半就按缺额算 _allocate_before_rebuild");③jweak 对齐=weak_tag_alignment=2 非 8 字节;④JavaCallWrapper 在 VM 调 Java 时切换 active_handles(javaCalls.cpp:65-154)
+> - **实证**: 27-jni-handles-demo.txt(NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后 NewLocalRef(weak)=NULL/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0)
+> - **悬念指向 02-jni-fast-path ✓**(正确,保留)
+
 ### 1. "三层 Handle — global/local/weak"
 
 场景: JNI_GetObjectArrayElement 返回 jobject→它是 local handle。如果你要跨多次 native 调用持有它→必须升级为 global handle。如果你想要 GC 可回收的引用→weak global handle。
