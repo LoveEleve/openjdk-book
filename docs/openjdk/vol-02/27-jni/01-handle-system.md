@@ -50,7 +50,7 @@ jobject JNIHandles::make_local(oop obj) {
   int             _allocate_before_rebuild;     // Number of blocks to allocate before rebuilding free list
 ```
 
-每块 32 个槽;满了链下一块(`_next`);`_top` 是已用计数。`allocate_handle`(jniHandles.cpp:481-546)按四段顺序找空位: ①`_last` 块的末尾槽;②**free list**(被 `DeleteLocalRef` 清空的槽串成的单链表,槽内嵌 next 指针:`_free_list = (oop*) *_free_list`,:521);③`_last->_next` 的未用块;④都不行就**重建 free list 或追加新块**(:532-545)。重建有启发式(rebuild_free_list,:548-575): 扫全链,把 `_handles[i]==NULL` 的槽收进 free list;若空闲槽不到一半,按缺额算出"再分配几个块后才重建"(`_allocate_before_rebuild`),避免每次都全链扫描。
+每块 32 个槽;满了链下一块(`_next`);`_top` 是已用计数。`allocate_handle`(jniHandles.cpp:481-546)按四段顺序找空位: ①`_last` 块的末尾槽;②**free list**——由 `rebuild_free_list` 扫描时把被 `DeleteLocalRef` 清空(`*handle == NULL`)的槽串成的单链表,槽内嵌 next 指针,取用头时 `_free_list = (oop*) *_free_list`(:519-524);③`_last->_next` 的未用块;④都不行就**重建 free list 或追加新块**(:532-545)。重建有启发式(rebuild_free_list,:548-575): 扫全链,把 `_handles[i]==NULL` 的槽收进 free list;若空闲槽不到一半,按缺额算出"再分配几个块后才重建"(`_allocate_before_rebuild`),避免每次都全链扫描。
 
 ### 失效: 不是"pop",是"清零 _top"
 
@@ -135,7 +135,7 @@ jobject JNIHandles::make_global(Handle obj, AllocFailType alloc_failmode) {
 
 ### 仓库本身: OopStorage
 
-OopStorage(gc/shared/oopStorage.hpp:37-73 的注释是设计总纲)管理"堆外指向堆内对象的引用集合",内部是一组 Block,每块含 `oop[]` + 使用位图(`_allocated_bitmask`,oopStorage.cpp:208)。`allocate`(:410-477)持 `_allocation_mutex` 从 `_allocation_list` 头块取条目,没有可用块就新建并把块挂进 `_active_array`(GC 并行遍历用,`expand_active_array` 可扩容),满块从分配列表摘除;`release`(:675-683)无锁,只查块位图清位。**两种并发协议**(头注释 :68-73): GC 的并发迭代(Concurrent Iteration Protocol)与分配(Allocation Protocol)互不长期阻塞——全局引用能被大量并发创建而不会成为 GC 的瓶颈。
+OopStorage(gc/shared/oopStorage.hpp:37-73 的注释是设计总纲)管理"堆外指向堆内对象的引用集合",内部是一组 Block,每块含 `oop[]` + 使用位图(`_allocated_bitmask`,oopStorage.cpp:208)。`allocate`(:410-477)持 `_allocation_mutex` 从 `_allocation_list` 头块取条目,没有可用块就新建并把块挂进 `_active_array`(GC 并行遍历用,`expand_active_array` 可扩容),满块从分配列表摘除;`release`(:675-682)无锁——位图用 CAS 原子清位(:575-587),变空的块进延迟清理列表,由后续 allocate 顺带处理(`reduce_deferred_updates`,:416)。**两种并发协议**(头注释 :68-73): GC 的并发迭代(Concurrent Iteration Protocol)与分配(Allocation Protocol)互不长期阻塞——全局引用能被大量并发创建而不会成为 GC 的瓶颈。
 
 ## 3. resolve: 无锁地读槽
 
@@ -164,8 +164,8 @@ inline oop JNIHandles::resolve_impl(jobject handle) {
 
 ## 核心悬念
 
-三层引用拆完: 本地引用是线程行李里 32 槽一块的便签纸(`_top` 清零整体失效,参数引用是帧内 oop 槽的地址);全局引用是 OopStorage 仓库里持久条目(显式 delete);弱全局引用靠"地址 +1"的 tag 位与 phantom 读写,由 GC 的 WeakProcessor 清 NULL——[实证](planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt)里 `jweak` 地址低位为 1、删掉全局引用后弱引用自动清空,一清二楚。SIGQUIT 转储末尾的 "JNI global refs: N, weak refs: M" 就是这两个仓库的当前水位(jniHandles.cpp:305-307)。
+三层引用拆完: 本地引用是线程行李里 32 槽一块的便签纸(`_top` 清零整体失效,参数引用是帧内 oop 槽的地址);全局引用是 OopStorage 仓库里持久条目(显式 delete);弱全局引用靠"地址 +1"的 tag 位与 phantom 读写,由 GC 的 WeakProcessor 清 NULL——[实证](planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt)里 `jweak` 地址低位为 1、删掉全局引用后弱引用自动清空,一清二楚。SIGQUIT 转储的 "JNI global refs: N, weak refs: M" 摘要行就是这两个仓库的当前水位(jniHandles.cpp:305-307)。
 
-但 Handle 系统只是 JNI 的"数据面"——每次 `GetIntField` 都走完整 JNI 调用(函数表查 env、状态转换、resolve),约 200 cycles;`GetIntField` 读一个整型字段本该是 10 cycles 的活。下一篇: 快路径怎么把 200 cycles 压到 30?
+但 Handle 系统只是 JNI 的"数据面"——每次 `GetIntField` 都走完整 JNI 调用(经 JNIEnv 函数表间接调用、状态转换、resolve),约 200 cycles;`GetIntField` 读一个整型字段本该是 10 cycles 的活。下一篇: 快路径怎么把 200 cycles 压到 30?
 
 > → [27-jni/02 — JNI GetIntField 正常 200 cycles → 怎么做到 30 cycles?— JNI Fast Path](02-jni-fast-path.md)
