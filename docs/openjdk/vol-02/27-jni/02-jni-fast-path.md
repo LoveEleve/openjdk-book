@@ -75,7 +75,7 @@ void quicken_jni_functions() {
 }
 ```
 
-**只有 8 个槽**: Boolean/Byte/Char/Short/Int/Long/Float/Double——全部是实例字段的 Get,**没有 `GetObjectField`,也没有 `GetStatic*Field`**([实证:] 27-jni-fastpath-demo.txt)。条件 5 选 1: `UseFastJNIAccessors`(默认 true,globals.hpp:916)且无 JVMTI 字段访问钩子且无校验/计数/检查——任一开启就整体不替换(`-XX:-UseFastJNIAccessors` 就是[实证]的慢路径开关)。函数表本身的更新有并发安全顾虑: native 线程可能正在读函数表,所以 JVMTI 侧替换走 `copy_jni_function_table`(jni.cpp:3820-3827)——**在 safepoint 里逐槽原子写**("To avoid this each function pointers are copied automically",注释 :3815-3819;JvmtiExport 用, :3820-3827)。
+**只有 8 个槽**: Boolean/Byte/Char/Short/Int/Long/Float/Double——全部是实例字段的 Get,**没有 `GetObjectField`,也没有 `GetStatic*Field`**([实证:] 27-jni-fastpath-demo.txt)。替换的 5 个条件: `UseFastJNIAccessors`(默认 true,globals.hpp:916)且无 JVMTI 字段访问钩子且无校验/计数/检查——任一开启就整体不替换(`-XX:-UseFastJNIAccessors` 就是[实证]的慢路径开关)。函数表本身的更新有并发安全顾虑: native 线程可能正在读函数表,所以 JVMTI 侧替换走 `copy_jni_function_table`(jni.cpp:3820-3827)——**在 safepoint 里逐槽原子写**("To avoid this each function pointers are copied automically",注释 :3815-3819;JvmtiExport 用, :3820-3827)。
 
 ### stub: 一次奇偶检查 + 两次 counter 加载
 
@@ -158,7 +158,7 @@ stub 的机制注释在 jniFastGetField.hpp:31-55,先看它再对照汇编:
   // race freedom.
 ```
 
-初值 0(safepoint.cpp:145);safepoint 开始时加 1 变奇数(begin() 内部 :448-450,`Threads_lock` 已经拿到),结束时再加 1 回偶数(end() :501-503)。**奇数的"持续期"覆盖整个 safepoint**(线程挂起→操作→唤醒),所以: 读到偶数 → 没有 safepoint 在进行;读完字段再读到同一个偶数 → 整个读窗口里没发生过 safepoint → 读到的 oop 没被移动过、字段值一致。**"Threads_lock 全程持有保证 race freedom"** 是协议的核心: 一次 safepoint 的两次加 1 之间,任何线程看到的 counter 不会处于"半同步"的中间态。18 域的 jniFastGetField 双加载与此同源。
+初值 0(safepoint.cpp:145);safepoint 开始时加 1 变奇数(begin() 内部 :448-450,`Threads_lock` 已经拿到),结束时再加 1 回偶数(end() :501-503)。**奇数的"持续期"覆盖整个 safepoint**(线程挂起→操作→唤醒),所以: 读到偶数 → 没有 safepoint 在进行;读完字段再读到同一个偶数 → 整个读窗口里没发生过 safepoint → 读到的 oop 没被移动过、字段值一致。反过来看论证的另一半: 对象移动**必然**发生在 begin 与 end 之间、必然让 counter 变号,所以即使投机读真的读到了"移动前的旧位置"(旧内存尚未回收、值也读出来了),二次校验也必然失败、结果被整体丢弃走慢路径——**读错不可怕,可怕的是读错还不知道**。**"Threads_lock 全程持有保证 race freedom"** 是协议的核心: 一次 safepoint 的两次加 1 之间,任何线程看到的 counter 不会处于"半同步"的中间态。hpp:54-55 还承认一个理论上的 counter 回绕(2 的 32 次方次 safepoint 后旧值重现),注释自己判定 "not a practical concern"。18 域的 jniFastGetField 双加载与此同源。
 
 ## 4. 谁给投机读兜底: 信号处理器
 
