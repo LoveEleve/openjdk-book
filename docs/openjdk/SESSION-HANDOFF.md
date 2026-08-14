@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-14 | 卷 2 写作中: **89/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 16) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 16/16,**11-cds/12-ci/13-jit-framework/18-safepoint/20-vm-operations/27-jni 域完结,30-jvm-entry 2/3(本会话)**,下一篇 30-jvm-entry/03 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-14 | 卷 2 写作中: **90/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 17) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 17/17,**11-cds/12-ci/13-jit-framework/18-safepoint/20-vm-operations/27-jni/30-jvm-entry 域完结(本会话)**,下一篇 32-jfr | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -44,12 +44,12 @@
 第 2 批(原语): 02(4) → 03(2) → 04(2) → 06(6) → 16(5) → 38(2) → 41(2) → 42(3)   ✅ 完结 26/26
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
-第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2 完结) → 27 ✅(3/3 完结) → 30(2/3)** → 32 → 34 → 36 → 37 → 39 → 46   🚧 进行中
+第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2 完结) → 27 ✅(3/3 完结) → 30 ✅(3/3 完结)** → 32 → 34 → 36 → 37 → 39 → 46   🚧 进行中
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 89 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 90 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -81,7 +81,7 @@
 | **18-safepoint** | 1-2 | `18-safepoint/01-safepoint-orchestration.md`(121)+`02-polling-verifiers.md`(97) | ✅ **18 域完结(本会话)** |
 | **20-vm-operations** | 1-2 | `20-vm-operations/01-vm-operation.md`(103)+`02-background-init.md`(372) | ✅ **20 域完结,第 5 批 11/13(本会话)** |
 | **27-jni** | 1-3 | `27-jni/01-handle-system.md`(171)+`02-jni-fast-path.md`(189)+`03-jni-check-platform.md`(78) | ✅ **27 域完结(本会话)** |
-| **30-jvm-entry** | 1-3 | `30-jvm-entry/01-jvm-entry-points.md`(138)+`02-java-calls.md`(118) | 🚧 30 域 2/3(本会话) |
+| **30-jvm-entry** | 1-3 | `30-jvm-entry/01-jvm-entry-points.md`(138)+`02-java-calls.md`(118)+`03-reflection-stackwalk.md`(111) | ✅ **30 域完结(本会话)** |
 
 ### 本会话 16 篇的 commit 清单(按 git log 为准)
 
@@ -104,7 +104,7 @@
 **18-safepoint/02(轮询与 NoSafepointVerifier,18 域收官)**: 正文 e2896a5 → 回填 a0a97bf(⚠️ 10 条)→ README 2e63aeb(82/152,18 域完结,第 5 批 9/13)→ 素材 18-safepoint-polling-demo.txt(gitignore)→ **第 3 轮** 06086f2(①轮询**双实现**——解释器/共享 stub=testb 位测试(MacroAssembler::safepoint_poll),**C1/C2 编译代码=deref 方式**(movptr 线程 poll 值+testl [poll_addr],c1_LIRAssembler_x86.cpp:558-575/x86_64.ad:1099-1102)——armed 值=8|bad_page 落在 PROT_NONE 页→**真 SIGSEGV**→is_poll_address(os.hpp:429)→get_poll_stub(os_linux_x86.cpp:431-432)→safepoint 阻塞;**01-os/04 的轮询页 SIGSEGV 在 JDK11 x86 真实存在(编译代码路径)**,thread-local 只是把被轮询地址从全局页变成线程自己的值;②全局页模式: 编译代码 deref 全局 polling_page(C1 :576-592),解释器退化 cmp32 state;③轮询点归属: 编译代码=C1 LIR/C2 SafePoint 节点,解释器=MacroAssembler)
 **20-vm-operations/01(VM_Operation 从提交到执行,20 域 1/2)**: 正文 b30c2e8 → 回填 b2c8867(⚠️ 7 条)→ README f0ed423(83/152,20 域 1/2,第 5 批 10/13)→ 素材 20-vmops-demo.txt(gitignore)→ **第 3 轮** 7221a66(①doit_prologue 语义——VM_RevokeBias::doit_prologue 检查对象**是否还带 bias 标记**(biasedLocking.cpp:520-534,"avoid a safepoint"),非大纲的"检查线程栈";②唤醒机制——**登记≠唤醒**: evaluate_operation 只 increment_vm_operation_completed_count(:427-429),等待者由 **loop 每轮结束的 VMOperationRequest_lock->notify_all()**(vmThread.cpp:622-624)统一唤醒后自检 ticket;③loop 末尾复查 no_op_safepoint_needed(true)(:625-631,18-01 Cleanup 另一触发点))
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(371 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt(gitignore)→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注脚本覆盖 11 块;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true 注册成立,MemProfiling 恒 false)
-**27-jni/03(JNI Check + 平台层,27 域收官)**: 正文 9f523af(78 行)→ 回填 ⚠️ 10 组 → README 9f523af 同提交(87/152,27 域完结)→ 素材 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt(gitignore)→ 深审 2 轮(①JNI_ENTRY_CHECKED **不含 ThreadInVMfromNative**——不做整函数状态转换,校验点用 IN_VM 局部转换(与 JNI_ENTRY 的关键差异);②jniExport.hpp 不是 JNI 函数声明而是 JVMTI 接口导出器;jni_NativeInterface 实例在 jni.cpp:3528 非 3550;validate_handle :443/validate_object :469 非 :497)第 3 轮无新增→ **第 4 轮** 35f96a8(①校验维度表补'字段 ID 类型'行(checkStaticFieldID :256/checkInstanceFieldID :284)→ 7→8 维度与悬念一致;②尾部链接统一相对路径;③fatal 路径差异: 宏内非 Java 线程=直接 print+abort 无 JNI 栈,与 NativeReportJNIFatalError 不同)
+**27-jni/03(JNI Check + 平台层,27 域收官)**: 正文 9f523af(78 行)→ 回填 ⚠️ 10 组 → README 9f523af 同提交(87/152,27 域完结)→ 素材 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt(gitignore)→ 深审 2 轮(①JNI_ENTRY_CHECKED **不含 ThreadInVMfromNative**——不做整函数状态转换,校验点用 IN_VM 局部转换(与 JNI_ENTRY 的关键差异);②jniExport.hpp 不是 JNI 函数声明而是 JVMTI 接口导出器;jni_NativeInterface 实例在 jni.cpp:3528 非 3550;validate_handle :443/validate_object :469 非 :497)第 3 轮无新增→ **第 4 轮** 35f96a8(①校验维度表补'字段 ID 类型'行(checkStaticFieldID :256/checkInstanceFieldID :284)→ 7→8 维度与悬念一致;②尾部链接统一相对路径;③fatal 路径差异: 宏内非 Java 线程=直接 print+abort 无 JNI 栈,与 NativeReportJNIFatalError 不同)
 **27-jni/02(JNI Fast Path,27 域 2/3)**: 正文 1ec9012(189 行)→ 回填 ⚠️ 10 组 → README 1ec9012 同提交(86/152,27 域 2/3)→ 素材 27-jni-fastpath-demo.txt(gitignore)→ 深审 2 轮(①quicken_jni_functions 在 create_vm **第三段**(thread.cpp:3916)非第四段;②fieldID 偏移=BitsPerWord-2(64 位 62 位),位布局注释 "30" 是 32 位遗留)第 3 轮无新增→ **第 4 轮** da75d76(①安全论证补全——对象移动必然伴随 counter 变号,投机读读到旧位置值也被二次校验丢弃;②补 counter wraparound(hpp:54-55);③"条件 5 选 1"歧义改"替换的 5 个条件";④验证 GetObjectField 普通实现=HeapAccess oop_load_at+make_local(jni.cpp:2076)支撑无快路径断言;⑤验证 jni_GetStaticIntField 仅函数表槽)
 **27-jni/01(Handle 系统,27 域 1/3)**: 正文 f64d2af(171 行)→ 回填 ⚠️ 9 组 → README f64d2af 同提交(85/152,27 域 1/3)→ 素材 27-jni-handles-demo.txt(gitignore)→ **第 3 轮** 6d6b59f(参数 handle 机制精确化——编译代码 object_move sharedRuntime_x86_64.cpp:1157-1180+解释器 pass_object interpreterRT_x86_64.cpp:214-260 lea 取参数槽地址,null 参数传 NULL;06-oops/01 链接文本对齐;jweak 对齐=weak_tag_alignment=2)→ **第 4 轮** 786af8f(①free list 成因精确化——由 rebuild_free_list 扫描清空槽构建(:548-575,"cleared out by a delete call"),非 DeleteLocalRef 直接串链;取用 :519-524;②OopStorage release 细节——CAS 清位 :575-587+空块延迟清理 reduce_deferred_updates :416,区间 :675-682;③悬念"函数表查 env"→"经 JNIEnv 函数表间接调用";④SIGQUIT 摘要行措辞)
 
@@ -199,7 +199,7 @@
 | 命令输出 | `materials/commands/` 140+ 文件 | jcmd/jstat/jmap 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材**(详见 §二 commit 清单,共 25 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt / 13-jit-broker-demo.txt / 13-jit-tiered-demo.txt / 18-safepoint-demo.txt / 18-safepoint-polling-demo.txt / 20-vmops-demo.txt / 20-background-init-demo.txt / 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt
+**本会话新增素材**(详见 §二 commit 清单,共 26 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt / 13-jit-broker-demo.txt / 13-jit-tiered-demo.txt / 18-safepoint-demo.txt / 18-safepoint-polling-demo.txt / 20-vmops-demo.txt / 20-background-init-demo.txt / 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
@@ -350,6 +350,18 @@
 - **深审抓到的实质错误**: ①批量撤销触发机制(update_heuristics 计数,非"堆扩容");②ChunkPoolCleaner 真实语义(BlocksToKeep=5 其余 os::free);③StubRoutines 两阶段原因(RuntimeStub 可重定位,非代码缓存);④停机顺序(先停线程后注销任务,初稿写反);⑤VMThread 优先级注释("must be lower",初稿"不能高于"半对);⑥init.cpp:124 注释凭记忆多加 ", loads primordial classes"(真实在 :68 声明处)
 - 实证: 20-background-init-demo.txt(素材清单见 §五)
 
+### 6.45 30-jvm-entry/03(Reflection + StackWalk,30 域收官,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
+
+- **"reflection.cpp:100-400" 目录错**: reflection.cpp/reflectionUtils.cpp 在 **share/runtime/**(非 prims/);invoke_method :1257-1280(镜像定位=clazz+**slot 编号** method_with_idnum+override+ptypes/rtype),共享 invoke :1072-1255,invoke_constructor :1282
+- **"Reflection::field_get → obj_field_acquire" JDK8 旧版**: JDK11 反射字段访问走 Unsafe(Field.java);reflection.cpp 无 field_get
+- **"getCallerClass 用 vframeStream 前两个 frame" 半对**: JVM_GetCallerClass(jvm.cpp:706-742): **security_next()** 跳过三类内部帧(Method::is_ignored_by_security_stack_walk method.cpp:1268-1276: _invoke intrinsic/MethodAccessorImpl 子类/MH 适配帧);frame0 必须 _getCallerClass intrinsic(:729-733)/frame0-1 @CallerSensitive(:736-739)/首个非 ignored 帧(:740-742);注解解析时收集(classFileParser.cpp:2172-2185)
+- **"StackWalk filter 反射帧" 错(重要)**: 反射帧过滤在 **Java 侧**(StackStreamFactory.java:249-268 skipReflectionFrames/isReflectionFrame 按类判断);hotspot 只过滤 **@LambdaForm.Hidden 帧**(is_hidden,stackwalk.cpp:123-137,注解 classFileParser.cpp:2180)——实证 -Xlog:stackwalk=debug: hotspot 把 invoke0/invoke/Delegating/Method.invoke 全 fill,Java 输出隐藏
+- **invoke 五段**: 方法解析(静态/私有/<init>/接口 resolve_interface_call/vtable :1088-1148)/参数个数(:1175-1178)/unbox_for_primitive+widen+push 打包(:1180-1225)/JavaCalls::call(:1233)/InvocationTargetException 包装(:1234-1249)+narrow+box(:1251-1254);**override 标志 C++ 侧不用**(传给 invoke 闲置,访问检查在 Java 侧 MethodAccessor/verifyAccess)
+- **StackWalker 分页**: JVM_CallStackWalk(jvm.cpp:552)→StackWalk::walk(stackwalk.cpp:332,JavaFrameStream/LiveFrameStream)→fetchFirstBatch(:363,跳 StackWalker 自身帧 :378-384)→fill_in_frames(:108-145);JVM_MoreStackWalk(:580)→fetchNextBatch;batchSize 默认 6(实证日志);BaseFrameStream magic 跨批校验(:42-88)
+- **实证方法论**: ReflectionDemo+StackWalker SHOW_HIDDEN_FRAMES 显示反射链 6 帧(Method.invoke→Delegating→NativeMethodAccessorImpl→invoke0);-Xlog:stackwalk=debug 证明 hotspot 不过滤反射帧——**实证纠错机制**(大纲机制 vs 实测)
+- **悬念指向 31(已完结)错**: 正确=32-jfr
+- 实证: 30-reflection-stackwalk-demo.txt(素材清单见 §五)
+
 ### 6.44 30-jvm-entry/02(JavaCalls + NativeLookup,30 域 2/3,大纲 9 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
 - **"call_dynamic 四种调用模式" 编造**: JavaCalls(javaCalls.hpp:229-269)只有 call_special(:227)/call_virtual(:188)/call_static(:262)+construct_new_instance(:261)+低层 call(:268)→call_helper(javaCalls.cpp:346);每入口先 LinkResolver 解析(08 域)再 call
@@ -361,7 +373,7 @@
 - **call_helper 十步**: 三断言(:349-352,含 !is_at_safepoint "call to Java code during VM operation")/args->verify(:361)/空方法(:370)/compile_if_required(:385)/from_interpreted_entry(:390)/栈守卫恢复(:399-413)/JavaCallWrapper(:420)/call_stub(:442)/结果回写(:447)/vm_result 跨 GC 保 oop(:451-462)
 - **实证方法论**: nm libjava.so 看 Java_ 名字格式;native 无实现触发 UnsatisfiedLinkError(消息=方法名+签名,'int NoImplDemo.notImplemented(int)')
 - **第 3 轮** 7521406: 特殊表 3 条→7 条(补 Perf+JVMCI/JFR 条件条目)→ **第 4 轮** 69c5f2e(①**查找流程重写**: 核心=lookup_style :253 按类加载器分流——系统类=特殊表 :263+libjava dll_lookup :265;**应用类=JavaCalls::call_static 调 ClassLoader.findNative :277-285(绕回 Java 侧,System.loadLibrary 链路)**;lookup_entry :327 只做三种名字风格;agent 兜底 :293-297;prefixed :476;UnsatisfiedLinkError :522-527;②四断言补 :352 no_handle_mark;③Windows _64 表述删(无 windows 源码);素材同步)
-- 实证: 30-java-calls-demo.txt(素材清单见 §五)
+- 实证: 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt(素材清单见 §五)
 
 ### 6.43 30-jvm-entry/01(JVM Entry Points,30 域 1/3,大纲 9 组漂移含 2 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -371,7 +383,7 @@
 - **运行时解析**: NativeLookup::lookup(nativeLookup.cpp:527-546): has_native_function()→lookup_base 动态解析(PrintJNIResolving=**-verbose:jni** 非 -Xlog,JDK11 无 jni,resolve 标签)→set_native_function;注册的方法 has_native_function=true 不再动态解析(实证: [Registering JNI native method java.lang.System.currentTimeMillis] 后整次无 Dynamic-linking)
 - **JVM_ENTRY vs JVM_LEAF 判据=碰不碰堆**: ENTRY(interfaceSupport.inline.hpp:558-565)=thread_from_jni_environment+ThreadInVMfromNative+VM_ENTRY_BASE(HandleMark);LEAF(:588-592)=VM_Exit::block_if_vm_exited+NoHandleMark,不转状态不碰堆不建引用不抛异常(CurrentTimeMillis/NanoTime/GetInterfaceVersion/SupportsCX8);JVM_ENTRY 与 JNI_ENTRY 差异=JNI_ENTRY 多 WeakPreserveExceptionMark(:515-517);JVMWrapper(jvm.cpp:254-256,CountJNICalls 计数)
 - **实证方法论**: -verbose:jni 观察注册链;nm -D libjava.so 验证链接期符号(SUNWprivate_1.1 版本节点=jvm_sym.ver);javap -s 看 native 签名
-- 实证: 30-jvm-entry-demo.txt / 30-java-calls-demo.txt(素材清单见 §五)→ **第 4 轮** 328791b(①注册表行号 System.c:38;②JVM_ENTRY/JNI_ENTRY 差异只陈述事实;③libjvm.so 实际导出 **174 个 JVM_* + 5 个 jio_***,jvm.h 182 个 JNIEXPORT 含 jio_*;④JVM_MonitorWait :81 例证验证;⑤131 个 UND 全为 U;⑥PrintJNIResolving 由 -verbose:jni 设置 arguments.cpp:2413)
+- 实证: 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt(素材清单见 §五)→ **第 4 轮** 328791b(①注册表行号 System.c:38;②JVM_ENTRY/JNI_ENTRY 差异只陈述事实;③libjvm.so 实际导出 **174 个 JVM_* + 5 个 jio_***,jvm.h 182 个 JNIEXPORT 含 jio_*;④JVM_MonitorWait :81 例证验证;⑤131 个 UND 全为 U;⑥PrintJNIResolving 由 -verbose:jni 设置 arguments.cpp:2413)
 
 ### 6.42 27-jni/03(JNI Check + 平台层,27 域收官,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -384,7 +396,7 @@
 - **fatal vs warning 两级**: ReportJNIFatalError(hpp:36-40,VM 态: JNI 栈+os::abort(true))/NativeReport 系(:146-156)IN_VM 包装
 - **悬念指向 28-jvmti 错**: 正确=**30-jvm-entry**(第 5 批,00-domain-writing-order.md:76)
 - **实证方法论**: 自写 JNI demo 触发两类检查(2000 个 NewLocalRef 泄漏→每 32 个警告 33/66/99;FindClass 失败不查异常→"JNI call made with exception pending");**无 -Xcheck:jni 对照 0 警告**;注意 .so 加载路径与 native 方法名匹配
-- 实证: 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt(素材清单见 §五)
+- 实证: 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt(素材清单见 §五)
 
 ### 6.41 27-jni/02(JNI Fast Path,27 域 2/3,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -399,7 +411,7 @@
 - **try_resolve_jobject_in_native**(barrierSetAssembler_x86.cpp:213-217)=clear_jweak_tag+movptr [obj] 两行,不区分引用类型;G1 无覆盖用基类
 - **实证方法论**: 自写 JNI bench(gcc -shared): C 循环 GetIntField;快路径 2000 万次 ~28ms(1.4ns/次)vs -XX:-UseFastJNIAccessors ~301ms(15ns/次),**约 10 倍**;注意 C 里 printf 要 fflush;GetFieldID 用实例字段(static 字段会 NoSuchFieldError)
 - **写作期血泪**: ①大纲把 create_vm 四段划分与 quicken_jni_functions 位置错配——跨篇引用段号前先核对目标文章段落边界;②"30 位"差点照抄注释——枚举 BitsPerWord-2 为准
-- 实证: 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt(素材清单见 §五)
+- 实证: 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt(素材清单见 §五)
 
 ### 6.40 27-jni/01(JNI Handle 系统,27 域 1/3,大纲 9 处漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -411,7 +423,7 @@
 - **JNIHandleBlock 内部**: block_size_in_oops=32;allocate_handle 四段(:481-546): _last 块末槽→free list(槽内嵌 next :521)→_last->_next→rebuild_free_list 或追加新块;rebuild 启发式(:548-575): 空闲>一半才下次重建,否则按缺额追加块;_block_free_list 全局池+线程本地 free_handle_block(allocate_block :364-405,deadlock 注释 :374-377);PushLocalFrame/PopLocalFrame 用 _pop_frame_link(jni.cpp:746-783)
 - **实证方法论**: JNI demo(acbench/jniref/): gcc -shared -fPIC -I$JAVA_HOME/include 编译;printf 必须 fflush(stdout)(重定向时全缓冲丢输出);GetObjectRefType 常量 JNILocalRefType=1/JNIGlobalRefType=2/JNIWeakGlobalRefType=3;global/weak handle 值必须存 C 侧(返回 Java 后丢失);SIGQUIT 转储 "JNI global refs: 29, weak refs: 1"(基线 28/0,jniHandles.cpp:305-307)
 - **写作期血泪**: 误判 check.py 文件损坏(HS_MAP 单行超长,实际完好)——插入映射先 grep 确认目标字符串再 replace
-- 实证: 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt(素材清单见 §五)
+- 实证: 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt(素材清单见 §五)
 
 ### 6.38 20-01(VM_Operation 从提交到执行,20 域 1/2,大纲 7 处漂移含 0 处硬编造 + 深审 2 轮,2026-08-13)
 - **模式 4 元组 ✓**(vmOperations.hpp:136-141: _safepoint/_no_safepoint/_concurrent/_async_safepoint);evaluation_mode(:195)/evaluate_at_safepoint(:207-209)/evaluate_concurrently(:211-212)
@@ -583,7 +595,8 @@
 - [x] **27-jni/03**(JNI Check + 平台层)——✅ 完结(正文 9f523af/回填 ⚠️ 10 组/README 9f523af 同提交,commit 见 §二);**27 域完结**
 - [x] **30-jvm-entry/01**(System.currentTimeMillis() 怎么进入 JVM)——✅ 完结(正文 9ed479d/回填 ⚠️ 9 组/README 9ed479d 同提交,commit 见 §二);30 域 1/3
 - [x] **30-jvm-entry/02**(JavaCalls + NativeLookup)——✅ 完结(正文 bf0d15f/回填 ⚠️ 9 组/README bf0d15f 同提交,commit 见 §二);30 域 2/3
-- [ ] **30-jvm-entry/03**(反射与栈遍历)——**下一篇**;大纲 `planning/outlines/30-jvm-entry/03-reflection-stackwalk.md`;30-02 悬念指向它
+- [x] **30-jvm-entry/03**(反射与栈遍历)——✅ 完结(正文 cfd6484/回填 ⚠️ 10 组/README cfd6484 同提交,commit 见 §二);**30 域完结**
+- [ ] **32-jfr/01**(JFR Recorder Engine)——**下一篇**;大纲 `planning/outlines/32-jfr/01-recorder-engine.md`;30-03 悬念指向它
 - [ ] 30-jvm-entry 完结后 → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 5 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -623,11 +636,11 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/30-jvm-entry/03-reflection-stackwalk.md(注意 ⚠️ 块——01/02 大纲各回填 9 组,03 大概率同样漂移;30-02 悬念指向它: Method.invoke/StackWalker 的 C++ 侧实现)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;30 域 03 重点: reflection.cpp(JVM_GetClassDeclaredFields/JVM_InvokeMethod 等)、reflectionUtils、stackwalk.cpp(JVM_CallStackWalk/JVM_MoreFrames,StackFrameStream)、JVM_GetCallerClass、与 24-frame(帧遍历)、08-interpreter(vframe)衔接;实证: jcmd Thread.print 或 StackWalker demo)
+1. 读 planning/outlines/32-jfr/01-recorder-engine.md(注意 ⚠️ 块——30 域三篇各回填 9/9/10 组,32 域大概率同样漂移;30-03 悬念指向它: JFR 的采集引擎)
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;32 域 01 重点: jfr/recorder/ 的 JfrRecorder(创建/启动链,20-02 已见 on_create_vm_1-3)、JfrRecorderService、JfrChunkWriter/ChunkRepository、JfrBuffer 环形缓冲、JfrEvent(JFR_ONLY 宏在事件点埋桩)、与 31-02(AGCT/SuspendedThreadTask 采样)、38-perfdata(观测通道对照)、20-02(JFR Recorder Thread/采样线程)衔接;实证: -XX:StartFlightRecording + jcmd JFR.start(容器 jcmd 不可用则命令行)、jfr print 或 -Xlog:jfr*
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证;jcmd 在当前容器 attach 不可用,实证可用 kill -3(SIGQUIT)线程转储或命令行 -Xlog,自写 JNI demo 用 gcc 编译(acbench/jniref/ 模式,printf 要 fflush)
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
-5. 30-jvm-entry 完结后 → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 4 域)
+5. 32-jfr 后 → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 5 域)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
