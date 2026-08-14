@@ -360,6 +360,7 @@
 - **PathToGcRootsOperation::doit ✓**(本篇大纲较准): safepoint 断言 :82/BitSet :85-87/EdgeQueue 5%或 32M :59-63+commit 1:10 :65-69/BFS 优先 :112 满时 DFS 兜底 :117-124/失败降级 flat :95-98;DFS max_depth=5000(dfsClosure.cpp:41);rootType 两维(rootType.hpp:36/:51)
 - **chain 序列化**: ObjectSampleCheckpoint::write(:398-409 write_sample_blobs+edge_store->iterate ObjectSampleWriter);OldObjectSample 事件(metadata.xml:579-586);OldObjectRootSystem/OldObjectRootType/OldObjectGcRoot(:1083-1095);default.jfc:433-438 memory-leak-detection-enabled
 - **第 3 轮** f3bdc94: quick reject 表述修正——栈记录在 sample 入口已发生(RecordStackTrace 先于 add),quick reject 省的是队列维护与样本字段设置
+- **第 4 轮** acb752b: 补 **cutoff 机制**——EventEmitter::emit(eventEmitter.cpp:55-70: cutoff≤0 只发样本无链 :58-63;cutoff>0 才 PathToGcRootsOperation :66-68);**默认 memory-leak-detection-cutoff=0ns 无链**(default.jfc:433-438)——修正"录制停止即追链"隐含断言
 - 实证: 32-jfr-leakprofiler-demo.txt(素材清单见 §五)
 
 ### 6.49 32-jfr/04(Binary Writer + Chunk Format,32 域 4/6,大纲 9 组漂移含 4 处机制编造 + 深审 2 轮,2026-08-14)
