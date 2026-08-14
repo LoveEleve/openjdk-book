@@ -35,7 +35,7 @@ void ObjectSampler::sample(HeapWord* obj, size_t allocated, JavaThread* thread) 
 **非阻塞**: `JfrTryLock` 拿不到锁直接跳过本次采样("Skipping old object sample due to lock contention")——不阻塞分配线程;`RecordStackTrace`(:120-136)按事件配置决定要不要为本次分配记录分配栈。真正的决策在 `add`(:155-199):
 
 - **span 语义**: `span = _total_allocated - _priority_queue->total()`(:167)——**"距上次入队样本的分配增量"**(累计分配减去已入队样本的总 span),衡量"这个分配点吃掉了多少堆";
-- **优先级队列**: 保持 top-N(默认 **256**,`old_object_queue_size`,jfrOptionSet.cpp:173)最大 span 的样本;队满时 `peek()`(最小 span)→ **quick reject**(`peek->span() > span` 直接丢弃,:171-175)——**避免昂贵的栈记录+入队**;否则 pop+**reuse** 复用样本对象(:176);
+- **优先级队列**: 保持 top-N(默认 **256**,`old_object_queue_size`,jfrOptionSet.cpp:173)最大 span 的样本;队满时 `peek()`(最小 span)→ **quick reject**(`peek->span() > span` 直接丢弃,:171-175)——省掉优先级队列的维护(替换/重排)与样本字段设置(栈记录其实已在 sample 入口做过);否则 pop+**reuse** 复用样本对象(:176);
 - **GC 集成**: `ObjectSampler::oops_do`(:227-246)把样本当弱引用处理——对象死掉就 `set_dead`,`scavenge` 时移除并把 span 转给前驱样本(:201-225)。
 
 **启用**: `LeakProfiler::start(sample_count)`(leakProfiler.cpp:41-77)——sample_count 来自 `old_object_queue_size`(jfrJniMethod.cpp:109);ZGC/Shenandoah 明确不支持(:53-62);通过 **VM 操作** `StartOperation` 在 safepoint 安装采样器(:68)。
