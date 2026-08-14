@@ -363,6 +363,7 @@
 - **chunk 轮转**: 阈值=Java 侧 setFileNotification(jfrJniMethod.cpp:116-118),JfrChunkRotation::evaluate(size_written>threshold :62-66)→notify Java 侧 monitor;chunk 自包含可边录边读
 - **实证方法论**: -XX:StartFlightRecording=filename=...,settings=profile + xxd 看文件头("FLR\0"+版本 2.0+chunk_size 槽回填=文件大小)+ **bin/jfr summary**(Version/Chunks/事件表);-Xlog:jfr+system=info 观察启动;注意 -Xlog 尾逗号语法错误会拒启
 - **第 3 轮** 474ccf4: JfrBuffer"环形语义"→"线性区(刷空后回收复用)"
+- **第 4 轮**: ①"130+ 事件类型"实证——jfr summary 完整输出 **143 个 jdk.* 类型**(grep -c 实证,素材补记);②刷写可见性复核(_pos 偏旧=保守少读,commit 边界由 volatile _top+消息锁同步);③flush 链/消息循环/chunk 回填逐项复核无新问题(无正文改动)
 - 实证: 32-jfr-recorder-demo.txt(素材清单见 §五)
 
 ### 6.45 30-jvm-entry/03(Reflection + StackWalk,30 域收官,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
