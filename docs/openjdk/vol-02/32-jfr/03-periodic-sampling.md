@@ -60,7 +60,7 @@ traceid JfrStackTraceRepository::add_trace(const JfrStackTrace& stacktrace) {
 
 ## 核心悬念
 
-周期机制拆完: 线程采样靠 Java 侧注入的间隔(无 JVM flag)+ semaphore 循环分摊采样,栈经 `JfrStackTraceRepository` 哈希去重(同栈同 id,事件只写 4 字节);45 个周期事件由 Java 侧 `RequestEngine` 按 period 节拍驱动(native 只提供 requestXXX 实现,chunk 边界事件每 chunk 刷新)。[实证](planning/outlines/00-jvm-tools/materials/commands/32-jfr-sampling-demo.txt)里 `jfr print` 的 ExecutionSample 实例带着完整栈——repository 的 id 已被还原成可读形式。
+周期机制拆完: 线程采样靠 Java 侧注入的间隔(无 JVM flag)+ semaphore 循环分摊采样,栈经 `JfrStackTraceRepository` 哈希去重(同栈同 id,事件只写 8 字节 id,栈数据经 repository::write 落进 chunk 的常量池,jfrStackTraceRepository.cpp:100);45 个周期事件由 Java 侧 `RequestEngine` 按 period 节拍驱动(native 只提供 requestXXX 实现,chunk 边界事件每 chunk 刷新)。[实证](planning/outlines/00-jvm-tools/materials/commands/32-jfr-sampling-demo.txt)里 `jfr print` 的 ExecutionSample 实例带着完整栈——repository 的 id 已被还原成可读形式。
 
 但还原依赖"栈轨迹、常量、字符串在文件里怎么编码"——事件 id 指向 repository,repository 数据又怎么落到 `.jfr` 的二进制流?下一篇: 二进制写出与 chunk 格式。
 
