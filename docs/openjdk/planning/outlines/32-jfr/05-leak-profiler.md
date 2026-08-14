@@ -3,6 +3,17 @@
 > 🟡 Working | 采样 + priority queue + BFS/DFS chain trace
 > 读者处境: JFR 启用 Old Object Sampling——在 TLAB 分配时每 N 字节采样一个 Old 代对象→trace reference chain 到 GC root→record `jdk.OldObjectSample` event→JMC 展示泄漏路径。
 
+> ⚠️ 写作期修正(2026-08-14, vol-02/32-jfr/05 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"每 N 字节采样" 错**: 粒度=**每次 TLAB 补充/大对象分配**(AllocTracer::send_allocation_outside_tlab/in_new_tlab allocTracer.cpp:35/:45 首行 JFR_ONLY JfrAllocationTracer→LeakProfiler::sample 排除隐藏线程 leakProfiler.cpp:112-122→ObjectSampler::sample objectSampler.cpp:138-153);MemAllocator 只在 refill/堆外分配发事件(memAllocator.cpp:239-247)
+> - **span 语义精确化**: span = _total_allocated - priority_queue->total()(:167,**"距上次入队样本的分配增量"**);样本 span=该次分配的 allocated(:193);大纲 "span=分配字节数" 半对
+> - **锁**: sample 入口用 **JfrTryLock 非阻塞**(:147,失败跳过 "Skipping old object sample due to lock contention");acquire/release(:94-104)是**自旋锁**(Atomic::cmpxchg 循环,checkpoint 用)——两套
+> - **quick reject ✓**(:171-175 peek->span()>span);队满 pop+reuse(:176);样本队列默认 **256**(jfrOptionSet.cpp:173 old_object_queue_size);GC 集成 oops_do(:227-246 弱引用)+scavenge(:201-225 span 转前驱)
+> - **启用**: LeakProfiler::start(sample_count,:41-77: 0 禁用/ZGC+Shenandoah 不支持 :53-62/StartOperation VM 操作 safepoint 安装 :68);jfrJniMethod.cpp:109
+> - **PathToGcRootsOperation::doit ✓**(:81-131: safepoint 断言 :82/BitSet 按堆 :85-87/EdgeQueue 5%或 32M :59-63+commit 1:10 :65-69/BFS 优先 :112+满时 DFS 兜底 :117-124/初始化失败降级 flat :95-98/EventEmitter :129);DFS max_depth=5000(dfsClosure.cpp:41);rootType 两维枚举(rootType.hpp:36/:51)
+> - **chain 序列化**: ObjectSampleCheckpoint::write(:398-409: write_sample_blobs+edge_store->iterate(ObjectSampleWriter));OldObjectSample 事件(metadata.xml:579-586,字段 allocationTime/lastKnownHeapUsage/object/arrayElements/root);OldObjectRootSystem/OldObjectRootType/OldObjectGcRoot 类型(:1083-1095);default.jfc:433-438 memory-leak-detection-enabled
+> - **悬念指向 06 ✓**(正确,保留)
+> - **实证**: 32-jfr-leakprofiler-demo.txt(源码链核对/大纲核对结论: 本篇大纲行号机制较准,漂移 3 处)
+
 ### 1. "ObjectSampler — 采样+优先级队列"
 
 场景: Application 每秒 1000 次 TLAB 分配→每 `sample_interval` 字节采样一次→object 放入 priority queue(按 span=分配字节数排序)→保留 top-N 最大分配跨度。
