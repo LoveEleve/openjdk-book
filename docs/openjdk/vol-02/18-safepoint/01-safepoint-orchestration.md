@@ -39,8 +39,8 @@ counter 只在 begin/end 各 +1,且两次递增间持着 Threads_lock,保证配�
 1. **`Threads_lock->lock()`**(:169)——先锁线程表: 保证同步期间**没有线程启动或退出**(注释 :167-168),这把锁要一直持有到 end() 才放;
 2. `_waiting_to_block = nof_threads`(:185)——**要等的人数**,每有一个线程"到安全点"就减一;
 3. **`_state = _synchronizing`**(:242)——亮黄灯;
-4. **武装轮询机制**(:244-268): JDK11 有两条路——`SafepointMechanism::uses_thread_local_poll()` 时给每个线程置本地 poll 标志(`arm_local_poll`,:244-252);否则走全局轮询页(`PageArmed=1` + `os::make_polling_page_unreadable()` + `Interpreter::notice_safepoints()` 让解释器在字节码间检查,:260-268,信号侧的 SIGSEGV 处理见 01-os/04);
-5. **`os::serialize_thread_states()`**(:257)——内存屏障的替代品: 让所有线程先写自己的状态到**同一内存页**,再 mprotect 序列化这些写(:219-226 注释,比逐线程 membar 便宜);
+4. **武装轮询机制**(:244-268): JDK11 有两条路,而 **x86_64 默认走 thread-local poll**(`THREAD_LOCAL_POLL` 宏定义于 globalDefinitions_x86.hpp:68,SafepointMechanism 构造时 `set_uses_thread_local_poll`,safepointMechanism.cpp:37-39)——给每个线程置本地 poll 标志(`arm_local_poll`,:244-252);编译代码/解释器的轮询是 `testb` **线程自己的 `_polling_page` 字段**(macroAssembler_x86.cpp:3744-3756,interp_masm_x86.cpp:832-834 "Thread-local Safepoint poll")——**不触发 SIGSEGV**。全局轮询页(`PageArmed=1` + `os::make_polling_page_unreadable()` + `Interpreter::notice_safepoints()`,:260-268)是另一条路——01-os/04 讲的 SIGSEGV 轮询页正是它,但对 JDK11 x86 来说不是默认路径;
+5. **`os::serialize_thread_states()`**(:257)——只在 `!UseMembar` 时执行(x86 默认 UseMembar=true 走正常 membar): 让所有线程先写自己的状态到**同一内存页**,再 mprotect 序列化这些写(:219-226 注释,比逐线程 membar 便宜)——这是无 membar 平台的替代品;
 6. **逐线程点名**: 主循环遍历所有线程,`examine_state_of_thread()`(safepoint.cpp:1045)判定每个线程的处境:
    - **已挂起或已安全**(native/blocked 等,safepoint_safe :760-774)→ `roll_forward(_at_safepoint)`——`signal_thread_at_safepoint()` 把 `_waiting_to_block` 减一(:1108);
    - **_thread_in_vm**(正在 VM 里)→ `_call_back`(让它继续跑到自愿阻塞点,:1088-1090);
@@ -70,7 +70,7 @@ counter 只在 begin/end 各 +1,且两次递增间持着 Threads_lock,保证配�
 
 ## 3. 响应端: 线程怎么"到达"
 
-每种线程的停止机制不同(begin() 开头的大注释,safepoint.cpp:202-236): 解释器改 dispatch 表在字节码间检查、native 返回时检查、编译代码靠轮询页 SIGSEGV、阻塞线程不唤醒、VM 内线程跑到自愿阻塞点。到达的公共入口是 `block()`(safepoint.cpp:816):
+每种线程的停止机制不同(begin() 开头的大注释,safepoint.cpp:202-236): 编译代码与解释器靠轮询(thread-local 模式下 `testb` 线程的 poll 位;全局页模式下解释器切 dispatch 表、编译代码靠轮询页 SIGSEGV——两条路详见下一篇与 01-os/04)、native 返回时检查、阻塞线程不唤醒、VM 内线程跑到自愿阻塞点。到达的公共入口是 `block()`(safepoint.cpp:816):
 
 ```cpp
 // safepoint.cpp:880-886(截取核心,逐字)
@@ -116,6 +116,6 @@ counter 只在 begin/end 各 +1,且两次递增间持着 Threads_lock,保证配�
 
 编排端拆完了: 三态机(`_not_synchronized=0` 省指令、volatile 直读不碰锁)双全局量(counter 偶数=JNI fast path);begin() 指挥(锁线程表→亮黄灯→武装轮询→逐线程点名→三档等待→阻塞等最后一个→counter 奇数→cleanup);block() 响应(抢 Safepoint_lock 报数、排队卡在 Threads_lock);cleanup 7 项维护;end() 放行(counter 偶数→解除武装→restart→unlock)。一句话: **safepoint 是"VM 线程持锁当门闩、200 个线程排队进门"的集体停摆**——`_waiting_to_block` 是点名册,counter 是红绿灯。
 
-但还有一个关键问题留给了下一篇: 线程**怎么知道**该停了?编译代码读轮询页(信号侧 01-os/04 讲过)、解释器改 dispatch 表、native 返回检查——这些"轮询"本身是怎么实现的?它们凭什么**零开销**(不触发 safepoint 时)?
+但还有一个关键问题留给了下一篇: 线程**怎么知道**该停了?编译代码/解释器的轮询(`testb` 线程的 `_polling_page`,thread-local 默认;全局页模式读 `_state` 地址,macroAssembler_x86.cpp:3756-3759)、native 返回检查——这些"轮询"本身是怎么实现的?它们凭什么**零开销**(不触发 safepoint 时)?
 
 > → [18-safepoint/02 — 轮询与验证器](02-polling-verifiers.md)
