@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-14 | 卷 2 写作中: **95/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 22) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 22/22,**11-cds/12-ci/13-jit-framework/18-safepoint/20-vm-operations/27-jni/30-jvm-entry 域完结,32-jfr 5/6(本会话)**,下一篇 32-jfr/06 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-14 | 卷 2 写作中: **96/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 23) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 23/23,**11-cds/12-ci/13-jit-framework/18-safepoint/20-vm-operations/27-jni/30-jvm-entry/32-jfr 域完结(本会话)**,下一篇 34-nmt | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -44,12 +44,12 @@
 第 2 批(原语): 02(4) → 03(2) → 04(2) → 06(6) → 16(5) → 38(2) → 41(2) → 42(3)   ✅ 完结 26/26
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
-第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2 完结) → 27 ✅(3/3 完结) → 30 ✅(3/3 完结) → 32(5/6)** → 34 → 36 → 37 → 39 → 46   🚧 进行中
+第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2 完结) → 27 ✅(3/3 完结) → 30 ✅(3/3 完结) → 32 ✅(6/6 完结)** → 34 → 36 → 37 → 39 → 46   🚧 进行中
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 95 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 96 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -82,7 +82,7 @@
 | **20-vm-operations** | 1-2 | `20-vm-operations/01-vm-operation.md`(103)+`02-background-init.md`(372) | ✅ **20 域完结,第 5 批 11/13(本会话)** |
 | **27-jni** | 1-3 | `27-jni/01-handle-system.md`(171)+`02-jni-fast-path.md`(189)+`03-jni-check-platform.md`(78) | ✅ **27 域完结(本会话)** |
 | **30-jvm-entry** | 1-3 | `30-jvm-entry/01-jvm-entry-points.md`(138)+`02-java-calls.md`(118)+`03-reflection-stackwalk.md`(111) | ✅ **30 域完结(本会话)** |
-| **32-jfr** | 1-6 | `32-jfr/01-recorder-engine.md`(139)+`02-event-metadata.md`(47)+`03-periodic-sampling.md`(67)+`04-binary-writer.md`(94)+`05-leak-profiler.md`(88) | 🚧 32 域 5/6(本会话,06 待写) |
+| **32-jfr** | 1-6 | `32-jfr/01-recorder-engine.md`(139)+`02-event-metadata.md`(47)+`03-periodic-sampling.md`(67)+`04-binary-writer.md`(94)+`05-leak-profiler.md`(88)+`06-jni-instrumentation.md`(61) | ✅ **32 域完结(本会话)** |
 
 ### 本会话 16 篇的 commit 清单(按 git log 为准)
 
@@ -105,7 +105,7 @@
 **18-safepoint/02(轮询与 NoSafepointVerifier,18 域收官)**: 正文 e2896a5 → 回填 a0a97bf(⚠️ 10 条)→ README 2e63aeb(82/152,18 域完结,第 5 批 9/13)→ 素材 18-safepoint-polling-demo.txt(gitignore)→ **第 3 轮** 06086f2(①轮询**双实现**——解释器/共享 stub=testb 位测试(MacroAssembler::safepoint_poll),**C1/C2 编译代码=deref 方式**(movptr 线程 poll 值+testl [poll_addr],c1_LIRAssembler_x86.cpp:558-575/x86_64.ad:1099-1102)——armed 值=8|bad_page 落在 PROT_NONE 页→**真 SIGSEGV**→is_poll_address(os.hpp:429)→get_poll_stub(os_linux_x86.cpp:431-432)→safepoint 阻塞;**01-os/04 的轮询页 SIGSEGV 在 JDK11 x86 真实存在(编译代码路径)**,thread-local 只是把被轮询地址从全局页变成线程自己的值;②全局页模式: 编译代码 deref 全局 polling_page(C1 :576-592),解释器退化 cmp32 state;③轮询点归属: 编译代码=C1 LIR/C2 SafePoint 节点,解释器=MacroAssembler)
 **20-vm-operations/01(VM_Operation 从提交到执行,20 域 1/2)**: 正文 b30c2e8 → 回填 b2c8867(⚠️ 7 条)→ README f0ed423(83/152,20 域 1/2,第 5 批 10/13)→ 素材 20-vmops-demo.txt(gitignore)→ **第 3 轮** 7221a66(①doit_prologue 语义——VM_RevokeBias::doit_prologue 检查对象**是否还带 bias 标记**(biasedLocking.cpp:520-534,"avoid a safepoint"),非大纲的"检查线程栈";②唤醒机制——**登记≠唤醒**: evaluate_operation 只 increment_vm_operation_completed_count(:427-429),等待者由 **loop 每轮结束的 VMOperationRequest_lock->notify_all()**(vmThread.cpp:622-624)统一唤醒后自检 ticket;③loop 末尾复查 no_op_safepoint_needed(true)(:625-631,18-01 Cleanup 另一触发点))
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(371 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt(gitignore)→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注脚本覆盖 11 块;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true 注册成立,MemProfiling 恒 false)
-**27-jni/03(JNI Check + 平台层,27 域收官)**: 正文 9f523af(78 行)→ 回填 ⚠️ 10 组 → README 9f523af 同提交(87/152,27 域完结)→ 素材 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt(gitignore)→ 深审 2 轮(①JNI_ENTRY_CHECKED **不含 ThreadInVMfromNative**——不做整函数状态转换,校验点用 IN_VM 局部转换(与 JNI_ENTRY 的关键差异);②jniExport.hpp 不是 JNI 函数声明而是 JVMTI 接口导出器;jni_NativeInterface 实例在 jni.cpp:3528 非 3550;validate_handle :443/validate_object :469 非 :497)第 3 轮无新增→ **第 4 轮** 35f96a8(①校验维度表补'字段 ID 类型'行(checkStaticFieldID :256/checkInstanceFieldID :284)→ 7→8 维度与悬念一致;②尾部链接统一相对路径;③fatal 路径差异: 宏内非 Java 线程=直接 print+abort 无 JNI 栈,与 NativeReportJNIFatalError 不同)
+**27-jni/03(JNI Check + 平台层,27 域收官)**: 正文 9f523af(78 行)→ 回填 ⚠️ 10 组 → README 9f523af 同提交(87/152,27 域完结)→ 素材 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(gitignore)→ 深审 2 轮(①JNI_ENTRY_CHECKED **不含 ThreadInVMfromNative**——不做整函数状态转换,校验点用 IN_VM 局部转换(与 JNI_ENTRY 的关键差异);②jniExport.hpp 不是 JNI 函数声明而是 JVMTI 接口导出器;jni_NativeInterface 实例在 jni.cpp:3528 非 3550;validate_handle :443/validate_object :469 非 :497)第 3 轮无新增→ **第 4 轮** 35f96a8(①校验维度表补'字段 ID 类型'行(checkStaticFieldID :256/checkInstanceFieldID :284)→ 7→8 维度与悬念一致;②尾部链接统一相对路径;③fatal 路径差异: 宏内非 Java 线程=直接 print+abort 无 JNI 栈,与 NativeReportJNIFatalError 不同)
 **27-jni/02(JNI Fast Path,27 域 2/3)**: 正文 1ec9012(189 行)→ 回填 ⚠️ 10 组 → README 1ec9012 同提交(86/152,27 域 2/3)→ 素材 27-jni-fastpath-demo.txt(gitignore)→ 深审 2 轮(①quicken_jni_functions 在 create_vm **第三段**(thread.cpp:3916)非第四段;②fieldID 偏移=BitsPerWord-2(64 位 62 位),位布局注释 "30" 是 32 位遗留)第 3 轮无新增→ **第 4 轮** da75d76(①安全论证补全——对象移动必然伴随 counter 变号,投机读读到旧位置值也被二次校验丢弃;②补 counter wraparound(hpp:54-55);③"条件 5 选 1"歧义改"替换的 5 个条件";④验证 GetObjectField 普通实现=HeapAccess oop_load_at+make_local(jni.cpp:2076)支撑无快路径断言;⑤验证 jni_GetStaticIntField 仅函数表槽)
 **27-jni/01(Handle 系统,27 域 1/3)**: 正文 f64d2af(171 行)→ 回填 ⚠️ 9 组 → README f64d2af 同提交(85/152,27 域 1/3)→ 素材 27-jni-handles-demo.txt(gitignore)→ **第 3 轮** 6d6b59f(参数 handle 机制精确化——编译代码 object_move sharedRuntime_x86_64.cpp:1157-1180+解释器 pass_object interpreterRT_x86_64.cpp:214-260 lea 取参数槽地址,null 参数传 NULL;06-oops/01 链接文本对齐;jweak 对齐=weak_tag_alignment=2)→ **第 4 轮** 786af8f(①free list 成因精确化——由 rebuild_free_list 扫描清空槽构建(:548-575,"cleared out by a delete call"),非 DeleteLocalRef 直接串链;取用 :519-524;②OopStorage release 细节——CAS 清位 :575-587+空块延迟清理 reduce_deferred_updates :416,区间 :675-682;③悬念"函数表查 env"→"经 JNIEnv 函数表间接调用";④SIGQUIT 摘要行措辞)
 
@@ -200,7 +200,7 @@
 | 命令输出 | `materials/commands/` 140+ 文件 | jcmd/jstat/jmap 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材**(详见 §二 commit 清单,共 31 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt / 13-jit-broker-demo.txt / 13-jit-tiered-demo.txt / 18-safepoint-demo.txt / 18-safepoint-polling-demo.txt / 20-vmops-demo.txt / 20-background-init-demo.txt / 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt
+**本会话新增素材**(详见 §二 commit 清单,共 32 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt / 13-jit-broker-demo.txt / 13-jit-tiered-demo.txt / 18-safepoint-demo.txt / 18-safepoint-polling-demo.txt / 20-vmops-demo.txt / 20-background-init-demo.txt / 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
@@ -351,6 +351,18 @@
 - **深审抓到的实质错误**: ①批量撤销触发机制(update_heuristics 计数,非"堆扩容");②ChunkPoolCleaner 真实语义(BlocksToKeep=5 其余 os::free);③StubRoutines 两阶段原因(RuntimeStub 可重定位,非代码缓存);④停机顺序(先停线程后注销任务,初稿写反);⑤VMThread 优先级注释("must be lower",初稿"不能高于"半对);⑥init.cpp:124 注释凭记忆多加 ", loads primordial classes"(真实在 :68 声明处)
 - 实证: 20-background-init-demo.txt(素材清单见 §五)
 
+### 6.51 32-jfr/06(JNI Interface + Instrumentation + DCmd,32 域收官,大纲 10 组漂移含 6 处机制编造 + 深审 2 轮,2026-08-14)
+
+- **"JfrClassAdapter::transform" 编造**: 真实=JfrEventClassTransformer::on_klass_creation(jfrEventClassTransformer.cpp:1515);调用点 klassFactory.cpp:222 JFR_ONLY(ON_KLASS_CREATION)(jfrKlassExtension.hpp:41 宏,IS_EVENT_KLASS trace_id 标记)——**类文件解析层拦截 jdk.jfr.Event 子类首次加载**,create_new_bytes_for_event_klass 重写字节→新 InstanceKlass 替换+tag_as;日志字符串 "JfrClassAdapter:"(:1522)是旧名唯一来源
+- **"方法入口 ASM 插桩" 错**: 注入=**事件类 schema**(5 方法壳 commit/begin/end/isEnabled/shouldCommit,:120-145 空方法体字节+3 字段 EventHandler,:60-61);急切模式调 Java EventInstrumentation.java:60(ASM 生成方法体)经 JfrUpcalls::new_bytes_eager_instrumentation(jfrUpcalls.cpp:146;Jfr::is_recording()||force_instrumentation :1406-1428)
+- **"~20 JFR-required 类" 无依据**(删除): 只动 Event 子类
+- **"JfrJniMethod::start/dump 类方法" 半对**: jfrJniMethod.cpp=JVM_ENTRY_NO_ENV 函数表(jfr_set_output/jfr_set_method_sampling_interval/jfr_emit_event/jfr_end_recording...),无 start/dump 方法
+- **"JfrJavaSupport::thread_local_jfr_ref" 编造**: 不存在
+- **"JfrDCmd" 编造**: JfrStartFlightRecordingDCmd 等 5 个(jfrDcmds.hpp:30-141);execute(jfrDcmds.cpp:376)=参数翻译→构造 jdk/jfr/internal/dcmd/DCmdStart→JavaCalls run()→Recording.start()→JVM 接口
+- **悬念指向 33 ✓**(目录=33-jmx-management)
+- **实证方法论**: 转换器/JNI 表/DCmd 链源码核对(32-jfr-jni-instrumentation-demo.txt)
+- 实证: 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
+
 ### 6.50 32-jfr/05(Old Object Sampling,32 域 5/6,大纲 8 组漂移含 2 处机制编造 + 深审 2 轮,2026-08-14)
 
 - **"每 N 字节采样" 错**: 粒度=**每次 TLAB 补充/大对象分配**(AllocTracer::send_allocation_outside_tlab/in_new_tlab allocTracer.cpp:35/:45 首行 JFR_ONLY JfrAllocationTracer→LeakProfiler::sample 排除隐藏线程 leakProfiler.cpp:112-122→ObjectSampler::sample objectSampler.cpp:138-153);MemAllocator 只在 refill/堆外分配发事件(memAllocator.cpp:239-247)
@@ -361,7 +373,7 @@
 - **chain 序列化**: ObjectSampleCheckpoint::write(:398-409 write_sample_blobs+edge_store->iterate ObjectSampleWriter);OldObjectSample 事件(metadata.xml:579-586);OldObjectRootSystem/OldObjectRootType/OldObjectGcRoot(:1083-1095);default.jfc:433-438 memory-leak-detection-enabled
 - **第 3 轮** f3bdc94: quick reject 表述修正——栈记录在 sample 入口已发生(RecordStackTrace 先于 add),quick reject 省的是队列维护与样本字段设置
 - **第 4 轮** acb752b: 补 **cutoff 机制**——EventEmitter::emit(eventEmitter.cpp:55-70: cutoff≤0 只发样本无链 :58-63;cutoff>0 才 PathToGcRootsOperation :66-68);**默认 memory-leak-detection-cutoff=0ns 无链**(default.jfc:433-438)——修正"录制停止即追链"隐含断言
-- 实证: 32-jfr-leakprofiler-demo.txt(素材清单见 §五)
+- 实证: 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
 
 ### 6.49 32-jfr/04(Binary Writer + Chunk Format,32 域 4/6,大纲 9 组漂移含 4 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -374,7 +386,7 @@
 - **实证方法论**: jfr print --xml(reader 还原 CPULoad 字段);xxd(32-01 交叉)
 - **第 3 轮** 329733b: STRING_CONSTANT 表述收敛(常量池条目字符串,非"写字符串时按需登记"推测)
 - **第 4 轮** a33ec4c: ①"长度头用 be_write"修正(字符串长度走 write 变长编码,数据体 be_write 直拷);②事件格式补 **u4 大小槽**(begin_event_write reserve :56-60/end_event_write 回填 :62-76,write_padded_at_offset)
-- 实证: 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt(素材清单见 §五)
+- 实证: 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
 
 ### 6.48 32-jfr/03(Periodic Sampling,32 域 3/4,大纲 9 组漂移含 4 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -387,7 +399,7 @@
 - **实证方法论**: jfr print --events 'jdk.ExecutionSample' 看采样实例(sampledThread/state/完整栈);jfc 文件(default.jfc/profile.jfc :117 ExecutionSample period)查默认周期;traceid 大小查 jfrTypes.hpp:30
 - **第 3 轮** 79a1216: 函数名修正(jfr_set_method_sampling_interval 非 jfr_set_java_sample_interval)
 - **第 4 轮** 5ae494d: ①悬念段遗留"4 字节"改 8 字节(id=u8)——**跨段一致性问题(第 2 轮改了正文没改悬念)**;②栈轨迹落盘补全(repository::write JfrChunkWriter :100,WriteStackTraceRepository friend);③resolve_linenos 在 add 层验证
-- 实证: 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt(素材清单见 §五)
+- 实证: 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
 
 ### 6.47 32-jfr/02(Event Types + Metadata,32 域 2/4,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -400,7 +412,7 @@
 - **实证方法论**: bin/jfr print --events 'jdk.ThreadStart'(reader 按 metadata schema 解析实例,字段名从 metadata 来);grep -o 'category="..."' 统计;注意 jfr print --events 需要 filter 参数(裸 --events 报 "missing value")
 - **第 3 轮** 418b993: 采样器引用补行号(文字锚纪律)
 - **第 4 轮** a2e168a: ①"全部事件类型"限定"内置事件类型"(动态事件不在 XML);②"XML 不会在运行期被解析"限定为 C++ 事件类(避免与 MetadataHandler 运行期解析矛盾);③143 vs 124 关系补注(XML 124+Java 侧注册其余)
-- 实证: 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt(素材清单见 §五)
+- 实证: 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
 
 ### 6.46 32-jfr/01(Recorder Engine,32 域 1/4,大纲 9 组漂移含 4 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -415,7 +427,7 @@
 - **实证方法论**: -XX:StartFlightRecording=filename=...,settings=profile + xxd 看文件头("FLR\0"+版本 2.0+chunk_size 槽回填=文件大小)+ **bin/jfr summary**(Version/Chunks/事件表);-Xlog:jfr+system=info 观察启动;注意 -Xlog 尾逗号语法错误会拒启
 - **第 3 轮** 474ccf4: JfrBuffer"环形语义"→"线性区(刷空后回收复用)"
 - **第 4 轮**: ①"130+ 事件类型"实证——jfr summary 完整输出 **143 个 jdk.* 类型**(grep -c 实证,素材补记);②刷写可见性复核(_pos 偏旧=保守少读,commit 边界由 volatile _top+消息锁同步);③flush 链/消息循环/chunk 回填逐项复核无新问题(无正文改动)
-- 实证: 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt(素材清单见 §五)
+- 实证: 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
 
 ### 6.45 30-jvm-entry/03(Reflection + StackWalk,30 域收官,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -428,7 +440,7 @@
 - **实证方法论**: ReflectionDemo+StackWalker SHOW_HIDDEN_FRAMES 显示反射链 6 帧(Method.invoke→Delegating→NativeMethodAccessorImpl→invoke0);-Xlog:stackwalk=debug 证明 hotspot 不过滤反射帧——**实证纠错机制**(大纲机制 vs 实测)
 - **悬念指向 31(已完结)错**: 正确=32-jfr
 - **第 4 轮** fcb05e2: ①分页批大小修正——StackStreamFactory.java:545-556(非 StackWalker.java): 首批=min(max(estimateDepth,SMALL_BATCH=8),LARGE=256),后续翻倍至 BATCH_SIZE=32 封顶;实证 6=estimateDepth 估计值续批 12;②JVMInvokeMethodSlack=develop_pd globals.hpp:1919
-- 实证: 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt(素材清单见 §五)
+- 实证: 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
 
 ### 6.44 30-jvm-entry/02(JavaCalls + NativeLookup,30 域 2/3,大纲 9 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -441,7 +453,7 @@
 - **call_helper 十步**: 三断言(:349-352,含 !is_at_safepoint "call to Java code during VM operation")/args->verify(:361)/空方法(:370)/compile_if_required(:385)/from_interpreted_entry(:390)/栈守卫恢复(:399-413)/JavaCallWrapper(:420)/call_stub(:442)/结果回写(:447)/vm_result 跨 GC 保 oop(:451-462)
 - **实证方法论**: nm libjava.so 看 Java_ 名字格式;native 无实现触发 UnsatisfiedLinkError(消息=方法名+签名,'int NoImplDemo.notImplemented(int)')
 - **第 3 轮** 7521406: 特殊表 3 条→7 条(补 Perf+JVMCI/JFR 条件条目)→ **第 4 轮** 69c5f2e(①**查找流程重写**: 核心=lookup_style :253 按类加载器分流——系统类=特殊表 :263+libjava dll_lookup :265;**应用类=JavaCalls::call_static 调 ClassLoader.findNative :277-285(绕回 Java 侧,System.loadLibrary 链路)**;lookup_entry :327 只做三种名字风格;agent 兜底 :293-297;prefixed :476;UnsatisfiedLinkError :522-527;②四断言补 :352 no_handle_mark;③Windows _64 表述删(无 windows 源码);素材同步)
-- 实证: 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt(素材清单见 §五)
+- 实证: 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
 
 ### 6.43 30-jvm-entry/01(JVM Entry Points,30 域 1/3,大纲 9 组漂移含 2 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -451,7 +463,7 @@
 - **运行时解析**: NativeLookup::lookup(nativeLookup.cpp:527-546): has_native_function()→lookup_base 动态解析(PrintJNIResolving=**-verbose:jni** 非 -Xlog,JDK11 无 jni,resolve 标签)→set_native_function;注册的方法 has_native_function=true 不再动态解析(实证: [Registering JNI native method java.lang.System.currentTimeMillis] 后整次无 Dynamic-linking)
 - **JVM_ENTRY vs JVM_LEAF 判据=碰不碰堆**: ENTRY(interfaceSupport.inline.hpp:558-565)=thread_from_jni_environment+ThreadInVMfromNative+VM_ENTRY_BASE(HandleMark);LEAF(:588-592)=VM_Exit::block_if_vm_exited+NoHandleMark,不转状态不碰堆不建引用不抛异常(CurrentTimeMillis/NanoTime/GetInterfaceVersion/SupportsCX8);JVM_ENTRY 与 JNI_ENTRY 差异=JNI_ENTRY 多 WeakPreserveExceptionMark(:515-517);JVMWrapper(jvm.cpp:254-256,CountJNICalls 计数)
 - **实证方法论**: -verbose:jni 观察注册链;nm -D libjava.so 验证链接期符号(SUNWprivate_1.1 版本节点=jvm_sym.ver);javap -s 看 native 签名
-- 实证: 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt(素材清单见 §五)→ **第 4 轮** 328791b(①注册表行号 System.c:38;②JVM_ENTRY/JNI_ENTRY 差异只陈述事实;③libjvm.so 实际导出 **174 个 JVM_* + 5 个 jio_***,jvm.h 182 个 JNIEXPORT 含 jio_*;④JVM_MonitorWait :81 例证验证;⑤131 个 UND 全为 U;⑥PrintJNIResolving 由 -verbose:jni 设置 arguments.cpp:2413)
+- 实证: 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)→ **第 4 轮** 328791b(①注册表行号 System.c:38;②JVM_ENTRY/JNI_ENTRY 差异只陈述事实;③libjvm.so 实际导出 **174 个 JVM_* + 5 个 jio_***,jvm.h 182 个 JNIEXPORT 含 jio_*;④JVM_MonitorWait :81 例证验证;⑤131 个 UND 全为 U;⑥PrintJNIResolving 由 -verbose:jni 设置 arguments.cpp:2413)
 
 ### 6.42 27-jni/03(JNI Check + 平台层,27 域收官,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -464,7 +476,7 @@
 - **fatal vs warning 两级**: ReportJNIFatalError(hpp:36-40,VM 态: JNI 栈+os::abort(true))/NativeReport 系(:146-156)IN_VM 包装
 - **悬念指向 28-jvmti 错**: 正确=**30-jvm-entry**(第 5 批,00-domain-writing-order.md:76)
 - **实证方法论**: 自写 JNI demo 触发两类检查(2000 个 NewLocalRef 泄漏→每 32 个警告 33/66/99;FindClass 失败不查异常→"JNI call made with exception pending");**无 -Xcheck:jni 对照 0 警告**;注意 .so 加载路径与 native 方法名匹配
-- 实证: 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt(素材清单见 §五)
+- 实证: 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
 
 ### 6.41 27-jni/02(JNI Fast Path,27 域 2/3,大纲 10 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -479,7 +491,7 @@
 - **try_resolve_jobject_in_native**(barrierSetAssembler_x86.cpp:213-217)=clear_jweak_tag+movptr [obj] 两行,不区分引用类型;G1 无覆盖用基类
 - **实证方法论**: 自写 JNI bench(gcc -shared): C 循环 GetIntField;快路径 2000 万次 ~28ms(1.4ns/次)vs -XX:-UseFastJNIAccessors ~301ms(15ns/次),**约 10 倍**;注意 C 里 printf 要 fflush;GetFieldID 用实例字段(static 字段会 NoSuchFieldError)
 - **写作期血泪**: ①大纲把 create_vm 四段划分与 quicken_jni_functions 位置错配——跨篇引用段号前先核对目标文章段落边界;②"30 位"差点照抄注释——枚举 BitsPerWord-2 为准
-- 实证: 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt(素材清单见 §五)
+- 实证: 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
 
 ### 6.40 27-jni/01(JNI Handle 系统,27 域 1/3,大纲 9 处漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
 
@@ -491,7 +503,7 @@
 - **JNIHandleBlock 内部**: block_size_in_oops=32;allocate_handle 四段(:481-546): _last 块末槽→free list(槽内嵌 next :521)→_last->_next→rebuild_free_list 或追加新块;rebuild 启发式(:548-575): 空闲>一半才下次重建,否则按缺额追加块;_block_free_list 全局池+线程本地 free_handle_block(allocate_block :364-405,deadlock 注释 :374-377);PushLocalFrame/PopLocalFrame 用 _pop_frame_link(jni.cpp:746-783)
 - **实证方法论**: JNI demo(acbench/jniref/): gcc -shared -fPIC -I$JAVA_HOME/include 编译;printf 必须 fflush(stdout)(重定向时全缓冲丢输出);GetObjectRefType 常量 JNILocalRefType=1/JNIGlobalRefType=2/JNIWeakGlobalRefType=3;global/weak handle 值必须存 C 侧(返回 Java 后丢失);SIGQUIT 转储 "JNI global refs: 29, weak refs: 1"(基线 28/0,jniHandles.cpp:305-307)
 - **写作期血泪**: 误判 check.py 文件损坏(HS_MAP 单行超长,实际完好)——插入映射先 grep 确认目标字符串再 replace
-- 实证: 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt(素材清单见 §五)
+- 实证: 27-jni-handles-demo.txt / 27-jni-fastpath-demo.txt / 27-jni-check-demo.txt / 30-jvm-entry-demo.txt / 30-java-calls-demo.txt / 30-reflection-stackwalk-demo.txt / 32-jfr-recorder-demo.txt / 32-jfr-metadata-demo.txt / 32-jfr-sampling-demo.txt / 32-jfr-binary-demo.txt / 32-jfr-leakprofiler-demo.txt / 32-jfr-jni-instrumentation-demo.txt(素材清单见 §五)
 
 ### 6.38 20-01(VM_Operation 从提交到执行,20 域 1/2,大纲 7 处漂移含 0 处硬编造 + 深审 2 轮,2026-08-13)
 - **模式 4 元组 ✓**(vmOperations.hpp:136-141: _safepoint/_no_safepoint/_concurrent/_async_safepoint);evaluation_mode(:195)/evaluate_at_safepoint(:207-209)/evaluate_concurrently(:211-212)
@@ -669,8 +681,8 @@
 - [x] **32-jfr/03**(周期采样与栈轨迹)——✅ 完结(正文 6daa7f1/回填 ⚠️ 9 组/README 6daa7f1 同提交,commit 见 §二);32 域 3/4
 - [x] **32-jfr/04**(二进制写出与 chunk 格式)——✅ 完结(正文 328c92f/回填 ⚠️ 9 组/README 328c92f 同提交,commit 见 §二);32 域 4/6
 - [x] **32-jfr/05**(泄漏剖析)——✅ 完结(正文 b595e6b/回填 ⚠️ 8 组/README b595e6b 同提交,commit 见 §二);32 域 5/6
-- [ ] **32-jfr/06**(JNI 接口与字节码插桩)——**下一篇**;大纲 `planning/outlines/32-jfr/06-jni-instrumentation.md`;32-05 悬念指向它
-- [ ] 32-jfr 全部完结后 → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余)
+- [x] **32-jfr/06**(JNI 接口与字节码插桩)——✅ 完结(正文 f2a2c2f/回填 ⚠️ 10 组/README f2a2c2f 同提交,commit 见 §二);**32 域完结**
+- [ ] **34-nmt/01**(Native Memory Tracking)——**下一篇**;大纲 `planning/outlines/34-nmt/`;32 域收官后批次顺序
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
