@@ -360,7 +360,7 @@
 - **JavaCallArguments(重要)**: 只记 handle/jobject 地址不记裸 oop(push_oop 注释 javaCalls.hpp:104-108 "delays the exposure of naked oops until it is GC-safe";value_state :158-164);parameters()(javaCalls.cpp:505-517)调用 stub 前统一解析为裸 oop(resolve_indirect_oop :486-503: handle→Handle::raw_resolve/jobject→JNIHandles::resolve)
 - **call_helper 十步**: 三断言(:349-352,含 !is_at_safepoint "call to Java code during VM operation")/args->verify(:361)/空方法(:370)/compile_if_required(:385)/from_interpreted_entry(:390)/栈守卫恢复(:399-413)/JavaCallWrapper(:420)/call_stub(:442)/结果回写(:447)/vm_result 跨 GC 保 oop(:451-462)
 - **实证方法论**: nm libjava.so 看 Java_ 名字格式;native 无实现触发 UnsatisfiedLinkError(消息=方法名+签名,'int NoImplDemo.notImplemented(int)')
-- **第 3 轮** 7521406: 特殊表 3 条→7 条(补 Perf+JVMCI/JFR 条件条目)
+- **第 3 轮** 7521406: 特殊表 3 条→7 条(补 Perf+JVMCI/JFR 条件条目)→ **第 4 轮** 69c5f2e(①**查找流程重写**: 核心=lookup_style :253 按类加载器分流——系统类=特殊表 :263+libjava dll_lookup :265;**应用类=JavaCalls::call_static 调 ClassLoader.findNative :277-285(绕回 Java 侧,System.loadLibrary 链路)**;lookup_entry :327 只做三种名字风格;agent 兜底 :293-297;prefixed :476;UnsatisfiedLinkError :522-527;②四断言补 :352 no_handle_mark;③Windows _64 表述删(无 windows 源码);素材同步)
 - 实证: 30-java-calls-demo.txt(素材清单见 §五)
 
 ### 6.43 30-jvm-entry/01(JVM Entry Points,30 域 1/3,大纲 9 组漂移含 2 处机制编造 + 深审 2 轮,2026-08-14)
