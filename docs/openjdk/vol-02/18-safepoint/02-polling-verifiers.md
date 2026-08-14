@@ -20,10 +20,10 @@
   };
 ```
 
-- **`_thread_local_poll`**: 每线程一个 poll 标志,轮询是**读值 + 位测试**——不触发任何异常;
+- **`_thread_local_poll`**: 每线程一个 poll 标志,轮询是**读值 + 位测试(解释器路径)**或 **deref 该值(编译代码路径)**——见下一节;
 - **`_global_page_poll`**: 所有线程共享一个被 mprotect 成不可读的页,轮询是**读这个页**——页面可读时是 noop,不可读时 SIGSEGV → 信号处理器接管(01-os/04 拆过信号侧)。
 
-JDK11 选哪条由 **`ThreadLocalHandshakes`** 决定——它是 pd product 标志,**x86 默认 true**(实证 PrintFlagsFinal): `SafepointMechanism::default_initialize`(safepointMechanism.cpp:36-39)里 `if (ThreadLocalHandshakes) set_uses_thread_local_poll();`——**所以 JDK11 x86 的默认轮询是 thread-local,不走 SIGSEGV**。全局页模式保留着(关掉 ThreadLocalHandshakes 即可切换,实证里 `-XX:-ThreadLocalHandshakes` 跑 safepoint 照常工作)。
+JDK11 选哪条由 **`ThreadLocalHandshakes`** 决定——它是 pd product 标志,**x86 默认 true**(实证 PrintFlagsFinal): `SafepointMechanism::default_initialize`(safepointMechanism.cpp:36-39)里 `if (ThreadLocalHandshakes) set_uses_thread_local_poll();`——**所以 JDK11 x86 的默认轮询是 thread-local**。全局页模式保留着(关掉 ThreadLocalHandshakes 即可切换,实证里 `-XX:-ThreadLocalHandshakes` 跑 safepoint 照常工作)。
 
 ## 2. poll 值: 一个字节里的 armed/disarmed
 
@@ -48,15 +48,17 @@ void MacroAssembler::safepoint_poll(Label& slow_path, Register thread_reg, Regis
 }
 ```
 
-**关键设计 (斜体)**: *`testb` 读线程对象里的 `_polling_page` 字段,只看它的第 3 位(`poll_bit()=8`)——`local_poll_armed` 的实现就是 `mask_bits_are_true(thread->get_polling_page(), poll_bit())`(safepointMechanism.inline.hpp:32-35)。armed 与 disarmed 是**两个值**,相差正好这一位: `poll_armed_value = 8 | bad_page`, `poll_disarmed_value = good_page`(safepointMechanism.cpp:50-76)——bad_page 是受保护的页、good_page 是正常页。arm/disarm 只是把线程字段**写成这两个值之一**(`set_polling_page(poll_armed_value())`,safepointMechanism.inline.hpp:50-57)——一次 8 字节写。值还兼作地址: 某些路径 dereference 它时会落在 bad/good 页上,于是"值方案"与"页方案"在同一套数据上兼容。*
+**关键设计 (斜体)**: *`testb` 读线程对象里的 `_polling_page` 字段,只看它的第 3 位(`poll_bit()=8`)——`local_poll_armed` 的实现就是 `mask_bits_are_true(thread->get_polling_page(), poll_bit())`(safepointMechanism.inline.hpp:32-35)。armed 与 disarmed 是**两个值**,相差正好这一位: `poll_armed_value = 8 | bad_page`, `poll_disarmed_value = good_page`(safepointMechanism.cpp:50-76)——bad_page 是受保护的页、good_page 是正常页。arm/disarm 只是把线程字段**写成这两个值之一**(`set_polling_page(poll_armed_value())`,safepointMechanism.inline.hpp:50-57)——一次 8 字节写。*
+
+**但轮询指令有两种实现,别混**: 上面的 `testb` 来自 `MacroAssembler::safepoint_poll`——它服务**解释器 dispatch 与共享运行时 stub**;而 **C1/C2 编译代码的轮询是 deref 方式**: `movptr(rscratch1, [r15_thread+_polling_page_offset])` 取出 poll 值,然后 `testl(rax, [rscratch1])` **按该值 dereference 内存**(c1_LIRAssembler_x86.cpp:558-575、x86_64.ad:1099-1102)。平时值=good_page(可读),deref 是 noop;**armed 时值=8|bad_page,deref 落在 PROT_NONE 页 → 真 SIGSEGV** → 信号处理器用 `os::is_poll_address`(os.hpp:429,地址是否在轮询页内)识别为轮询而非崩溃 → `SharedRuntime::get_poll_stub`(os_linux_x86.cpp:431-432)走 safepoint 阻塞。**所以 01-os/04 拆的"轮询页 SIGSEGV"在 JDK11 x86 依然真实存在——它藏在编译代码的轮询路径里**,thread-local 只是让"被轮询的地址"从全局变成"线程自己的值"。
 
 [实证:](planning/outlines/00-jvm-tools/materials/commands/18-safepoint-polling-demo.txt) 启动日志 `-Xlog:os` 会打印这两个页: `SafePoint Polling address, bad (protected) page:0x...b54000, good (unprotected) page:0x...b55000`(safepointMechanism.cpp:69)——**两个连续页**,一坏一好。轮询侧的行为差异: 不触发 safepoint 时,`testb` 结果为零、`jnz` 不跳——**一条指令,没有任何额外开销**;触发时跳 slow path → `block_if_requested`(safepointMechanism.inline.hpp:55-60: 未 armed 直接返回,armed 才进 `block_if_requested_slow`)。
 
-**轮询点在哪**: 编译代码的方法返回边、循环回边、调用点(`MacroAssembler::safepoint_poll` 被生成器插入);解释器在**每条字节码**的 dispatch 里轮询(08-02 拆过 dispatch_base 的轮询);native 返回时在 `ThreadStateTransition` 里检查(17 域)。非 Java 线程没有自己的 poll,`local_poll` 退化读全局状态(safepointMechanism.inline.hpp:38-46)。
+**轮询点在哪**: 编译代码在方法返回边、循环回边、调用点插入轮询(C1 由 `LIR_Assembler::safepoint_poll` 生成 deref 指令,C2 由 x86_64.ad 的 SafePoint 节点生成);解释器在**每条字节码**的 dispatch 里轮询(`MacroAssembler::safepoint_poll` 的 testb,08-02 拆过);native 返回时在 `ThreadStateTransition` 里检查(17 域)。非 Java 线程没有自己的 poll,`local_poll` 退化读全局状态(safepointMechanism.inline.hpp:38-46)。
 
 ## 3. 全局页模式: 广播与内核成本
 
-关掉 ThreadLocalHandshakes 后走 `_global_page_poll`: begin() 里 `PageArmed=1` + `os::make_polling_page_unreadable()`(mprotect PROT_NONE,01 篇 begin 步骤 4);所有线程的下一次轮询读(编译代码 `testl %eax, [polling_page]`——只读不写)立即 SIGSEGV → 信号处理器判"这是轮询页故障"→ 走 block(01-os/04 的阶段 2)。"全局"的意思是**广播**: 一个 mprotect,所有线程在各自的下一个轮询点集体命中。
+关掉 ThreadLocalHandshakes 后走 `_global_page_poll`: begin() 里 `PageArmed=1` + `os::make_polling_page_unreadable()`(mprotect PROT_NONE,01 篇 begin 步骤 4);编译代码轮询 deref **全局轮询页**(C1 的 `testl(rax, [polling_page])`,c1_LIRAssembler_x86.cpp:576-592)——页面不可读 → SIGSEGV → 信号处理器判"这是轮询页故障"→ 走 block(01-os/04 的阶段 2);解释器路径则退化为比较 `_state`(MacroAssembler 的 else 分支)。"全局"的意思是**广播**: 一个 mprotect,所有线程在各自的下一个轮询点集体命中。
 
 它的代价是内核往返: mprotect 要改页表项、还要 TLB shootdown 通知所有核刷新缓存——这正是 thread-local 方案省掉的(arm 只是一次普通写)。但它有个独到价值: **线程没有显式轮询代码也会被拦住**(只要它 dereference 那个地址)——这对某些不可控的代码路径是保险。
 
