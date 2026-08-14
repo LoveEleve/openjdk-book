@@ -28,7 +28,7 @@ XML 不会在运行期被解析成事件类——**构建期**由 Java 工具 `b
 
 - 产物: **`jfrEventClasses.hpp` + `jfrEventIds.hpp`**(生成目录,不在源码树——大纲的 "jfrEventClasses.hpp:30-120 enum" 看不到源码,因为它就是生成物);
 - 入口: `jfrEvents.hpp` 顶部注释 "Declare your event in jfr/metadata/metadata.xml."(:28),:32 `#include "jfrfiles/jfrEventClasses.hpp"`——**事件类型的新增/修改只动 XML,代码生成负责同步 C++**;
-- 生成类的形态: 每个事件一个类,有**字段 setter + commit()**。使用方式在采样器里看得最清楚(jfrThreadSampler.cpp): `event->set_stackTrace(id)`(:264,把栈轨迹 id 写进事件)、`_events[i].commit()`(:288-300,写 buffer)——与 32-01 的写入链衔接。大纲的 `TRACE_REQUEST_COMMIT` 宏在 jdk11u 里**不存在**(grep 零命中)。
+- 生成类的形态: 每个事件一个类,有**字段 setter + commit()**。使用方式在采样器里看得最清楚(jfrThreadSampler.cpp:264/:288-300): `event->set_stackTrace(id)`(把栈轨迹 id 写进事件)、`_events[i].commit()`(写 buffer)——与 32-01 的写入链衔接。大纲的 `TRACE_REQUEST_COMMIT` 宏在 jdk11u 里**不存在**(grep 零命中)。
 
 ## 3. Java 侧: 类型库与动态事件
 
