@@ -90,7 +90,7 @@
 **44-class-verification/02(VerificationType)**: 正文 97cceb3 → 回填 9ec3c4b(⚠️ 7 条)→ README 838b56d(73/152,**第 4 批收官**)→ HANDOFF bb16581 → **第 3 轮** 0bd8215(实证解读修正: [ long, long ] 是 2 个 long 变量,双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 fd 00 05 04 04 04)
 **11-cds/01(CDS 全景与 Dump)**: 正文 171bf24 → 回填 a9dafe0(⚠️ 8 条)→ README a35de82(74/152,第 5 批开篇)→ HANDOFF ca5ccc8 → **第 3 轮** 5375e05(java_mirror 移除与 remove_unshareable 分列两函数 :501/:489/narrow_klass_base 重合=主动设计 set_narrow_klass_base(_shared_rs.base()) :305/classlist 行数断言删除)
 **11-cds/02(CDS Load 端,11 域收官)**: 正文 e8f9905 → 回填 2e9bc6c(⚠️ 13 条)→ README 529c91d(75/152,11 域完结,第 5 批 2/13)→ 素材 11-cds-load-demo.txt(gitignore)→ **第 3 轮** ff00933(①SymbolTable lookup 顺序表述错——实际初始先查动态表,_lookup_shared_first 是"最近命中方优先"启发式,symbolTable.cpp:242-258,字符串表才固定先共享;②_adapter_trampoline 位置错——在 ConstMethod(constMethod.hpp:212),指向 RW 区槽初始 NULL,非"RW 区字段";③MAP_FIXED 不报错(占用时静默替换),兜底靠 map_region 的 base != requested_addr;顺带补 COW 细节: ro 纯共享、rw/mc 写脏后 COW;④01 篇承诺的"rw 区加载期 patch"明确化(方法入口 trampoline/adapter 槽,第 6 节);⑤lookup_from_stream 调用行号 :1074→:1072)
-**12-ci/01(ciObject 镜像体系,12 域开篇)**: 正文 4fe2ebf → 回填 13bae76(⚠️ 9 条)→ README e7ee1d1(76/152,12 域 1/3)→ 素材 12-ci-inlining-demo.txt(gitignore)
+**12-ci/01(ciObject 镜像体系,12 域开篇)**: 正文 4fe2ebf → 回填 13bae76(⚠️ 9 条)→ README e7ee1d1(76/152,12 域 1/3)→ 素材 12-ci-inlining-demo.txt(gitignore)→ **第 3 轮** 3dc78e4(①"资源区"错——ciEnv 的 _ciEnv_arena 是 C 堆上的 mtCompiler Arena,非 ResourceMark 资源区;②is_interface 虚分派细节——ciKlass.hpp:97 基类仍 virtual,内联位测试仅当静态类型是 ciInstanceKlass 时才成立,大纲"零虚函数"只对了一半;③update_if_shared 是"快照值与查询目标不一致才现算"(ciInstanceKlass.hpp:109-113),非每次查询;④will_link 引用节号 6→5)
 
 **本会话新增素材**(全部 gitignore 不入库,在 materials/commands/):
 - `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
@@ -319,6 +319,7 @@
 - **快照+懒字段体系**: 标量(_flags/_init_state/_nonstatic_field_size...,ciInstanceKlass.hpp:50-61)+懒(_super/_java_mirror/_nonstatic_fields,compute_nonstatic_fields :105);is_interface=ciFlags 位测试(ciInstanceKlass.hpp:231→ciFlags.hpp:59)
 - **缺机制补录**: ①共享类(CDS)update_if_shared(ciInstanceKlass.hpp:109-113,init_state 现算);②hotswap 检查 Dependencies::check_evol_method(ciMethod.cpp:102-110);③依赖登记 Dependencies(ciEnv.hpp:57/313,validate_compile_task_dependencies ciEnv.cpp:933)→nmethod 作废;④unloaded 镜像 is_loaded(ciObject.hpp:138);⑤解释器计数快照(ciMethod.cpp:137-148)
 - **实证方法论**: PrintInlining 是 ci 层决策的可见产物(内联树+"inline (hot)"/"accessor"/"callee is too large");TypeProfile (87426/87426 counts)=CiDemo$Square 是 MDO 剖面驱动 devirtualize 的证据;made not entrant 三行(升级替换,非依赖失效——别混);CiDemo: 接口调用+String.length 组合,PrintCompilation+PrintInlining 并发编译输出会交错
+- **第 3 轮**: ①ciEnv 的 Arena 是 C 堆 mtCompiler(_ciEnv_arena,ciEnv.cpp:98),不是资源区;②ciKlass::is_interface 基类仍 virtual(ciKlass.hpp:97),内联位测试仅限 ciInstanceKlass 静态类型——"零虚函数"只对一半;③update_if_shared 条件=_init_state != expected 才现算(ciInstanceKlass.hpp:109-113);④构造快照确认: _flags=ciFlags(access_flags)(ciInstanceKlass.cpp:58)/_has_subklass=ik->subklass()!=NULL(:60)/_init_state=ik->init_state()(:61)
 - 实证: 12-ci-inlining-demo.txt(素材清单见 §五)
 
 ### 6.30 11-02(CDS Load 端,11 域收官,大纲 13 处漂移含 3 处编造 + 深审 2 轮,2026-08-13)
