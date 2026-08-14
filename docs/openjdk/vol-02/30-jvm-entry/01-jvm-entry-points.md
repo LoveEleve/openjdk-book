@@ -127,7 +127,7 @@ JVM_LEAF(jlong, JVM_CurrentTimeMillis(JNIEnv *env, jclass ignored))
 JVM_END
 ```
 
-三行: 不建 handle、不转状态,直接 `os::javaTimeMillis()`(01-os 域的时钟)。**为什么它能用 LEAF**: 它不读堆、不创建引用、不抛异常——不需要 HandleMark,也不需要进入 VM 状态被 safepoint 管理,`block_if_vm_exited` 挡掉 VM 退出期就够。同族还有 `JVM_NanoTime`(:276)、`JVM_GetInterfaceVersion`(:263)、`JVM_SupportsCX8`(:3610)——一个 JVM_* 选哪个宏,取决于"碰不碰堆"这个唯一判据。
+三行: 不建 handle、不转状态,直接 `os::javaTimeMillis()`(01-os 域的时钟)。**为什么它能用 LEAF**: 它不读堆、不创建引用、不抛异常、不会阻塞——不需要 HandleMark,也不需要进入 VM 状态被 safepoint 管理,`block_if_vm_exited` 挡掉 VM 退出期就够。同族还有 `JVM_NanoTime`(:276)、`JVM_GetInterfaceVersion`(:263)、`JVM_SupportsCX8`(:3610)——一个 JVM_* 选哪个宏,主要判据就是"碰不碰堆"。
 
 ## 核心悬念
 
