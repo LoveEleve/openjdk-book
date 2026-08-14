@@ -51,7 +51,7 @@
     }
 ```
 
-完整链条: ①非并发操作先过 `check_for_valid_safepoint_state`(18 域验证器,:671);②**`doit_prologue()`**(:676)——在提交线程里先跑,给操作一个"反悔"机会(比如偏向锁撤销: 检查偏向线程的栈后发现它不在临界区,就地撤销,返回 false 取消本次提交,连队列都不用进);③入队 + `VMOperationQueue_lock->notify()`(:696-704);④**等结果用 ticket 计数**(:712-719)——提交线程记下自己的票号,醒来后 `vm_operation_completed_count()` 超过票号才算完成——**不用等"某个特定操作",而是"轮到我"**(多个提交者共用计数器);⑤`doit_epilogue()`(:722,并发模式不调用)。
+完整链条: ①非并发操作先过 `check_for_valid_safepoint_state`(18 域验证器,:671);②**`doit_prologue()`**(:676)——在提交线程里先跑,给操作一个"反悔"机会: 比如 `VM_RevokeBias::doit_prologue` 先检查传入对象**是否还带 bias 标记**(biasedLocking.cpp:520-534,注释 "Verify that there is actual work to do... we avoid a safepoint")——没有就返回 false 取消本次提交,连队列都不用进、省掉一次 safepoint;③入队 + `VMOperationQueue_lock->notify()`(:696-704);④**等结果用 ticket 计数**(:712-719)——提交线程记下自己的票号,醒来后 `vm_operation_completed_count()` 超过票号才算完成——**不用等"某个特定操作",而是"轮到我"**(多个提交者共用计数器);⑤`doit_epilogue()`(:722,并发模式不调用)。
 
 **执行侧**(`VMThread::loop`,vmThread.cpp:457): 空队列时 `wait(GuaranteedSafepointInterval)` 定时醒来——**超时且需要 cleanup 就强制一次"空 safepoint"**(no_op_safepoint_needed,:494-505,18-01 的 `Cleanup` 原因);取到操作后:
 
@@ -86,7 +86,7 @@
               ...
 ```
 
-`evaluate_operation`(:403)完成时做**完成登记**: `calling_thread()->increment_vm_operation_completed_count()`(:427-429,唤醒等待者)——**注意顺序**: 这个递增会让提交线程立刻醒来并可能释放操作对象,所以之后不能再访问 `_cur_vm_operation`(:430-434 注释)。`VMOperationTimeoutTask`(:92)监控操作耗时(超时告警/中止)。
+`evaluate_operation`(:403)完成时做**完成登记**: `calling_thread()->increment_vm_operation_completed_count()`(:427-429)——**注意顺序**: 这个递增会让提交线程一醒来就可能释放操作对象,所以之后不能再访问 `_cur_vm_operation`(:430-434 注释)。**等待者的唤醒不在登记处**: loop 每一轮结束(无论有没有执行操作)都会 `VMOperationRequest_lock->notify_all()`(vmThread.cpp:622-624)——等待线程醒来后自检 ticket 是否轮到自己;同一处还复查 `no_op_safepoint_needed(true)` 决定要不要补一次空 safepoint(:625-631,18-01 的 `Cleanup` 另一触发点)。`VMOperationTimeoutTask`(:92)监控操作耗时(超时告警/中止)。
 
 **嵌套**: 操作内部又提交操作(如 GC doit 里要 dump heap)——`allow_nested_vm_operations()` 默认 false,VM 线程自己调 `execute` 时检查,不允许就 `fatal`(vmThread.cpp:724-736);允许的嵌套走**另一条腿**: `evaluate_at_safepoint` 且不在 safepoint 时,由 VM 线程自己 begin/evaluate/end(:744-750)。
 
