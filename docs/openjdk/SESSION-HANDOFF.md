@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-13 | 卷 2 写作中: **83/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 10) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 10/13,**11-cds/12-ci/13-jit-framework/18-safepoint 域完结**,20-vm-operations 1/2 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-14 | 卷 2 写作中: **84/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 11) | 第 1-4 批**全部完结**(12 个域),第 5 批(VM 核心)进行中 11/13,**11-cds/12-ci/13-jit-framework/18-safepoint/20-vm-operations 域完结**,**20 域 2/2 收官(本会话)**,下一篇 27-jni | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 20-vm-operations/02(后台任务与初始化,大纲 `planning/outlines/20-vm-operations/02-background-init.md`;20-vm-operations/01 悬念指向它: 谁在后台周期性干活——PeriodicTask/WatcherThread/CodeCache sweeper 等)。
+**下一步(唯一,无选择)**: 27-jni/01(Handle 系统,大纲 `planning/outlines/27-jni/01-handle-system.md`;20-vm-operations/02 悬念指向它: jobject 在 Java 对象与 C 世界之间怎么存活)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,83 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -44,12 +44,12 @@
 第 2 批(原语): 02(4) → 03(2) → 04(2) → 06(6) → 16(5) → 38(2) → 41(2) → 42(3)   ✅ 完结 26/26
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
-第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20(1/2)** → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46   🚧 进行中
+第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2 完结)** → 27 → 30 → 32 → 34 → 36 → 37 → 39 → 46   🚧 进行中
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 83 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 84 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -79,7 +79,7 @@
 | **12-ci** | 1-3 | `12-ci/01-ci-overview-mirror.md`(174)+`02-ci-typeflow-escape.md`(164)+`03-ci-factory-runtime.md`(128) | ✅ **12 域完结(本会话)** |
 | **13-jit-framework** | 1-2 | `13-jit-framework/01-compile-broker-queue.md`(76)+`02-tiered-compilation-policy.md`(146) | ✅ **13 域完结(本会话)** |
 | **18-safepoint** | 1-2 | `18-safepoint/01-safepoint-orchestration.md`(121)+`02-polling-verifiers.md`(97) | ✅ **18 域完结(本会话)** |
-| **20-vm-operations** | 1-2 | `20-vm-operations/01-vm-operation.md`(103) | 🚧 20 域 1/2(本会话) |
+| **20-vm-operations** | 1-2 | `20-vm-operations/01-vm-operation.md`(103)+`02-background-init.md`(371) | ✅ **20 域完结,第 5 批 11/13(本会话)** |
 
 ### 本会话 16 篇的 commit 清单(按 git log 为准)
 
@@ -101,6 +101,7 @@
 **18-safepoint/01(Safepoint 编排,18 域 1/2)**: 正文 1b4b441 → 回填 b24f7fa(⚠️ 8 条)→ README b6ed56d(81/152,18 域 1/2,第 5 批 8/13)→ 素材 18-safepoint-demo.txt(gitignore)→ **第 3 轮** a10d2f5(①**x86_64 默认 thread-local poll**——THREAD_LOCAL_POLL 宏(globalDefinitions_x86.hpp:68),SafepointMechanism 构造 set_uses_thread_local_poll(safepointMechanism.cpp:37-39);编译代码/解释器轮询=testb 线程自己的 _polling_page 字段(macroAssembler_x86.cpp:3744-3756,interp_masm_x86.cpp:832-834 "Thread-local Safepoint poll"),**不触发 SIGSEGV**——01-os/04 的轮询页是全局页模式,JDK11 x86 非默认,别混;②os::serialize_thread_states 只在 !UseMembar(x86 默认 true)时执行(:256-258);③全局页模式解释器才切 dispatch 表+编译代码 SIGSEGV;**注: 18-02 第 3 轮(06086f2)修正本条②的表述——编译代码(C1/C2)轮询是 deref 方式,armed 时仍真 SIGSEGV(01-os/04 路径真实存在),'不触发 SIGSEGV'只对解释器/MacroAssembler 路径成立,以 18-02 为准**)
 **18-safepoint/02(轮询与 NoSafepointVerifier,18 域收官)**: 正文 e2896a5 → 回填 a0a97bf(⚠️ 10 条)→ README 2e63aeb(82/152,18 域完结,第 5 批 9/13)→ 素材 18-safepoint-polling-demo.txt(gitignore)→ **第 3 轮** 06086f2(①轮询**双实现**——解释器/共享 stub=testb 位测试(MacroAssembler::safepoint_poll),**C1/C2 编译代码=deref 方式**(movptr 线程 poll 值+testl [poll_addr],c1_LIRAssembler_x86.cpp:558-575/x86_64.ad:1099-1102)——armed 值=8|bad_page 落在 PROT_NONE 页→**真 SIGSEGV**→is_poll_address(os.hpp:429)→get_poll_stub(os_linux_x86.cpp:431-432)→safepoint 阻塞;**01-os/04 的轮询页 SIGSEGV 在 JDK11 x86 真实存在(编译代码路径)**,thread-local 只是把被轮询地址从全局页变成线程自己的值;②全局页模式: 编译代码 deref 全局 polling_page(C1 :576-592),解释器退化 cmp32 state;③轮询点归属: 编译代码=C1 LIR/C2 SafePoint 节点,解释器=MacroAssembler)
 **20-vm-operations/01(VM_Operation 从提交到执行,20 域 1/2)**: 正文 b30c2e8 → 回填 b2c8867(⚠️ 7 条)→ README f0ed423(83/152,20 域 1/2,第 5 批 10/13)→ 素材 20-vmops-demo.txt(gitignore)→ **第 3 轮** 7221a66(①doit_prologue 语义——VM_RevokeBias::doit_prologue 检查对象**是否还带 bias 标记**(biasedLocking.cpp:520-534,"avoid a safepoint"),非大纲的"检查线程栈";②唤醒机制——**登记≠唤醒**: evaluate_operation 只 increment_vm_operation_completed_count(:427-429),等待者由 **loop 每轮结束的 VMOperationRequest_lock->notify_all()**(vmThread.cpp:622-624)统一唤醒后自检 ticket;③loop 末尾复查 no_op_safepoint_needed(true)(:625-631,18-01 Cleanup 另一触发点))
+**20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(371 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt(gitignore)→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")
 
 **本会话新增素材**(全部 gitignore 不入库,在 materials/commands/):
 - `08-bytecodes-javap.txt`(BcDemo 六方法 javap -c: 76 条固定长指令与 def 表全对/lookupswitch 对齐 1→44/invokedynamic 5 字节)
@@ -193,7 +194,7 @@
 | 命令输出 | `materials/commands/` 140+ 文件 | jcmd/jstat/jmap 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材**(详见 §二 commit 清单,共 19 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt / 13-jit-broker-demo.txt / 13-jit-tiered-demo.txt / 18-safepoint-demo.txt / 18-safepoint-polling-demo.txt / 20-vmops-demo.txt
+**本会话新增素材**(详见 §二 commit 清单,共 20 个): 08-bytecodes-javap.txt / 08-interpreter-templates.txt / 08-interpreter-counterdemo.txt / 08-linkresolve-javap.txt / 08-unsafe-demo.txt / 08-whitebox-demo.txt / 08-verifier-demo.txt / 08-verificationtype-javap.txt / 08-cds-demo.txt / 08-cds-dump-full.txt / 11-cds-load-demo.txt / 12-ci-inlining-demo.txt / 12-ci-typeflow-escape-demo.txt / 12-ci-replay-demo.txt / 13-jit-broker-demo.txt / 13-jit-tiered-demo.txt / 18-safepoint-demo.txt / 18-safepoint-polling-demo.txt / 20-vmops-demo.txt / 20-background-init-demo.txt
 
 **引用纪律**: 工具实证必须真实存在——引用前 grep materials/ 验证;素材缺失的实证不要引用,改为布局推导。
 
@@ -225,7 +226,7 @@
 ### 6.4 平台/环境事实(写作时已确认)
 - **jdk11u 源码树只含 x86 平台**(cpu/ 只有 x86,os/ 只有 linux/posix)——不要断言其他平台的实现细节
 - 常用实证: **Temurin OpenJDK 11.0.32 在 /data/tmp/opencode/jdk11**(与 jdk11u 同版本,实证首选);Temurin 17 在 /data/tmp/opencode/jdk17(含 src.zip 可查 API 变迁);TencentKona 17/21 在 /opt/codev/
-- 本会话关键源码位置: templateInterpreter.cpp/hpp、templateTable.cpp、interpreterRuntime.cpp(:148-215 ldc/resolve_ldc、:217 _new、:749 monitorenter、:1176 at_safepoint、:1008 frequency_counter_overflow)、interfaceSupport.inline.hpp(:445 IRT_ENTRY、:468 JRT_ENTRY、:111-123 ThreadStateTransition)、unsafe.cpp(1122 行)、whitebox.cpp(2360 行)、forte.cpp(668 行)、verifier.cpp(2913 行)、verificationType.hpp/cpp、metaspaceShared.cpp(2184 行)、filemap.hpp/cpp(1515 行)、systemDictionaryShared.cpp(1071 行)、compactHashtable.cpp(529 行)、heapShared.cpp(862 行);ci 系: ciObject.cpp(handle 双通道)/ciObjectFactory.cpp(728 行,工厂缓存 :305-334)/ciInstanceKlass.cpp(:599 implementor,:713 dump_replay_data)/ciMethod.cpp(:965 ensure_method_data)/ciField.cpp(:246 initialize_from,:257-291 is_constant)/ciMethodData.cpp(:170 load_data)/ciTypeFlow.cpp(3048 行,:272 type_meet,:2727 flow_types)/bcEscapeAnalyzer.cpp(:167 set_global_escape,:1201 do_analysis)/ciReplay.cpp(:1074 replay_impl,:1115/:1206 initialize)/ciEnv.cpp(:215 析构,:1231 dump_replay_data_unsafe,:947 register_method);编译器系: compileBroker.cpp(2841 行,:464 select_task 调用,:1479 assign_compile_id,:2062 invoke_compiler_on_method,:1532 create_compile_task)/compileTask.hpp(CompileReason :48-59)/tieredThresholdPolicy.cpp(980 行,:44/:65 predicate helper,:202 initialize 线程数,:285 select_task,:371 event,:715 common,:676-712 转换图注释,:884/:903 两事件)/compilerDefinitions.hpp(CompLevel :54-63);safepoint 系: safepoint.hpp(三态 :61-66,counter :112-119,ThreadSafepointState :228-277)/safepoint.cpp(1474 行,:155 begin,:499 end,:731 do_cleanup_tasks,:647 ParallelSPCleanupTask::work,:816 block,:1045 examine_state_of_thread,:440 no_op_safepoint_needed)/safepointMechanism.cpp(:36 default_initialize,armed/disarmed 值 :50-76)/safepointMechanism.inline.hpp(local_poll_armed :32-35,arm/disarm :50-57)/safepointVerifiers.hpp(NoSafepointVerifier :89-104 线程计数)/safepointVerifiers.cpp(NoGCVerifier :8-28 total_collections)/jniFastGetField.hpp(:29-49 双加载)/macroAssembler_x86.cpp(:3744-3761 safepoint_poll)/c1_LIRAssembler_x86.cpp(:558-593 C1 deref 轮询)/x86_64.ad(:1099-1102 C2 deref 轮询)/vmOperations.hpp(VM_OPS_DO :48-132 ~84 种,Mode :136-141)/vmThread.hpp(VMOperationQueue :39-85,queue_peek lock-free :68)/vmThread.cpp(:457 loop,:663 execute,:403 evaluate_operation,:622-624 每轮 notify_all,:494-505 超时空 safepoint)
+- 本会话关键源码位置: templateInterpreter.cpp/hpp、templateTable.cpp、interpreterRuntime.cpp(:148-215 ldc/resolve_ldc、:217 _new、:749 monitorenter、:1176 at_safepoint、:1008 frequency_counter_overflow)、interfaceSupport.inline.hpp(:445 IRT_ENTRY、:468 JRT_ENTRY、:111-123 ThreadStateTransition)、unsafe.cpp(1122 行)、whitebox.cpp(2360 行)、forte.cpp(668 行)、verifier.cpp(2913 行)、verificationType.hpp/cpp、metaspaceShared.cpp(2184 行)、filemap.hpp/cpp(1515 行)、systemDictionaryShared.cpp(1071 行)、compactHashtable.cpp(529 行)、heapShared.cpp(862 行);ci 系: ciObject.cpp(handle 双通道)/ciObjectFactory.cpp(728 行,工厂缓存 :305-334)/ciInstanceKlass.cpp(:599 implementor,:713 dump_replay_data)/ciMethod.cpp(:965 ensure_method_data)/ciField.cpp(:246 initialize_from,:257-291 is_constant)/ciMethodData.cpp(:170 load_data)/ciTypeFlow.cpp(3048 行,:272 type_meet,:2727 flow_types)/bcEscapeAnalyzer.cpp(:167 set_global_escape,:1201 do_analysis)/ciReplay.cpp(:1074 replay_impl,:1115/:1206 initialize)/ciEnv.cpp(:215 析构,:1231 dump_replay_data_unsafe,:947 register_method);编译器系: compileBroker.cpp(2841 行,:464 select_task 调用,:1479 assign_compile_id,:2062 invoke_compiler_on_method,:1532 create_compile_task)/compileTask.hpp(CompileReason :48-59)/tieredThresholdPolicy.cpp(980 行,:44/:65 predicate helper,:202 initialize 线程数,:285 select_task,:371 event,:715 common,:676-712 转换图注释,:884/:903 两事件)/compilerDefinitions.hpp(CompLevel :54-63);safepoint 系: safepoint.hpp(三态 :61-66,counter :112-119,ThreadSafepointState :228-277)/safepoint.cpp(1474 行,:155 begin,:499 end,:731 do_cleanup_tasks,:647 ParallelSPCleanupTask::work,:816 block,:1045 examine_state_of_thread,:440 no_op_safepoint_needed)/safepointMechanism.cpp(:36 default_initialize,armed/disarmed 值 :50-76)/safepointMechanism.inline.hpp(local_poll_armed :32-35,arm/disarm :50-57)/safepointVerifiers.hpp(NoSafepointVerifier :89-104 线程计数)/safepointVerifiers.cpp(NoGCVerifier :8-28 total_collections)/jniFastGetField.hpp(:29-49 双加载)/macroAssembler_x86.cpp(:3744-3761 safepoint_poll)/c1_LIRAssembler_x86.cpp(:558-593 C1 deref 轮询)/x86_64.ad(:1099-1102 C2 deref 轮询)/vmOperations.hpp(VM_OPS_DO :48-132 ~84 种,Mode :136-141)/vmThread.hpp(VMOperationQueue :39-85,queue_peek lock-free :68)/vmThread.cpp(:457 loop,:663 execute,:403 evaluate_operation,:622-624 每轮 notify_all,:494-505 超时空 safepoint,:242-275 create,:204-226 VMOperationTimeoutTask);后台任务系: task.hpp(PeriodicTask :39-108,常量 :45-48,execute_if_pending :82-92)/task.cpp(静态数组 :32-33,real_time_tick :49-78,time_to_wait :80-92,enroll :110-130,disenroll :133-154)/thread.cpp(WatcherThread 段 :1367-1562: 构造 :1377-1393 优先级 MaxPriority,run :1453,sleep :1395-1451,start :1514,make_startable :1524,stop :1529;Threads::create_vm :3702-4091: vm_init_globals :3809,init_globals :3846,VMThread 段 :3868-3888,周期任务注册 :4047-4055,WatcherThread 启动 :4066-4078)/init.cpp(vm_init_globals :90-98 7 步,init_globals :101-160 30 函数)/biasedLocking.cpp(EnableBiasedLockingTask :79-92,BiasedLocking::init :95-112,update_heuristics :321-372,VM_BulkRevokeBias :566)/statSampler.cpp(StatSamplerTask :42-46,engage :78-90)/arena.cpp(ChunkPoolCleaner :169-177,clean :141-147,free_all_but :99-120,start_chunk_pool_cleaner_task :237-246)/jniPeriodicChecker.cpp(JniPeriodicCheckerTask :33-37,engage :55-66)/rtmLocking.cpp(RTMLockingCalculationTask :38-47)/memprofiler.cpp(MemProfilerTask :47-52,整体 #ifndef PRODUCT)/jfrThreadSampler.cpp(JfrThreadSampler :311,start_thread :424-430,run :452-500,enroll=semaphore :439-446)/serviceThread.cpp(initialize :41-45)/sweeper.cpp(sweeper_loop :265-278)/java.cpp(before_exit :445-546,WatcherThread::stop :503,StatSampler::disengage :507)/os_linux.cpp(os::run_periodic_checks :5381)/jvmFlagConstraintsRuntime.cpp(PerfDataSamplingIntervalFunc :122-131,BiasedLockingStartupDelayFunc :78-87)/jni.cpp(JNI_CreateJavaVM :4098,Threads::create_vm 调用 :4012)
 
 ### 6.5 实证方法论新增(本会话沉淀)
 - **javap 原始字节分析**: javap 显示是"解释过的",原始证据要 xxd/hexdump——44-02 的双槽证据是 `fd 00 05 04 04 04`(append 的 number_of_locals=4 vs 类型项 2 个),不是 javap 的 `[ long, long ]`
@@ -322,6 +323,27 @@
 - **写作期血泪**: 块内代码凭记忆混入不存在的 check_end_stack/grep 零命中——必须逐行回源码
 - **第 3 轮**: 实证解读修正([ long, long ] 是 2 个 long 变量(loop 的 sum+i),双槽证据=原始字节 number_of_locals=4 vs 类型项 2 个 `fd 00 05 04 04 04`)
 - 实证: 08-verificationtype-javap.txt
+
+### 6.39 20-02(后台任务与启动序列,20 域收官,大纲 10+ 处漂移含 6 处机制编造 + 深审 2 轮,2026-08-14)
+
+- **"WatcherThread 主循环 vmThread.cpp:500-550" 文件错(重要)**: WatcherThread 在 **thread.cpp**(构造 :1377-1393/run :1453/start :1514/make_startable :1524/stop :1529),vmThread.cpp 是 VMThread!名字="VM Periodic Task Thread"(thread.hpp:930),NonJavaThread(:902),线程转储 waiting on condition
+- **"固定 50ms 睡眠" 错**: sleep()(thread.cpp:1395-1451)先算 `PeriodicTask::time_to_wait()`(task.cpp:80-92,min(interval-counter)),在 PeriodicTask_lock 上 wait(remaining) 睡到**最近任务到期点**;无任务 remaining=0 睡到被 unpark;spurious/新任务循环重算(:1432-1447);真实时间源=run 报告 time_waited→real_time_tick
+- **"递减 counter" 反**: execute_if_pending(task.hpp:82-92)把 delay **累加**进 _counter,>=interval 执行并清零;counter=距上次执行的毫秒;time_to_next_interval=interval-counter(:96-99)
+- **"_tasks 链表" 错**: 静态数组 `_tasks[max_tasks=10]`(task.cpp:32-33,满 10 fatal);enroll=尾加+unpark/start(task.cpp:110-130);disenroll=左移(:133-154);real_time_tick 遍历时处理任务自 disenroll(index-- :72-75)——EnableBiasedLockingTask 的 delete this 就靠它
+- **"JFR 是 PeriodicTask" 编造**: 文件=jfrThreadSampler.cpp(share/jfr/periodic/sampling,非 jfrThreadSampling.cpp);JfrThreadSampler 独立 NonJavaThread(:311,os::create_thread :425),run(:452)用自己的 semaphore _sample+os::naked_short_sleep;间隔由 Java 侧 ExecutionSample 事件阈值注入(jfrThreadSampler.hpp:50);默认配置无此线程(实证转储只有 JFR Recorder Thread)——enroll/disenroll 是**重名**,与 PeriodicTask 无关
+- **"BiasedLocking::check_bulk_rebias 周期" 编造**: 真实 EnableBiasedLockingTask(biasedLocking.cpp:79-92)**一次性**任务——task() 提交 async VM_EnableBiasedLocking(:86,注释 "Use async VM operation to avoid blocking the Watcher thread")后 delete this;BiasedLocking::init(:95-112): delay>0→enroll,否则同步 VMThread::execute;JDK11 默认 BiasedLockingStartupDelay=**0**(globals.hpp:970,实证 20-vmops-demo [0.024s] 立即执行),AggressiveOpts 才 500(arguments.cpp:1986-1987);**批量撤销=VM_BulkRevokeBias(:566)由 update_heuristics 同类撤销计数驱动**(20=HR_BULK_REBIAS/40=HR_BULK_REVOKE,globals.hpp:978/984,:321-372,提交 :727),非周期任务
+- **"NMTSweeper nmtCommon.cpp" 编造**: 无 NMT 周期任务;NMT_stack_walkable 只是 init_globals 一行(init.cpp:150)
+- **任务全清单(7 个,别漏)**: StatSamplerTask(50ms,statSampler.cpp:42-46,38-02 已详)/EnableBiasedLockingTask(一次性)/VMOperationTimeoutTask(vmThread.cpp:92,204-226,AbortVMOnVMOperationTimeout=1000ms 时,interval=delay/10 夹 [10,10000],:246-256,arm/disarm 在 loop begin/end :544-546/:590-592)/ChunkPoolCleaner(arena.cpp:169-177,5000ms,BlocksToKeep=5 其余 os::free :99-120/:141-147,CleanChunkPoolAsync 默认 true)/JniPeriodicCheckerTask(10ms,CheckJNICalls,os::run_periodic_checks=DO_SIGNAL_CHECK 信号完整性检查 os_linux.cpp:5381-5394)/RTMLockingCalculationTask(一次性,UseRTMLocking)/MemProfilerTask(develop-only,memprofiler.cpp 整体 #ifndef PRODUCT)
+- **"VM init 23 步 init.cpp:80-250" 全错**: init.cpp 共 190 行;init_globals=**:101-160(30 个函数**,顺序即头顶依赖注释),vm_init_globals=:90-98(7 步: check_ThreadShadow/basic_types_init/eventlog_init/mutex_init/chunkpool_init/perfMemory_init/SuspendibleThreadSet_init);"jintArgumentProlog/10_initPhase2/30_runPhase2" 是 JDK8 旧版;StubRoutines 顺序=codeCache_init(:107)→stubRoutines_init1(:110)→universe_init(:111,注释 dependent on codeCache_init and stubRoutines_init1)——大纲"StubRoutines 在 CodeCache 前"反了;两阶段=generate_initial/generate_all 内容差异(stubGenerator_x86_64.cpp:5869/:5974-5977 "fabricate a RuntimeStub internally"),非代码缓存依赖
+- **"Threads::create_vm 是 init_globals 一步" 反**: Threads::create_vm(thread.cpp:3702,jni.cpp:4012 由 JNI_CreateJavaVM_inner :3952 调用)调 vm_init_globals(:3809)+init_globals(:3846);create_vm 四段: ①参数与 OS(:3702-3801,os::init/parse/ergo/SafepointMechanism::initialize :3784/agents)②全局初始化(:3803-3862,主线程对象+ObjectMonitor::Initialize+init_globals)③VMThread 点亮(:3868-3923,create+os::create_thread+**Notify_lock 等 active_handles 就绪**:3871-3887,VM_Verify :3891-3895 第一个 VM 操作,initialize_java_lang_classes :3914,StubCodeDesc::freeze :3919,set_init_completed :3923)④服务与后台(:3935-4078,信号/Attach/Chunk cleaner :3953-3955/ServiceThread :3960/编译器 :3980-3985/模块 initPhase2 :3996/JVMTI 阶段/JFR on_create_vm_1-3 :3853/:3998/:4034/Management :4037/**周期任务大登记 :4047-4055**/WatcherThread make_startable+start :4066-4078)
+- **"VMThread::create 内部等 loop(VMOperationLock)" 错**: create(vmThread.cpp:242-275)只建对象(new VMThread/timeout task enroll/VMOperationQueue/_terminate_lock/sun.threads.vmOperationTime 计数器 :268-274);就绪握手=run 里 set_active_handles+Notify_lock->notify(vmThread.cpp:293-298)vs 主线程 wait(:3879-3887,"Monitors can have spurious returns");**"vm_during_initialization flag" 不存在(编造)**
+- **"两阶段=数据/服务" 错**: init.hpp:38-39 注释是 main Java thread/VM thread 分工(历史语义),服务启动全在 create_vm 三/四段
+- **WatcherThread 晚启动原因**: make_startable 后才可 start(thread.cpp:1514-1527);注释 "All PeriodicTasks should be registered by now. If they aren't, late joiners might appear to start slowly"(thread.cpp:4072-4074)——counter 从 0 起,晚注册者第一个 tick 要等满 interval
+- **停机**: before_exit(java.cpp:445-546)**先 WatcherThread::stop(:503)再 StatSampler::disengage(:507)**——先停时钟再注销任务("Stop the WatcherThread. We do this before disenrolling various",:500-502)
+- **悬念指向 21-shared-runtime 错**: 正确=27-jni(层 4,00-domain-writing-order.md:76)
+- **实证方法论**: SIGQUIT(kill -3)线程转储在 attach 不可用的容器里可用(jcmd 超时 10500ms 失败);PrintFlagsFinal 验证默认值;20-vmops-demo.txt 的 [0.024s] EnableBiasedLocking 交叉引用
+- **深审抓到的实质错误**: ①批量撤销触发机制(update_heuristics 计数,非"堆扩容");②ChunkPoolCleaner 真实语义(BlocksToKeep=5 其余 os::free);③StubRoutines 两阶段原因(RuntimeStub 可重定位,非代码缓存);④停机顺序(先停线程后注销任务,初稿写反);⑤VMThread 优先级注释("must be lower",初稿"不能高于"半对);⑥init.cpp:124 注释凭记忆多加 ", loads primordial classes"(真实在 :68 声明处)
+- 实证: 20-background-init-demo.txt(素材清单见 §五)
 
 ### 6.38 20-01(VM_Operation 从提交到执行,20 域 1/2,大纲 7 处漂移含 0 处硬编造 + 深审 2 轮,2026-08-13)
 - **模式 4 元组 ✓**(vmOperations.hpp:136-141: _safepoint/_no_safepoint/_concurrent/_async_safepoint);evaluation_mode(:195)/evaluate_at_safepoint(:207-209)/evaluate_concurrently(:211-212)
@@ -487,8 +509,9 @@
 - [x] **18-safepoint/01**(Safepoint 编排)——✅ 完结(正文 1b4b441/回填 b24f7fa/README b6ed56d,commit 见 §二);18 域 1/2
 - [x] **18-safepoint/02**(轮询与 NoSafepointVerifier)——✅ 完结(正文 e2896a5/回填 a0a97bf/README 2e63aeb,commit 见 §二);**18 域完结,第 5 批 9/13**
 - [x] **20-vm-operations/01**(VM_Operation 从提交到执行)——✅ 完结(正文 b30c2e8/回填 b2c8867/README f0ed423,commit 见 §二);20 域 1/2
-- [ ] **20-vm-operations/02**(后台任务与初始化)——**下一篇**;大纲 `planning/outlines/20-vm-operations/02-background-init.md`;20-01 悬念指向它: 谁在后台周期性干活
-- [ ] 20-vmops 完结后 → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 8 域)
+- [x] **20-vm-operations/02**(后台任务与启动序列)——✅ 完结(正文 4e942c1/回填 ⚠️ 14 组/README 7aae8ba,commit 见 §二);**20 域完结,第 5 批 11/13**
+- [ ] **27-jni/01**(jobject 怎么在 JVM 内部存——Handle 系统)——**下一篇**;大纲 `planning/outlines/27-jni/01-handle-system.md`;20-02 悬念指向它
+- [ ] 27-jni 后 → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 7 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -527,11 +550,11 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/20-vm-operations/02-background-init.md(注意 ⚠️ 块——20-01 大纲已回填 7 条,02 大概率同样漂移;20-01 悬念指向它: 谁在后台周期性干活)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;02 是后台任务,重点: PeriodicTask 体系(periodicTask.cpp: watchdog/统计等周期任务)、WatcherThread(04-signals 呼应?)、VMOperationTimeoutTask、JFR checkpoint 周期、CodeCache sweeper(16 域!)的触发;与 16-code-cache(Sweeper)、38-perfdata(StatSampler 周期)衔接;实证: jcmd 观察周期任务或 -Xlog 相关)
-3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证
+1. 读 planning/outlines/27-jni/01-handle-system.md(注意 ⚠️ 块——27 域是第 5 批剩余第一个;20-02 悬念指向它: jobject 引用怎么在 Java 对象与 C 世界之间存活)
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律;27 域重点: jniHandles.cpp 的 handle 块机制(JNIHandleBlock)、全局引用与本地引用、DeleteLocalRef、handles.hpp 的 Handle/HandleMark(09 域 arena 衔接)、jni.cpp 方法表入口、JNI_ENTRY 宏(17-04 interfaceSupport)、jobject 表示;与 42-core-native(JNI 系统)、31-unsafe(UNSAFE_ENTRY=JVM_ENTRY)、09-memory-core(HandleMark/ResourceMark)衔接)
+3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证;jcmd 在当前容器 attach 不可用(超时),实证可用 kill -3(SIGQUIT)线程转储或命令行 -Xlog
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3 轮)→ 回填大纲 → 提交 → 更新 README
-5. 20-vmops 完结后 → 27-jni → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 8 域)
+5. 27-jni 完结后 → 30-jvm-entry → 32-jfr → 34-nmt → 36-attach → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 7 域)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
