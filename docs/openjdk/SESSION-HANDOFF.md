@@ -360,6 +360,7 @@
 - **StackWalker 分页**: JVM_CallStackWalk(jvm.cpp:552)→StackWalk::walk(stackwalk.cpp:332,JavaFrameStream/LiveFrameStream)→fetchFirstBatch(:363,跳 StackWalker 自身帧 :378-384)→fill_in_frames(:108-145);JVM_MoreStackWalk(:580)→fetchNextBatch;batchSize 默认 6(实证日志);BaseFrameStream magic 跨批校验(:42-88)
 - **实证方法论**: ReflectionDemo+StackWalker SHOW_HIDDEN_FRAMES 显示反射链 6 帧(Method.invoke→Delegating→NativeMethodAccessorImpl→invoke0);-Xlog:stackwalk=debug 证明 hotspot 不过滤反射帧——**实证纠错机制**(大纲机制 vs 实测)
 - **悬念指向 31(已完结)错**: 正确=32-jfr
+- **第 4 轮** fcb05e2: ①分页批大小修正——StackStreamFactory.java:545-556(非 StackWalker.java): 首批=min(max(estimateDepth,SMALL_BATCH=8),LARGE=256),后续翻倍至 BATCH_SIZE=32 封顶;实证 6=estimateDepth 估计值续批 12;②JVMInvokeMethodSlack=develop_pd globals.hpp:1919
 - 实证: 30-reflection-stackwalk-demo.txt(素材清单见 §五)
 
 ### 6.44 30-jvm-entry/02(JavaCalls + NativeLookup,30 域 2/3,大纲 9 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-14)
