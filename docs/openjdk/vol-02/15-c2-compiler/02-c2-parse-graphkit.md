@@ -129,7 +129,7 @@ JVMState* ParseGenerator::generate(JVMState* jvms) {
 
 `new Parse(...)` 从 caller 的 JVMState 出发,把 callee 的字节码全部展开成图——callee 的返回被接回调用点的表达式栈,异常状态也一并转交(`transfer_exceptions_into_jvms`)。callee 内部遇到调用,又递归走同一条链。**每进一层,jvms 的 depth 加一**——`Parse::_depth = 1 + caller->depth()`(parse1.cpp:397),`InlineTree` 的深度检查 `inline_level() = caller_jvms->depth()`(parse.hpp:96-97)读的正是同一个计数。
 
-OSR 是另一种"从中间开始建图": 解释器在循环回边把控制权交给编译代码,`StartOSRNode`(callnode.hpp:91-98)的域里只放一个"OSR buffer"参数;parse1.cpp:570-574 把它交给 `load_interpreter_state`——从解释器栈帧重建局部变量/表达式栈(OSR buffer 的物理布局与 24-frame 域的帧重建共享同一套解释器帧格式)。所以 OSR 编译从 `entry_bci` 起建图,`_tf = C->tf()` 换成 OSR 专用类型(parse1.cpp:521)。[实证](planning/outlines/00-jvm-tools/materials/commands/15-c2-parse-graphkit-demo.txt)第 5 段: 长循环方法被 OSR 编译两次(`1 % 3 OSRDemo::loop @ 5`——`%` 标记 + 回边 bci 5),替换后旧 OSR nmethod `made not entrant`。
+OSR 是另一种"从中间开始建图": 解释器在循环回边把控制权交给编译代码,`StartOSRNode`(callnode.hpp:91-98)的域里只放一个"OSR buffer"参数;parse1.cpp:570-574 把它交给 `load_interpreter_state`(:186+)——用 `fetch_interpreter_state` 逐槽恢复局部变量与监视器(BoxLockNode + 伪 FastLockNode,:221-250;buffer 的填充侧是解释器,`SharedRuntime::OSR_migration_begin` sharedRuntime.cpp:3036,注释明说依赖"interpreter local array and the monitors"的布局)。所以 OSR 编译从 `entry_bci` 起建图,`_tf = C->tf()` 换成 OSR 专用类型(parse1.cpp:521)。[实证](planning/outlines/00-jvm-tools/materials/commands/15-c2-parse-graphkit-demo.txt)第 5 段: 长循环方法被 OSR 编译两次(`1 % 3 OSRDemo::loop @ 5`——`%` 标记 + 回边 bci 5),替换后旧 OSR nmethod `made not entrant`。
 
 **PrintInlining 把整条决策链摆上台面**([实证](planning/outlines/00-jvm-tools/materials/commands/15-c2-parse-graphkit-demo.txt)第 1 段): 低层级编译(C1)里 7 字节的 `d6` 也报 `"callee is too large"`——因为 C1 的嵌套有 `NestedInliningSizeRatio=90%` 逐层衰减(c1_globals.hpp:177,每层 max_inline_size 乘 0.9,c1_GraphBuilder.cpp:700-705);C2 的高频树里 139 字节的 `big` 反而 `inline (hot)`——高频调用点放宽到 FreqInlineSize=325;而 16 层缩进都成功内联之后,第 17 层的 `d3` 报 `"inlining too deep"`——深度从调用者 JVMState 计(`inline_level() = caller_jvms->depth()`,parse.hpp:96-97),`inline_level() > MaxInlineLevel=15` 首次成立。同一份源码、两代编译器,决策参数完全不同。
 
@@ -219,7 +219,7 @@ safepoint 的机制也不是"OopMap recording in parse": Parse 只在需要时�
 
 四件事: **①去重**——紧跟在 Call 或 SafePoint 之后就不插(它们本身是 safepoint,:2246-2251);②**克隆内存状态**成一个新的 MergeMemNode(:2273-2275),防止屏障/store 浮过 safepoint(注释 :2260-2270);③**连接口与轮询地址**——thread-local poll 时从线程对象读 `polling_page_offset`(18-02 域的轮询页在这里接线),全局模式用 `ConPNode::make(os::get_polling_page())`(:2286-2296);④**add_safepoint_edges 把整条 JVMState 链(各级调用者的 locals/stack/monitors)挂上**——这才是"GC 需要知道 oops"在 parse 期的全部内容: 它们是**节点**,不是机器寄存器。另外还从 root 加一条 precedence 边保活这个 safepoint,直到解析结束(:2305-2308)。机器级 OopMap(寄存器/栈槽 → oop 标记)要等寄存器分配完成后,由 `Compile::BuildOopMaps`(buildOopMap.cpp:566,文件头注释 "builds OopMaps after all scheduling is done" :39)做前向到达定义分析生成。
 
-异常路径与 safepoint 并列构成图的"副作用骨架": 每个字节码后 `do_exceptions()`(parse1.cpp:905-932)检查有没有积累的异常状态——**无异常处理器**的方法直接 `throw_to_exit` 把异常状态转给调用者(向上传递);**有处理器**的走 `catch_inline_exceptions` 在图中接入 handler 块。内联方法的异常也经 `transfer_exceptions_into_jvms` 并入调用者(callGenerator.cpp:110)。
+异常路径与 safepoint 并列构成图的"副作用骨架": 每个字节码后 `do_exceptions()`(parse1.cpp:905-932)检查有没有积累的异常状态——**无异常处理器**的方法直接 `throw_to_exit` 把异常状态转给调用者(向上传递);**有处理器**的走 `catch_inline_exceptions`(doCall.cpp:836)在图中接入 handler 块。内联方法的异常也经 `transfer_exceptions_into_jvms` 并入调用者(callGenerator.cpp:110)。
 
 *关键设计: Parse 期的"JVM 状态"是图的一部分而非旁路数据——locals/stack/monitors 就是 SafePointNode 的输入边,所以 deopt 时解释器状态可以精确重建;而机器级 OopMap 推迟到寄存器分配后,因为只有那时才知道 oop 住哪个寄存器。safepoint 的"插不插"由回边与调用点决定(调用点天然是 safepoint,回边按需补插),配合 18-02 域的轮询机制,让编译代码的 GC 停顿与解释器语义一致。*
 
