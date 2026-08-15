@@ -37,7 +37,7 @@ C1 的第一步是把字节码(隐式操作栈)翻译成一张**显式的数据�
   }
 ```
 
-①**build_hir()**(:141-258)远不止"GraphBuilder + 优化": IR 构建(内部才调 GraphBuilder)→ `optimize_blocks`(UseC1Optimizations 门控,:179)→ `split_critical_edges` → `compute_code`(块排序,注释 "the control flow must not be changed from here on")→ **GVN**(UseGlobalValueNumbering)→ **RangeCheckElimination**(非 OSR 时)→ `eliminate_null_checks` → `compute_use_counts`。②**emit_lir()**(:252-278): `LIRGenerator` 按线性扫描序生成 LIR(`hir()->iterate_linear_scan_order(&gen)`,:256)+ **`LinearScan::do_linear_scan`** 寄存器分配(:270-276,`_max_spills` 统计)。③**emit_code_body()**: `LIR_Assembler` 发 x86 码;随后 `install_code`(:410)`env->register_method` 注册 nmethod。*关键设计: 大纲的"Step 3 Canonicalizer 独立阶段"不存在——Canonicalizer 在 GraphBuilder 每次 append 时即时内联调用(见 §2);独立优化只有 optimize_blocks/GVN/RangeCheckElimination 三趟,且都可开关*。C1 全程以"快"为纲: bailout 机制(InstructionCountCutoff、BailoutAfterHIR 等)随时放弃编译回到解释器。
+①**build_hir()**(:141-258)远不止"GraphBuilder + 优化": IR 构建(内部才调 GraphBuilder)→ `optimize_blocks`(UseC1Optimizations 门控,:179)→ `split_critical_edges` → `compute_code`(块排序,注释 "the control flow must not be changed from here on")→ **GVN**(UseGlobalValueNumbering)→ **RangeCheckElimination**(非 OSR 时)→ `eliminate_null_checks` → `compute_use_counts`。②**emit_lir()**(:252-278): `LIRGenerator` 按线性扫描序生成 LIR(`hir()->iterate_linear_scan_order(&gen)`,:256)+ **`LinearScan::do_linear_scan`** 寄存器分配(:270-276,`_max_spills` 统计)。③**emit_code_body()**: `LIR_Assembler` 发 x86 码;随后 `install_code`(:410)`env->register_method` 注册 nmethod。*关键设计: 大纲的"Step 3 Canonicalizer 独立阶段"不存在——Canonicalizer 在 GraphBuilder 每次 append 时即时内联调用(见 §2);独立优化四趟(optimize_blocks/GVN/RangeCheckElimination/eliminate_null_checks),全在 UseC1Optimizations 门控下,可开关*。C1 全程以"快"为纲: bailout 机制(InstructionCountCutoff、BailoutAfterHIR 等)随时放弃编译回到解释器。
 
 ## 2. GraphBuilder: 逐字节码建图
 
@@ -73,6 +73,6 @@ GraphBuilder 的输入是 ciMethod(12 域镜像),输出是 `IR`(含 BlockBegin �
 
 ## 核心悬念
 
-C1 前端拆完: 管线是三大步(build_hir 内含 GraphBuilder+三趟优化+bailout 机制 / emit_lir 的 LIRGenerator+LinearScan / emit_code_body+install_code),Canonicalizer 是 append 时的即时动作而非独立阶段;GraphBuilder 预扫描建块、逐字节码 append(Canonicalizer+LVN 即时消除)、局部变量与操作栈是 Value 引用(iload 零成本)、块合并插 Phi;HIR 节点用 LEAF/BRANCH 宏组织,BlockBegin(StateSplit)连接 BlockEnd(Goto/If/Return/Throw)。[实证](planning/outlines/00-jvm-tools/materials/commands/14-c1-pipeline-demo.txt)的 PrintCompilation 记录 `230 b 3 C1Demo::sum` 就是这条管线的产物。但"快"还不够——**append 时已经顺手做了常量折叠,正式的优化趟次**(optimize_blocks/GVN/RangeCheckElimination/空检查消除)在下一篇展开。下一篇: Canonicalizer 与优化趟次。
+C1 前端拆完: 管线是三大步(build_hir 内含 GraphBuilder+三趟优化+bailout 机制 / emit_lir 的 LIRGenerator+LinearScan / emit_code_body+install_code),Canonicalizer 是 append 时的即时动作而非独立阶段;GraphBuilder 预扫描建块、逐字节码 append(Canonicalizer+LVN 即时消除)、局部变量与操作栈是 Value 引用(iload 零成本)、块合并插 Phi;HIR 节点用 LEAF/BRANCH 宏组织,BlockBegin(StateSplit)连接 BlockEnd(Goto/If/Return/Throw)。[实证](planning/outlines/00-jvm-tools/materials/commands/14-c1-pipeline-demo.txt)的 PrintCompilation 记录 `230 b 3 C1Demo::sum` 就是这条管线的产物。但"快"还不够——**append 时已经顺手做了常量折叠,正式的优化趟次**(optimize_blocks/GVN/RangeCheckElimination/空检查消除,共四趟)在下一篇展开。下一篇: Canonicalizer 与优化趟次。
 
 > → [14-c1-compiler/02 — C1 优化: Canonicalizer + ValueMap + Optimizer](02-c1-optimizations.md)
