@@ -36,13 +36,13 @@
       }
 ```
 
-`ThreadBlockInVM`(:102)先把线程置成阻塞态(注释 :94-96: safepoint 能正确处理这个线程);`Service_lock` 下**一次性检测全部 5 个条件**(:105-109)——内存传感器(`LowMemoryDetector::has_pending_requests`)/JVMTI 事件队列/GC 通知/DCmd 通知/StringTable 工作;没有就 `wait`。*关键设计: 检测与等待在同一把锁下*——新事件若在"检测完"与"进入 wait"之间到达,会被 notify 打断 wait,不会丢失唤醒。JVMTI 事件特殊: **在锁内 dequeue(:117)、锁外 post(:126-129)**——dequeue 保证不会两个线程抢同一事件,post 在锁外避免持锁回调。
+`ThreadBlockInVM`(:102)先把线程置成阻塞态(注释 :94-100: "Need state transition ThreadBlockInVM so that this thread will be handled by safepoint correctly...");`Service_lock` 下**一次性检测全部 5 个条件**(:105-109)——内存传感器(`LowMemoryDetector::has_pending_requests`)/JVMTI 事件队列/GC 通知/DCmd 通知/StringTable 工作;没有就 `wait`。*关键设计: 检测与等待在同一把锁下*——新事件若在"检测完"与"进入 wait"之间到达,会被 notify 打断 wait,不会丢失唤醒。JVMTI 事件特殊: **在锁内 dequeue(:117)、锁外 post(:126-129)**——dequeue 保证不会两个线程抢同一事件,post 在锁外避免持锁回调。
 
 ## 2. 五类任务: 触发源与处理
 
 **①JVMTI deferred events**。不是所有 JVMTI 事件都能在发生线程上直接回调(比如类重定义要在安全点外做复杂工作),于是入 `ServiceThread::_jvmti_service_queue`(ServiceThread 自己的静态队列,注释 :40-43 "Events can be posted before JVMTI vm_start...";`enqueue_deferred_event` :145-153 持锁入队+notify)。post 处理在锁外;事件对象本身被 GC 扫描**保持存活**直到处理完(`oops_do`/`nmethods_do`,:155-179 扫 `_jvmti_event` 与队列)。
 
-**②GC 通知(JMX)**。GC 结束时 `GCMemoryManager::gc_end` 调 `GCNotifier::pushNotification`(memoryManager.cpp:295,带上 GC 起止时间/action/cause 与统计)→ 入 GCNotifier 的**请求链表**(gcNotifier.hpp:33-60,`first_request/last_request`);`has_event` 就是链表非空(:76-78);ServiceThread 调 `GCNotifier::sendNotification`(:136)→ `sendNotificationInternal` 构造 `sun.management.GarbageCollectorImpl` 的 JMX 通知并发出。**`sendNotification` 显式清 pending exception**(gcNotifier.cpp:165-172,注释 "Clearing pending exception to avoid premature termination of the service thread")——回调里抛的异常不能杀死这个线程。
+**②GC 通知(JMX)**。GC 结束时 `GCMemoryManager::gc_end` 调 `GCNotifier::pushNotification`(memoryManager.cpp:295,带上 GC 起止时间/action/cause 与统计)→ 入 GCNotifier 的**请求链表**(gcNotifier.hpp:33-60,`first_request/last_request`);`has_event` 就是链表非空(:76-78);ServiceThread 调 `GCNotifier::sendNotification`(:136)→ `sendNotificationInternal` 构造 `com.sun.management.internal.GarbageCollectorExtImpl` 的 JMX 通知并发出(gcNotifier.cpp:82 的 klass 引用)。**`sendNotification` 显式清 pending exception**(gcNotifier.cpp:165-172,注释 "Clearing pending exception to avoid premature termination of the service thread")——回调里抛的异常不能杀死这个线程。
 
 **③StringTable 并发清理**。StringTable 的 weak 引用在 GC 标记后出现 dead entries,删除要动哈希表结构、不能在 GC 的 critical 区做,于是 GC 后 `check_concurrent_work` 按 dead/load 因子触发 `trigger_concurrent_work`(stringTable.cpp:520-535,Service_lock 下置 `_has_work`+notify);`try_rehash_table` 的 grow 分支里也会再触发(:587/:594)——与 32 域的 JFR、OopStorage 的清理都无关。ServiceThread 收到后 `StringTable::do_concurrent_work`→`concurrent_work`(:539-549): 看 load factor,**高于阈值且表未满就 grow(扩容顺带清 dead),否则 clean_dead_entries**。
 
