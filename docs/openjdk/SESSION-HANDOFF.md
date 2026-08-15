@@ -273,6 +273,37 @@
 
 ## 六、本会话实战经验(最重要,新 AI 必读;6.1-6.51 旧会话沉淀,6.52-6.74 本会话 23 篇新沉淀)
 
+### 6.0 本会话精华速查(新 AI 写 21-03 前必读)
+
+**本会话覆盖**: 15-c2 域 8 篇全完结(C2 全管线: Ideal Graph/Parse/IGVN-CCP-EA/循环/Chaitin/Matcher/宏展开/intrinsic)+ 21-shared-runtime 2 篇(桩/c2i-i2c)。21-03(异常)是 21 域收官篇,之后的 25-gc 是第 6 批最大域。
+
+**大纲漂移的六大高发类型**(15-c2+21 域 10 篇实测,共 150+ 处漂移,每篇 14-19 处):
+1. **函数名编造**: do_load/do_arith/do_inline/add_node(02 篇)、add_constraint(04)、eliminate_locking_nodes→eliminate_locking_node 单数(07)、PhaseOutput(06)、MathIntrinsicNode(08)、generate_c2i_adapter→gen_c2i_adapter(21-02)——**大纲的函数名是不可信字段,一律 grep**
+2. **行号全错**: handle_ic_miss_helper 1100-1300→1552、Simplify 200-330→1199、inline_string_indexOf 1000-1300→1294、generate_stubs 280-400→99——**大纲行号多是规划期估算,差几百行**
+3. **机制编造(最严重)**: Ideal() 返回 this(01)、CCP 从 BOTTOM 逆风(03)、ArgEscape 转寄存器(03)、Strip Mining=主尾模型(04)、_hint_color(05)、peephole 消 mov(06)、CoarsenedLockNode cmpxchg(07)、nanoTime RDTSC(08)、push rbp 建帧(21-02)——**机制描述全部回源码验证**
+4. **帧/汇编模型错位**: c2i adapter frameless(21-02)、OopMap 张冠李戴(21-02)、"栈溢出边缘不调 C++"是推断(21-01)
+5. **归属错**: do_call 在 doCall.cpp 非 parse1.cpp(02)、find_callee_method 是入口帧场景(21-01)、intrinsic 触发在 Parse 期非 IGVN(08)
+6. **数字无据**: c2i 200 条/i2c 40 条(21-02)、1 cycle(21-01)、5 cycles(08)、5-10% penalty(04)——**性能数字无源码依据一律删**
+
+**深审第 3/4 轮的高发错误**(用户追加 REVIEW 时重点):
+- **跨段遗留**(改了正文没改悬念): 32-03 的 4/8 字节、03 篇四步→五步同源错误出现 5 处——修正后全文 grep 同源表述
+- **跨篇断言**: rep movsq(07,实际向量循环)、VDSO(08,39-02 未提)——**跨篇引用只保留目标篇实证过的内容**
+- **flag 类型凭记忆**: TraceLoopOpts develop 非 notproduct(04)、UseSSE42Intrinsics 默认 false+ergonomics(08)
+- **术语对齐**: megamorphic=vtable/itable(21-01 第 3 轮)、FALSE IC miss 与 icholder 呼应(21-01)
+
+**HANDOFF §6 追加新节**: 已连续 9 次因"new 含旧节标题"导致新节插到标题前——**强制顺序**: 独立文本→## 七、前插入→grep -n "### 6.6" 校验→再做其他**
+
+**实证工具箱**(本会话沉淀,release 可用的):
+- PrintInlining(diagnostic)= 内联决策树/类型画像(双态 vs 三态)/intrinsic 标记——**虚调用与 intrinsic 的主观察窗**
+- -Xlog:jit+compilation=debug(product)= 编译事件(OSR %/made not entrant)
+- CITime(product)= 阶段树(Parse/Optimize 各子阶段/Matcher/Regalloc/Output)
+- PrintCompilation+Verbose 不可用(Verbose 是 develop)
+- EA 开关对照(EliminateAllocations product)= 标量替换量级实证(0 次 GC vs 6 次)
+- 循环性能对照需 -Xbatch+超长运行(容器噪声 ±20%,短运行不可靠)
+- 已探明的 flag 边界: PrintIdeal/PrintIdealGraph notproduct(拒启)、PrintOptoAssembly diagnostic 但 NOT_PRODUCT(静默)、TraceCallFixup/ICMissHistogram/TraceSuperWord 不可用
+
+
+
 ### 6.1 大纲漂移的规律(96 篇全部出现,2-15 处/篇;前会话沉淀 02/03/04/45/48/06/16/38/41/42/07/09/17/10/19/23/24/08/31/44/11/12/13/18 域,本会话沉淀 20/27/30/32 域)
 **任何机制描述/行号/值/专有名词,一律当"线索"而非"事实"**。高频漂移类型:
 1. **机制编造**(最严重): 大纲把"想当然的实现"写成机制——实证全部是编造
@@ -972,6 +1003,8 @@
 | 源码树(jdk11u) | `/data/workspace/jdk11u/src/hotspot/`(仅 x86+linux!) |
 | C1 编译器源码 | `/data/workspace/jdk11u/src/hotspot/share/c1/`(c1_Compilation/GraphBuilder/Instruction/Canonicalizer/ValueMap/Optimizer/LinearScan/LIRAssembler/Runtime1/FrameMap;x86 特化在 cpu/x86/) |
 | C2 编译器源码 | `/data/workspace/jdk11u/src/hotspot/share/opto/`(node/type/phaseX(IGVN+NodeHash)/compile/parse1-3/graphKit/cfgnode/memnode/addnode/opcodes/c2_globals 等,x86 特化在 cpu/x86/) |
+| SharedRuntime/桩 | `/data/workspace/jdk11u/src/hotspot/share/runtime/sharedRuntime.cpp`(3216 行: generate_stubs :99/handle_ic_miss_helper :1552)+`sharedRuntime.hpp`+`cpu/x86/sharedRuntime_x86_64.cpp`(4003 行: gen_c2i_adapter :585/gen_i2c_adapter :733/generate_i2c2i_adapters :943/generate_deopt_blob :2810) |
+| 异常处理源码(21-03 用) | 预判: `share/runtime/` 的 exceptions.hpp/cpp、`share/interpreter/` 的 bytecodeInterpreter 异常分派、`share/code/` 的 exceptionTable、`cpu/x86/` 的异常 stub——写作时按大纲实际定位 |
 | JDK 侧源码 | `/data/workspace/jdk11u/src/java.base/`、`/data/workspace/jdk11u/src/jdk.jfr/` |
 | 工具素材 | `docs/openjdk/planning/outlines/00-jvm-tools/materials/`(commands/ 150+ 文件) |
 | **实证 JDK(首选,与源码同版本)** | **`/data/tmp/opencode/jdk11/bin`(Temurin OpenJDK 11.0.32)** |
@@ -992,11 +1025,24 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/21-shared-runtime/03-*.md(注意 ⚠️ 块——01/02 篇已回填(3 块 14/15 条),03 篇大概率同样漂移;**21-03 是 21 域收官篇**;21-03 重点: 异常处理——ExceptionTable/异常表查找、compiled code 的 handler 查找(SharedRuntime 异常路径/x86 层异常 stub)、解释器异常分派、ImplicitNullCheck 等;与 01/02 篇衔接: deopt/unpack 在 01 篇,adapter 在 02 篇,异常是第三条 runtime 通道;与 24-frame 衔接: 异常帧)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律与 6.61-6.66 的 compiler 域经验——C2 与 C1 同属 compiler 层,行号漂移规律一致;01/02 篇已证: 大纲行号多为规划期估算,机制编造高发在"函数名不存在/文件归属错/默认值错/阶段归属错位")
-3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证;PrintCompilation 是 product(-Xlog:jit+compilation 等价);**PrintIdeal/PrintIdealGraph 是 notproduct(release 拒启,实证已录);PrintOptoAssembly 是 diagnostic 但实现 NOT_PRODUCT(release 静默);PrintInlining 是 diagnostic 可用**;PrintAssembly 无 hsdis 只有 nmethod header,且 hsdis 无法编译(无 binutils 头文件),保持无 hsdis 实证方案;jcmd 现在可用(listener 已触发,socket 在 /tmp/.java_pid<pid>)
-4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件;15-c2 域 opto 文件已在 HS_MAP)→ 深审 2 轮(用户会追加第 3/4 轮,重点抓跨段遗留/隐含断言)→ 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
-5. 21 域后 → 25-gc → 28-jvmti → 29-mh → 33-jmx → 43-nio-net(第 6 批剩余 4 域)
+【21-shared-runtime/03 写作指引——21 域收官篇】
+1. 读 planning/outlines/21-shared-runtime/03-exception-handling.md(注意 ⚠️ 块;01/02 篇回填 3 块 14/15 条,03 篇大概率同样漂移)。
+   21-03 主题=异常处理,按大纲实际内容验证,预判要点(以实际 grep 为准):
+   - 异常表: ExceptionTable(share/code/exceptionTable 或 method.hpp 内嵌)/异常表查找(compiled code 的 handler 查找)
+   - 解释器异常分派(bytecodeInterpreter/templateTable 的 athrow/异常处理入口)
+   - 编译代码异常路径(SharedRuntime 的异常 stub/ComputeExceptionHandler/x86 层)
+   - 隐式异常: ImplicitNullCheck/implicit null 检查(16-04 域 relocation 讲过轮询与 null)
+   - 与 01 篇衔接: deopt/unpack 是"假设破产"的逃生口,异常是第三条 runtime 通道;与 02 篇衔接: c2i/i2c 是正常互调,异常穿越两者;与 24-frame 衔接: 异常帧/异常 oop 传递
+2. 验证大纲所有 file:line 与专有名词——21 域已验证的高发漂移类型: ①**函数名错**(generate_stubs→无/eliminate_locking_nodes→单数/gen_c2i_adapter 前缀);②**行号全错**(handle_ic_miss_helper 1100-1300→1552);③**帧模型编造**(push rbp 建新帧→frameless);④**OopMap/汇编细节张冠李戴**(桩的机制安到 adapter 上);⑤**归属错**(find_callee_method 是另一场景函数);⑥**指令数/cycle 数无据**(200/40 条、1 cycle 全部删)。21-03 大概率同样: 异常处理是汇编+运行时混合,行号与"谁负责哪步"最易错
+3. 实证优先用 /data/tmp/opencode/jdk11;异常路径的实证思路:
+   - 显式 try-catch 编译形态: -XX:+UnlockDiagnosticVMOptions -XX:+PrintInlining 看异常处理器相关内联(有限)
+   - JFR 的 jdk.JavaExceptionThrow/jdk.JavaErrorThrow 事件(20-02 素材有 JFR 录制先例);或 jdk.ExceptionStatistics
+   - 隐式 null 检查: 代码形态(空指针)与编译行为——若 -Xlog:exceptions 标签存在(先验证)则直接可用;不存在则行为对照
+   - 复用素材: 24-frame 的 24-deopt-demo.txt(异常触发 deopt 的完整实证)、20-02 的 JFR
+   - flag 边界: 异常相关 flag(如 PrintExceptionHandlers?)先查类型再定方案
+4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP;ART 改回当前文件;21 域 sharedRuntime/codeBlob 已在 HS_MAP)→ 深审 2 轮(第 2 轮逐机制回源码质疑;用户常追加第 3/4 轮,重点抓: 跨段遗留(改了正文没改悬念)、隐含断言、跨篇引用只保留目标篇实证过的内容)→ 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
+5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68/6.73/6.74,已连续 9 次违规)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容);③**立即 `grep -n "### 6.6"` 校验连续递增**;④再做其他编辑。禁止"new 含旧节标题"的替换模式
+6. 21 域后 → 25-gc → 28-jvmti → 29-mh → 33-jmx → 43-nio-net(第 6 批剩余 4 域;25-gc 是第 6 批大域,写前先读 KP 与 outlines 定篇数)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
