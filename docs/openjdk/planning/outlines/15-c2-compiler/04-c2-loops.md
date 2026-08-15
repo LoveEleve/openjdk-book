@@ -64,7 +64,7 @@ PhaseIdealLoop::do_unroll(loop):
 > - **指令映射实测(x86.ad)**: loadV4→**movd**(:3034)/loadV16→**movdqu**(:3098,**非大纲 movdqa**)/vadd2I→**paddd(UseAVX==0)/vpaddd(UseAVX>0)**(:6325-6345);"5-10% penalty"无源码依据删除
 > - **"相邻内存检测 same base stride=4" 半对**: pack 寻找=同 base 连续偏移的 Load/Store 打包(combine_packs),非简单等差检测;对齐=align_initial_loop_index+pre-loop 保证
 > - **superword.cpp 5218 行** ✓;**SuperWordLoopUnrollAnalysis x86_64 默认 true**(c2_globals_x86.hpp:84,unrolling_analysis :194);**UseSuperWord product 默认 true**(c2_globals.hpp:333)
-> - **实证**: 计算密集循环(C1 慢 3.7 倍/-XX:-UseSuperWord +59%/-XX:LoopUnrollLimit=1 +70%,-Xbatch 超长运行)/OSR 事件/CITime IdealLoop 0.006s;TraceLoopOpts/TraceSuperWord notproduct 不可用
+> - **实证**: 计算密集循环(C1 慢 3.7 倍/-XX:-UseSuperWord +59%/-XX:LoopUnrollLimit=1 +70%,-Xbatch 超长运行)/OSR 事件/CITime IdealLoop 0.006s;TraceSuperWord notproduct(:348)/TraceLoopOpts develop(:228) 不可用
 
 
 场景: `a[i] = b[i] + c[i]; a[i+1] = b[i+1] + c[i+1];` 循环展开后出现 4 对重复的 Load-Add-Store。SuperWord 识别相邻内存访问→组合为 128-bit 向量操作。
