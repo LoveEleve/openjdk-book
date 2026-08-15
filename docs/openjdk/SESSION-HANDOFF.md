@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-15 | 卷 2 写作中: **104/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 31) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 31 篇(11/12/13/18/20/27/30/32/34/36/37/39 十二域完结,**本会话 21 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2),39 域收官**),下一篇 46-sa-postmortem/01 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-15 | 卷 2 写作中: **105/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 32 篇(11/12/13/18/20/27/30/32/34/36/37/39/46 **十三域全部完结,第 5 批收官!**,**本会话 22 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1)**),下一篇 14-c1-compiler/01(第 6 批开篇) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3/4 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 46-sa-postmortem/01(SA Postmortem,大纲 `planning/outlines/46-sa-postmortem/01-sa-postmortem.md`;**第 5 批收官域**,批次顺序 39 → 46)。
+**下一步(唯一,无选择)**: 14-c1-compiler/01(C1 管线 + HIR,大纲 `planning/outlines/14-c1-compiler/01-c1-pipeline-ir.md`;**第 6 批(JIT/GC)开篇域**,批次顺序 46 → 14 → 15 → ...)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,96 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -45,12 +45,12 @@
 第 2 批(原语): 02(4) → 03(2) → 04(2) → 06(6) → 16(5) → 38(2) → 41(2) → 42(3)   ✅ 完结 26/26
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
-第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2)** → 46   🚧 进行中
+第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 104 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 105 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -88,8 +88,9 @@
 | **36-attach** | 1-2 | `36-attach/01-attach-listener.md`(157)+`02-jdk-attach.md`(65) | ✅ **36 域完结(本会话)** |
 | **37-heap-dumper** | 1-2 | `37-heap-dumper/01-heap-dumper.md`(77)+`02-compression-triggers.md`(59) | ✅ **37 域完结(本会话)** |
 | **39-runtime-monitoring** | 1-2 | `39-runtime-monitoring/01-service-thread.md`(73)+`02-timer-stats.md`(66) | ✅ **39 域完结(本会话)** |
+| **46-sa-postmortem** | 1 | `46-sa-postmortem/01-sa-postmortem.md`(61) | ✅ **46 域完结(本会话),第 5 批收官** |
 
-### 本会话 21 篇的 commit 清单(按 git log 为准,2026-08-14/15)
+### 本会话 22 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(372 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true)
 
@@ -201,7 +202,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 19 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 20 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -217,6 +218,7 @@
 - `32-jfr-jni-instrumentation-demo.txt`(转换器/JNI 表/DCmd 链核对)
 - `37-heap-dumper-gzip-oome-demo.txt`(gzip 流式压缩实证: 自 attach+executeJCmd GC.heap_dump -gz=1,文件头 1f8b 0810+FCOMMENT+"HPROF BLOCKSIZE=1048576" 注释,1318476 vs 15430735=12x,python gzip 解压还原 JAVA PROFILE 头;OOM 自动 dump: -Xmx64m+HeapDumpOnOutOfMemoryError→java_pid<pid>.hprof 34MB,顺序=OOM 消息→dump→异常;GC.heap_dump filename 是位置参数)
 - `37-heap-dumper-demo.txt`(hprof 文件逐字节解析: 19 字节头 "JAVA PROFILE 1.0.2\0"+u4 id_size=8+u8 时间戳;顶层记录 UTF8 49109/LOAD_CLASS 2211/FRAME 30/TRACE 8/SEGMENT 16/END;段内 INSTANCE 104269/PRIM_ARRAY 34837/OBJ_ARRAY 23378/CLASS_DUMP 2021/STICKY 1601/JNI_GLOBAL 64/THREAD_OBJ 7;live 对照 6.0MB/4 段/INSTANCE 37782(-64%);JDK11 变体验证: CLASS_DUMP 无 serial(64 字节头)/INSTANCE 含 object id+stid;触发=HotSpotDiagnostic.dumpHeap 需 jmxremote 加载 libmanagement)
+- `46-sa-postmortem-demo.txt`(jhsdb 双模式实证: --pid 活进程 ptrace attach 成功(G1 23 threads/Heap Configuration/regions 7630);--core 离线解析 gcore 19GB core;jstack 解 Interpreted frame;attach 失败教训=目标进程已退出;SA 源码定位)
 - `39-runtime-monitoring-timer-demo.txt`(jstat -class Loaded 1841/Bytes 3798.0 直接读 PerfCounter 无需 attach;gc+phases 四阶段毫秒(GCTraceTimeImpl);jcmd GC.run 触发 GC 成功——jcmd attach 容器可用修正;计时器家族定位)
 - `36-attach-loadagent-demo.txt`(自 attach+loadAgentPath 加载自定义 JVMTI agent 全链路: Agent_OnAttach 收到 options='hello-attach'/返回 -1→AgentInitializationException rc=-1/properties 与 ManagementAgent.start_local 走 attach 通道/退出 Agent_OnUnload;需 -Djdk.attach.allowAttachSelf=true)
 - `36-attach-trigger-demo.txt`(attach 触发链实证: touch .attach_pid+SIGQUIT→"Attach triggered" 日志+socket srw------- 0600 出现;无文件 kill -3=线程转储(信号二义);已初始化短路;转储含 "Attach Listener" #23 与 "Signal Dispatcher" #4;strace stat 证据;环境事实: 容器常驻 JMC/VisualVM 自动 attach 新 JVM(~1.6s)致"无信号也触发"假象,/tmp 堆积 .java_pid* 残留,os::get_temp_directory() Linux 写死 /tmp;jcmd 10500ms 超时更可能是目标进程已退出)
@@ -661,6 +663,17 @@
 - **实证方法论(重要环境修正)**: **jstat 直接读 hsperf 文件无需 attach**(jstat -class Loaded 1841);**jcmd attach 在容器可用**——之前实验已触发 listener,socket 文件存在,jcmd GC.run 成功——36 域"jcmd 不可用"结论再次修正(listener 启动后即可用);gc+phases 日志=jcmd GC.run 触发
 - 实证: 39-runtime-monitoring-timer-demo.txt
 
+### 6.60 46-sa-postmortem/01(SA Postmortem,第 5 批收官域,大纲 9 组漂移含 2 处机制编造 + 深审 2 轮,2026-08-15)
+- **"core_lookup 线性扫描 O(n)/linked list" 错(重要)**: 真实=**map_array 排序指针数组+二分**(core_lookup ps_core.c:153-175,注释 "We keep a sorted array of pointers in ph->map_array, so we can binary search";sort_map_array :382-421 链表→数组→qsort)——O(log n);completeness 问 6 的"链表 vs 红黑树"基于错误前提
+- **"add_map_info linked list prepend O(1)" ✓**(:124-134),lookup 走 map_array 二分
+- **"symtab 线性遍历" 错(重要)**: 构建时 **hcreate_r 哈希**(symtab.c:416-432,n*1.25),查找 **hsearch_r O(1)**(search_symbol :569-587,base+sym->offset :583);符号 section 默认 **SHT_DYNSYM** 发现 **SHT_SYMTAB 优先**(build_symtab_internal :329+)
+- **"lookup_symbol 找 libjvm.so" 半对**: 真实=**忽略 object_name 全局搜所有库**(libproc_impl.c:215-238,注释原文)
+- **"debuginfo-install" 半对**: 真实=**.gnu_debuglink 段**(build_symtab_from_debug_link :261)/**NT_GNU_BUILD_ID note**(build_symtab_from_build_id :305)
+- **源码位置**: jdk.hotspot.agent/linux/native/libsaproc/(非 hotspot/agent/);ps_core.c 1134/ps_proc.c 527/symtab.c 607/LinuxDebuggerLocal.c 584
+- **缺机制(重要)**: ①verifyBitness(LinuxDebuggerLocal.c:196-210,/proc/<pid>/exe,失败 "cannot open binary file");②core_read_data(ps_core.c:431-465): pread 段内偏移+分数页补零;③class_share_maps CDS 兜底(:189-200);④ps_prochandle 统一 core/live;⑤attach0(:251) Pgrab 在 **ps_proc.c:450**;⑥Pgrab=ptrace_attach(PTRACE_ATTACH+waitpid SIGSTOP :275-292)+maps 解析+fillThreadsAndLoadObjects
+- **实证方法论**: **jhsdb 双模式实证**(活进程 ptrace + gcore 19GB core 离线)——容器 gcore 可用(core_pattern=core);**attach 失败排查**: 目标进程退出→/proc/<pid>/exe 消失→"cannot open binary file"(NMTDemo 3 秒退出教训,用 SleepDemo);jstack 解 Interpreted frame 证明 ptrace 读栈
+- 实证: 46-sa-postmortem-demo.txt
+
 ---
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
@@ -698,8 +711,9 @@
 - [x] 37-heap-dumper/01——✅ 完结(正文 b4d58cd 含回填 ⚠️ 11 组/README 8800102/第 4 轮 da7f010);**37 域 1/2**
 - [x] 37-heap-dumper/02——✅ 完结(正文 5150644 含回填 ⚠️ 11 组/README 5528a26);**37 域完结,第 5 批 11/13**
 - [x] 39-runtime-monitoring/01——✅ 完结(正文 f70b0c5 含回填 ⚠️ 9 组/README de26701/第 4 轮 32fe697);**39 域 1/2**
-- [x] 39-runtime-monitoring/02——✅ 完结(正文 6cfef46 含回填 ⚠️ 10 组/README d7dff18);**39 域完结,第 5 批 12/13**
-- [ ] **46-sa-postmortem/01**(SA Postmortem: core dump + ptrace + ELF symbols)——**下一篇,第 5 批收官**;大纲 `planning/outlines/46-sa-postmortem/01-sa-postmortem.md`;39-runtime-monitoring/02 悬念已指向 46-sa-postmortem/01
+- [x] 39-runtime-monitoring/02——✅ 完结(正文 6cfef46 含回填 ⚠️ 10 组/README d7dff18/第 4 轮 16a954e);**39 域完结,第 5 批 12/13**
+- [x] 46-sa-postmortem/01——✅ 完结(正文 e8526bc 含回填 ⚠️ 9 组/README eff5880);**46 域完结,第 5 批 13/13 收官**
+- [ ] **14-c1-compiler/01**(C1 管线 + HIR: 字节码→编译图)——**下一篇,第 6 批开篇**;大纲 `planning/outlines/14-c1-compiler/01-c1-pipeline-ir.md`;46-sa-postmortem/01 悬念已指向 14-c1-compiler/01
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
