@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-15 | 卷 2 写作中: **107/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 2) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 24 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(2)**,下一篇 14-c1-compiler/03 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-15 | 卷 2 写作中: **108/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 3) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 25 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(3)**,下一篇 14-c1-compiler/04 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3/4 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 14-c1-compiler/03(LinearScan + LIR → x86 码,大纲 `planning/outlines/14-c1-compiler/03-c1-register-codegen.md`;14 域四篇,01/02 已完结)。
+**下一步(唯一,无选择)**: 14-c1-compiler/04(Runtime1 + FrameMap: C1 runtime 与栈帧,大纲 `planning/outlines/14-c1-compiler/04-c1-runtime-frame.md`;**14 域收官篇**)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,96 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -50,7 +50,7 @@
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 107 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 108 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -89,9 +89,9 @@
 | **37-heap-dumper** | 1-2 | `37-heap-dumper/01-heap-dumper.md`(77)+`02-compression-triggers.md`(59) | ✅ **37 域完结(本会话)** |
 | **39-runtime-monitoring** | 1-2 | `39-runtime-monitoring/01-service-thread.md`(73)+`02-timer-stats.md`(66) | ✅ **39 域完结(本会话)** |
 | **46-sa-postmortem** | 1 | `46-sa-postmortem/01-sa-postmortem.md`(61) | ✅ **46 域完结(本会话),第 5 批收官** |
-| **14-c1-compiler** | 1-4 | `14-c1-compiler/01-c1-pipeline-ir.md`(88)+`02-c1-optimizations.md`(56) | ✅ 01/02 完结(本会话),**14 域 2/4** |
+| **14-c1-compiler** | 1-4 | `14-c1-compiler/01-c1-pipeline-ir.md`(88)+`02-c1-optimizations.md`(56)+`03-c1-register-codegen.md`(45) | ✅ 01/02/03 完结(本会话),**14 域 3/4** |
 
-### 本会话 24 篇的 commit 清单(按 git log 为准,2026-08-14/15)
+### 本会话 25 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(372 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true)
 
@@ -203,7 +203,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 22 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 23 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -219,6 +219,7 @@
 - `32-jfr-jni-instrumentation-demo.txt`(转换器/JNI 表/DCmd 链核对)
 - `37-heap-dumper-gzip-oome-demo.txt`(gzip 流式压缩实证: 自 attach+executeJCmd GC.heap_dump -gz=1,文件头 1f8b 0810+FCOMMENT+"HPROF BLOCKSIZE=1048576" 注释,1318476 vs 15430735=12x,python gzip 解压还原 JAVA PROFILE 头;OOM 自动 dump: -Xmx64m+HeapDumpOnOutOfMemoryError→java_pid<pid>.hprof 34MB,顺序=OOM 消息→dump→异常;GC.heap_dump filename 是位置参数)
 - `37-heap-dumper-demo.txt`(hprof 文件逐字节解析: 19 字节头 "JAVA PROFILE 1.0.2\0"+u4 id_size=8+u8 时间戳;顶层记录 UTF8 49109/LOAD_CLASS 2211/FRAME 30/TRACE 8/SEGMENT 16/END;段内 INSTANCE 104269/PRIM_ARRAY 34837/OBJ_ARRAY 23378/CLASS_DUMP 2021/STICKY 1601/JNI_GLOBAL 64/THREAD_OBJ 7;live 对照 6.0MB/4 段/INSTANCE 37782(-64%);JDK11 变体验证: CLASS_DUMP 无 serial(64 字节头)/INSTANCE 含 object id+stid;触发=HotSpotDiagnostic.dumpHeap 需 jmxremote 加载 libmanagement)
+- `14-c1-register-codegen-demo.txt`(LinearScan 机制定位: do_linear_scan 全流程/Interval=Range 链表/alloc_locked_reg 选 use_pos 最晚/x86 peephole 空实现+EdgeMoveOptimizer/LIR_Assembler emit 链)
 - `14-c1-optimizations-demo.txt`(C1 优化 flag 类型盘点: RangeCheckElimination=product 可关,UseC1Optimizations 等 develop 不可关;PrintAssembly 无 hsdis 只输出 nmethod header(C1 main code 352>C2 224);机制源码定位)
 - `14-c1-pipeline-demo.txt`(PrintCompilation 实证: "230 b 3 C1Demo::sum (23 bytes)"/231 % OSR/made not entrant;-Xlog:jit+compilation 等价;PrintIR/PrintLIR notproduct 说明;管线三大步源码定位)
 - `46-sa-postmortem-demo.txt`(jhsdb 双模式实证: --pid 活进程 ptrace attach 成功(G1 23 threads/Heap Configuration/regions 7630);--core 离线解析 gcore 19GB core;jstack 解 Interpreted frame;attach 失败教训=目标进程已退出;SA 源码定位)
@@ -699,6 +700,16 @@
 - **实证方法论**: PrintAssembly 无 hsdis 只输出 nmethod header(main code 尺寸可比较:C1 352>C2 224);flag 类型决定能否开关对照
 - 实证: 14-c1-optimizations-demo.txt
 
+### 6.63 14-c1-compiler/03(LinearScan + LIR → x86 码,14 域 3/4,大纲 10 组漂移含 2 处机制编造 + 深审 2 轮,2026-08-15)
+- **"Interval: [start, end]" 半对(重要)**: 真实=Interval 由 **Range 链表**组成(c1_LinearScan.hpp:455-470,Range 的 _from/_to/_next;Interval :501+)——活跃段可不连续;Interval 挂 _assigned_reg/_register_hint(:563)/_current_split_child/_canonical_spill_slot
+- **"spill 选择 end 最远的 Interval" 半对**: 真实=**find_locked_reg 选 _use_pos 最晚的寄存器**(c1_LinearScan.cpp:5504-5524)——占用者下次使用前空闲最长
+- **"peephole: 相邻 move 消除" 编造(重要)**: x86 **peephole 空实现**(c1_LIRAssembler_x86.cpp:3994,注释 "sparc uses this for delay slot filling");真正 LIR 优化=**EdgeMoveOptimizer+ControlFlowOptimizer**(c1_LinearScan.cpp:3152-3155)
+- **"x86 FpuStack ST0-ST7" 半对**: allocate_fpu_stack(c1_LinearScan_x86.cpp:35)仅 **x87 模式**(use_fpu_stack_allocation),x86_64 默认 SSE
+- **行号漂移**: c1_LinearScan.cpp **6800 行**(大纲 400-800 严重低估);hpp 963;LIRAssembler.cpp 867
+- **缺机制(重要)**: ①do_linear_scan(:3100-3130)全流程;②activate_current(:5792-5855): 栈槽起始 split+load(:5802-5812)/combine_spilled→alloc_free 或 alloc_locked(:5834-5840);③split_for_spilling(:5227);④resolve_data_flow 块边 move;⑤LIR_Assembler emit_code(:214)→emit_lir_list(:268)→emit_op0/1/2(:598/:504/:695)
+- **实证方法论**: TraceLinearScanLevel 是 develop 不可用;PrintAssembly 无 hsdis 只给 nmethod 布局(C1 main code 352>C2 224,复用 02 篇)
+- 实证: 14-c1-register-codegen-demo.txt
+
 ---
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
@@ -739,8 +750,9 @@
 - [x] 39-runtime-monitoring/02——✅ 完结(正文 6cfef46 含回填 ⚠️ 10 组/README d7dff18/第 4 轮 16a954e);**39 域完结,第 5 批 12/13**
 - [x] 46-sa-postmortem/01——✅ 完结(正文 e8526bc 含回填 ⚠️ 9 组/README eff5880);**46 域完结,第 5 批 13/13 收官**
 - [x] 14-c1-compiler/01——✅ 完结(正文 0bbb913 含回填 ⚠️ 9 组/README 35d344e/第 4 轮 a256662);**14 域 1/4,第 6 批开篇**
-- [x] 14-c1-compiler/02——✅ 完结(正文 d7c79df 含回填 ⚠️ 10 组/README b4e6586);**14 域 2/4**
-- [ ] **14-c1-compiler/03**(LinearScan + LIR → x86 码)——**下一篇**;大纲 `planning/outlines/14-c1-compiler/03-c1-register-codegen.md`;14-c1-compiler/02 悬念已指向 03
+- [x] 14-c1-compiler/02——✅ 完结(正文 d7c79df 含回填 ⚠️ 10 组/README b4e6586/第 4 轮 94a2793);**14 域 2/4**
+- [x] 14-c1-compiler/03——✅ 完结(正文 6ba2903 含回填 ⚠️ 10 组/README 9d2f7ed);**14 域 3/4**
+- [ ] **14-c1-compiler/04**(Runtime1 + FrameMap: C1 runtime 与栈帧)——**下一篇,14 域收官**;大纲 `planning/outlines/14-c1-compiler/04-c1-runtime-frame.md`;14-c1-compiler/03 悬念已指向 04
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
