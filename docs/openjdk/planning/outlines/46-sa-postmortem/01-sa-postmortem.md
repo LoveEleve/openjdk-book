@@ -3,6 +3,18 @@
 > 🔴 Deep | 不依赖 live JVM → 独立进程读取 JVM 状态
 > 读者处境: JVM crash→`hs_err_pid.log` 不完整→需要 core dump→`jhsdb jmap --core core.dump --exe java`→SA 作为独立进程解析 core dump→找 libjvm.so→ELF symbols→`Universe::_collectedHeap`→oop iterate→dump heap objects。**不需要 JVM 还在运行**——SA 直接从 core file 或 /proc/pid/mem 读取内存。
 
+> ⚠️ 写作期修正(2026-08-15, vol-02/46-sa-postmortem/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"core_lookup 线性扫描 O(n)/linked list" 错(重要)**: 真实=**map_array 排序指针数组+二分查找**(core_lookup ps_core.c:153-175,注释 "We keep a sorted array of pointers in ph->map_array, so we can binary search";sort_map_array :382-421 链表→数组→qsort)——O(log n);大纲 completeness 问 6 的"链表 vs 红黑树/O(n) 太慢"基于错误前提
+> - **"add_map_info 用 linked list prepend O(1)" ✓ 对**(:124-134 map->next=core->maps)——但 lookup 用 map_array 二分
+> - **"symtab 遍历 symbol table entries 线性" 错(重要)**: 构建时 **hcreate_r 哈希表**(symtab.c:416-432,size n*1.25),查找 **hsearch_r O(1)**(search_symbol :569-587,命中返回 base+sym->offset :583);符号 section 默认 **SHT_DYNSYM**,发现 **SHT_SYMTAB 则优先切换**(build_symtab_internal :329+)
+> - **"lookup_symbol 找到 libjvm.so 的 symtab" 半对**: 真实=**忽略 object_name 遍历所有库全局搜索**(libproc_impl.c:215-238,注释 "We just ignore object_name and do a global search")
+> - **"debuginfo-install" 半对**: 真实机制=**ELF .gnu_debuglink 段**(build_symtab_from_debug_link symtab.c:261)/**NT_GNU_BUILD_ID note**(build_symtab_from_build_id :305)
+> - **源码位置**: 不在 hotspot/agent/,在 **jdk.hotspot.agent/linux/native/libsaproc/**(ps_core.c 1134 行 ✓/ps_proc.c 527/symtab.c 607 ✓/LinuxDebuggerLocal.c 584)
+> - **"ps_proc.c:78-110 ptrace PEEKDATA 8 字节" ✓**(process_read_data :66-116: 非对齐三段式=前部/整字循环/尾部合并);ptrace_attach :275-292(PTRACE_ATTACH+waitpid SIGSTOP);Pgrab 在 **ps_proc.c:450**(非 libproc_impl.c)
+> - **缺机制(重要)**: ①verifyBitness(LinuxDebuggerLocal.c:196-210,/proc/<pid>/exe 位宽检查,失败 "cannot open binary file");②core_read_data(ps_core.c:431-465): core_lookup 二分→mapoff=addr-vaddr→off=offset+mapoff→**pread**;段尾分数页补零;③class_share_maps 链表兜底(CDS,:189-200);④ps_prochandle 统一 core/live 数据源(上层只调 ps_pdread);⑤attach0(LinuxDebuggerLocal.c:251:Pgrab→fillThreadsAndLoadObjects)→ps_prochandle 存 jlong 字段;⑥search_symbol base+offset=运行时地址
+> - **实证**: 46-sa-postmortem-demo.txt(jhsdb jmap --heap --pid 活进程 attach 成功:G1 23 threads/Heap Configuration/regions 7630;jstack 解 Interpreted frame;gcore 19GB core+jhsdb --heap --core 离线解析成功;首次 attach 失败教训=目标进程已退出 /proc/<pid>/exe 消失)
+> - **悬念指向错**: "→ 域47 Instrumentation" 过期(47 是第 7 批);46 是**第 5 批收官域**——悬念应指**第 6 批第一个域 14-c1-compiler/01**(C1 管线+HIR)
+
 ### 1. "Core dump 解析 — ELF segment → memory maps"
 
 场景: Java 进程 crash→core dump 文件(ELF format)→SA open core file→ELF header→program headers(PT_LOAD segments)→每个 segment 记录为 `map_info`(addr range→offset in core file→fd)→`core_lookup(addr)`→find segment→pread→read data。
