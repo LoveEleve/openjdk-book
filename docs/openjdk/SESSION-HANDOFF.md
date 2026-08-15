@@ -146,7 +146,7 @@
 
 **14-c1-compiler/04(Runtime1 + FrameMap,14 域收官)**: 正文 9693e17(61 行,含大纲回填 ⚠️ 10 组)→ README 811f3ed(109/152,14 域完结,第 6 批 1/8)→ 素材 14-c1-runtime-frame-demo.txt→ 深审 2 轮(①Runtime1=JRT_ENTRY 家族逃生口(Klass* 非 ciKlass/set_vm_result TLS 返回/慢路径语义 TLAB 快速路径内联);②monitorenter→SharedRuntime 助手;③OopMap 在 LinearScan 构建(大纲"FrameMap 构建"错);④patch_code 懒链接;⑤StubID=RUNTIME1_STUBS 宏/generate_blob stub 进 CodeCache)→ 第 3/4 轮(复核无新问题)
 
-**15-c2-compiler/01(C2 Ideal Graph: Node + Type + IGVN,15 域开篇)**: 正文 58e4a25(253 行,含大纲回填 ⚠️ 9 组)→ README 1992d9f(110/152,15 域 1/8,第 6 批 2/8)→ 素材 15-c2-ideal-graph-demo.txt→ 深审 2 轮(①**Ideal() 返回约定**: NULL=无变化(默认),改图必须返回新根(可 this),**禁止返回旧节点**(走 Identity)——大纲"返回 this(NOP)"错;②**AddNode `Node(0,in1,in2)` 的 0 是 NULL 控制槽**(addnode.hpp:44)——in(0) 存在但恒 NULL(控制无关可浮动,loopopts.cpp:1379),非"无 in(0) 槽";③**`igvn.cpp` 不存在**——hash_find_insert 在 phaseX.cpp:143;④**transform 五步非三环**: Ideal 循环→Value→singleton 常量→Identity→hash_find_insert,大纲漏 GVN 步;⑤**x+0/x*1 折叠发生在 Parse 期**单遍 PhaseGVN::transform_no_reclaim(phaseX.cpp:864-924+addnode.cpp:56-61),IGVN 价值=worklist 迭代+级联+全局 CSE+can_reshape;⑥**ptr_meet 表 Null∩NotNull=BotPTR**(type.cpp:2460-2468)——矛盾即死路径,大纲"放弃 nullness 变 Ptr"错;名字 **NOTNULL**(type.hpp:919);⑦xmeet 虚分派(非 meet_helper);⑧hash-cons 类型唯一不可变;⑨K=1024 死循环守卫(globalDefinitions.hpp:255);⑩**实证边界**: PrintIdeal/PrintIdealGraph notproduct 拒启、**PrintOptoAssembly diagnostic 但实现 NOT_PRODUCT**(compile.cpp:718-733/output.cpp:1554)release 静默、CITime 阶段树(GVN1/IGVN/GVN2)、javac 层折叠(bigsum 50 常量→bipush 50,3 字节);⑪IGVN 在 Optimize 中 6 处运行(compile.cpp:2247-2254/:2321/:2332/:2388-2391/:2424/:2454))→ 第 3 轮无新增
+**15-c2-compiler/01(C2 Ideal Graph: Node + Type + IGVN,15 域开篇)**: 正文 58e4a25(253 行,含大纲回填 ⚠️ 3 块 13 条)→ README 1992d9f(110/152,15 域 1/8,第 6 批 2/8)→ 素材 15-c2-ideal-graph-demo.txt→ 深审 2 轮(①**Ideal() 返回约定**: NULL=无变化(默认),改图必须返回新根(可 this),**禁止返回旧节点**(走 Identity)——大纲"返回 this(NOP)"错;②**AddNode `Node(0,in1,in2)` 的 0 是 NULL 控制槽**(addnode.hpp:44)——in(0) 存在但恒 NULL(控制无关可浮动,loopopts.cpp:1379),非"无 in(0) 槽";③**`igvn.cpp` 不存在**——hash_find_insert 在 phaseX.cpp:143;④**transform 五步非三环**: Ideal 循环→Value→singleton 常量→Identity→hash_find_insert,大纲漏 GVN 步;⑤**x+0/x*1 折叠发生在 Parse 期**单遍 PhaseGVN::transform_no_reclaim(phaseX.cpp:864-924+addnode.cpp:56-61),IGVN 价值=worklist 迭代+级联+全局 CSE+can_reshape;⑥**ptr_meet 表 Null∩NotNull=BotPTR**(type.cpp:2460-2468)——矛盾即死路径,大纲"放弃 nullness 变 Ptr"错;名字 **NOTNULL**(type.hpp:919);⑦xmeet 虚分派(非 meet_helper);⑧hash-cons 类型唯一不可变;⑨K=1024 死循环守卫(globalDefinitions.hpp:255);⑩**实证边界**: PrintIdeal/PrintIdealGraph notproduct 拒启、**PrintOptoAssembly diagnostic 但实现 NOT_PRODUCT**(compile.cpp:718-733/output.cpp:1554)release 静默、CITime 阶段树(GVN1/IGVN/GVN2)、javac 层折叠(bigsum 50 常量→bipush 50,3 字节);⑪IGVN 在 Optimize 中 6 处运行(compile.cpp:2247-2254/:2321/:2332/:2388-2391/:2424/:2454))→ **第 3 轮** 新修正 6 处(①PhiNode::Value 用 **meet_speculative**(cfgnode.cpp:1007)非 meet();②Parse 与 Optimize 之间夹 **PhaseRemoveUseless**(compile.cpp:841-844);③check_node_count 语义精确化(compile.hpp:907-914,余量 NodeLimitFudgeFactor×2);④AddNode::Identity 对称双侧检查表述;⑤实证表述精确化(编译事件非"C2 编译";cfold"level 1 为止");⑥大纲 ⚠️ 块统一为 `> 块级引用` 格式(3 块 13 条),HANDOFF"9 组"计数修正)
 
 ---
 
@@ -756,7 +756,7 @@
 - **实证方法论**: 慢路径计数 NOT_PRODUCT release 不可观察;-XX:-UseTLAB 间接对照;nmethod header 的 stub code/oops/metadata 段(PrintAssembly 无 hsdis)
 - 实证: 14-c1-runtime-frame-demo.txt
 
-### 6.65 15-c2-compiler/01(C2 Ideal Graph,15 域开篇,大纲 9 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-15)
+### 6.65 15-c2-compiler/01(C2 Ideal Graph,15 域开篇,大纲 13 处漂移含 3 处机制编造 + 深审 2 轮 + 第 3 轮,2026-08-15)
 - **"Ideal() 返回 this(NOP=无优化)" 错(重要)**: 返回**NULL=无变化**(默认实现 node.cpp:1144-1146);**改了图必须返回新根**(原地改输入也返回 this);**禁止返回旧节点**(返回旧节点必须走 Identity,node.cpp:1100-1138 "treatise" 注释)——IGVN 对 Ideal 返回值继续循环理想化,对 Identity 返回值直接替换
 - **"AddNode 无 in(0)" 错**: `Node(0,in1,in2)` 第一个参数是 **NULL 控制槽**(addnode.hpp:44,3 个 required 槽: in(0)=NULL/in(1)=a/in(2)=b)——控制无关节点 in(0) 恒 NULL 可浮动(loopopts.cpp:1379 "has no control edge (can float about)"),控制敏感节点(Region/If/Load/Store)in(0) 放控制边;**MemNode 内存边是专属槽**(memnode.hpp:52-58 enum Control/Memory/Address/ValueIn)
 - **"igvn.cpp:100-200" 文件不存在**: JDK11 无 igvn.cpp;NodeHash::hash_find_insert 在 **phaseX.cpp:143-198**(req+Opcode+逐 in+cmp 全等才算命中)
@@ -767,6 +767,7 @@
 - **行号漂移**: type.hpp Type 类 :74(大纲 48-230 旧范围)、TOP/BOTTOM :412-421、TypeInt :537、TypePtr :813;node.hpp Node :210 ✓ 对
 - **缺机制(重要)**: ①节点内存=node_arena+**delete 是 NOP**(node.hpp:231-240);②`_cnt`=required 输入数/`_max`=数组长度(:291/:293);③身份=Opcode()(node.hpp:786,classes.hpp 宏表生成 opcodes.hpp:31-49)+class_id/_flags 位(node.hpp:736-760)+DEFINE_CLASS_QUERY 位掩码查询(:792-800);④TypeInt::make hash-cons(type.cpp:1429-1449+707-745)类型唯一不可变→比较=指针相等;TypeInt::xmeet "Expand covered set"(:1487-1489);xdual 翻转 hi/lo(:1494-1497);⑤PhiNode::Value 起点 TOP 逐路 meet(cfgnode.cpp:918-1009);⑥optimize 守卫: NodeLimitFudgeFactor(c2_globals.hpp:471)+**K=1024×live_nodes 死循环判定**(globalDefinitions.hpp:255,phaseX.cpp:1235);⑦worklist 初值=Parse 期 for_igvn(compile.cpp:757+phaseX.cpp:992-993);NodeHash 75% 扩容(phaseX.hpp:82-83);subsume_node 剪边重连(:1527);⑧**IGVN 在 Optimize 中 6 处运行**(compile.cpp:2247-2254 Parse 后/:2321 EA 后/:2332 宏消除后/:2388-2391 CCP 后/:2424 range-check cast 后/:2454 opaque4 后)
 - **实证方法论(重要)**: ①PrintIdeal/PrintIdealGraph **notproduct** release 拒启(报错原文 "is notproduct and is available only in debug version of VM");②**PrintOptoAssembly diagnostic 但标志处理与 dump 全在 #ifndef PRODUCT**(compile.cpp:718-733/output.cpp:1554-1558)——release 接受但静默,别被"diagnostic"骗了;③可用: -Xlog:jit+compilation=debug(product)编译事件(level/b 标志/OSR %/made not entrant)、-XX:+CITime 阶段树(product)、PrintInlining(diagnostic);④常量折叠 javac 层就做(50 个 1+1+… → bipush 50 3 字节,实证第 7 段)——演示 C2 折叠要防 javac 先折
+- **第 3 轮新增**: ①PhiNode::Value 的 meet 循环实际调 **meet_speculative**(cfgnode.cpp:1007,"meet()"表述不精确);②Parse 末尾先 **PhaseRemoveUseless**(compile.cpp:841-844)再 Optimize——"Parse 一结束立刻 IGVN"忽略中间步骤;③check_node_count 是 **live_nodes+margin > max_node_limit**(compile.hpp:907-914),optimize 传 NodeLimitFudgeFactor×2 余量,不是"总量超 NodeLimitFudgeFactor";④AddNode::Identity 是**对称双侧检查**(addnode.cpp:56-61 两个 if);⑤实证表述: jit+compilation 显示的是**编译事件**(含 C1),cfold 是"level 1 为止"非"就够"(推断词);⑥大纲 ⚠️ 块格式统一为 `> 块级引用+列表`(3 块 13 条,与 14-c1 域一致),HANDOFF 计数修正
 - 实证: 15-c2-ideal-graph-demo.txt
 
 ---
@@ -812,7 +813,7 @@
 - [x] 14-c1-compiler/02——✅ 完结(正文 d7c79df 含回填 ⚠️ 10 组/README b4e6586/第 4 轮 94a2793);**14 域 2/4**
 - [x] 14-c1-compiler/03——✅ 完结(正文 6ba2903 含回填 ⚠️ 10 组/README 9d2f7ed/第 4 轮 428f011);**14 域 3/4**
 - [x] 14-c1-compiler/04——✅ 完结(正文 9693e17 含回填 ⚠️ 10 组/README 811f3ed);**14 域完结,第 6 批 1/8**
-- [x] 15-c2-compiler/01——✅ 完结(正文 58e4a25 含回填 ⚠️ 9 组/README 1992d9f);**15 域 1/8,第 6 批 2/8**
+- [x] 15-c2-compiler/01——✅ 完结(正文 58e4a25 含回填 ⚠️ 3 块 13 条/README 1992d9f);**15 域 1/8,第 6 批 2/8**
 - [ ] **15-c2-compiler/02**(Parse + GraphKit: 字节码→Ideal Graph)——**下一篇**;大纲 `planning/outlines/15-c2-compiler/02-c2-parse-graphkit.md`;15-c2-compiler/01 悬念已指向 15-c2-compiler/02
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
@@ -854,7 +855,7 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/15-c2-compiler/02-*.md(注意 ⚠️ 块——01 篇已回填 9 组,02 篇大概率同样漂移;15-c2/02 重点: parse1.cpp/parse2.cpp/parse3.cpp 逐字节码构建、GraphKit(graphKit.cpp/hpp 的 node factory: control/memory/i_o state、set_control/merge/exception 边)、inline 决策(do_call/do_invoke、CallGenerator、InlineTree)、SafePointNode/JVMState 的构建期语义;与 01 篇衔接: Node/Type/IGVN 已铺底,02 讲图的出生;与 14-c1 衔接: 同样的 ci 镜像(12 域)、CompileBroker 入口(13 域))
+1. 读 planning/outlines/15-c2-compiler/02-*.md(注意 ⚠️ 块——01 篇已回填 3 块 13 条,02 篇大概率同样漂移;15-c2/02 重点: parse1.cpp/parse2.cpp/parse3.cpp 逐字节码构建、GraphKit(graphKit.cpp/hpp 的 node factory: control/memory/i_o state、set_control/merge/exception 边)、inline 决策(do_call/do_invoke、CallGenerator、InlineTree)、SafePointNode/JVMState 的构建期语义;与 01 篇衔接: Node/Type/IGVN 已铺底,02 讲图的出生;与 14-c1 衔接: 同样的 ci 镜像(12 域)、CompileBroker 入口(13 域))
 2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律与 6.61-6.65 的 compiler 域经验——C2 与 C1 同属 compiler 层,行号漂移规律一致;01 篇已证: 大纲行号多为规划期估算,机制编造高发在"Ideal 返回约定/meet 语义/文件存在性")
 3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证;PrintCompilation 是 product(-Xlog:jit+compilation 等价);**PrintIdeal/PrintIdealGraph 是 notproduct(release 拒启,实证已录);PrintOptoAssembly 是 diagnostic 但实现 NOT_PRODUCT(release 静默);PrintInlining 是 diagnostic 可用**;PrintAssembly 无 hsdis 只有 nmethod header,且 hsdis 无法编译(无 binutils 头文件),保持无 hsdis 实证方案;jcmd 现在可用(listener 已触发,socket 在 /tmp/.java_pid<pid>)
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件;15-c2 域 opto 文件已在 HS_MAP)→ 深审 2 轮(用户会追加第 3/4 轮,重点抓跨段遗留/隐含断言)→ 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x

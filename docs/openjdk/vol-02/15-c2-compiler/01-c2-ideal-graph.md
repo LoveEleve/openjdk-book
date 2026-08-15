@@ -97,7 +97,7 @@ Parse 每遇到一条字节码就建节点并**立即交给 GVN 化简**(parse2.
 
 图有了,还要给每个节点一个"运行期可能取值"的抽象。C2 用**类型格**(Type lattice): 越靠近格顶越"宽泛未知",越靠近格底越"精确",最底 `Type::BOTTOM` 是空集(不可能)。格顶 `Type::TOP` 是"未知"(type.hpp:78-118 的枚举,`:412-421` 的静态成员)。
 
-`int y = (x > 0) ? x : 0` 在图中是一个 `PhiNode`(cfgnode.hpp:120)合并两路: 真分支的 x 类型 `TypeInt[1, max_jint]`,假分支的常量 0 类型 `TypeInt[0,0]`。`PhiNode::Value` 把各路输入用 `meet()` 逐路合并(cfgnode.cpp:918-1009),起点 `Type::TOP`:
+`int y = (x > 0) ? x : 0` 在图中是一个 `PhiNode`(cfgnode.hpp:120)合并两路: 真分支的 x 类型 `TypeInt[1, max_jint]`,假分支的常量 0 类型 `TypeInt[0,0]`。`PhiNode::Value` 把各路输入用 `meet_speculative` 逐路合并(cfgnode.cpp:918-1009),起点 `Type::TOP`:
 
 ```cpp
 // type.cpp:1455-1490(截取核心,逐字)
@@ -137,7 +137,7 @@ const TypePtr::PTR TypePtr::ptr_meet[TypePtr::lastPTR][TypePtr::lastPTR] = {
 
 ## 3. IGVN — 迭代到不动点的优化引擎
 
-**`x + 0` 和 `x * 1` 到底在哪一步被消掉?** 大纲把这一幕放在 IGVN 里,但源码比这更早——**Parse 建节点时**,单遍的 `PhaseGVN::transform_no_reclaim`(phaseX.cpp:864-924,和 IGVN 的 `transform_old` 同款流程,只是没有 worklist、不做级联)就已经在化简: `AddNode::Identity` 检查加法单位元,`phase->type(in(2))->higher_equal(zero)` 命中就返回 `in(1)`(addnode.cpp:56-61,类注释 "We look for "add of zero" as an identity" 在 addnode.hpp:52-54);`MulNode::Identity` 同理消 `x*1`(mulnode.cpp:52-61)。所以图中根本不会出现 `AddI(x, 0)` 节点。IGVN 的真正价值不是"第一轮折叠",而是 **worklist 迭代到不动点 + 全局值编号 + 结构性图改写**(`can_reshape=true`)。
+**`x + 0` 和 `x * 1` 到底在哪一步被消掉?** 大纲把这一幕放在 IGVN 里,但源码比这更早——**Parse 建节点时**,单遍的 `PhaseGVN::transform_no_reclaim`(phaseX.cpp:864-924,和 IGVN 的 `transform_old` 同款流程,只是没有 worklist、不做级联)就已经在化简: `AddNode::Identity` 对称检查两个输入,任一侧类型是加法单位元就返回另一侧(类注释 "We look for "add of zero" as an identity" 在 addnode.hpp:52-54;实现 addnode.cpp:56-61);`MulNode::Identity` 同理消 `x*1`(mulnode.cpp:52-61)。所以图中根本不会出现 `AddI(x, 0)` 节点。IGVN 的真正价值不是"第一轮折叠",而是 **worklist 迭代到不动点 + 全局值编号 + 结构性图改写**(`can_reshape=true`)。
 
 单节点 transform 的完整流程在 `transform_old`(phaseX.cpp:1283-1402),五步:
 
@@ -238,11 +238,11 @@ void PhaseIterGVN::optimize() {
 }
 ```
 
-工作清单初值不是空的: Parse 期每建一个"值得再看一眼"的节点就 `record_for_igvn` 登记进 `Compile::_for_igvn`(compile.cpp:757 "Node list that Iterative GVN will start with"),`PhaseIterGVN` 构造时把整张清单抄进 `_worklist`(phaseX.cpp:992-993)——所以 Parse 一结束,优化立刻从"刚才建过的一切"开跑。两个守卫是工程细节也是设计声明: 节点总量超 `NodeLimitFudgeFactor` 就放弃编译(c2_globals.hpp:471);循环次数超过 **`K * live_nodes()`**(`K = 1024`,globalDefinitions.hpp:255)判定"无限循环"放弃——**IGVN 承诺终止,靠的是这两道闸**。
+工作清单初值不是空的: Parse 期每建一个"值得再看一眼"的节点就 `record_for_igvn` 登记进 `Compile::_for_igvn`(compile.cpp:757 "Node list that Iterative GVN will start with"),`PhaseIterGVN` 构造时把整张清单抄进 `_worklist`(phaseX.cpp:992-993)。时序上 Parse 末尾先跑 `PhaseRemoveUseless` 清掉解析产生的死节点(compile.cpp:841-844,注释 "Remove clutter produced by parsing"),`Optimize()` 的第一个动作才是 IGVN 全图迭代。两个守卫是工程细节也是设计声明: 活节点数接近上限时放弃编译(`check_node_count`,compile.hpp:907-914——optimize 里带 `NodeLimitFudgeFactor * 2` 的余量,c2_globals.hpp:471);循环次数超过 **`K * live_nodes()`**(`K = 1024`,globalDefinitions.hpp:255)判定"无限循环"放弃——**IGVN 承诺终止,靠的是这两道闸**。
 
 IGVN 在 C2 管线里不止跑一次。`Compile::Optimize`(compile.cpp:2220)中: Parse 后第一次全图迭代(compile.cpp:2247-2254 "Iterative Global Value Numbering, including ideal transforms"),逃逸分析/宏消除后各一次(:2321/:2332),CCP 之后收尾一次(:2388-2391),range-check cast 与 opaque4 移除后再各补一次(:2424/:2454)。阶段名留在 phasetype.hpp:28-63(`PHASE_ITER_GVN1`/`PHASE_ITER_GVN2`)——这就是 IGVN 的"心脏"地位: 每次结构变换之后都要把它重跑一遍。
 
-**实证边界**: 理想图本身在 release 构建里**不可见**——`PrintIdeal`/`PrintIdealGraph` 都是 notproduct(c2_globals.hpp:101/:371),release 直接拒绝启动([实证](planning/outlines/00-jvm-tools/materials/commands/15-c2-ideal-graph-demo.txt)第 3/4 段: "VM option 'PrintIdeal' is notproduct and is available only in debug version of VM");`PrintOptoAssembly` 虽是 diagnostic 标志,但**从标志处理到汇编打印整个包在 `#ifndef PRODUCT` 里**(compile.cpp:718-733;output.cpp:1554 起的 dump 段),release 静默无输出(实证第 5 段)。能观察的是编译事件与阶段计时: `-Xlog:jit+compilation=debug` 显示每个方法的 C2 编译(实证第 1 段: `idn`/`phi` 编译到 level 4,`cfold`(常量方法,2 字节)编到 level 1 就够,旧的 level 2 nmethod 全部 `made not entrant`);`-XX:+CITime` 打印完整阶段树——Parse / Optimize(GVN 1 / IGVN / Cond Const Prop / GVN 2)/ Matcher / Scheduler / Regalloc(实证第 6 段)。折叠行为也有一个间接实证: `bigsum()` 里 50 个 `1+1+…` 在 **javac 编译期**就已折叠成 `bipush 50`(字节码 3 字节,实证第 7 段 "bigsum (3 bytes)")——常量折叠从 javac 到 C2 层层都在做。
+**实证边界**: 理想图本身在 release 构建里**不可见**——`PrintIdeal`/`PrintIdealGraph` 都是 notproduct(c2_globals.hpp:101/:371),release 直接拒绝启动([实证](planning/outlines/00-jvm-tools/materials/commands/15-c2-ideal-graph-demo.txt)第 3/4 段: "VM option 'PrintIdeal' is notproduct and is available only in debug version of VM");`PrintOptoAssembly` 虽是 diagnostic 标志,但**从标志处理到汇编打印整个包在 `#ifndef PRODUCT` 里**(compile.cpp:718-733;output.cpp:1554 起的 dump 段),release 静默无输出(实证第 5 段)。能观察的是编译事件与阶段计时: `-Xlog:jit+compilation=debug` 显示每个方法的**编译事件**(实证第 1 段: `idn`/`phi` 最终编译到 level 4,`cfold`(常量方法,2 字节)编到 level 1 为止,旧的 level 2 nmethod 全部 `made not entrant`);`-XX:+CITime` 打印完整阶段树——Parse / Optimize(GVN 1 / IGVN / Cond Const Prop / GVN 2)/ Matcher / Scheduler / Regalloc(实证第 6 段)。折叠行为也有一个间接实证: `bigsum()` 里 50 个 `1+1+…` 在 **javac 编译期**就已折叠成 `bipush 50`(字节码 3 字节,实证第 7 段 "bigsum (3 bytes)")——常量折叠从 javac 到 C2 层层都在做。
 
 *关键设计: IGVN 是"懒计算的定点迭代"——只处理 worklist 上的节点,一个节点的类型变窄只把它的**消费者**入队,而不是全图重扫。这比 C1 的"固定趟数"深一个数量级: C1 是规定次数的规范化,C2 是迭代到"再改也不会有新变化"。代价是终止性要靠 K 守卫,而任何新的 `Ideal()` 改写都必须守 node.cpp 的返回值铁律,否则破坏 worklist 一致性。*
 
