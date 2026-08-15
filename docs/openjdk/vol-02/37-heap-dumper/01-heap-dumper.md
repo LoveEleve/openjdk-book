@@ -39,13 +39,13 @@
 
 文件头(注释从 `hprof_io.c` 复制,heapDumper.cpp:52-130): `"JAVA PROFILE 1.0.2\0"`(19 字节)+ `u4 id size` + `u8 时间戳(ms)`——[实证](planning/outlines/00-jvm-tools/materials/commands/37-heap-dumper-demo.txt)里 `id_size=8`(64 位)、时间戳与运行时刻吻合。**顶层记录**: `u1 tag + u4 time + u4 len + body`;**堆数据在 HEAP_DUMP_SEGMENT(0x1C)记录里**,1.0.2 格式允许把堆 dump 拆成多个段,以 HEAP_DUMP_END(0x2C)收尾(:307-342)。
 
-段由 `DumpWriter::start_sub_record` 管理(heapDumper.cpp:575-603): 第一个 sub-record 前写 `1C + u4(0) + u4(len)` 的段头,len **动态回填**("Will be fixed up later if we add more sub-records");sub-record 放不下(超过 1MB 缓冲区)时 `finish_dump_segment` 结束当前段、开新段。**段内 sub-record 头也是 9 字节(u1 tag + u4 time + u4 len)**,body 长度由类型决定。
+段由 `DumpWriter::start_sub_record` 管理(heapDumper.cpp:575-603): 段的第一个 sub-record 前写 `1C + u4(0) + u4(len)` 的 9 字节段头(HEAP_DUMP_SEGMENT 顶层记录头),len **动态回填**("Will be fixed up later if we add more sub-records");sub-record 放不下(超过 1MB 缓冲区)时 `finish_dump_segment` 结束当前段、开新段。**段内 sub-record 只有 `u1 tag` + body**(:602 的 `write_u1(tag)` 是 sub-record 的全部头部——没有 time/len 字段,长度由记录类型决定),9 字节头只属于段记录本身。
 
 sub-record 种类与 JDK11 的实现形态(注意与标准 hprof spec 的差异): **CLASS_DUMP(0x20)** = `id class + u4 STACK_TRACE_ID + id×6(super/loader/signers/protection_domain/reserved×2) + u4 instance size + 常量池/static/instance 字段描述符`(dump_class_and_array_classes :994-1033)——**没有标准 spec 里的 u4 class serial**;`STACK_TRACE_ID` 是常量 1(:373),不是真实栈轨迹;static 字段值按类型宽度写入,instance 字段只写描述符(id name + u1 type)。**INSTANCE_DUMP(0x21)** = `id object + u4 STACK_TRACE_ID + id class + u4 size + 字段值`(dump_instance :969-987)——标准 spec 里没有 object id 与 stack trace id 这两个字段;实例字段值按类字段布局写入(实例大小由 `instance_size` 算,:827)。**OBJ_ARRAY_DUMP(0x22)** = `id + u4 stid + u4 len + id 元素类 + 元素 id 数组`(:1145-1159);**PRIM_ARRAY_DUMP(0x23)** = `id + u4 stid + u4 len + u1 元素类型 + 原始字节`(:1179-1193)。还有 `GC_ROOT_*` 家族(0x01-0x08 与 0xFF): JNI_GLOBAL/JNI_LOCAL/JAVA_FRAME/NATIVE_STACK/STICKY_CLASS/THREAD_BLOCK/MONITOR_USED/THREAD_OBJ/UNKNOWN(:357-364)。
 
 ## 3. 对象 ID 的真相: 地址即 ID
 
-hprof 里所有"引用"都是 **id 字段**——而 JDK11 的 id **就是对象地址**(write_objectID,heapDumper.cpp:526-533,`write_u8((u8)a)`);class id 用 **java mirror 的地址**(write_classID :553-555,注释 "We use java mirror as the class ID");符号 id 用 Symbol 指针(:535-542)。[实证](planning/outlines/00-jvm-tools/materials/commands/37-heap-dumper-demo.txt)里解析出的 INSTANCE_DUMP 的 class id 字段 `ff 53 b6 30...` 正是堆内地址形态。*关键设计: 地址作 id 让引用解析变成零成本指针,但 dump 文件不跨进程稳定*——**这也意味着转储必须在 safepoint 里做**: 遍历过程中对象不允许移动(GC 压缩),地址才是有效的。
+hprof 里所有"引用"都是 **id 字段**——而 JDK11 的 id **就是对象地址**(write_objectID,heapDumper.cpp:526-533,`write_u8((u8)a)`);class id 用 **java mirror 的地址**(write_classID :553-555,注释 "We use java mirror as the class ID");符号 id 用 Symbol 指针(:535-542)。[实证](planning/outlines/00-jvm-tools/materials/commands/37-heap-dumper-demo.txt)里解析出的 CLASS_DUMP 的 class id 字段 `ff 53 b6 30...` 正是堆内地址形态。*关键设计: 地址作 id 让引用解析变成零成本指针,但 dump 文件不跨进程稳定*——**这也意味着转储必须在 safepoint 里做**: 遍历过程中对象不允许移动(GC 压缩),地址才是有效的。
 
 ## 4. 实证对照: 结构与 live 语义
 
