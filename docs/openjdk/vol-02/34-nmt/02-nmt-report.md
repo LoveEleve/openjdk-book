@@ -61,7 +61,7 @@ void MemSummaryReporter::report() {
 
 **Total = malloc 总量 + 虚拟内存 reserved/committed**(`MallocMemorySnapshot::total` 含 arena 与 tracking header,mallocTracker.cpp:35-42);然后**逐 20 类输出**(mtThreadStack 被跳过——它并入 Thread 类)。[实证](planning/outlines/00-jvm-tools/materials/commands/34-nmt-tracking-demo.txt) 的输出与这段代码逐行对应: "Total: reserved=18058807559, committed=1165695239";"Java Heap (reserved=..., committed=...)" 来自 `print_total`;每一类的子行由 `report_summary_of_type`(:121-190)按数据存在性决定: malloc 行 `(malloc=343389 #3287)`(print_malloc_line :70-74),虚拟内存行 `(mmap: reserved=.., committed=..)`(:76-80),arena 行 `(arena=19632 #34)`(:82-86),NMT 类再追加 `(tracking overhead=263488)`(:177-180)。
 
-`report_summary_of_type` 里有两个**跨类别汇总**(:127-137): mtThread 类要把 mtThreadStack 的 reserved/committed 加进来("Count thread's native stack in Thread category"),mtNMT 类要把 tracking overhead(所有 MallocHeader 的累计)加进来;mtClass 类额外输出类计数(instance/array,:146-151)与 Metadata 详情(report_metadata :192-217,来自 MetaspaceUtils——10 域 Metaspace 的 used/free/waste 在这里上报告)。**不足一个显示单位的类别不输出**(`amount_in_current_scale(reserved_amount) > 0`,:139)——所以报告里 20 类不一定全出现。
+`report_summary_of_type` 里有两个**跨类别汇总**(:127-137): mtThread 类要把 mtThreadStack 的 reserved/committed 加进来("Count thread's native stack in Thread category"),mtNMT 类要把 tracking overhead(所有 MallocHeader 的累计)加进来;mtClass 类额外输出类计数(instance/array,:146-151)与 Metadata 详情(report_metadata :192-217,来自 MetaspaceUtils——10 域 Metaspace 的 used/free/waste 在这里上报告)。**不足一个显示单位的类别不输出**(`amount_in_current_scale(reserved_amount) > 0`,:139)——所以报告里 20 类不一定全出现:[实证](planning/outlines/00-jvm-tools/materials/commands/34-nmt-tracking-demo.txt) 的退出报告恰好 **18 类**(mtThreadStack 并入 Thread、mtTest 全程无分配)。
 
 ## 3. detail 报告: summary + 虚拟内存地图 + 逐调用点
 
