@@ -85,12 +85,13 @@ void PhaseCCP::analyze() {
 
 **NoEscape = 可标量替换**("It could be replaced with scalar",注释原话)——这是三个级别里唯一能消除堆分配的;ArgEscape 只是"作为参数传出去且调用内不逃逸",**对象还在堆上**——大纲说"ArgEscape → field loads 转 register"在源码里不存在,ArgEscape 能带来的是锁消除、指针比较优化这类次级收益。
 
-`compute_escape`(escape.cpp:118-343)不是大纲说的"从每个 AllocateNode DFS/BFS",而是**四步图算法**:
+`compute_escape`(escape.cpp:118-343)不是大纲说的"从每个 AllocateNode DFS/BFS",而是**五步图算法**:
 
 - **①建图**: `add_node_to_connection_graph` 遍历**所有**理想节点(:148-197 的 worklist 循环),按节点类型建 PointsTo 节点并连边(`LocalVar →P> JavaObject`、`Field →P> JavaObject`、`JavaObject →F> Field`,escape.hpp:100-107),延迟边随后用 `add_final_edges` 消解(:202-206)。
 - **②传播**: `complete_connection_graph`(:233-238)沿边传播逃逸状态——**GlobalEscape 节点指向的一切标 GlobalEscape,ArgEscape 同理**(escape.hpp:107-112 注释原文)。
 - **③调整**: 对 NoEscape 对象 `adjust_scalar_replaceable_state`(:256-257)——**逃逸不逃逸 ≠ 可标量替换**: 被数组拷贝、被安全点调试信息引用、类型不精确等原因会让对象"不逃逸但不可拆",状态逐级下调(:1757)。
-- **④内存图分离**: 对可标量替换的分配 `split_unique_types`(:319-341,实现 :3058)——把分配对象的内存从公共 MergeMem 里**拆出独占别名域**(要求 `C->AliasLevel() >= 3 && EliminateAllocations`,:321),这样后续 IGVN 才能对该对象做精确的 load/store 优化。
+- **④图级优化**: `optimize_ideal_graph`(:296-299)三件事——`EliminateLocks` 时把不逃逸对象的锁标记为 `non_esc_obj`(:1983-1997,后续宏展开据此做锁消除);`OptimizePtrCompare` 时优化对象指针比较(同一不逃逸对象 → EQ,分配 vs 不可能指向它 → NEQ,:2030-2059);把指向不逃逸分配的 `MemBarStoreStore` 降级成 `MemBarCPUOrder`(注释 "optimize out MemBarStoreStore node if the allocated object never escapes",:2032-2044)。
+- **⑤内存图分离**: 对可标量替换的分配 `split_unique_types`(:319-341,实现 :3058)——把分配对象的内存从公共 MergeMem 里**拆出独占别名域**(要求 `C->AliasLevel() >= 3 && EliminateAllocations`,:321),这样后续 IGVN 才能对该对象做精确的 load/store 优化。
 
 **最后一刀在 PhaseMacroExpand**: EA 只是"证明",消除分配发生在 `eliminate_macro_nodes`(macro.cpp:2567)——先做锁消除(`eliminate_locking_node`,:2593-2595),再对 `Allocate`/`AllocateArray` 调 `eliminate_allocate_node`(:2610-2613)。后者有**四道门**: `EliminateAllocations` 开关、JVMTI pop frame 不可用、`_is_non_escaping`(EA 打的标记)、`can_eliminate_allocation` 检查安全点引用(macro.cpp:1091-1116);通过后 `scalar_replacement`(:759,在 :1128 调用)把分配拆成字段级定义,随后 `process_users_of_allocation`(:946)处理字段访问——**Store 被直接删除**(值留在 def-use 图里,store 的 memory 边直通,`replace_node(n, n->in(MemNode::Memory))`,:959-961),**Load 经由 IGVN 的类型传播解析为字段的唯一定义值**,GC 屏障一并消除(eliminate_gc_barrier)——堆分配、屏障、内存加载一起消失。Compile::Optimize 里的编排(compile.cpp:2307-2337): `ConnectionGraph::do_analysis(this, &igvn)`(:2316)→ `igvn.optimize()`(:2321)→ `PhaseMacroExpand::eliminate_macro_nodes`(:2328-2333)。循环优化之后还有一次 `expand_macro_nodes`(:2432-2440)——把**剩余**的宏节点(真正的分配/锁/数组拷贝)展开成机器级节点,那是"必须发生的分配"。
 
