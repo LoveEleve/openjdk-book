@@ -14,7 +14,7 @@ JDK9+ 的 attach 是 **attach-on-demand**: `init_at_startup()`(attachListener_li
 
 叫醒动作由客户端发起(jdk.attach 的 Linux 实现,`VirtualMachineImpl.java`): ①`findSocketFile` 找不到 socket → ②`createAttachFile` 在**目标进程的 cwd**(`/proc/<pid>/cwd/`)或 `/tmp` 写一个 `.attach_pid<pid>` 空文件(:76,:282-302)→ ③`sendQuitTo(pid)` 发 **SIGQUIT**(:78,:120-126)→ ④轮询等待 socket 文件出现,超时 `attachTimeout`(默认 10000ms,HotSpotVirtualMachine.java:367)→ ⑤删掉 `.attach_pid` 文件。
 
-服务端这边,SIGQUIT 的处理在 **Signal Dispatcher** 线程的 `signal_thread_entry`(os.cpp:341-382)——**同一个信号有两个含义**:
+服务端这边,SIGQUIT 的处理在 **Signal Dispatcher** 线程的 `signal_thread_entry`(os.cpp:341-389)——**同一个信号有两个含义**:
 
 ```cpp
 // os.cpp:353-389(截取核心,逐字)
@@ -70,7 +70,7 @@ JDK9+ 的 attach 是 **attach-on-demand**: `init_at_startup()`(attachListener_li
     }
 ```
 
-`pd_init()` 建 socket(§3);成功后状态转 AL_INITIALIZED,进入 **dequeue → 分派 → complete 的循环**。分派按操作名查函数表(funcs[],:324-336)——**10 个内置操作**: `agentProperties`/`datadump`/`dumpheap`/`load`/`properties`/`threaddump`/`inspectheap`/`setflag`/`printflag`/`jcmd`;两个特例: `detachall`(所有客户端断开时,`pd_detachall` 清理)与 **`load` 受 `EnableDynamicAgentLoading` 门控**(:371-374,JDK11u 默认 true,globals.hpp:2470;后续 JDK 版本该默认值已收紧)。没查到的操作名走平台钩子 `pd_find_operation`(Linux 返回 NULL)或报 "Operation %s not recognized!"。
+`pd_init()` 建 socket(§3);成功后状态转 AL_INITIALIZED,进入 **dequeue → 分派 → complete 的循环**。分派按操作名查函数表(funcs[],:324-336)——**10 个内置操作**: `agentProperties`/`datadump`/`dumpheap`/`load`/`properties`/`threaddump`/`inspectheap`/`setflag`/`printflag`/`jcmd`;两个特例: `detachall`(类注释 "Performs clean-up tasks on platforms where we can detect that the last client has detached",:477-482;Linux 的 `pd_detachall` 是空实现,:580-582)与 **`load` 受 `EnableDynamicAgentLoading` 门控**(:371-374,JDK11u 默认 true,globals.hpp:2470;后续 JDK 版本该默认值已收紧)。没查到的操作名走平台钩子 `pd_find_operation`(Linux 返回 NULL)或报 "Operation %s not recognized!"。
 
 **与 34-nmt 域接上的关键点**: `jcmd` 操作(attachListener.cpp:200-212)把**所有命令参数当成 arg(0) 一个字符串**,调 `DCmd::parse_and_execute(DCmd_Source_AttachAPI, out, op->arg(0), ' ', THREAD)`——"VM.native_memory summary" 整串由 **DCmd 框架**按空格解析。所以 attach 通道是 DCmd 的入口之一(34-nmt/02 里 NMTDCmd 注册的三源 AttachAPI/MBean/Internal 的 **AttachAPI 就是这条通道**)。操作完成后 `op->complete(res, &st)`(Linux 实现见 §3)把结果码和输出流写回客户端。
 
@@ -84,7 +84,7 @@ dequeue(accept 循环,:346-383)在 accept 之后做**第二道安全校验**: `g
 
 ## 4. 约束与"按需"的边界
 
-几个开关决定整个机制是否可用: **`-XX:-DisableAttachMechanism`**(globals.hpp:2464,默认允许)把 attach 全部关闭(信号处理、启动逻辑、`is_attach_supported` 全部短路);`-XX:+StartAttachListener` 让 listener 启动时就在(常用于容器场景,避免 attach 依赖 cwd 可写);`ReduceSignalUsage` 则同时影响信号与懒启动。`check_socket_file`(:494-516)处理一种异常: **socket 文件被外部删除**(比如工具误删或 /tmp 被清)→ 下次信号来时重启 listener。`abort()` 在 VM 崩溃路径清理 socket。
+几个开关决定整个机制是否可用: **`-XX:-DisableAttachMechanism`**(globals.hpp:2464,默认允许)把 attach 全部关闭(信号处理、启动逻辑、`is_attach_supported` 全部短路);`-XX:+StartAttachListener` 让 listener 启动时就在(thread.cpp:3941);`ReduceSignalUsage` 则同时影响信号与懒启动。`check_socket_file`(:494-516)处理一种异常: **socket 文件被外部删除**(比如工具误删或 /tmp 被清)→ 下次信号来时重启 listener。`abort()` 在 VM 崩溃路径清理 socket。
 
 *关键设计: 整套机制零常驻开销,但依赖 cwd 或 /tmp 可写*——[实证](planning/outlines/00-jvm-tools/materials/commands/36-attach-trigger-demo.txt)里有一个环境陷阱: 本容器**常驻 JMC 与 VisualVM**,它们通过 hsperfdata 自动发现新 JVM 并自动 attach(实测新 JVM 启动约 1.6 秒即被触发)——表现为"没发信号 attach 也发生了",也解释了本机 /tmp 堆积的大量 `.java_pid*` 残留。而 34-nmt 会话里 `jcmd` attach 报 "Unable to open socket file /proc/<pid>/root/tmp/.java_pid<pid> ... doesn't respond within 10500ms"(attachTimeout 默认 10000ms + 递增轮询)曾让人误判"容器不支持 attach"——**触发链本身是可用的**(本篇实证),那次失败更可能是目标进程早已退出(NMTDemo 3 秒即结束)或 jcmd 对 /proc/<pid>/root 的路径解析问题。线程转储里可看到成果: `"Attach Listener" #23 daemon prio=9 ... runnable`(阻塞在 accept)与 `"Signal Dispatcher" #4 daemon ... waiting on condition` 并存。
 
