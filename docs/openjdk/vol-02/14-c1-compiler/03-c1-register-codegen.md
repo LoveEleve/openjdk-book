@@ -20,7 +20,7 @@ HIR/LIR 里的操作数是**虚拟寄存器**(无数量限制);机器只有 16 �
 
 01 篇说过 `emit_lir()` 里 `LIRGenerator` 按线性扫描序把 HIR 指令转成 **LIR_Op 序列**(`Add(x,y)` → `LIR_Op2(lir_add, x, y, result)`;x86 特化在 `c1_LIRGenerator_x86.cpp`)。分配完成后的 LIR 由 **LIR_Assembler** 发码: `emit_code`(c1_LIRAssembler.cpp:214)遍历块 → `emit_block` → `emit_lir_list`(:268)逐 op 调 `emit_op0/1/2`(:598/:504/:695,x86 实现在 c1_LIRAssembler_x86.cpp,`lir_add` 按操作数形态选 `addl reg,reg`/`addl mem,reg` 等)。
 
-**LIR 层的真正优化在 LinearScan 尾部**(c1_LinearScan.cpp:3152-3155): `EdgeMoveOptimizer::optimize`(块边的冗余 move 消除,实现 :5861/:5949/:6014)+ `ControlFlowOptimizer`。**大纲的 "peephole: 相邻 move 消除" 是编造**——`LIR_Assembler::peephole` 在 x86 上是**空实现**(c1_LIRAssembler_x86.cpp:3994,`void LIR_Assembler::peephole(LIR_List*) {}`,注释 "In particular sparc uses this for delay slot filling")。
+**LIR 层的真正优化在 LinearScan 尾部**(c1_LinearScan.cpp:3152-3155): `EdgeMoveOptimizer::optimize`(块边的冗余 move 消除,实现 :5861/:5949/:6014)+ `ControlFlowOptimizer`。**大纲的 "peephole: 相邻 move 消除" 是编造**——`LIR_Assembler::peephole` 在 x86 上是**空实现**(c1_LIRAssembler_x86.cpp:3994,函数体只有 `// do nothing for now`;声明处的注释 c1_LIRAssembler.hpp:160-161 说明它是给 sparc 的 delay slot 填充留的钩子)。
 
 ## 3. x87 与实证边界
 
