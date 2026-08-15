@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-15 | 卷 2 写作中: **105/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 32 篇(11/12/13/18/20/27/30/32/34/36/37/39/46 **十三域全部完结,第 5 批收官!**,**本会话 22 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1)**),下一篇 14-c1-compiler/01(第 6 批开篇) | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-15 | 卷 2 写作中: **106/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 1) | 第 1-5 批**全部完结**(第 5 批 13/13 收官);第 6 批(JIT/GC)开篇,**本会话 23 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(1)**,下一篇 14-c1-compiler/02 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3/4 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 14-c1-compiler/01(C1 管线 + HIR,大纲 `planning/outlines/14-c1-compiler/01-c1-pipeline-ir.md`;**第 6 批(JIT/GC)开篇域**,批次顺序 46 → 14 → 15 → ...)。
+**下一步(唯一,无选择)**: 14-c1-compiler/02(C1 优化: Canonicalizer + ValueMap + Optimizer,大纲 `planning/outlines/14-c1-compiler/02-c1-optimizations.md`;14 域四篇,01 已完结)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,96 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -50,7 +50,7 @@
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 105 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 106 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -89,8 +89,9 @@
 | **37-heap-dumper** | 1-2 | `37-heap-dumper/01-heap-dumper.md`(77)+`02-compression-triggers.md`(59) | ✅ **37 域完结(本会话)** |
 | **39-runtime-monitoring** | 1-2 | `39-runtime-monitoring/01-service-thread.md`(73)+`02-timer-stats.md`(66) | ✅ **39 域完结(本会话)** |
 | **46-sa-postmortem** | 1 | `46-sa-postmortem/01-sa-postmortem.md`(61) | ✅ **46 域完结(本会话),第 5 批收官** |
+| **14-c1-compiler** | 1-4 | `14-c1-compiler/01-c1-pipeline-ir.md`(88) | ✅ 01 完结(本会话),**14 域 1/4** |
 
-### 本会话 22 篇的 commit 清单(按 git log 为准,2026-08-14/15)
+### 本会话 23 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(372 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true)
 
@@ -202,7 +203,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 20 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 21 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -218,6 +219,7 @@
 - `32-jfr-jni-instrumentation-demo.txt`(转换器/JNI 表/DCmd 链核对)
 - `37-heap-dumper-gzip-oome-demo.txt`(gzip 流式压缩实证: 自 attach+executeJCmd GC.heap_dump -gz=1,文件头 1f8b 0810+FCOMMENT+"HPROF BLOCKSIZE=1048576" 注释,1318476 vs 15430735=12x,python gzip 解压还原 JAVA PROFILE 头;OOM 自动 dump: -Xmx64m+HeapDumpOnOutOfMemoryError→java_pid<pid>.hprof 34MB,顺序=OOM 消息→dump→异常;GC.heap_dump filename 是位置参数)
 - `37-heap-dumper-demo.txt`(hprof 文件逐字节解析: 19 字节头 "JAVA PROFILE 1.0.2\0"+u4 id_size=8+u8 时间戳;顶层记录 UTF8 49109/LOAD_CLASS 2211/FRAME 30/TRACE 8/SEGMENT 16/END;段内 INSTANCE 104269/PRIM_ARRAY 34837/OBJ_ARRAY 23378/CLASS_DUMP 2021/STICKY 1601/JNI_GLOBAL 64/THREAD_OBJ 7;live 对照 6.0MB/4 段/INSTANCE 37782(-64%);JDK11 变体验证: CLASS_DUMP 无 serial(64 字节头)/INSTANCE 含 object id+stid;触发=HotSpotDiagnostic.dumpHeap 需 jmxremote 加载 libmanagement)
+- `14-c1-pipeline-demo.txt`(PrintCompilation 实证: "230 b 3 C1Demo::sum (23 bytes)"/231 % OSR/made not entrant;-Xlog:jit+compilation 等价;PrintIR/PrintLIR notproduct 说明;管线三大步源码定位)
 - `46-sa-postmortem-demo.txt`(jhsdb 双模式实证: --pid 活进程 ptrace attach 成功(G1 23 threads/Heap Configuration/regions 7630);--core 离线解析 gcore 19GB core;jstack 解 Interpreted frame;attach 失败教训=目标进程已退出;SA 源码定位)
 - `39-runtime-monitoring-timer-demo.txt`(jstat -class Loaded 1841/Bytes 3798.0 直接读 PerfCounter 无需 attach;gc+phases 四阶段毫秒(GCTraceTimeImpl);jcmd GC.run 触发 GC 成功——jcmd attach 容器可用修正;计时器家族定位)
 - `36-attach-loadagent-demo.txt`(自 attach+loadAgentPath 加载自定义 JVMTI agent 全链路: Agent_OnAttach 收到 options='hello-attach'/返回 -1→AgentInitializationException rc=-1/properties 与 ManagementAgent.start_local 走 attach 通道/退出 Agent_OnUnload;需 -Djdk.attach.allowAttachSelf=true)
@@ -674,6 +676,16 @@
 - **实证方法论**: **jhsdb 双模式实证**(活进程 ptrace + gcore 19GB core 离线)——容器 gcore 可用(core_pattern=core);**attach 失败排查**: 目标进程退出→/proc/<pid>/exe 消失→"cannot open binary file"(NMTDemo 3 秒退出教训,用 SleepDemo);jstack 解 Interpreted frame 证明 ptrace 读栈
 - 实证: 46-sa-postmortem-demo.txt
 
+### 6.61 14-c1-compiler/01(C1 管线 + HIR,第 6 批开篇,大纲 9 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-15)
+- **"c1_Compiler::compile_method 6 步管线" 错(重要)**: 入口 Compiler::compile_method(c1_Compiler.cpp:246)**只构造 Compilation 对象**;管线在 c1_Compilation.cpp: compile_method(:429)→compile_java_method(:370)=**三大步**——build_hir(:141-258: GraphBuilder→optimize_blocks(UseC1Optimizations :179)→split_critical_edges→compute_code→GVN→RangeCheckElimination(非 OSR)→eliminate_null_checks→compute_use_counts)/emit_lir(:252-278: LIRGenerator :256+LinearScan do_linear_scan :270-276)/emit_code_body+install_code(:410 register_method)
+- **"Canonicalizer 独立 step" 错(重要)**: 在 **GraphBuilder::append_with_bci 内联即时调用**(c1_GraphBuilder.cpp:2299-2306);独立优化=optimize_blocks/GVN/RangeCheckElimination
+- **"iload→创建 LoadLocal" 错**: load_local(:935-940)=**push(state()->local_at(index)) 直接取 Value**,零成本;Local 是占位(:697)
+- **"BlockBegin 类头" 半对**: LEAF(BlockBegin, StateSplit)(c1_Instruction.hpp:1601),SSA 字段 _successors/_predecessors/_end(:1619-1625);类层次用 **LEAF/BRANCH 宏**(Phi :641/Local :697/Constant :724/ArithmeticOp :1060/Invoke :1243/NewInstance :1292/Goto :1859/If :1970/Return :2149/Throw :2171/Base :2190);Value=Instruction*(:117)
+- **行号漂移**: c1_GraphBuilder.cpp **4428 行**(大纲 200-1000);c1_Instruction.hpp 2632
+- **缺机制(重要)**: ①BlockListBuilder 预扫描(make_block_at :152+);②append_with_bci 的 LVN(vmap :2308-2319)+InstructionCountCutoff bailout(:2328)+StateSplit 状态拷贝/异常边(:2336-2351);③**Phi=ValueStack::setup_phi_for_stack/local**(c1_ValueStack.cpp:178-191,块合并,栈槽负索引);④If/Goto/Return/Throw 创建(:1227/:1208/:1599/:2275);⑤invoke(:1841);⑥bailout 家族
+- **实证方法论**: **PrintIR/PrintLIR/PrintCFG 是 notproduct**(release 无);用 **PrintCompilation**(product)与 -Xlog:jit+compilation 看编译事件(compile_id/层级/OSR %/made not entrant);HIR 图只能源码推演
+- 实证: 14-c1-pipeline-demo.txt
+
 ---
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
@@ -713,7 +725,8 @@
 - [x] 39-runtime-monitoring/01——✅ 完结(正文 f70b0c5 含回填 ⚠️ 9 组/README de26701/第 4 轮 32fe697);**39 域 1/2**
 - [x] 39-runtime-monitoring/02——✅ 完结(正文 6cfef46 含回填 ⚠️ 10 组/README d7dff18/第 4 轮 16a954e);**39 域完结,第 5 批 12/13**
 - [x] 46-sa-postmortem/01——✅ 完结(正文 e8526bc 含回填 ⚠️ 9 组/README eff5880);**46 域完结,第 5 批 13/13 收官**
-- [ ] **14-c1-compiler/01**(C1 管线 + HIR: 字节码→编译图)——**下一篇,第 6 批开篇**;大纲 `planning/outlines/14-c1-compiler/01-c1-pipeline-ir.md`;46-sa-postmortem/01 悬念已指向 14-c1-compiler/01
+- [x] 14-c1-compiler/01——✅ 完结(正文 0bbb913 含回填 ⚠️ 9 组/README 35d344e);**14 域 1/4,第 6 批开篇**
+- [ ] **14-c1-compiler/02**(C1 优化: Canonicalizer + ValueMap + Optimizer)——**下一篇**;大纲 `planning/outlines/14-c1-compiler/02-c1-optimizations.md`;14-c1-compiler/01 悬念已指向 02
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
