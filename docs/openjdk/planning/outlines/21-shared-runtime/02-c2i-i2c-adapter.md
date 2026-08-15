@@ -4,6 +4,13 @@
 > 读者处境: 编译代码调用了一个还未编译的方法→需要从编译栈帧切到解释器栈帧。寄存器里存着编译代码的参数——但解释器期望参数在局部变量表中。谁做这个翻译？
 
 ### 1. "编译和解释的两种世界" — 调用约定差异
+> ⚠️ 写作期修正(2026-08-15, vol-02/21-shared-runtime/02 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"generate_c2i_adapter/generate_i2c_adapter (sharedRuntime_x86_64.cpp:500-1200)" 函数名错(重要)**: 真实 **gen_c2i_adapter(:585)/gen_i2c_adapter(:733)**,入口 **generate_i2c2i_adapters(:943)**一次生成三个入口(i2c_entry :949/c2i_unverified_entry :962/c2i_entry :986)+AdapterHandlerLibrary::new_entry(fingerprint,:991);同签名方法共享 adapter(指纹)
+> - **"push rbp; mov rbp,rsp 建新帧" 错(重要)**: adapter **frameless**——注释 :748-763 "An i2c adapter is frameless because the caller frame, which is interpreted, routinely repairs its own stack pointer...This is why c2i and i2c adapters cannot be indefinitely composed";栈修复职责归解释器(sender_sp/interpreter_frame_last_sp);VerifyAdapterCalls(:768-793 "i2c adapter must return to an interpreter frame")防组合
+> - **"c2i adapter 需要 OopMap" 编造(重要)**: OopMap 只在 save_live_registers(:157,桩)与 native wrapper(:1159);adapter 纯汇编 repack 无 GC 点
+> - **"c2i 200 instructions/i2c 40" 无据**: 删
+> - **漏(重要)**: c2i_unverified_entry 的 **holder 检查**(load_klass+cmpptr holder_klass+IC miss 兜底 :970-975)+**编译检查**(Method::code_offset 非空→IC miss,注释 "Method might have been compiled since the call site was patched to interpreted" :978-983)——IC 语义的汇编落地点(21-01/16-04 衔接);patch_callers_callsite(:596 注释 "Check for a compiled target...patch the caller's call")
+
 
 场景: 编译代码跑在 x86_64 上——参数在 rdi/rsi/rdx/rcx/r8/r9 中。解释器期望参数在局部变量表的 slot 0..N 上(栈底)。需要 adapter 做翻译。
 
@@ -36,6 +43,13 @@ OopMap 标注这些位置(寄存器/栈偏移)→GC 知道哪些 slot 存了 oop
 - [x86: OopMap 是编译时生成的 bitmask——每个 slot 1 bit(oop vs non-oop)。GC worker 遍历栈帧→对每个 slot: check OopMap bit→1→mark oop。adapter 的 OopMap 很小——只有 receiver+method 两个 oop root]
 
 ### 2. "改朝换代——栈帧怎么切？" — Frame Layout
+> ⚠️ 写作期修正(2026-08-15, vol-02/21-shared-runtime/02 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **帧切换细节(修正大纲)**:
+>   - c2i(gen_c2i_adapter :585): 输入=**栈上的编译布局**(:603 注释 "Since all args are passed on the stack")→patch_callers_callsite(:596)→pop rax 返回地址→mov r13,rsp 设 senderSP(:619)→subptr extraspace(total_args*stackElementSize+wordSize,:606-614)→**栈内重排成解释器布局**(:955-958 注释 "unpacked into the interpreter layout")→尾部 movptr rcx, Method::interpreter_entry_offset()+jmp(:716-717);rbx 一路持有 Method*(:954 注释)
+>   - i2c(gen_i2c_adapter :733): r13=senderSP(:739 注释)→保存 SP→**andptr rsp,-16 对齐**(:816)→movptr r11, Method::from_compiled_offset()(:828,**from_compiled_entry=15-c2/02 篇 from_interpreted_entry 的姊妹字段**,method.hpp:697/:709)→按 VMRegPair 搬参数→跳编译入口
+> - **"RSP 减小对 GC 安全" 无据**: 删
+> - **参数映射**: x86_64 前 6 整型参数 c_rarg0-5(rdi-r9,:1011-1013)/浮点 8 XMM(:1014-1017)/超出走栈(2 VMReg 槽 :1040-1041);64-bit interpreter slot=8 字节(abstractInterpreter.hpp:236),long/double 占 1 槽;"32-bit long 2 slots"无 x86_32 源码验证本篇不展开
+
 
 场景: 编译代码调解释器——当前 RSP 在编译帧的底部。解释器帧需要在当前帧上面建(new frame with lower RSP)。
 
@@ -63,6 +77,11 @@ c2i adapter:
 - 关键设计: i2c 不建新帧——直接在解释器帧底部压参数→jmp。因为解释器帧已经在编译代码上方(RSP 小于编译帧)且解释器帧不需要被 GC 扫描调用端——编译代码用自己的 OopMap
 
 ### 3. "reg 参数怎么对应 local？" — 参数寄存器映射
+> ⚠️ 写作期修正(2026-08-15, vol-02/21-shared-runtime/02 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"reg 参数怎么对应 local" 场景简化**: c2i 输入是栈布局非寄存器(见 §2 修正);i2c 才是"解释器槽→寄存器"
+> - **"locals()[i].set_int/set_long"** 是解释器 slot 访问 API,方向对;核心是 VMRegPair 布局转换(c_calling_convention :994)
+> - **实证边界**: adapter 是手写汇编,release 无直接观察(VerifyAdapterCalls develop);机制以源码注释为准(frameless 注释即设计文档)
+
 
 场景: `foo(int a, long b, Object c)` —— x86_64 前 6 参数在寄存器。c2i adapter 要把它们 copy 到解释器的 local slots。
 
