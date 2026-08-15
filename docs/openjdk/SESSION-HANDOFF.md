@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-15 | 卷 2 写作中: **109/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 4) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 26 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结)**,下一篇 15-c2-compiler/01 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-15 | 卷 2 写作中: **110/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 5) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 27 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(1)** ,下一篇 15-c2-compiler/02 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3/4 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 15-c2-compiler/01(C2 Ideal Graph: Node + Type + IGVN,大纲 `planning/outlines/15-c2-compiler/01-c2-ideal-graph.md`;14 域四篇已完结)。
+**下一步(唯一,无选择)**: 15-c2-compiler/02(Parse + GraphKit: 字节码→Ideal Graph,大纲 `planning/outlines/15-c2-compiler/02-c2-parse-graphkit.md`;15 域 01 篇已完结,悬念已指向 02)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,96 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -46,11 +46,11 @@
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
-第 6 批(JIT/GC): 14 ✅ → 15 → 21 → 25 → 28 → 29 → 33 → 43
+第 6 批(JIT/GC): 14 ✅ → **15 ✅(1/8)** → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 109 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 110 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -90,6 +90,7 @@
 | **39-runtime-monitoring** | 1-2 | `39-runtime-monitoring/01-service-thread.md`(73)+`02-timer-stats.md`(66) | ✅ **39 域完结(本会话)** |
 | **46-sa-postmortem** | 1 | `46-sa-postmortem/01-sa-postmortem.md`(61) | ✅ **46 域完结(本会话),第 5 批收官** |
 | **14-c1-compiler** | 1-4 | `14-c1-compiler/01-c1-pipeline-ir.md`(88)+`02-c1-optimizations.md`(56)+`03-c1-register-codegen.md`(45)+`04-c1-runtime-frame.md`(61) | ✅ **14 域完结(本会话)** |
+| **15-c2-compiler** | 1 | `15-c2-compiler/01-c2-ideal-graph.md`(253) | ✅ **15 域 1/8(本会话)** |
 
 ### 本会话 26 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
@@ -144,6 +145,8 @@
 **14-c1-compiler/03(LinearScan + LIR → x86 码,14 域 3/4)**: 正文 6ba2903(45 行,含大纲回填 ⚠️ 10 组)→ README 9d2f7ed(108/152)→ 素材 14-c1-register-codegen-demo.txt→ 深审 2 轮(①Interval=Range 链表非单一 [start,end];②spill 选 _use_pos 最晚(非"end 最远");③x86 peephole 空实现——LIR 优化=EdgeMoveOptimizer+ControlFlowOptimizer;④LinearScan 6800 行(大纲 400-800 低估);⑤do_linear_scan 全流程/activate_current 双路径)→ **第 4 轮** 428f011(peephole 引用错位修正: 注释在 hpp:160-161,空实现 x86.cpp:3994 只有 "// do nothing for now";TraceLinearScanLevel=develop 验证)
 
 **14-c1-compiler/04(Runtime1 + FrameMap,14 域收官)**: 正文 9693e17(61 行,含大纲回填 ⚠️ 10 组)→ README 811f3ed(109/152,14 域完结,第 6 批 1/8)→ 素材 14-c1-runtime-frame-demo.txt→ 深审 2 轮(①Runtime1=JRT_ENTRY 家族逃生口(Klass* 非 ciKlass/set_vm_result TLS 返回/慢路径语义 TLAB 快速路径内联);②monitorenter→SharedRuntime 助手;③OopMap 在 LinearScan 构建(大纲"FrameMap 构建"错);④patch_code 懒链接;⑤StubID=RUNTIME1_STUBS 宏/generate_blob stub 进 CodeCache)→ 第 3/4 轮(复核无新问题)
+
+**15-c2-compiler/01(C2 Ideal Graph: Node + Type + IGVN,15 域开篇)**: 正文 58e4a25(253 行,含大纲回填 ⚠️ 9 组)→ README 1992d9f(110/152,15 域 1/8,第 6 批 2/8)→ 素材 15-c2-ideal-graph-demo.txt→ 深审 2 轮(①**Ideal() 返回约定**: NULL=无变化(默认),改图必须返回新根(可 this),**禁止返回旧节点**(走 Identity)——大纲"返回 this(NOP)"错;②**AddNode `Node(0,in1,in2)` 的 0 是 NULL 控制槽**(addnode.hpp:44)——in(0) 存在但恒 NULL(控制无关可浮动,loopopts.cpp:1379),非"无 in(0) 槽";③**`igvn.cpp` 不存在**——hash_find_insert 在 phaseX.cpp:143;④**transform 五步非三环**: Ideal 循环→Value→singleton 常量→Identity→hash_find_insert,大纲漏 GVN 步;⑤**x+0/x*1 折叠发生在 Parse 期**单遍 PhaseGVN::transform_no_reclaim(phaseX.cpp:864-924+addnode.cpp:56-61),IGVN 价值=worklist 迭代+级联+全局 CSE+can_reshape;⑥**ptr_meet 表 Null∩NotNull=BotPTR**(type.cpp:2460-2468)——矛盾即死路径,大纲"放弃 nullness 变 Ptr"错;名字 **NOTNULL**(type.hpp:919);⑦xmeet 虚分派(非 meet_helper);⑧hash-cons 类型唯一不可变;⑨K=1024 死循环守卫(globalDefinitions.hpp:255);⑩**实证边界**: PrintIdeal/PrintIdealGraph notproduct 拒启、**PrintOptoAssembly diagnostic 但实现 NOT_PRODUCT**(compile.cpp:718-733/output.cpp:1554)release 静默、CITime 阶段树(GVN1/IGVN/GVN2)、javac 层折叠(bigsum 50 常量→bipush 50,3 字节);⑪IGVN 在 Optimize 中 6 处运行(compile.cpp:2247-2254/:2321/:2332/:2388-2391/:2424/:2454))→ 第 3 轮无新增
 
 ---
 
@@ -225,7 +228,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 24 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 25 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -245,6 +248,7 @@
 - `14-c1-register-codegen-demo.txt`(LinearScan 机制定位: do_linear_scan 全流程/Interval=Range 链表/alloc_locked_reg 选 use_pos 最晚/x86 peephole 空实现+EdgeMoveOptimizer/LIR_Assembler emit 链)
 - `14-c1-optimizations-demo.txt`(C1 优化 flag 类型盘点: RangeCheckElimination=product 可关,UseC1Optimizations 等 develop 不可关;PrintAssembly 无 hsdis 只输出 nmethod header(C1 main code 352>C2 224);机制源码定位)
 - `14-c1-pipeline-demo.txt`(PrintCompilation 实证: "230 b 3 C1Demo::sum (23 bytes)"/231 % OSR/made not entrant;-Xlog:jit+compilation 等价;PrintIR/PrintLIR notproduct 说明;管线三大步源码定位)
+- `15-c2-ideal-graph-demo.txt`(C2 编译事件: IGVNDemo idn/phi 编到 level 4、cfold 常量方法 level 1、旧 nmethod made not entrant;PrintInlining 内联树 diagnostic 可用;PrintIdeal/PrintIdealGraph notproduct 拒启错误信息原文;PrintOptoAssembly 接受但 release 静默;CITime 阶段树 Parse/Optimize(GVN1/IGVN/Cond Const Prop/GVN2)/Matcher/Scheduler/Regalloc;bigsum 50 常量 javac 折叠成 bipush 50→3 字节)
 - `46-sa-postmortem-demo.txt`(jhsdb 双模式实证: --pid 活进程 ptrace attach 成功(G1 23 threads/Heap Configuration/regions 7630);--core 离线解析 gcore 19GB core;jstack 解 Interpreted frame;attach 失败教训=目标进程已退出;SA 源码定位)
 - `39-runtime-monitoring-timer-demo.txt`(jstat -class Loaded 1841/Bytes 3798.0 直接读 PerfCounter 无需 attach;gc+phases 四阶段毫秒(GCTraceTimeImpl);jcmd GC.run 触发 GC 成功——jcmd attach 容器可用修正;计时器家族定位)
 - `36-attach-loadagent-demo.txt`(自 attach+loadAgentPath 加载自定义 JVMTI agent 全链路: Agent_OnAttach 收到 options='hello-attach'/返回 -1→AgentInitializationException rc=-1/properties 与 ManagementAgent.start_local 走 attach 通道/退出 Agent_OnUnload;需 -Djdk.attach.allowAttachSelf=true)
@@ -257,7 +261,7 @@
 
 ---
 
-## 六、本会话实战经验(最重要,新 AI 必读;6.1-6.51 旧会话沉淀,6.52-6.64 本会话 13 篇新沉淀)
+## 六、本会话实战经验(最重要,新 AI 必读;6.1-6.51 旧会话沉淀,6.52-6.65 本会话 14 篇新沉淀)
 
 ### 6.1 大纲漂移的规律(96 篇全部出现,2-15 处/篇;前会话沉淀 02/03/04/45/48/06/16/38/41/42/07/09/17/10/19/23/24/08/31/44/11/12/13/18 域,本会话沉淀 20/27/30/32 域)
 **任何机制描述/行号/值/专有名词,一律当"线索"而非"事实"**。高频漂移类型:
@@ -296,6 +300,7 @@
 - **本会话关键源码位置补(39 域)**: serviceThread.cpp(service_thread_entry :84-143 5 条件检测 :105-109/enqueue_deferred_event :145-153/oops_do 保活 :155-179/initialize NearMaxPriority :74)/gcNotifier.cpp(pushNotification→addRequest notify :45-64/sendNotification 清异常 :165-172)/stringTable.cpp(trigger_concurrent_work :226-230/check_concurrent_work :520-535/concurrent_work :539-549)/memoryManager.cpp(gc_end pushNotification :295)/lowMemoryDetector.cpp(has_pending_requests :41-51)/timer.hpp(elapsedTimer :32-50/TimeStamp :53-73/TraceCPUTime :75-90)/timerTrace.hpp(TraceTime 独立文件 :46+,日志框架输出 TRACETIME_LOG :57-59)/os_linux.cpp(elapsed_counter :1435-1437=CLOCK_MONOTONIC javaTimeNanos :1555-1569,dlsym :1489-1491)/runtimeService.hpp(PerfCounter+TimeStamp :34-51)/threadService.hpp(原子计数 :53-101)
 - **本会话关键源码位置补(46 域)**: jdk.hotspot.agent/linux/native/libsaproc/(ps_core.c add_map_info 链表 prepend :124-134/core_lookup 二分 :153-175/sort_map_array qsort :382-421/core_read_data pread :431-465/class_share_maps 兜底 :189-200;ps_proc.c process_read_data 8 字节三段式 :66-116/ptrace_attach :275-292/Pgrab :450;symtab.c build_symtab_internal :329+ 默认 DYNSYM 优先 SYMTAB/hcreate_r 哈希 :416-432/search_symbol :569-587/debuglink :261/build-id :305;LinuxDebuggerLocal.c attach0 :251/verifyBitness :196-210;libproc_impl.c lookup_symbol 全局搜 :215-238)
 - **本会话关键源码位置补(14-c1 域)**: c1_Compiler.cpp(Compiler::compile_method 只构造 Compilation :246)/c1_Compilation.cpp(compile_method :429/compile_java_method :370-405/build_hir :141-258/emit_lir :252-278/install_code :410)/c1_GraphBuilder.cpp(4428 行: BlockListBuilder make_block_at :152+/append_with_bci :2299-2352(Canonicalizer 即时 :2300-2302+LVN :2308-2319+bailout :2328)/load_local :935-940 零成本/If :1227/Goto :1208/Return :1599/Throw :2275/invoke :1841)/c1_Instruction.hpp(LEAF/BRANCH 宏: Phi :641/Local :697/Constant :724/ArithmeticOp :1060/Invoke :1243/NewInstance :1292/BlockBegin :1601/Goto :1859/If :1970/Return :2149/Throw :2171/Base :2190/HASHING 宏 :243-271)/c1_ValueStack.cpp(setup_phi :178-191)/c1_Canonicalizer.cpp(do_Op2 三段 :77-180+/do_If :712+/imul 幂转移位 :960-977)/c1_ValueMap.cpp(find_insert :109-149 跨块 pin :130-136)/c1_Optimizer.cpp(eliminate_null_checks :1155/NullCheckEliminator :553)/c1_RangeCheckElimination.cpp(eliminate :46 has_access_indexed :47)/c1_LinearScan.cpp(6800 行: do_linear_scan :3100-3130/allocate_registers :1656-1690/activate_current :5792-5855/find_locked_reg use_pos 最晚 :5504-5524/split_for_spilling :5227/EdgeMoveOptimizer :5861)/c1_LinearScan.hpp(Interval=Range 链表 :455-470/:501+)/c1_LIRAssembler.cpp(emit_code :214/emit_lir_list :268/emit_op0/1/2 :598/:504/:695)/c1_Runtime1.cpp(JRT_ENTRY 家族: new_instance :346-359(Klass*+set_vm_result)/monitorenter :693-704→SharedRuntime 助手/monitorexit JRT_LEAF :706-716/patch_code :834/:1271/generate_blob :194)/c1_Runtime1.hpp(RUNTIME1_STUBS 宏 :40-65+)/c1_FrameMap.cpp(构造 :156/framesize :190-191)/c1_FrameMap_x86.cpp(initialize :160-206 rax=3/rbx=2/caller_save :203-206)/c1_LIRAssembler_x86.cpp(peephole 空实现 :3994)
+- **本会话关键源码位置补(15-c2 域)**: node.hpp(Node 类 :210,_in/_out :282-283,_cnt/_max :291/:293,arena new/delete NOP :231-240,Opcode :786,DEFINE_CLASS_QUERY :792-800,flags 枚举 :736-757,三个钩子 :977-986)/node.cpp(Ideal 默认+铁律注释 :1091-1146,Identity 默认 :1081-1083,Value 默认 :1087-1089,Node 构造 :320+,Init :294)/type.hpp(Type :74,TYPES 枚举 :78-118,TOP/BOTTOM :412-421,meet :224-226,xmeet :241,dual :236-238,TypeInt :537,TypePtr :813,NULL_PTR/NOTNULL :918-919,TypeFunc 槽 :1519-1525)/type.cpp(TypeInt::make hashcons :1429-1449/hashcons :707-745/xmeet "Expand covered set" :1487-1489/xdual 翻转 :1494-1497/ptr_meet 表 :2460-2468/ptr_dual :2572-2574/不同类 LCA :3977-3986/不同常量 NotNull :3963-3972)/phaseX.cpp(PhaseIterGVN ctor for_igvn :992-993/hash_find_insert :143-198/apply_ideal :838/apply_identity :846/transform_no_reclaim 单遍 :864-924/optimize 主循环 :1223-1251/transform_old 五步 :1283-1402/remove_globally_dead_node :1413/subsume_node :1527/add_users_to_worklist :1611-1620)/phaseX.hpp(NodeHash :53-117,insert_limit 75% :82-83,PhaseValues _table :375,PhaseIterGVN :451-583)/compile.cpp(Optimize :2220,IGVN 6 处 :2247-2254/:2321/:2332/:2388-2391/:2424/:2454,for_igvn 注释 :757,Parse 用 PhaseGVN :764,PrintIdeal dump :884-899,PrintOptoAssembly NOT_PRODUCT :718-733)/compile.hpp(node_arena :452/type_arena :481/record_for_igvn :1078)/addnode.hpp(AddNode Node(0,in1,in2) :44)/addnode.cpp(AddNode::Identity :56-61/hash 交换律 :50-52/Ideal 常数下沉 :111-203)/mulnode.cpp(MulNode::Identity :52-61)/cfgnode.cpp(PhiNode::Value :918-1009)/memnode.hpp(MemNode 槽枚举 :52-58)/opcodes.hpp(枚举由 classes.hpp 生成 :31-49)/parse1.cpp(build_start_state :813/ParmNode transform :831/merge_common Region :1659-1665/Phi ensure_phi :1744-1745/phi set_req :1756-1772)/parse2.cpp(iadd :2250-2253/do_ifnull :1448-1526)/parse3.cpp(do_get_xxx :144-210)/graphKit.cpp(make_load ctl+mem+adr :1514-1540)/connode.hpp(ConNode :37)/c2_globals.hpp(PrintIdeal notproduct :101/PrintOptoAssembly diagnostic :147/PrintInlining diagnostic :657/PrintIdealGraph notproduct :371-391/NodeLimitFudgeFactor :471)/globalDefinitions.hpp(K=1024 :255)/phasetype.hpp(阶段枚举 :28-63)/loopnode.hpp(sea of nodes :992)/domgraph.cpp(sea of nodes :386)/loopopts.cpp("no control edge can float" :1379)
 
 ### 6.5 实证方法论新增(本会话沉淀)
 - **JNI 系列**: 自写 JNI demo(gcc -shared -fPIC -I$JAVA_HOME/include);printf 要 fflush(stdout)(重定向全缓冲丢输出);GetObjectRefType 常量 1/2/3;jobject 参数是 local ref(传回 Java 再传回变 refType=1)
@@ -751,6 +756,19 @@
 - **实证方法论**: 慢路径计数 NOT_PRODUCT release 不可观察;-XX:-UseTLAB 间接对照;nmethod header 的 stub code/oops/metadata 段(PrintAssembly 无 hsdis)
 - 实证: 14-c1-runtime-frame-demo.txt
 
+### 6.65 15-c2-compiler/01(C2 Ideal Graph,15 域开篇,大纲 9 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-15)
+- **"Ideal() 返回 this(NOP=无优化)" 错(重要)**: 返回**NULL=无变化**(默认实现 node.cpp:1144-1146);**改了图必须返回新根**(原地改输入也返回 this);**禁止返回旧节点**(返回旧节点必须走 Identity,node.cpp:1100-1138 "treatise" 注释)——IGVN 对 Ideal 返回值继续循环理想化,对 Identity 返回值直接替换
+- **"AddNode 无 in(0)" 错**: `Node(0,in1,in2)` 第一个参数是 **NULL 控制槽**(addnode.hpp:44,3 个 required 槽: in(0)=NULL/in(1)=a/in(2)=b)——控制无关节点 in(0) 恒 NULL 可浮动(loopopts.cpp:1379 "has no control edge (can float about)"),控制敏感节点(Region/If/Load/Store)in(0) 放控制边;**MemNode 内存边是专属槽**(memnode.hpp:52-58 enum Control/Memory/Address/ValueIn)
+- **"igvn.cpp:100-200" 文件不存在**: JDK11 无 igvn.cpp;NodeHash::hash_find_insert 在 **phaseX.cpp:143-198**(req+Opcode+逐 in+cmp 全等才算命中)
+- **"transform 三环(Ideal→Value→Identity)" 不全(重要)**: 真实 **transform_old 五步**(phaseX.cpp:1283-1402): ①Ideal 循环(返回 NULL 停,每次把旧节点用户入队)②Value 重算类型(变窄→set_type+raise_bottom_type+用户入队)③**singleton→makecon 换常量**④apply_identity ⑤**hash_find_insert 全局 CSE**;大纲漏③⑤
+- **"IGVN 第一轮折叠 x+0/x*1" 错(重要)**: 折叠在 **Parse 期单遍 PhaseGVN::transform_no_reclaim 就发生**(phaseX.cpp:864-924 同款流程无 worklist;AddNode::Identity addnode.cpp:56-61/MulNode::Identity mulnode.cpp:52-61;parse2.cpp:2252 每字节码 _gvn.transform)——图中根本不会出现 AddI(x,0);IGVN 的价值=worklist 迭代到不动点+全局值编号+can_reshape 结构改写
+- **"TypePtr(NULL).meet(NotNull)→Ptr 放弃 nullness" 错(重要)**: ptr_meet 表(type.cpp:2460-2468)**Null∩NotNull=BotPTR(空集=矛盾)**——C2 用类型矛盾判死路径;名字是 **NOTNULL**(type.hpp:919)非 NotNull
+- **"子类覆写 meet_helper" 错**: 覆写的是 **xmeet**(type.hpp:241 虚函数);meet→meet_helper(type.cpp:848,处理 narrowoop/narrowklass+speculative)→xmeet 分派;同格指针 meet: 不同类退 NotNull+类 LCA(:3977-3986)、不同常量退 NotNull(:3963-3972)
+- **行号漂移**: type.hpp Type 类 :74(大纲 48-230 旧范围)、TOP/BOTTOM :412-421、TypeInt :537、TypePtr :813;node.hpp Node :210 ✓ 对
+- **缺机制(重要)**: ①节点内存=node_arena+**delete 是 NOP**(node.hpp:231-240);②`_cnt`=required 输入数/`_max`=数组长度(:291/:293);③身份=Opcode()(node.hpp:786,classes.hpp 宏表生成 opcodes.hpp:31-49)+class_id/_flags 位(node.hpp:736-760)+DEFINE_CLASS_QUERY 位掩码查询(:792-800);④TypeInt::make hash-cons(type.cpp:1429-1449+707-745)类型唯一不可变→比较=指针相等;TypeInt::xmeet "Expand covered set"(:1487-1489);xdual 翻转 hi/lo(:1494-1497);⑤PhiNode::Value 起点 TOP 逐路 meet(cfgnode.cpp:918-1009);⑥optimize 守卫: NodeLimitFudgeFactor(c2_globals.hpp:471)+**K=1024×live_nodes 死循环判定**(globalDefinitions.hpp:255,phaseX.cpp:1235);⑦worklist 初值=Parse 期 for_igvn(compile.cpp:757+phaseX.cpp:992-993);NodeHash 75% 扩容(phaseX.hpp:82-83);subsume_node 剪边重连(:1527);⑧**IGVN 在 Optimize 中 6 处运行**(compile.cpp:2247-2254 Parse 后/:2321 EA 后/:2332 宏消除后/:2388-2391 CCP 后/:2424 range-check cast 后/:2454 opaque4 后)
+- **实证方法论(重要)**: ①PrintIdeal/PrintIdealGraph **notproduct** release 拒启(报错原文 "is notproduct and is available only in debug version of VM");②**PrintOptoAssembly diagnostic 但标志处理与 dump 全在 #ifndef PRODUCT**(compile.cpp:718-733/output.cpp:1554-1558)——release 接受但静默,别被"diagnostic"骗了;③可用: -Xlog:jit+compilation=debug(product)编译事件(level/b 标志/OSR %/made not entrant)、-XX:+CITime 阶段树(product)、PrintInlining(diagnostic);④常量折叠 javac 层就做(50 个 1+1+… → bipush 50 3 字节,实证第 7 段)——演示 C2 折叠要防 javac 先折
+- 实证: 15-c2-ideal-graph-demo.txt
+
 ---
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
@@ -794,7 +812,8 @@
 - [x] 14-c1-compiler/02——✅ 完结(正文 d7c79df 含回填 ⚠️ 10 组/README b4e6586/第 4 轮 94a2793);**14 域 2/4**
 - [x] 14-c1-compiler/03——✅ 完结(正文 6ba2903 含回填 ⚠️ 10 组/README 9d2f7ed/第 4 轮 428f011);**14 域 3/4**
 - [x] 14-c1-compiler/04——✅ 完结(正文 9693e17 含回填 ⚠️ 10 组/README 811f3ed);**14 域完结,第 6 批 1/8**
-- [ ] **15-c2-compiler/01**(C2 Ideal Graph: Node + Type + IGVN)——**下一篇**;大纲 `planning/outlines/15-c2-compiler/01-c2-ideal-graph.md`;14-c1-compiler/04 悬念已指向 15-c2-compiler/01
+- [x] 15-c2-compiler/01——✅ 完结(正文 58e4a25 含回填 ⚠️ 9 组/README 1992d9f);**15 域 1/8,第 6 批 2/8**
+- [ ] **15-c2-compiler/02**(Parse + GraphKit: 字节码→Ideal Graph)——**下一篇**;大纲 `planning/outlines/15-c2-compiler/02-c2-parse-graphkit.md`;15-c2-compiler/01 悬念已指向 15-c2-compiler/02
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -814,6 +833,7 @@
 | 卷 2 进度 | `docs/openjdk/vol-02/README.md` |
 | 源码树(jdk11u) | `/data/workspace/jdk11u/src/hotspot/`(仅 x86+linux!) |
 | C1 编译器源码 | `/data/workspace/jdk11u/src/hotspot/share/c1/`(c1_Compilation/GraphBuilder/Instruction/Canonicalizer/ValueMap/Optimizer/LinearScan/LIRAssembler/Runtime1/FrameMap;x86 特化在 cpu/x86/) |
+| C2 编译器源码 | `/data/workspace/jdk11u/src/hotspot/share/opto/`(node/type/phaseX(IGVN+NodeHash)/compile/parse1-3/graphKit/cfgnode/memnode/addnode/opcodes/c2_globals 等,x86 特化在 cpu/x86/) |
 | JDK 侧源码 | `/data/workspace/jdk11u/src/java.base/`、`/data/workspace/jdk11u/src/jdk.jfr/` |
 | 工具素材 | `docs/openjdk/planning/outlines/00-jvm-tools/materials/`(commands/ 150+ 文件) |
 | **实证 JDK(首选,与源码同版本)** | **`/data/tmp/opencode/jdk11/bin`(Temurin OpenJDK 11.0.32)** |
@@ -834,11 +854,11 @@
 ## 十、下一步(读完立即做)
 
 ```
-1. 读 planning/outlines/15-c2-compiler/01-*.md(注意 ⚠️ 块——14-c1 域四篇各回填 9/10/10/10 组,15 域大概率同样漂移;15-c2 重点: share/opto/ 的 Node 体系(node.hpp/cpp,Node::_op/_in/_out,Type 体系 type.hpp/type.cpp)、IdealGraphVisualizer 输出、IGVN(PhaseIterGVN,phaseX.cpp 的 Optimize)、parse(Parse 字节码解析,parse1.cpp/parse2.cpp)、C2 的管线(Compile::Compile/Compile::Optimize/Optimization 阶段: IdealLoop/PhaseCCP/PhaseMacroExpand 等);与 14-c1 衔接: 同样的 ci 镜像(12 域)、CompileBroker 入口(13 域)、打印 flag PrintIdeal/PrintOptoAssembly 的类型(product vs develop——PrintIdeal 是 develop 需注意实证边界);悬 念指向 15-c2 的 02 篇(大纲 02-c2-* 具体见 outlines/)
-2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律与 6.61-6.64 的 14-c1 域经验——C2 与 C1 同属 compiler 层,行号漂移规律一致)
-3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证;PrintCompilation 是 product(-Xlog:jit+compilation 等价);PrintIdeal/PrintOptoAssembly 大概率 notproduct/develop(release 不可用,先验证 flag 类型再定实证方案);PrintAssembly 无 hsdis 只有 nmethod header;jcmd 现在可用(listener 已触发,socket 在 /tmp/.java_pid<pid>)
-4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件)→ 深审 2 轮(用户会追加第 3/4 轮,重点抓跨段遗留/隐含断言)→ 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
-5. 15-c2 后 → 21-shared-runtime → 25-gc → 28-jvmti → 29-mh → 33-jmx → 43-nio-net(第 6 批剩余 7 域)
+1. 读 planning/outlines/15-c2-compiler/02-*.md(注意 ⚠️ 块——01 篇已回填 9 组,02 篇大概率同样漂移;15-c2/02 重点: parse1.cpp/parse2.cpp/parse3.cpp 逐字节码构建、GraphKit(graphKit.cpp/hpp 的 node factory: control/memory/i_o state、set_control/merge/exception 边)、inline 决策(do_call/do_invoke、CallGenerator、InlineTree)、SafePointNode/JVMState 的构建期语义;与 01 篇衔接: Node/Type/IGVN 已铺底,02 讲图的出生;与 14-c1 衔接: 同样的 ci 镜像(12 域)、CompileBroker 入口(13 域))
+2. 验证大纲所有 file:line 与专有名词(按 §6.1 的规律与 6.61-6.65 的 compiler 域经验——C2 与 C1 同属 compiler 层,行号漂移规律一致;01 篇已证: 大纲行号多为规划期估算,机制编造高发在"Ideal 返回约定/meet 语义/文件存在性")
+3. 实证优先用 /data/tmp/opencode/jdk11(Temurin 11,与 jdk11u 同版本);素材引用前 grep materials/ 验证;PrintCompilation 是 product(-Xlog:jit+compilation 等价);**PrintIdeal/PrintIdealGraph 是 notproduct(release 拒启,实证已录);PrintOptoAssembly 是 diagnostic 但实现 NOT_PRODUCT(release 静默);PrintInlining 是 diagnostic 可用**;PrintAssembly 无 hsdis 只有 nmethod header,且 hsdis 无法编译(无 binutils 头文件),保持无 hsdis 实证方案;jcmd 现在可用(listener 已触发,socket 在 /tmp/.java_pid<pid>)
+4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/MAPPINGS/EXTERNAL;ART 变量改回当前文件;15-c2 域 opto 文件已在 HS_MAP)→ 深审 2 轮(用户会追加第 3/4 轮,重点抓跨段遗留/隐含断言)→ 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
+5. 15-c2 后 → 21-shared-runtime → 25-gc → 28-jvmti → 29-mh → 33-jmx → 43-nio-net(第 6 批剩余 6 域)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
