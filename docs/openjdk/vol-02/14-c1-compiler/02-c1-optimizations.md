@@ -6,7 +6,7 @@
 
 ## naive HIR 怎么变干净
 
-01 篇的 GraphBuilder 产出"naive HIR"——`a + 0 + b` 会先建 `Add(Add(a, 0), b)`。C1 用三样东西把它变干净: **Canonicalizer**(代数/常量简化)、**ValueMap**(值编号消除重复计算)、**Optimizer**(null/range check 消除)。这篇拆三层,并纠正大纲三个想象: Canonicalizer **不是多趟**而是 append 时单遍即时;"x/x→1" 不存在;getter 内联不是 Canonicalizer 的活。**C1 的 escape 分析也不是没有**——12-02 域的 bcEscapeAnalyzer 就是 C1 的(只是很浅)。
+01 篇的 GraphBuilder 产出"naive HIR"——若不做任何简化,`a + 0 + b` 的直觉形态是 `Add(Add(a, 0), b)`(实际 append 第一步就被化简,见 §1)。C1 用三样东西把它变干净: **Canonicalizer**(代数/常量简化)、**ValueMap**(值编号消除重复计算)、**Optimizer**(null/range check 消除)。这篇拆三层,并纠正大纲三个想象: Canonicalizer **不是多趟**而是 append 时单遍即时;"x/x→1" 不存在;getter 内联不是 Canonicalizer 的活。**C1 的 escape 分析也不是没有**——12-02 域的 bcEscapeAnalyzer 就是 C1 的(只是很浅)。
 
 ## 1. Canonicalizer: 单遍即时,不是多趟
 
@@ -20,9 +20,9 @@ Canonicalizer 的调用点就是 01 篇的 `append_with_bci`——构造它时**
   Value canonical() const                        { return _canonical; }
 ```
 
-**"多趟"是误解**: `a + 0 + 0` 的情形是 GraphBuilder 两次 append,每次都即时化简(`Add(a,0)→a` 后第二次 `Add(a,0)→a`),不存在"一遍遍历后再来一遍";"两趟保证收敛"是编造。简化规则集中在 `do_Op2`(c1_Canonicalizer.cpp:77-180+)的三段: **①操作数恒等**(x==y): `x-x→0`、`x&x→x`、`x|x→x`、`x^x→0`(:78-91);**②双常量折叠**: int/long 的 add/sub/mul/div/rem/and/or/xor 全部编译期算掉(除法除 0 保护,:93-156);**③单常量**(y==0): `x+0→x`、`x-0→x`、`x*0→0`、`x&0→0`、`x|0→x`(:160-180+)。`x*1` 不在消除列表里——**imul 常量 1/2/4/8 转成移位**(`:960-977`,返回 `log2_scale`,`x*1` 变成移位 0,真正消除发生在 LIR 阶段)。
+**"多趟"是误解**: `a + 0 + 0` 的情形是 GraphBuilder 两次 append,每次都即时化简(`Add(a,0)→a` 后第二次 `Add(a,0)→a`),不存在"一遍遍历后再来一遍";"两趟保证收敛"是编造。简化规则集中在 `do_Op2`(c1_Canonicalizer.cpp:77-180+)的三段: **①操作数恒等**(x==y): `x-x→0`、`x&x→x`、`x|x→x`、`x^x→0`(:78-91);**②双常量折叠**: int/long 的 add/sub/mul/div/rem/and/or/xor 全部编译期算掉(除法除 0 保护,:93-156);**③单常量**(y==0): `x+0→x`、`x-0→x`、`x*0→0`、`x&0→0`、`x|0→x`(:160-180+)。`x*1` 不在消除列表里——**imul 常量 1/2/4/8 转成移位**(`:960-977`,返回 `log2_scale`),`x*1` 对应移位 0 的恒等情形。
 
-**控制流简化在 `do_If`**(:712+): `If(a cond a)`→**直接替换成 Goto**(:719-737,`a==a` 恒真/`a<a` 恒假选择后继);`If(常量1 cond 常量2)`→编译期定真值→Goto(:739-749);`If((a cmp b) cond rc)`→按比较结果化简(:750+)。**方法内联的澄清**: Canonicalizer 里没有任何 getter/setter 内联——内联是 GraphBuilder/Compilation 层的活(12-02 域的内联器),大纲把它安在 Canonicalizer 头上是编造。
+**控制流简化在 `do_If`**(:712+): `If(a cond a)`→**直接替换成 Goto**(:719-737,`a==a` 恒真/`a<a` 恒假选择后继);`If(常量1 cond 常量2)`→编译期定真值→Goto(:739-749);`If((a cmp b) cond rc)`→按比较结果化简(:750+)。**方法内联的澄清**: Canonicalizer 里没有任何 getter/setter 内联——内联逻辑在 GraphBuilder 的方法调用处理里(do_method_call 的内联路径),大纲把它安在 Canonicalizer 头上是编造。
 
 ## 2. ValueMap: 值编号
 
@@ -34,7 +34,7 @@ Canonicalizer 的调用点就是 01 篇的 `append_with_bci`——构造它时**
 
 `Optimizer::eliminate_null_checks`(c1_Optimizer.cpp:1155-1161)跑 `NullCheckEliminator`(:553,ValueVisitor 遍历): 沿 def-use 传播"已验证非空"的集合,后续对同一对象的字段访问/null check 就省掉。`RangeCheckElimination::eliminate`(c1_RangeCheckElimination.cpp:46-52)是另一个文件:**只有方法里有 AccessIndexed 才做**(:47 `has_access_indexed`),内部 `RangeCheckEliminator` 用 predicate 传播数组边界信息。
 
-**flag 盘点决定实证手段**: `RangeCheckElimination` 是 **product**(globals.hpp:1369,release 可关),`CanonicalizeNodes`/`UseLoopInvariantCodeMotion` 是 product;而 **UseC1Optimizations/UseLocalValueNumbering/UseGlobalValueNumbering/EliminateNullChecks 全是 develop**(c1_globals.hpp:90/:105/:108/:146)——release 关不掉,优化趟次只能源码推演。[实证](planning/outlines/00-jvm-tools/materials/commands/14-c1-optimizations-demo.txt)里 PrintAssembly 因缺 hsdis 只输出 nmethod 布局(可见 C1 的 main code 352 字节 > C2 的 224——**未深度优化的代价**)。*关键设计: 大纲"C1 不做 escape analysis"是错的——C1 有浅层 escape 分析(bcEscapeAnalyzer,12-02 域),只是不做 loop unswitching/标量替换这类深度优化;profiling 数据留给 C2(13-02 域)*。
+**flag 盘点决定实证手段**: `RangeCheckElimination` 是 **product**(globals.hpp:1369,release 可关),`UseLoopInvariantCodeMotion` 也是 product;而 **CanonicalizeNodes/UseC1Optimizations/UseLocalValueNumbering/UseGlobalValueNumbering/EliminateNullChecks 全是 develop**(c1_globals.hpp:165/:90/:105/:108/:146)——release 关不掉,优化趟次只能源码推演。[实证](planning/outlines/00-jvm-tools/materials/commands/14-c1-optimizations-demo.txt)里 PrintAssembly 因缺 hsdis 只输出 nmethod 布局(可见 C1 的 main code 352 字节 > C2 的 224——**未深度优化的代价**)。*关键设计: 大纲"C1 不做 escape analysis"是错的——C1 有浅层 escape 分析(bcEscapeAnalyzer,12-02 域),只是不做 loop unswitching/标量替换这类深度优化;profiling 数据留给 C2(13-02 域)*。
 
 ## 核心悬念
 
