@@ -56,7 +56,7 @@ LRG 携带分配决策所需的度量(chaitin.hpp:50-67):
 - `score()` = `raw_score(_cost, _area)`(chaitin.cpp:99/:103,注释 "Bigger area lowers score, encourages spilling this live range. Bigger cost raise score, prevents spilling")——**cost/area 比值越小越先被 spill**;
 - `_copy_bias`: 希望与谁同色(来自 copy 的另一端)——**偏置着色**(`bias_color`,chaitin.hpp:689 "Helper function which implements biasing heuristic")让 copy 两端尽量同色,减少 spill code。大纲的 `_hint_color` 不存在。
 
-`Register_Allocate` 的后续编排(:373-570): `de_ssa`(:373,SSA 出局,插入"虚拟 copy"——与 C1 的 SSA→LIR 出局同构)→ `gather_lrg_masks` + `live.compute`(:386-387)→ 基指针存活区间延伸到 GC 点(:397)→ `build_ifg_virtual`(:409)→ **aggressive coalesce**(PhaseAggressiveCoalesce,coalesce.cpp:447,:425-426)→ `insert_copies`(:429)→ 重建 live + `build_ifg_physical`(:450,物理寄存器约束 + **寄存器压力计算**——int/float 两路 Pressure 统计每块峰值压力(`INTPRESSURE` x86_64=13 等,c2_globals_x86.hpp:51,非 16——含保留寄存器),超可用数就返回 `must_spill` 计数,:823-836)→ 若 `must_spill` 先预分裂(:462)。
+`Register_Allocate` 的后续编排(:373-570): `de_ssa`(:373,注释 "Come out of SSA world to the Named world"——Phi 的输入与输出要同寄存器,先以"虚拟 copy"占位,:366-372)→ `gather_lrg_masks` + `live.compute`(:386-387)→ 基指针存活区间延伸到 GC 点(:397)→ `build_ifg_virtual`(:409)→ **aggressive coalesce**(PhaseAggressiveCoalesce,coalesce.cpp:447,:425-426)→ `insert_copies`(:429)→ 重建 live + `build_ifg_physical`(:450,物理寄存器约束 + **寄存器压力计算**——int/float 两路 Pressure 统计每块峰值压力(`INTPRESSURE` x86_64=13 等,c2_globals_x86.hpp:51,非 16——含保留寄存器),超可用数就返回 `must_spill` 计数,:823-836)→ 若 `must_spill` 先预分裂(:462)。
 
 *关键设计: 干涉图是"同时存活"关系的一次性编码——逆向扫描天然得到每个定义点与存活集的干涉,无需显式区间;copy 不干涉 + 偏置着色是"图着色消除拷贝"的支点: 能合则合(消 copy),不能合则偏置同色(消 spill code)。*
 
