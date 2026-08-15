@@ -10,7 +10,7 @@
 
 ## 1. 计时器: 从 os::elapsed_counter 到 RAII
 
-一切的底是 **`os::elapsed_counter`**(os_linux.cpp:1435-1437)——**单调时钟**: `javaTimeNanos() - initial_time_count`(`initial_time_count` 是 JVM 启动时记录的计数器,os_linux.cpp:177);`javaTimeNanos`(:1555-1569)用 **`CLOCK_MONOTONIC` 的 clock_gettime**(:1558;`clock_gettime` 本身是 **dlsym 动态加载**的,:1489-1491——规避旧 glibc 的版本差异),不支持时 fallback `gettimeofday`。`elapsed_frequency` 是 `NANOSECS_PER_SEC`(:1439-1441,纳秒分辨率)。*关键设计: CLOCK_MONOTONIC 不受 NTP 同步与管理员改时间影响——GC 日志里的时间戳线性前进,即使 wall clock 被回拨*。
+一切的底是 **`os::elapsed_counter`**(os_linux.cpp:1435-1437)——**单调时钟**: `javaTimeNanos() - initial_time_count`(`initial_time_count` 是 JVM 启动时记录的计数器,声明 :177,启动时在 clock_init 后赋值 :5565);`javaTimeNanos`(:1555-1569)用 **`CLOCK_MONOTONIC` 的 clock_gettime**(:1558;`clock_gettime` 本身是 **dlsym 动态加载**的,:1489-1491——规避旧 glibc 的版本差异),不支持时 fallback `gettimeofday`。`elapsed_frequency` 是 `NANOSECS_PER_SEC`(:1439-1441,纳秒分辨率)。*关键设计: CLOCK_MONOTONIC 不受 NTP 同步与管理员改时间影响——GC 日志里的时间戳线性前进,即使 wall clock 被回拨*。
 
 **elapsedTimer**(timer.hpp:32-50,注意在 **share/runtime/** 不是大纲的 utilities/): `_counter`(累计)+`_start_counter`+`_active`;`start()` 记 `_start_counter = os::elapsed_counter()`,`stop()` 把差值累进 `_counter`——支持多次 start/stop 累加。`seconds()`/`milliseconds()` 由 `_counter` 换算。**TimeStamp**(timer.hpp:53-73)是"事件时刻"记录器(`update()` 记当前 elapsed,之后查 `seconds()`/`ticks_since_update()`)。
 
