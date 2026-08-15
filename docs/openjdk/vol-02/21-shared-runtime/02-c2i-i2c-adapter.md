@@ -1,7 +1,7 @@
 # 02. 从编译跳到解释——c2i/i2c Adapter
 
 > **前置依赖**:[21-shared-runtime/01 — 编译代码遇到问题——向谁求助?— Runtime Stubs](openjdk/vol-02/21-shared-runtime/01-runtime-stubs.md):IC miss 桩与调用点修补,adapter 的"未验证入口"从这里兜底;[15-c2-compiler/02 — Parse + GraphKit: 字节码→Ideal Graph](openjdk/vol-02/15-c2-compiler/02-c2-parse-graphkit.md):`from_interpreted_entry`(i2c/i2i)是这里的姊妹字段;[16-code-cache/04 — 重定位与内联缓存](openjdk/vol-02/16-code-cache/04-relocation-ic.md):c2i 未验证入口做的 holder 检查就是 IC 语义
-> → **后续**:[21-shared-runtime/03 — 编译代码里抛了异常: JVM 怎么找 handler?— 异常处理](openjdk/vol-02/21-shared-runtime/03-exception-handling.md)
+> → **后续**:[21-shared-runtime/03 — 编译代码里抛了异常——JVM 怎么找 handler?— 异常处理](openjdk/vol-02/21-shared-runtime/03-exception-handling.md)
 > 关联域: 24-frame(栈帧布局)、08-interpreter(解释器帧)、16-code-cache(调用点修补)
 
 ## 两种世界的接缝
@@ -98,4 +98,4 @@ x86_64(非 Windows)调用约定在 `c_calling_convention`(sharedRuntime_x86_64.c
 
 编译↔解释的接缝封好了: **三个入口一次生成**(i2c_entry/c2i_unverified_entry(holder 检查+编译检查+IC miss 兜底)/c2i_entry)、**frameless 设计**(栈修复归解释器,adapter 不能无限组合——VerifyAdapterCalls 把关)、**参数一次搬运**(6 整型寄存器+8 XMM+栈,repack 成解释器槽)。但接缝只解决了"怎么跳过去"——跳过去之后,解释器或编译代码**抛出异常**时,handler 怎么找?异常表怎么查?编译代码的异常还要把"逃逸"的栈帧处理好。下一篇: 异常处理。
 
-> → [21-shared-runtime/03 — 编译代码里抛了异常: JVM 怎么找 handler?— 异常处理](openjdk/vol-02/21-shared-runtime/03-exception-handling.md)
+> → [21-shared-runtime/03 — 编译代码里抛了异常——JVM 怎么找 handler?— 异常处理](openjdk/vol-02/21-shared-runtime/03-exception-handling.md)

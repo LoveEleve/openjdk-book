@@ -4,6 +4,15 @@
 > 读者处境: 编译代码执行 `a.length`——a 是 null→SIGSEGV。signal handler 发现这是个 compiled frame 中的隐式 NPE→需要决定: 抛 NPE 让 caller 处理，还是可以从这里恢复？
 
 ### 1. "这条指令抛了什么异常？" — Implicit Exceptions
+> ⚠️ 写作期修正(2026-08-15, vol-02/21-shared-runtime/03 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **enum ImplicitExceptionKind (sharedRuntime.hpp:188-192)** ✓ 行号对
+> - **"continuation_for_implicit_exception (sharedRuntime.cpp:1600-1750)" 行号错**: 真实 **:796-965**;`continuation_for_implicit_exception` 声明 sharedRuntime.hpp:201-203 ✓
+> - **"SIGSEGV handler 读 cr2 寄存器" 错**: Linux 用 `info->si_addr`(os_linux_x86.cpp:359);三路判据=SIGSEGV 栈区(yellow/reserved+_thread_in_Java)→SOE(:364-387)/SIGFPE FPE_INTDIV|FLTDIV(:447-454)→div0/SIGSEGV !needs_explicit_null_check(:482-486)→NPE
+> - **"查 nul_chk_table[pc] → 没有 → vm_abort" 半对**: 查表在 `nmethod::continuation_for_implicit_exception`(nmethod.cpp:1986-2012,ImplicitExceptionTable 偏移对表,exceptionHandlerTable.hpp:132-138);查不到返回 **NULL→走正常崩溃报告**(非直接 vm_abort);表填充=C2 MachNullCheck(output.cpp:1658-1663)+C1 DivByZeroStub/ImplicitNullCheckStub(c1_CodeStubs_x86.cpp:148/:452),存 nmethod nul_chk_table 段(nmethod.cpp:745-746)
+> - **STACK_OVERFLOW 编译路径不查表**: 直接 `StubRoutines::throw_StackOverflowError_entry`(:816-830);解释器路径返回 `Interpreter::throw_*_entry`(:807-812;入口生成 templateInterpreterGenerator.cpp:175-182,generate_exception_handler_common x86:142-173);**解释器显式检查也跳这些入口**(arraylength null_check templateTable_x86.cpp:4164-4168/ldiv testq :1416-1427)
+> - **"两阶段: 设 reserved zone 3 页=12KB" 错**: reserved 区默认 **1 页**(globals_x86.hpp:57-69 red1/yellow2/reserved1/shadow20);两阶段真实机制=@ReservedStackAccess 逃生窗——信号 handler 找到 annotated 帧→disable reserved zone 守卫+设 reserved_stack_activation(os_linux_x86.cpp:366-381)→方法入口 reserved_stack_check(macroAssembler_x86.cpp:1094-1108)在 **rsp ≥ activation(回到逃生窗之上)时** enable+跳 delayed SOE 桩;SOE 构造绕开 Java 栈(throw_StackOverflowError_common :768-785)
+> - **throw 桩统一骨架**: generate_throw_exception(stubGenerator_x86_64.cpp:5758-5832)→尾部 jump forward_exception_entry(:5830-5832,同文件 :494-550 调 exception_handler_for_return_address 寻路)
+> - **实证**: -Xlog:exceptions=info 可用;NPE "thrown [sharedRuntime.cpp, line 606]" + "thrown in C1 compiled method" + "continuing at PC"(c1_Runtime1.cpp:608-611);SOE 同一 oop 沿栈逐帧传播 24395 帧(素材 21-exception-handling-demo.txt)
 
 场景: 编译代码不显式做 null check——直接用 `mov rdi, [rsi+12]`(rsi=null→SIGSEGV)。signal handler 需要区分是"真正的 crash" 还是 "JVM 可以恢复的隐式异常"。
 
@@ -44,6 +53,14 @@ Phase 2: throw_StackOverflowError()
 - 关键设计: 两阶段因为帧 unwind 本身需要栈空间(调 exception handler→建异常对象→copy stack trace→print)——如果初始栈已经溢出→unwind 过程再次溢出。reserved zone 给了 unwind 足够空间
 
 ### 2. "handler 在哪？" — exception_handler 查找链
+> ⚠️ 写作期修正(2026-08-15, vol-02/21-shared-runtime/03 已按真实源码成文):
+> - **"raw_exception_handler_for_return_address (sharedRuntime.cpp:1400-1550)" 行号错**: 真实 **:454-515**;hpp:182-183 ✓。**功能描述错**: 它**不查异常表**——只按返回地址寻路(find_blob→is_deopt_pc→unpack_with_exception/exception_begin;returns_to_call_stub→catch_exception_entry;解释器→rethrow_exception_entry;查不到 ShouldNotReachHere,非"返回 NULL 交给 caller")
+> - **编译代码异常入口链(大纲漏)**: 方法异常入口 emit_exception_handler(x86.ad:1318-1333)→jump exception_blob(sharedRuntime_x86_64.cpp:3900-4002,rax=oop rdx=pc)→handle_exception_C(opto/runtime.cpp:1390-1423,无 JRT wrapper,出 VM 后复查 nmethod 是否刚被 deopt)→helper(:1269-1381)
+> - **查表三段(大纲"ExceptionCache→异常表"漏缓存)**: ①ExceptionCache 缓存(compiledMethod.cpp:137-150,16 槽/链,读不锁假阴性)②compute_compiled_exc_handler(:632-734)=ScopeDesc→Method::fast_exception_handler_bci_for(method.cpp:200-235 扫字节码四元组表+子类型检查)→ExceptionHandlerTable.entry_for(exceptionHandlerTable.cpp:110-120 按 catch_pco 子表+bci/scope_depth)③回填缓存(add_handler_for_exception_and_pc :152-166)
+> - **"栈展开: pop compiled frame 逐帧" 表述错**: 内联多层是**虚拟帧展开**——sd->sd->sender() 沿 ScopeDesc 链上溯(:688-695),非物理 pop;C1 无 handler 时返回 unwind_handler_begin(:714-718)
+> - **解释器接盘**: throw_exception_entry(templateInterpreterGenerator_x86.cpp:1519-1539)→InterpreterRuntime::exception_handler_for_exception(interpreterRuntime.cpp:470+)→handler 或 remove_activation_entry(注释 :1541-1543)
+> - **raw_exception_handler 调用点**: rethrow_C(opto/runtime.cpp:1447-1466)+vframeArray.cpp:268+forward_exception_entry(汇编侧)
+> - **悬念指向错(重要)**: "下一篇 域22 Deoptimization" 过期——deopt 重建已在 24-frame/03,写作顺序 21→**25-gc-framework/01**
 
 场景: compiled 代码中出了异常→需要找 handler。handler 可能在: (a) 同一 nmethod 的事处理表。(b) caller 的 nmethod。(c) interpreter frame。
 
@@ -70,6 +87,10 @@ compiled 帧中异常处理:
 - 关键设计: 栈展开的迭代——每一帧都独立处理。"一次性扫描所有帧"比"逐帧 pop"更安全但更慢——JVM 选逐帧因为异常路径本身就罕见
 
 ### 3. "打不过，找帮手" — monitor helpers + math support
+> ⚠️ 写作期修正(2026-08-15, vol-02/21-shared-runtime/03 已按真实源码成文):
+> - **monitor_enter_helper 声明 (sharedRuntime.hpp:340-341)** ✓;实现 **sharedRuntime.cpp:2035-2064**: 先 quick_enter(:2040,非 safepoint 同步中)→UseBiasedLocking 时 fast_enter 否则 slow_enter;exit :2071-2082("Exit must be non-blocking...no exceptions can be thrown");**synchronizer.cpp 行号错**: fast_enter :264/slow_enter :339(大纲 80-240);调用方=C2 complete_monitor_locking_Java(macro.cpp:2465-2466)/C1 c1_Runtime1.cpp:702
+> - **math 归属错(重要)**: dsin/dcos/dtan 在 **sharedRuntimeTrig.cpp:760/818/875**,dlog/dexp/dpow 在 sharedRuntimeTrans.cpp:165/233/369/658(大纲"sharedRuntimeTrans.cpp:50-400 dsin 泰勒级数"双错);**不是 Intel libm fork——fdlibm 的拷贝**(文件头注释 :30-37: Intel CPU 不满足 Java sin/cos 规范+绕过 libjava.so 间接调用快 ~15%);桩生成条件 supports_sse2&&UseLibmIntrinsic&&InlineIntrinsics(stubGenerator_x86_64.cpp:5959-5967 generate_libmSin 等);montgomery_multiply 在 sharedRuntime_x86_64.cpp:3811
+> - 悬念方向见 §2 ⚠️(→ 25-gc-framework/01)
 
 场景: 编译代码可以 inline 轻量锁(fast_enter cmpxchg)——但遇到 inflation 或 biased lock revoke 需要走 VM 慢路径。
 
@@ -97,6 +118,6 @@ montgomery_multiply — RSA crypto openSSL alternative
 
 ### 核心悬念
 
-**"SharedRuntime 的异常处理通过 continuation_for_implicit_exception 区分隐式异常和真 crash——stack overflow 分两阶段(unwind 有逃生窗)。exception_handler 通过 nmethod 异常表查找 handler→未找到→逐帧展开。"** — 下一篇: 域22 Deoptimization——逆优化的完整引擎。
+**"SharedRuntime 的异常处理通过 continuation_for_implicit_exception 区分隐式异常和真 crash——stack overflow 分两阶段(unwind 有逃生窗)。exception_handler 通过 nmethod 异常表查找 handler→未找到→逐帧展开。"** — 下一篇: 域25 GC Framework(写作顺序 21→25;deopt 重建已在 24-frame/03)。
 
-> → 域22 Deoptimization
+> → 域25 GC Framework(planning/outlines/25-gc-framework/)
