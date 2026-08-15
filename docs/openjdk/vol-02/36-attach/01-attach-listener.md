@@ -86,7 +86,7 @@ dequeue(accept 循环,:346-383)在 accept 之后做**第二道安全校验**: `g
 
 几个开关决定整个机制是否可用: **`-XX:-DisableAttachMechanism`**(globals.hpp:2464,默认允许)把 attach 全部关闭(信号处理、启动逻辑、`is_attach_supported` 全部短路);`-XX:+StartAttachListener` 让 listener 启动时就在(常用于容器场景,避免 attach 依赖 cwd 可写);`ReduceSignalUsage` 则同时影响信号与懒启动。`check_socket_file`(:494-516)处理一种异常: **socket 文件被外部删除**(比如工具误删或 /tmp 被清)→ 下次信号来时重启 listener。`abort()` 在 VM 崩溃路径清理 socket。
 
-*关键设计: 整套机制零常驻开销,但依赖 cwd 或 /tmp 可写*——[实证](planning/outlines/00-jvm-tools/materials/commands/36-attach-trigger-demo.txt)里有一个环境陷阱: 本容器**常驻 JMC 与 VisualVM**,它们通过 hsperfdata 自动发现新 JVM 并自动 attach(实测新 JVM 启动约 1.6 秒即被触发)——表现为"没发信号 attach 也发生了";而 `jcmd` 工具在本容器报 "Unable to open socket file /proc/<pid>/root/tmp/.java_pid<pid> ... doesn't respond within 10500ms"(attachTimeout 默认 10000ms + 递增轮询)——**触发链本身可用,失败发生在 jcmd 对 /proc/<pid>/root 路径的解析**(34-nmt 会话曾据此误判"容器不支持 attach")。线程转储里可看到成果: `"Attach Listener" #23 daemon prio=9 ... runnable`(阻塞在 accept)与 `"Signal Dispatcher" #4 daemon ... waiting on condition` 并存。
+*关键设计: 整套机制零常驻开销,但依赖 cwd 或 /tmp 可写*——[实证](planning/outlines/00-jvm-tools/materials/commands/36-attach-trigger-demo.txt)里有一个环境陷阱: 本容器**常驻 JMC 与 VisualVM**,它们通过 hsperfdata 自动发现新 JVM 并自动 attach(实测新 JVM 启动约 1.6 秒即被触发)——表现为"没发信号 attach 也发生了",也解释了本机 /tmp 堆积的大量 `.java_pid*` 残留。而 34-nmt 会话里 `jcmd` attach 报 "Unable to open socket file /proc/<pid>/root/tmp/.java_pid<pid> ... doesn't respond within 10500ms"(attachTimeout 默认 10000ms + 递增轮询)曾让人误判"容器不支持 attach"——**触发链本身是可用的**(本篇实证),那次失败更可能是目标进程早已退出(NMTDemo 3 秒即结束)或 jcmd 对 /proc/<pid>/root 的路径解析问题。线程转储里可看到成果: `"Attach Listener" #23 daemon prio=9 ... runnable`(阻塞在 accept)与 `"Signal Dispatcher" #4 daemon ... waiting on condition` 并存。
 
 ## 核心悬念
 
