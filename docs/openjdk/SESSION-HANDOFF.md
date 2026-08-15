@@ -277,7 +277,7 @@
 
 **本会话覆盖**: 15-c2 域 8 篇全完结(C2 全管线: Ideal Graph/Parse/IGVN-CCP-EA/循环/Chaitin/Matcher/宏展开/intrinsic)+ 21-shared-runtime 2 篇(桩/c2i-i2c)。21-03(异常)是 21 域收官篇,之后的 25-gc 是第 6 批最大域。
 
-**大纲漂移的六大高发类型**(15-c2+21 域 10 篇实测,共 150+ 处漂移,每篇 14-19 处):
+**大纲漂移的六大高发类型**(15-c2+21 域 10 篇实测,共 148 处漂移,每篇 13-17 处——15-c2 八篇 13/15/13/17/15/15/14/17,21 域两篇 14/15):
 1. **函数名编造**: do_load/do_arith/do_inline/add_node(02 篇)、add_constraint(04)、eliminate_locking_nodes→eliminate_locking_node 单数(07)、PhaseOutput(06)、MathIntrinsicNode(08)、generate_c2i_adapter→gen_c2i_adapter(21-02)——**大纲的函数名是不可信字段,一律 grep**
 2. **行号全错**: handle_ic_miss_helper 1100-1300→1552、Simplify 200-330→1199、inline_string_indexOf 1000-1300→1294、generate_stubs 280-400→99——**大纲行号多是规划期估算,差几百行**
 3. **机制编造(最严重)**: Ideal() 返回 this(01)、CCP 从 BOTTOM 逆风(03)、ArgEscape 转寄存器(03)、Strip Mining=主尾模型(04)、_hint_color(05)、peephole 消 mov(06)、CoarsenedLockNode cmpxchg(07)、nanoTime RDTSC(08)、push rbp 建帧(21-02)——**机制描述全部回源码验证**
