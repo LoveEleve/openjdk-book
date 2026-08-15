@@ -23,7 +23,7 @@ class Node:
 ```
 - 源码: `node.hpp:210-350` (Node 类定义 + _in/_out edges) + `node.hpp:350-450` (Ideal/Value/Identity 声明)
 
-- 关键设计: **sea-of-nodes = 控制、数据和内存的统一 DAG**——不是 C1 的 basic block based IR。每个 Node 可以同时持有一条 control edge(来自最近的 IfNode/RegionNode)、data edges(来自操作数) 和 memory edge(来自最近的 StoreNode 或 MergeMemNode)。IGVN 在优化时利用三种 edge types 做不同类型优化(control→dead code, data→constant fold, memory→load/store elimination)。
+⚠️ **写作期修正(15-c2/01,2026-08-15)**: ①`Ideal()` 返回约定写反——**返回 NULL=无变化**(默认实现 node.cpp:1144-1146);改了图必须返回**新根**(原地改输入也返回 this);**禁止返回旧节点**(返回旧节点走 Identity,node.cpp:1100-1138 注释"treatise");②`_cnt` 是 **required 输入数**(node.hpp:291),`_max` 是数组长度(:293),不是"当前数量";③`AddNode` 构造 `Node(0,in1,in2)`——第一个参数是 **NULL 控制槽**(addnode.hpp:44),in(0) 存在但恒 NULL(控制无关节点可浮动,loopopts.cpp:1379),不是"没有 in(0) 槽";④三类边按**索引位置**约定: in(0)=控制(Region/If/Load 等)、in(1..)=数据、MemNode 有专属内存边槽(memnode.hpp:52-58 Control/Memory/Address/ValueIn);"sea of nodes"注释在 loopnode.hpp:992;⑤节点分配: node_arena+delete NOP(node.hpp:231-240);身份=Opcode()(node.hpp:786)+class_id/_flags(node.hpp:736-760)+类型,DEFINE_CLASS_QUERY 位掩码查询(node.hpp:792-800),Opcode 枚举由 classes.hpp 宏生成(opcodes.hpp:31-49);⑥ParmNode=StartNode 投影(callnode.hpp:101-106,parse1.cpp:831);parse 每字节码 `_gvn.transform`(parse2.cpp:2250-2253)——建图即优化(单遍 PhaseGVN)。
 
 ### 2. "Type — C2 类型 lattice"
 
@@ -47,7 +47,7 @@ Type::dual() — 互补类型(用于 CFG 分析):
 ```
 - 源码: `type.hpp:48-150` (TypeInt/TypePtr/TypeLong 定义) + `type.hpp:224-260` (meet/meet_speculative) + `type.hpp:160-230` (TOP/BOTTOM/simple types)
 
-- 关键设计: **Type lattice 的用途**——Phi 节点 merge 多路控制流→meet() 返回最精确的共同类型。如果 meet 结果是 BOTTOM→该执行路径不可达→IGVN 消除整个路径(dead code elimination)。**TypePtr::add_offset(int)**——对象字段访问→Compute field type from class layout→返回字段的精确 Type→IGVN 可以用此信息消除后续的 null check/type check。
+⚠️ **写作期修正(15-c2/01,2026-08-15)**: ①名字:**`TypePtr::NOTNULL`**(type.hpp:919,非 NotNull);②**"Null meet NotNull → Ptr(放弃 nullness)" 错(重要)**: ptr_meet 表(type.cpp:2460-2468)**Null∩NotNull=BotPTR(空集/矛盾)**——类型矛盾即死路径,不是"放弃 nullness";③子类覆写的是 **xmeet**(type.hpp:241),meet→meet_helper(type.cpp:848)→xmeet 虚分派,不是 meet_helper;④行号漂移: Type 类 :74、TYPES 枚举 :78-118、TOP/BOTTOM 静态成员 :412-421、TypeInt :537、TypePtr :813(大纲"48-230"为旧范围);⑤TypeInt::make 走 **hash-cons**(type.cpp:1429-1449 + :707-745),类型全局唯一不可变,比较即指针相等;TypeInt::xmeet "Expand covered set"(:1487-1489)扩并集;xdual=翻转 hi/lo(:1494-1497);⑥不同类指针 meet 退 NotNull+类 LCA(:3977-3986)、不同常量退 NotNull(:3963-3972);⑦PhiNode::Value 起点 TOP 逐路 meet(cfgnode.cpp:918-1009);join=dual(meet(dual))(type.hpp:244-253)。
 
 ### 3. "IGVN — 迭代全局值编号 (Ideal→Value→Identity 三环)"
 
@@ -71,7 +71,7 @@ PhaseIterGVN::transform(n) (line 1267):
 ```
 - 源码: `phaseX.cpp:1223-1250` (optimize 主循环) + `phaseX.cpp:1267-1280` (transform 单节点) + `igvn.cpp:100-200` (hash_find_insert→全局 CSE)
 
-- 关键设计: **fixpoint 迭代 vs fixed-pass**——区别于 C1 的 linear scan(两趟规范化)。IGVN 反复迭代——每轮可能触发新的优化机会(Node 类型变窄→consumer 有新的 Identity 匹配)。`add_users_to_worklist` 递归添 `_out` edges→Cascading Effect 确保所有受影响的 Node 重新 transform。**hash_find_insert**(`igvn.cpp`) 值编号——如果两个 Node 的 opcode+inputs hash 同→已存在等价 Node→replace with existing→全局 CSE。
+⚠️ **写作期修正(15-c2/01,2026-08-15)**: ①**`igvn.cpp` 在 JDK11 不存在**——PhaseIterGVN/NodeHash 全在 phaseX.cpp;hash_find_insert :143-198;②**transform 真实顺序(transform_old :1283-1402,非"三环")**: Ideal 循环→Value(变窄则缓存+用户入队)→singleton 则 makecon 换常量→Identity→**hash_find_insert(全局 CSE)**——大纲漏第 4 步 GVN;③**x+0/x*1 折叠发生在 Parse 期**单遍 PhaseGVN::transform_no_reclaim(phaseX.cpp:864-924 + AddNode::Identity addnode.cpp:56-61 + MulNode::Identity mulnode.cpp:52-61),IGVN 的价值=worklist 迭代到不动点+全局值编号+can_reshape 结构改写;④补充机制: worklist 初值=Parse 期 for_igvn 清单(phaseX.cpp:992-993);optimize 守卫=NodeLimitFudgeFactor(c2_globals.hpp:471)+**K=1024×live_nodes 死循环判定**(globalDefinitions.hpp:255,phaseX.cpp:1235);NodeHash 75% 扩容(phaseX.hpp:82-83);subsume_node 剪边重连(:1527);remove_dead_node;⑤IGVN 在 Optimize 中多次运行(compile.cpp:2247-2254/:2321/:2332/:2388-2391/:2424/:2454),阶段名 phasetype.hpp;⑥实证边界: PrintIdeal/PrintIdealGraph **notproduct**(c2_globals.hpp:101/:371)release 拒绝;PrintOptoAssembly diagnostic 但实现 NOT_PRODUCT(compile.cpp:718-733/output.cpp:1554)release 静默;PrintCompilation/-Xlog:jit+compilation、CITime 阶段树、PrintInlining(diagnostic)可用。
 
 ---
 
