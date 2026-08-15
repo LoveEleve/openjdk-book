@@ -57,7 +57,7 @@ PhaseMacroExpand::eliminate_locking_nodes(AbstractLockNode* alock):
 ### 3. "ArrayCopy Expansion — from AllocateArray to memcpy"
 > ⚠️ 写作期修正(2026-08-15, vol-02/15-c2-compiler/07 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
 > - **"expand_arraycopy_node (macroArrayCopy.cpp:50-300)" 行号错(重要)**: 真实 **macroArrayCopy.cpp:1106**;generate_arraycopy :278;文件 1308 行
-> - **"small len→unrolled loop, large len→rep movsq" 简化**: 分派=generate_arraycopy 内部按类型/形态(clonebasic→clone_at_expansion/copyof-cloneoop 带屏障/arraycopy 编译期检查 :1154-1157 "Compile time checks...we do not make a fast path for this call"+disjoint/conjoint 特化);rep movsq 实现在 23-stub 域 stub 生成器
+> - **"small len→unrolled loop, large len→rep movsq" 简化**: 分派=generate_arraycopy 内部按类型/形态(clonebasic→clone_at_expansion/copyof-cloneoop 带屏障/arraycopy 编译期检查 :1154-1157 "Compile time checks...we do not make a fast path for this call"+disjoint/conjoint 特化);大块拷贝实现在 23-stub 域 stub 生成器(向量拷贝循环,23-stub/02 已拆;JDK11 x86_64 用向量循环非 rep movsq)
 > - **"插入 bounds check goto slow_path" 半对**: 编译期静态检查+运行时检查;慢路径=保留原调用
 > - **"Object arrays write barrier 不能 rep movsq"** ✓ 方向对(对象数组拷贝带屏障)
 > - **"AllocateArray→scalar replacement or real alloc (macro.cpp:2000-2200)" 行号错**: expand_allocate_array :1987;AllocateArray 消除也在 eliminate_allocate_node(:1091,is_AllocateArray 分支 :2610-2612)
