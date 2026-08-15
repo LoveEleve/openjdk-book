@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-15 | 卷 2 写作中: **99/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 26) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 26 篇(11/12/13/18/20/27/30/32/34 九域完结,**本会话 16 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(1),36 域 1/2**),下一篇 36-attach/02 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-15 | 卷 2 写作中: **100/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 27) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 27 篇(11/12/13/18/20/27/30/32/34/36 十个域完结,**本会话 17 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2),36 域收官**),下一篇 37-heap-dumper/01 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3/4 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 36-attach/02(JDK Attach API + loadAgent,大纲 `planning/outlines/36-attach/02-jdk-attach.md`;36 域两篇,01 已完结)。
+**下一步(唯一,无选择)**: 37-heap-dumper/01(HeapDumper + hprof,大纲 `planning/outlines/37-heap-dumper/01-heap-dumper.md`;36 域两篇已完结,批次顺序 36 → 37)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,96 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -45,12 +45,12 @@
 第 2 批(原语): 02(4) → 03(2) → 04(2) → 06(6) → 16(5) → 38(2) → 41(2) → 42(3)   ✅ 完结 26/26
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
-第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(1/2)** → 37 → 39 → 46   🚧 进行中
+第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2)** → 37 → 39 → 46   🚧 进行中
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 99 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 100 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -85,9 +85,9 @@
 | **30-jvm-entry** | 1-3 | `30-jvm-entry/01-jvm-entry-points.md`(138)+`02-java-calls.md`(118)+`03-reflection-stackwalk.md`(111) | ✅ **30 域完结(本会话)** |
 | **32-jfr** | 1-6 | `32-jfr/01-recorder-engine.md`(139)+`02-event-metadata.md`(47)+`03-periodic-sampling.md`(67)+`04-binary-writer.md`(95)+`05-leak-profiler.md`(88)+`06-jni-instrumentation.md`(61) | ✅ **32 域完结(本会话)** |
 | **34-nmt** | 1-2 | `34-nmt/01-tracking.md`(164)+`02-nmt-report.md`(150) | ✅ **34 域完结(本会话)** |
-| **36-attach** | 1-2 | `36-attach/01-attach-listener.md`(157) | ✅ 01 完结(本会话),**36 域 1/2** |
+| **36-attach** | 1-2 | `36-attach/01-attach-listener.md`(157)+`02-jdk-attach.md`(65) | ✅ **36 域完结(本会话)** |
 
-### 本会话 16 篇的 commit 清单(按 git log 为准,2026-08-14/15)
+### 本会话 17 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(372 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true)
 
@@ -199,7 +199,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 15 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 16 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -213,6 +213,7 @@
 - `32-jfr-binary-demo.txt`(jfr print --xml 还原 CPULoad 字段;Varint128 结构;字符串编码)
 - `32-jfr-leakprofiler-demo.txt`(采样链/路径追踪/序列化源码核对)
 - `32-jfr-jni-instrumentation-demo.txt`(转换器/JNI 表/DCmd 链核对)
+- `36-attach-loadagent-demo.txt`(自 attach+loadAgentPath 加载自定义 JVMTI agent 全链路: Agent_OnAttach 收到 options='hello-attach'/返回 -1→AgentInitializationException rc=-1/properties 与 ManagementAgent.start_local 走 attach 通道/退出 Agent_OnUnload;需 -Djdk.attach.allowAttachSelf=true)
 - `36-attach-trigger-demo.txt`(attach 触发链实证: touch .attach_pid+SIGQUIT→"Attach triggered" 日志+socket srw------- 0600 出现;无文件 kill -3=线程转储(信号二义);已初始化短路;转储含 "Attach Listener" #23 与 "Signal Dispatcher" #4;strace stat 证据;环境事实: 容器常驻 JMC/VisualVM 自动 attach 新 JVM(~1.6s)致"无信号也触发"假象,/tmp 堆积 .java_pid* 残留,os::get_temp_directory() Linux 写死 /tmp;jcmd 10500ms 超时更可能是目标进程已退出)
 - `34-nmt-tracking-demo.txt`(NMTDemo summary 退出报告 82 行: Total reserved=18058807559/committed=1165695239,20 类,thread #18,"malloc=343389 #3287",tracking overhead=263488;detail 段: 虚拟内存区域+4 帧栈/malloc callsite 段 4 帧(PerfStringConstant 等)/线程栈 reserved 1048576+committed 8192 守卫页)备注: -XX:+PrintNMTStatistics 需先 -XX:+UnlockDiagnosticVMOptions(diagnostic flag)
 
@@ -558,6 +559,16 @@
 - **第 3 轮**: quick reject 表述修正(栈记录在 sample 入口已发生)
 - 实证: 32-jfr-leakprofiler-demo.txt
 
+### 6.51 32-jfr/06(JNI Interface + Instrumentation + DCmd,32 域收官,大纲 10 组漂移含 6 处机制编造 + 深审 2 轮,2026-08-14)
+- **"JfrClassAdapter::transform" 编造**: 真实=JfrEventClassTransformer::on_klass_creation(jfrEventClassTransformer.cpp:1515);调用点 klassFactory.cpp:222 JFR_ONLY(ON_KLASS_CREATION)(jfrKlassExtension.hpp:41 宏,IS_EVENT_KLASS trace_id 标记)——**类文件解析层拦截 jdk.jfr.Event 子类首次加载**,重写字节→新 InstanceKlass 替换+tag_as;日志字符串 "JfrClassAdapter:"(:1522)是旧名唯一来源
+- **"方法入口 ASM 插桩" 错**: 注入=**事件类 schema**(5 方法壳 commit/begin/end/isEnabled/shouldCommit,:120-145 空方法体字节+3 字段 EventHandler,:60-61);急切模式调 Java EventInstrumentation.java:60(ASM 生成方法体)经 JfrUpcalls::new_bytes_eager_instrumentation(jfrUpcalls.cpp:146;Jfr::is_recording()||force_instrumentation :1406-1428)
+- **"~20 JFR-required 类" 无依据**(删除): 只动 Event 子类
+- **"JfrJniMethod::start/dump 类方法" 半对**: jfrJniMethod.cpp=JVM_ENTRY_NO_ENV 函数表(jfr_set_output/jfr_set_method_sampling_interval/jfr_emit_event/jfr_end_recording...)
+- **"JfrJavaSupport::thread_local_jfr_ref" 编造**: 不存在
+- **"JfrDCmd" 编造**: JfrStartFlightRecordingDCmd 等 5 个(jfrDcmds.hpp:30-141);execute(jfrDcmds.cpp:376)=参数翻译→构造 jdk/jfr/internal/dcmd/DCmdStart→JavaCalls run()→Recording.start()→JVM 接口
+- **第 4 轮**: 急切注入条件精确化(Jfr::is_recording() 或 force_instrumentation)
+- 实证: 32-jfr-jni-instrumentation-demo.txt
+
 ### 6.52 34-nmt/01(NMT 追踪系统,34 域 1/2,大纲 9 组漂移含 3 处机制编造 + 深审 2 轮 + 第 3 轮,2026-08-14)
 - **"MallocHeader {_size,_flags,_unused,_stack}" 错(重要)**: 真实=**位域打包的两个机器字**(mallocTracker.hpp:246-262,LP64 16 字节): `_size:64/_flags:8/_pos_idx:16/_bucket_idx:40`——**不存调用栈指针,只存 call-site 表索引**(detail 才写);**minimal 级别构造直接 return,header 纯占位连 size 都不写**,release 在 `<= NMT_minimal` 直接跳过(mallocTracker.cpp:68-70)
 - **"~30 MEMFLAGS" 错**: `enum MemoryType`(allocation.hpp:114-141)**20 类**+哨兵 mtNone→"Unknown"(nmtCommon.cpp:31-51)
@@ -591,15 +602,16 @@
 - **实证方法论**: -Xlog:attach=trace 看触发决策("Attach triggered"/"Failed to find attach file");touch 文件+SIGQUIT 对照实验(信号二义);strace -f -e trace=stat 看服务端文件访问;pgrep 会抓到 bash(命令行含同串)——用程序自打印 pid
 - 实证: 36-attach-trigger-demo.txt
 
-### 6.51 32-jfr/06(JNI Interface + Instrumentation + DCmd,32 域收官,大纲 10 组漂移含 6 处机制编造 + 深审 2 轮,2026-08-14)
-- **"JfrClassAdapter::transform" 编造**: 真实=JfrEventClassTransformer::on_klass_creation(jfrEventClassTransformer.cpp:1515);调用点 klassFactory.cpp:222 JFR_ONLY(ON_KLASS_CREATION)(jfrKlassExtension.hpp:41 宏,IS_EVENT_KLASS trace_id 标记)——**类文件解析层拦截 jdk.jfr.Event 子类首次加载**,重写字节→新 InstanceKlass 替换+tag_as;日志字符串 "JfrClassAdapter:"(:1522)是旧名唯一来源
-- **"方法入口 ASM 插桩" 错**: 注入=**事件类 schema**(5 方法壳 commit/begin/end/isEnabled/shouldCommit,:120-145 空方法体字节+3 字段 EventHandler,:60-61);急切模式调 Java EventInstrumentation.java:60(ASM 生成方法体)经 JfrUpcalls::new_bytes_eager_instrumentation(jfrUpcalls.cpp:146;Jfr::is_recording()||force_instrumentation :1406-1428)
-- **"~20 JFR-required 类" 无依据**(删除): 只动 Event 子类
-- **"JfrJniMethod::start/dump 类方法" 半对**: jfrJniMethod.cpp=JVM_ENTRY_NO_ENV 函数表(jfr_set_output/jfr_set_method_sampling_interval/jfr_emit_event/jfr_end_recording...)
-- **"JfrJavaSupport::thread_local_jfr_ref" 编造**: 不存在
-- **"JfrDCmd" 编造**: JfrStartFlightRecordingDCmd 等 5 个(jfrDcmds.hpp:30-141);execute(jfrDcmds.cpp:376)=参数翻译→构造 jdk/jfr/internal/dcmd/DCmdStart→JavaCalls run()→Recording.start()→JVM 接口
-- **第 4 轮**: 急切注入条件精确化(Jfr::is_recording() 或 force_instrumentation)
-- 实证: 32-jfr-jni-instrumentation-demo.txt
+### 6.55 36-attach/02(JDK Attach API + loadAgent,36 域收官,大纲 9 组漂移含 3 处机制编造 + 深审 2 轮,2026-08-15)
+- **"jdk.attach 是纯 C library / JVM_AttachCurrentThread" 编造(重要)**: `JVM_AttachCurrentThread` **零命中**;真实=jdk.attach 模块三层=公共 API com.sun.tools.attach(VirtualMachine 抽象/AttachProvider/异常)+内部 sun.tools.attach(HotSpotVirtualMachine 基类 :48-406+平台 VirtualMachineImpl)+native libattach(VirtualMachineImpl.c);src/jdk.attach/share/classes 等
+- **"write 'COMMAND\narg1=val1\n\n'" 协议格式错**: JDK11=NUL 分隔(01 篇已回填);客户端 execute :145-231/:308-321,读回 completionStatus int,101 特判 "Protocol mismatch",load 特判 AgentLoadException(:203-227)
+- **"loadAgent → cmd='load'" 半对(重要)**: 两条形态——**native .so** 走 loadAgentLibrary/loadAgentPath→execute("load", path, isAbsolute, options)(:86-129);**Java JAR** 的 loadAgent("jar", opts)(:135-172)拼 "jar=opts" 后 **loadAgentLibrary("instrument", ...)**——加载 JPLIS(instrument 库)再调 agentmain,错误码翻译 ATTACH_ERROR_BADJAR=100/NOTONCP=101/STARTFAIL=102(:177-180);**loadAgent 名字误导性——只接受 JAR**
+- **"attachListener.cpp:200-400" 行号错**: load_agent 在 attachListener.cpp:**108-135**;JvmtiExport::load_agent_library(jvmtiExport.cpp:2638-2722)
+- **"dlopen RTLD_LAZY" 半对**: os::dll_load(os_linux.cpp:1872+)=dlopen 封装,先查 noexecstack(禁栈守卫→VM_LinuxDllLoad VM 操作 safepoint 修复);dlsym=os::find_agent_function(os.cpp:574-610)按 AGENT_ONATTACH_SYMBOLS={"Agent_OnAttach"}(jvm_md.h:45)
+- **"Agent_OnLoad 不作为" ✓**: attach 只调 Agent_OnAttach;启动 -agentpath/-agentlib 走 Agent_OnLoad(create_vm_init_agents thread.cpp:4209-4237,失败 vm_exit;attach 失败回错误码客户端);同库可同时导出两符号
+- **缺机制(重要)**: ①VirtualMachine.attach 遍历 AttachProvider.providers(VirtualMachine.java:194-215),provider name="sun"/type="socket";②**自 attach 门控**: jdk.attach.allowAttachSelf 默认 false,pid==CURRENT_PID 抛 "Can not attach to current VM"(HotSpotVirtualMachine.java:56-57/:72-76)——34-nmt/02 的 AttachSelf 失败根因,本篇加属性成功;③**"return code: N" 协议**(jvmtiExport.cpp:2708)→客户端解析→非 0 抛 AgentInitializationException(:93-110)——注意 load 操作 completionStatus 恒 0(load_agent 返回 JNI_OK),agent 错误在输出流;④JNI_OK→Arguments::add_loaded_agent→退出 shutdown_vm_agents 调 Agent_OnUnload(thread.cpp:4230-4256);⑤第三通道 DCmd JVMTIAgentLoadDCmd "JVMTI.agent_load"(diagnosticCommand.cpp:315-353,.jar 分流)也调 load_agent_library——jcmd 工具即走此路;⑥API→操作名映射表(startManagementAgent→"ManagementAgent.start" DCmd :226-238)
+- **实证方法论**: **自 attach 是可行实证路径**(-Djdk.attach.allowAttachSelf=true)——全链路验证(Java API→NUL 协议→socket→load 操作→dlopen→dlsym→Agent_OnAttach);自写 JVMTI agent(gcc -shared -fPIC);失败 agent(return -1)验证 AgentInitializationException;properties/DCmd 走 attach 通道一并验证
+- 实证: 36-attach-loadagent-demo.txt
 
 ---
 
@@ -633,9 +645,10 @@
 - [x] 32-jfr/01-06——✅ 完结(正文 0856326/1f5d2d3/6daa7f1/328c92f/b595e6b/f2a2c2f,commit 见 §二);**32 域完结**
 - [x] 34-nmt/01——✅ 完结(正文 cb24e2a/回填 ⚠️ 9 组/README 0f2abb7/第 3 轮 58866ce/第 4 轮 434708a);**34 域 1/2**
 - [x] 34-nmt/02——✅ 完结(正文 3fba0d4 含回填 ⚠️ 11 组/README 62e48f4);**34 域完结,第 5 批 9/13**
-- [x] 36-attach/01——✅ 完结(正文 3cbbe22 含回填 ⚠️ 10 组/README eb9dbf4/第 3 轮 cc3a38b);**36 域 1/2**
-- [ ] **36-attach/02**(JDK Attach API + loadAgent,客户端 VirtualMachine 封装/loadAgent 流程)——**下一篇**;大纲 `planning/outlines/36-attach/02-jdk-attach.md`;36-attach/01 悬念已指向 02
-- [ ] 36-attach 后 → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 4 域)
+- [x] 36-attach/01——✅ 完结(正文 3cbbe22 含回填 ⚠️ 10 组/README eb9dbf4/第 3 轮 cc3a38b/第 4 轮 e19b9f3);**36 域 1/2**
+- [x] 36-attach/02——✅ 完结(正文 80537ed 含回填 ⚠️ 9 组/README a2f0430);**36 域完结,第 5 批 10/13**
+- [ ] **37-heap-dumper/01**(HeapDumper + hprof 格式)——**下一篇**;大纲 `planning/outlines/37-heap-dumper/01-heap-dumper.md`;36-attach/02 悬念已指向 37-heap-dumper/01(dumpheap 操作 attachListener.cpp:220-242)
+- [ ] 37-heap-dumper 后 → 39-runtime-mon → 46-sa(第 5 批剩余 3 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
