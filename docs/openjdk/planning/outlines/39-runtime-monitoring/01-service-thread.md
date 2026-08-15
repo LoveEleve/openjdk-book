@@ -3,6 +3,16 @@
 > 🔴 Deep | ~10 种 deferred tasks 的中枢
 > 读者处境: JVM 不只跑 Java 线程和 GC——还有一个隐形的 **ServiceThread** 处理 JVMTI deferred events/JFR periodic tasks/OopStorage cleanup/GC notifications。与 WatcherThread(event-driven vs periodic)分工。
 
+> ⚠️ 写作期修正(2026-08-15, vol-02/39-runtime-monitoring/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"低优先级——不会抢 GC worker CPU" 错(重要)**: initialize 里 **`set_priority(thread_oop(), NearMaxPriority)`**(serviceThread.cpp:74)——**prio=9 高优先级**(实证 20-background-init-demo.txt 线程行 "Service Thread" #5 daemon prio=9)
+> - **"~10 种 deferred tasks" 无依据**: 真实 **5 个条件/任务**(service_thread_entry :84-143): LowMemoryDetector 传感器/JVMTI deferred 事件/GC 通知/DCmd 通知/StringTable 清理
+> - **"JFR periodic tasks/OopStorage cleanup" 错**: ServiceThread 不做这两类——JFR 周期采样在 32 域已证(RequestEngine+os::SuspendedThreadTask);OopStorage 清理是 GC/Storage 自己的生命周期
+> - **行号漂移**: serviceThread.cpp **179 行**(大纲 50-100/:100-200): initialize :45-82;service_thread_entry :84-143;enqueue_deferred_event :145-153;oops_do/nmethods_do :155-179
+> - **主循环机制 ✓ 半对**: ThreadBlockInVM(:102,注释 :94-100 safepoint 正确处理)→Service_lock 下 **5 条件一次性检测**(:105-109)→wait(:112)→**锁外处理**(:122-141);JVMTI 事件**锁内 dequeue(:117)锁外 post(:126-129)**;检测与 wait 同锁防丢失唤醒
+> - **缺机制(重要)**: ①StringTable::trigger_concurrent_work(stringTable.cpp:226-230,Service_lock 下置 _has_work+notify);触发=check_concurrent_work(GC 后,dead/load 因子 :520-535)+try_rehash_table(:587/:594);concurrent_work(:539-549): load 高且未满 grow 否则 clean_dead_entries;②GC 通知=GCMemoryManager::gc_end pushNotification(memoryManager.cpp:295)→GCNotifier 链表(gcNotifier.hpp:33-60)→sendNotification 显式清异常防线程终止(gcNotifier.cpp:165-172);③DCmdFactory::send_notification 同样清异常(diagnosticFramework.cpp:445-452);④LowMemoryDetector::has_pending_requests 遍历 MemoryPool usage_sensor(lowMemoryDetector.cpp:41-51);⑤启动=create_vm thread.cpp:3960;⑥oops_do 保持 deferred 事件存活(:155-167)
+> - **实证**: 20-background-init-demo.txt("Service Thread" #5 daemon prio=9 runnable 与 "VM Periodic Task Thread" 并存)
+> - **悬念指向 02-timer-stats ✓**(正确,保留)
+
 ### 1. "ServiceThread — ~10 种延迟任务"
 
 场景: JVMTI agent 请求在 safepoint 外处理 class redefine → 推入 deferred event queue → ServiceThread 在 VM 安全时处理。
