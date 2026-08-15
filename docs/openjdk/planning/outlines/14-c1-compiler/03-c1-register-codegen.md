@@ -3,6 +3,18 @@
 > 🔴 Deep | 11 KP 中的 2 个核心机制
 > 读者处境: HIR 优化完了——如何把虚拟寄存器映射到物理寄存器？C2 用 graph coloring (O(n²))——C1 用 linear scan (O(n))——速度快 10x——精度损失可接受。
 
+> ⚠️ 写作期修正(2026-08-15, vol-02/14-c1-compiler/03 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"Interval: [start, end]" 半对(重要)**: 真实=Interval 由 **Range 链表**组成(c1_LinearScan.hpp:455-470 Range 的 _from/_to/_next;Interval 类 :501+)——活跃段可不连续;Interval 挂 _assigned_reg/_register_hint(:563)/_current_split_child/_canonical_spill_slot(分裂子区间体系)
+> - **"spill 时选择 end 最远的 Interval" 半对**: 真实=**find_locked_reg 选 `_use_pos[i]` 最晚的寄存器**(c1_LinearScan.cpp:5504-5524,:5508-5510)——占用者下次使用前空闲最长,spill+reload 代价最小;非"end 最远"
+> - **"peephole: 相邻 move 消除" 编造(重要)**: x86 的 **`LIR_Assembler::peephole` 是空实现**(c1_LIRAssembler_x86.cpp:3994,注释 "sparc uses this for delay slot filling");真正 LIR 优化=**EdgeMoveOptimizer+ControlFlowOptimizer**(c1_LinearScan.cpp:3152-3155,allocate 之后)
+> - **"x86 FpuStack ST0-ST7 特化" 半对**: c1_LinearScan_x86.cpp:35 allocate_fpu_stack 存在,但仅 **x87 模式**(use_fpu_stack_allocation);JDK11 x86_64 默认 SSE 走普通分配
+> - **"LinearScan O(n)" 半对**: do_linear_scan(:3100-3130)=number_instructions→local/global live sets→build_intervals→sort→allocate_registers(LinearScanWalker CPU/FPU 两遍 :1656-1690)→resolve_data_flow(+exception)→propagate_spill_slots;单趟扫描但实现细节多(active/inactive 列表)
+> - **register_hint ✓**(hpp:281 add_register_hints/:563-564)
+> - **行号漂移**: c1_LinearScan.cpp **6800 行**(大纲 400-800 严重低估);hpp 963;LIRAssembler.cpp 867
+> - **缺机制(重要)**: ①activate_current(:5792-5855): 栈槽起始 interval(must_start_in_memory)激活时 **split+load 回寄存器**(:5802-5812);普通=combine_spilled_intervals(不相交共享 spill 槽)→**alloc_free_reg 或 alloc_locked_reg**(:5834-5840);insert_move_when_activated(:5844-5852);②split_for_spilling(:5227);③LIR_Assembler::emit_code(:214)→emit_block→emit_lir_list(:268,peephole 钩子 :269)→emit_op0/1/2(:598/:504/:695);④x86 emit_op2 按操作数形态选指令格式(c1_LIRAssembler_x86.cpp)
+> - **实证**: 14-c1-register-codegen-demo.txt(TraceLinearScanLevel 是 develop 不可用;PrintAssembly 无 hsdis 给 nmethod 布局 C1 main code 352>C2 224;机制源码定位)
+> - **悬念指向 04 ✓**(04-c1-runtime-frame.md "Runtime1 + FrameMap — C1 runtime 与栈帧")
+
 ### 1. LinearScan — O(n) 寄存器分配
 
 场景: C1 需要把 15 个虚拟 HIR 值 (Value*) 映射到 8 个物理 GPR。C1 用 linear scan: Interval 按 start 排序→scan→逐个 assign→冲突的 spill 到栈。
