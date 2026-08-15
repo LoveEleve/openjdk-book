@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-15 | 卷 2 写作中: **100/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 27) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 27 篇(11/12/13/18/20/27/30/32/34/36 十个域完结,**本会话 17 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2),36 域收官**),下一篇 37-heap-dumper/01 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-15 | 卷 2 写作中: **101/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 28) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 28 篇(11/12/13/18/20/27/30/32/34/36 十域完结,**本会话 18 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(1),37 域 1/2**),下一篇 37-heap-dumper/02 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3/4 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 37-heap-dumper/01(HeapDumper + hprof,大纲 `planning/outlines/37-heap-dumper/01-heap-dumper.md`;36 域两篇已完结,批次顺序 36 → 37)。
+**下一步(唯一,无选择)**: 37-heap-dumper/02(流式压缩 + 多触发入口,大纲 `planning/outlines/37-heap-dumper/02-compression-triggers.md`;37 域两篇,01 已完结)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,96 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -45,12 +45,12 @@
 第 2 批(原语): 02(4) → 03(2) → 04(2) → 06(6) → 16(5) → 38(2) → 41(2) → 42(3)   ✅ 完结 26/26
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
-第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2)** → 37 → 39 → 46   🚧 进行中
+第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(1/2)** → 39 → 46   🚧 进行中
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 100 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 101 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -86,8 +86,9 @@
 | **32-jfr** | 1-6 | `32-jfr/01-recorder-engine.md`(139)+`02-event-metadata.md`(47)+`03-periodic-sampling.md`(67)+`04-binary-writer.md`(95)+`05-leak-profiler.md`(88)+`06-jni-instrumentation.md`(61) | ✅ **32 域完结(本会话)** |
 | **34-nmt** | 1-2 | `34-nmt/01-tracking.md`(164)+`02-nmt-report.md`(150) | ✅ **34 域完结(本会话)** |
 | **36-attach** | 1-2 | `36-attach/01-attach-listener.md`(157)+`02-jdk-attach.md`(65) | ✅ **36 域完结(本会话)** |
+| **37-heap-dumper** | 1-2 | `37-heap-dumper/01-heap-dumper.md`(77) | ✅ 01 完结(本会话),**37 域 1/2** |
 
-### 本会话 17 篇的 commit 清单(按 git log 为准,2026-08-14/15)
+### 本会话 18 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(372 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true)
 
@@ -199,7 +200,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 16 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 17 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -213,6 +214,7 @@
 - `32-jfr-binary-demo.txt`(jfr print --xml 还原 CPULoad 字段;Varint128 结构;字符串编码)
 - `32-jfr-leakprofiler-demo.txt`(采样链/路径追踪/序列化源码核对)
 - `32-jfr-jni-instrumentation-demo.txt`(转换器/JNI 表/DCmd 链核对)
+- `37-heap-dumper-demo.txt`(hprof 文件逐字节解析: 19 字节头 "JAVA PROFILE 1.0.2\0"+u4 id_size=8+u8 时间戳;顶层记录 UTF8 49109/LOAD_CLASS 2211/FRAME 30/TRACE 8/SEGMENT 16/END;段内 INSTANCE 104269/PRIM_ARRAY 34837/OBJ_ARRAY 23378/CLASS_DUMP 2021/STICKY 1601/JNI_GLOBAL 64/THREAD_OBJ 7;live 对照 6.0MB/4 段/INSTANCE 37782(-64%);JDK11 变体验证: CLASS_DUMP 无 serial(64 字节头)/INSTANCE 含 object id+stid;触发=HotSpotDiagnostic.dumpHeap 需 jmxremote 加载 libmanagement)
 - `36-attach-loadagent-demo.txt`(自 attach+loadAgentPath 加载自定义 JVMTI agent 全链路: Agent_OnAttach 收到 options='hello-attach'/返回 -1→AgentInitializationException rc=-1/properties 与 ManagementAgent.start_local 走 attach 通道/退出 Agent_OnUnload;需 -Djdk.attach.allowAttachSelf=true)
 - `36-attach-trigger-demo.txt`(attach 触发链实证: touch .attach_pid+SIGQUIT→"Attach triggered" 日志+socket srw------- 0600 出现;无文件 kill -3=线程转储(信号二义);已初始化短路;转储含 "Attach Listener" #23 与 "Signal Dispatcher" #4;strace stat 证据;环境事实: 容器常驻 JMC/VisualVM 自动 attach 新 JVM(~1.6s)致"无信号也触发"假象,/tmp 堆积 .java_pid* 残留,os::get_temp_directory() Linux 写死 /tmp;jcmd 10500ms 超时更可能是目标进程已退出)
 - `34-nmt-tracking-demo.txt`(NMTDemo summary 退出报告 82 行: Total reserved=18058807559/committed=1165695239,20 类,thread #18,"malloc=343389 #3287",tracking overhead=263488;detail 段: 虚拟内存区域+4 帧栈/malloc callsite 段 4 帧(PerfStringConstant 等)/线程栈 reserved 1048576+committed 8192 守卫页)备注: -XX:+PrintNMTStatistics 需先 -XX:+UnlockDiagnosticVMOptions(diagnostic flag)
@@ -613,6 +615,16 @@
 - **实证方法论**: **自 attach 是可行实证路径**(-Djdk.attach.allowAttachSelf=true)——全链路验证(Java API→NUL 协议→socket→load 操作→dlopen→dlsym→Agent_OnAttach);自写 JVMTI agent(gcc -shared -fPIC);失败 agent(return -1)验证 AgentInitializationException;properties/DCmd 走 attach 通道一并验证
 - 实证: 36-attach-loadagent-demo.txt
 
+### 6.56 37-heap-dumper/01(HeapDumper + hprof,37 域 1/2,大纲 11 组漂移含 2 处机制编造 + 深审 2 轮,2026-08-15)
+- **"ID 不是 address——递增序列号" 编造(重要)**: JDK11 `write_objectID` **直写 oop 地址**(heapDumper.cpp:526-533);class ID=java mirror 地址(:553-555);符号 ID=Symbol 指针(:535-542)——地址作 ID 正是必须 safepoint 的原因;大纲"跨 dump 追踪/ID 占 2GB"删除
+- **sub-record 格式与标准 hprof spec 不同(重要,实证逐字节验证)**: ①CLASS_DUMP(0x20)=`id + u4 STACK_TRACE_ID + id×6 + u4` + 描述符(dump_class_and_array_classes :994-1033)——**无 u4 class serial**;②INSTANCE_DUMP(0x21)=`id object + u4 stid + id class + u4 size + 字段值`(dump_instance :969-987);③OBJ_ARRAY/PRIM_ARRAY 均带 u4 STACK_TRACE_ID(:1145-1159/:1179-1193);STACK_TRACE_ID=常量 1(:373);④sub-record 头 **9 字节**(u1 tag+u4 time+u4 len)非 5 字节
+- **行号漂移**: heapDumper.hpp 仅 83 行(格式注释在 **heapDumper.cpp:52-130**);HeapDumper::dump **:1931-1984**(非 1931-2100);doit :1775-1806;work :1809-1894;文件总 2112 行
+- **"VM_HeapDumper 是 VM_Operation" 半对**: 真实=**VM_GC_Operation+AbstractGangTask**(:1477);GC 在 **doit() 内 collect_as_vm_thread(GCCause::_heap_dump)**(:1786),GCLocker 活跃跳过+warning(:1781-1784);ensure_parsability 必须先于遍历(:1778);WorkGang 并行(VM 线程遍历,worker 线程 writer_loop 只写 :1813-1815/:1796-1801)
+- **"DumperWriter" 名字错**: 真实=**DumpWriter**(:380)+AbstractWriter/CompressionBackend
+- **缺机制(重要)**: ①段分割=start_sub_record(:575-603): 段头 1C+u4(0)+u4(len) **动态回填**,放不下/超大时 finish_dump_segment 开新段;HEAP_DUMP_SEGMENT=0x1C/END=0x2C(:307-342);②work() 顺序(UTF8→LOAD_CLASS→FRAME/TRACE→CLASS_DUMP→safe_object_iterate→THREAD_OBJ→MONITOR→JNI_GLOBAL→**STICKY_CLASS=null class loader 类** :1883-1887→END);③do_object 跳过 Class 对象(:1451-1457)+CDS dormant(:1459-1461);④压缩 GZipCompressor(:1940-1944);⑤"Heap dump file created [N bytes in X secs]"(:1969-1973);⑥OOME 路径(_oome 假帧)
+- **实证方法论**: **HotSpotDiagnostic.dumpHeap 免 attach 触发**(com.sun.management.internal,jmm_DumpHeap0 management.cpp:1901-1920)——需 -Dcom.sun.management.jmxremote.port=0 加载 libmanagement 否则 UnsatisfiedLinkError;python 解析 hprof(顶层/段内记录均 9 字节头;CLASS_DUMP 64 字节头无 serial;live 对照验证 GC);**JDK 的 sub-record 与 hprof 标准 spec 有差异——以源码为准**
+- 实证: 37-heap-dumper-demo.txt
+
 ---
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
@@ -647,8 +659,9 @@
 - [x] 34-nmt/02——✅ 完结(正文 3fba0d4 含回填 ⚠️ 11 组/README 62e48f4);**34 域完结,第 5 批 9/13**
 - [x] 36-attach/01——✅ 完结(正文 3cbbe22 含回填 ⚠️ 10 组/README eb9dbf4/第 3 轮 cc3a38b/第 4 轮 e19b9f3);**36 域 1/2**
 - [x] 36-attach/02——✅ 完结(正文 80537ed 含回填 ⚠️ 9 组/README a2f0430);**36 域完结,第 5 批 10/13**
-- [ ] **37-heap-dumper/01**(HeapDumper + hprof 格式)——**下一篇**;大纲 `planning/outlines/37-heap-dumper/01-heap-dumper.md`;36-attach/02 悬念已指向 37-heap-dumper/01(dumpheap 操作 attachListener.cpp:220-242)
-- [ ] 37-heap-dumper 后 → 39-runtime-mon → 46-sa(第 5 批剩余 3 域)
+- [x] 37-heap-dumper/01——✅ 完结(正文 b4d58cd 含回填 ⚠️ 11 组/README 8800102);**37 域 1/2**
+- [ ] **37-heap-dumper/02**(流式压缩 + 多触发入口: GZipCompressor/jcmd/JMX/JFR/OOM)——**下一篇**;大纲 `planning/outlines/37-heap-dumper/02-compression-triggers.md`;37-heap-dumper/01 悬念已指向 02
+- [ ] 37-heap-dumper 后 → 39-runtime-mon → 46-sa(第 5 批剩余 2 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
