@@ -1,7 +1,7 @@
 # 03. IGVN + CCP + Escape Analysis — C2 优化三引擎
 
 > **前置依赖**:[15-c2-compiler/01 — C2 Ideal Graph: Node + Type + IGVN](openjdk/vol-02/15-c2-compiler/01-c2-ideal-graph.md):IGVN 的 transform_old 五步与类型格在这里,本篇的三个引擎共用这套地基;[15-c2-compiler/02 — Parse + GraphKit: 字节码→Ideal Graph](openjdk/vol-02/15-c2-compiler/02-c2-parse-graphkit.md):Parse 铺出的海量节点网,本篇讲怎么被优化;[12-ci/02 — ciTypeFlow 与 escape 分析](openjdk/vol-02/12-ci/02-ci-typeflow-escape.md):C1 的浅层 bcEscapeAnalyzer 与 C2 的 ConnectionGraph 对照
-> → **后续**:[15-c2-compiler/04 — 循环优化: LoopNode + unrolling + SuperWord](openjdk/vol-02/15-c2-compiler/04-c2-loops.md)
+> → **后续**:[15-c2-compiler/04 — Loop Optimization + SuperWord: 循环变换与向量化](openjdk/vol-02/15-c2-compiler/04-c2-loops.md)
 > 关联域: 12-ci(bcEscapeAnalyzer 对照)、09-memory-core(分配底层)、19-sync(锁消除)
 
 ## 一图三引擎
@@ -102,4 +102,4 @@ void PhaseCCP::analyze() {
 
 三个引擎的分工落定: **IGVN** 处处收敛(六次调用)、**CCP** 乐观传播常量并切断不可达分支(全 TOP 初始化 → root 前向 worklist → transform_once 常量替换与 Region 切割)、**EA** 用 ConnectionGraph 证明 NoEscape 并用 PhaseMacroExpand 完成标量替换(开关对照: 0 次 GC vs 6 次 GC)。但最常被优化的代码不是直线——**循环**。C2 的循环优化(循环不变量外提、剥皮、展开、范围检查消除、以及 SuperWord 向量化)是建立在 LoopNode/CountedLoopNode 上的另一套体系,而且它在编译期管线里占据了比 EA 更长的篇幅。下一篇: 循环。
 
-> → [15-c2-compiler/04 — 循环优化: LoopNode + unrolling + SuperWord](openjdk/vol-02/15-c2-compiler/04-c2-loops.md)
+> → [15-c2-compiler/04 — Loop Optimization + SuperWord: 循环变换与向量化](openjdk/vol-02/15-c2-compiler/04-c2-loops.md)
