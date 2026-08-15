@@ -3,6 +3,16 @@
 > 🔴 Deep | 11 KP 中的 2 个核心机制
 > 读者处境: 解释器→C1 编译 `ArrayList.add()`。第一步: GraphBuilder 逐字节码构建 c1_Instruction 图——字节码的隐式操作栈被转换为显式 SSA 变量。
 
+> ⚠️ 写作期修正(2026-08-15, vol-02/14-c1-compiler/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"c1_Compiler::compile_method 6 步管线" 错(重要)**: 入口 `Compiler::compile_method`(c1_Compiler.cpp:246)**只构造 Compilation 对象**;管线在 **c1_Compilation.cpp**: compile_method(:429)→compile_java_method(:370)=**三大步**——①build_hir(:141-258: IR 构建(GraphBuilder)→optimize_blocks(UseC1Optimizations :179)→split_critical_edges→compute_code(块排序,"control flow must not be changed from here on")→**GVN**(UseGlobalValueNumbering)→**RangeCheckElimination**(非 OSR)→eliminate_null_checks→compute_use_counts)②emit_lir(:252-278: LIRGenerator(:256)+**LinearScan do_linear_scan**(:270-276))③emit_code_body(LIR_Assembler)+install_code(:410 env->register_method)——**非"6 步"**
+> - **"Step 3: Canonicalizer::canonicalize() 独立阶段" 错(重要)**: Canonicalizer 在 **GraphBuilder::append_with_bci 内联即时调用**(c1_GraphBuilder.cpp:2299-2306,每 append 一条指令 canon.canonical());独立优化=optimize_blocks/GVN/RangeCheckElimination 三趟
+> - **"iload_1→创建 LoadLocal" 错**: `load_local`(c1_GraphBuilder.cpp:935-940)=**`push(state()->local_at(index))` 直接取已有 Value**——局部变量槽里存的就是之前 store 的 Value(指令 result),load 零成本;Local 类只是占位(LEAF(Local, Instruction) c1_Instruction.hpp:697)
+> - **"BlockBegin 类头 _state/_predecessors/_end" 半对**: BlockBegin=**LEAF(BlockBegin, StateSplit)**(c1_Instruction.hpp:1601),SSA 字段 _successors/_predecessors/_end(:1619-1625);类层次全用 **LEAF/BRANCH 宏**(grep "class X" 找不到)——Phi :641/Local :697/Constant :724/ArithmeticOp :1060/Invoke :1243/NewInstance :1292/Goto :1859/If :1970/Return :2149/Throw :2171/Base :2190;Value=typedef Instruction*(:117)
+> - **行号漂移**: c1_GraphBuilder.cpp **4428 行**(大纲 200-1000);c1_GraphBuilder.hpp 427;c1_Instruction.hpp 2632
+> - **缺机制(重要)**: ①BlockListBuilder 预扫描(所有分支目标/异常处理器 bci 先 make_block_at :152+);②append_with_bci 的 **LocalValueNumbering**(vmap find_insert :2308-2319)+**InstructionCountCutoff bailout**(:2328)+StateSplit 状态拷贝与 handle_exception 异常边(:2336-2351);③**Phi 创建=ValueStack::setup_phi_for_stack/setup_phi_for_local**(c1_ValueStack.cpp:178-191,块合并时 new Phi 替换,栈槽负索引 -index-1);④If/Goto/Return/Throw 创建(GraphBuilder :1227/:1208/:1599/:2275);⑤invoke(:1841);⑥bailout 家族(BailoutAfterHIR 等)——C1 随时可放弃编译回解释器
+> - **实证**: 14-c1-pipeline-demo.txt(PrintCompilation "230 b 3 C1Demo::sum (23 bytes)"/231 % OSR/made not entrant;**PrintIR/PrintLIR 是 notproduct release 无**;jfr 日志等价 -Xlog:jit+compilation)
+> - **悬念指向 02 ✓**(02-c1-optimizations.md "Canonicalizer + ValueMap + Optimizer")
+
 ### 1. C1 编译管线 — 6 步码生
 
 场景: `CompileBroker`→`c1_Compiler::compile_method(ciEnv)`→C1 6 步管线正式启动。
