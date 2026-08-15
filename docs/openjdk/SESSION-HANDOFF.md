@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-14 | 卷 2 写作中: **98/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 25) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 25 篇(11/12/13/18/20/27/30/32/34 九个域完结,**本会话 15 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2),34 域收官**),下一篇 36-attach/01 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-15 | 卷 2 写作中: **99/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 26) | 第 1-4 批**全部完结**(12 个域);第 5 批(VM 核心)进行中 26 篇(11/12/13/18/20/27/30/32/34 九域完结,**本会话 16 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(1),36 域 1/2**),下一篇 36-attach/02 | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3/4 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 36-attach/01(Attach Listener + Socket IPC,大纲 `planning/outlines/36-attach/01-attach-listener.md`;34 域两篇已完结,批次顺序 34 → 36)。
+**下一步(唯一,无选择)**: 36-attach/02(JDK Attach API + loadAgent,大纲 `planning/outlines/36-attach/02-jdk-attach.md`;36 域两篇,01 已完结)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,96 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -45,12 +45,12 @@
 第 2 批(原语): 02(4) → 03(2) → 04(2) → 06(6) → 16(5) → 38(2) → 41(2) → 42(3)   ✅ 完结 26/26
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
-第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2)** → 36 → 37 → 39 → 46   🚧 进行中
+第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(1/2)** → 37 → 39 → 46   🚧 进行中
 第 6 批(JIT/GC): 14 → 15 → 21 → 25 → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 98 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 99 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -85,8 +85,9 @@
 | **30-jvm-entry** | 1-3 | `30-jvm-entry/01-jvm-entry-points.md`(138)+`02-java-calls.md`(118)+`03-reflection-stackwalk.md`(111) | ✅ **30 域完结(本会话)** |
 | **32-jfr** | 1-6 | `32-jfr/01-recorder-engine.md`(139)+`02-event-metadata.md`(47)+`03-periodic-sampling.md`(67)+`04-binary-writer.md`(95)+`05-leak-profiler.md`(88)+`06-jni-instrumentation.md`(61) | ✅ **32 域完结(本会话)** |
 | **34-nmt** | 1-2 | `34-nmt/01-tracking.md`(164)+`02-nmt-report.md`(150) | ✅ **34 域完结(本会话)** |
+| **36-attach** | 1-2 | `36-attach/01-attach-listener.md`(157) | ✅ 01 完结(本会话),**36 域 1/2** |
 
-### 本会话 15 篇的 commit 清单(按 git log 为准,2026-08-14)
+### 本会话 16 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(372 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true)
 
@@ -198,7 +199,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 14 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 15 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -212,6 +213,7 @@
 - `32-jfr-binary-demo.txt`(jfr print --xml 还原 CPULoad 字段;Varint128 结构;字符串编码)
 - `32-jfr-leakprofiler-demo.txt`(采样链/路径追踪/序列化源码核对)
 - `32-jfr-jni-instrumentation-demo.txt`(转换器/JNI 表/DCmd 链核对)
+- `36-attach-trigger-demo.txt`(attach 触发链实证: touch .attach_pid+SIGQUIT→"Attach triggered" 日志+socket srw------- 0600 出现;无文件 kill -3=线程转储(信号二义);已初始化短路;转储含 "Attach Listener" #23 与 "Signal Dispatcher" #4;strace stat 证据;环境事实: 容器常驻 JMC/VisualVM 自动 attach 新 JVM(~1.6s)致"无信号也触发"假象,/tmp 堆积 .java_pid* 残留,os::get_temp_directory() Linux 写死 /tmp;jcmd 10500ms 超时更可能是目标进程已退出)
 - `34-nmt-tracking-demo.txt`(NMTDemo summary 退出报告 82 行: Total reserved=18058807559/committed=1165695239,20 类,thread #18,"malloc=343389 #3287",tracking overhead=263488;detail 段: 虚拟内存区域+4 帧栈/malloc callsite 段 4 帧(PerfStringConstant 等)/线程栈 reserved 1048576+committed 8192 守卫页)备注: -XX:+PrintNMTStatistics 需先 -XX:+UnlockDiagnosticVMOptions(diagnostic flag)
 
 **旧素材 19 个**(前会话): 08-bytecodes-javap / 08-interpreter-templates / 08-interpreter-counterdemo / 08-linkresolve-javap / 08-unsafe-demo / 08-whitebox-demo / 08-verifier-demo / 08-verificationtype-javap / 08-cds-demo / 08-cds-dump-full / 11-cds-load-demo / 12-ci-inlining-demo / 12-ci-typeflow-escape-demo / 12-ci-replay-demo / 13-jit-broker-demo / 13-jit-tiered-demo / 18-safepoint-demo / 18-safepoint-polling-demo / 20-vmops-demo
@@ -578,6 +580,17 @@
 - **实证方法论**: jcmd attach 本容器不可用(10500ms 超时);**自 attach 被 JDK 禁止**("Can not attach to current VM",HotSpotVirtualMachine.java:75);diff 真实输出素材缺失→按格式代码布局推导(正文注明);summary/detail 报告结构与素材逐行对照(report_summary_of_type 每个分支对应素材一行)
 - 实证: 34-nmt-tracking-demo.txt(补 (A) 段 committed 子段)+ jcmd-VM.native_memory.txt
 
+### 6.54 36-attach/01(AttachListener + Socket IPC,36 域 1/2,大纲 10 组漂移含 4 处机制编造 + 深审 2 轮 + 第 3 轮,2026-08-15)
+- **"JVM 启动时创建 socket" 错(重要)**: JDK9+ **attach-on-demand 懒启动**——init_at_startup 默认 false(唯一例外 ReduceSignalUsage,attachListener_linux.cpp:520-526),`-XX:+StartAttachListener`(globals.hpp:2467)强制;启动只 vm_start() 清残留 socket 文件(:460-476,thread.cpp:3936-3943)
+- **"SIGQUIT 触发" 半对(机制错)**: 触发=**双条件**——客户端先写 `.attach_pid<pid>` 文件(cwd 优先 fallback /tmp,VirtualMachineImpl.java:76/:282-302)再发 SIGQUIT(:120-126);Signal 线程 SIGBREAK 处理(os.cpp:353-389): transit_state CAS + is_init_trigger 查文件(uid 防伪 :530-560),命中 init(),**未命中继续打印线程转储**——同一信号二义;已初始化短路
+- **"COMMAND\narg1=val1\n\n" 协议格式错**: 真实=NUL 分隔 `<ver>0<cmd>0<arg>0<arg>0<arg>0`(:253-258;客户端 writeString UTF-8+NUL :308-321);版本 1,101=BADVERSION;AttachOperation name≤16/3 参/各≤1024(hpp:138-142)
+- **"permission 400" 错**: chmod **0600**(S_IREAD|S_IWRITE,:222);bind **`.tmp` 再 rename** 正式路径(:195/:211-228);安全双重=0600+**SO_PEERCRED euid/egid**(:361-372)
+- **"unlink 旧 file→create new" 半对**: vm_start() 启动时 stat+unlink 残留;atexit(listener_cleanup) 正常退出清理(:164-177)
+- **缺机制(重要)**: ①操作函数表 10 个(attachListener.cpp:324-336: agentProperties/datadump/dumpheap/load/properties/threaddump/inspectheap/setflag/printflag/jcmd);②**jcmd 操作=DCmd::parse_and_execute(DCmd_Source_AttachAPI, op->arg(0), ' ')(:200-212)——34-nmt/02 的 AttachAPI 源就是这条通道**;③线程=JavaThread "Attach Listener"(daemon/system thread group,attachListener.cpp:423-475),入口 attach_listener_thread_entry(:344-406);④状态机 NOT_INITIALIZED/INITIALIZING/INITIALIZED+transit CAS;⑤EnableDynamicAgentLoading 门控 load(:371-374,JDK11u 默认 true globals.hpp:2470,后续版本收紧);⑥DisableAttachMechanism 全关(globals.hpp:2464);⑦客户端 attach 流程(NSpid 解析/findSocketFile/createAttachFile/SIGQUIT/轮询 attachTimeout 默认 10000ms HotSpotVirtualMachine.java:367/checkPermissions/connect);⑧check_socket_file 失效重启(:494-516);⑨complete "result\n"+data(:408-434);⑩每操作独占连接
+- **环境事实(重要,修正旧结论)**: 容器常驻 **JMC+VisualVM 自动 attach 新 JVM**(~1.6s,hsperfdata)——"无信号也触发"假象+/tmp 堆积 .java_pid* 残留;os::get_temp_directory() Linux 写死 "/tmp"(os_linux.cpp:1707,不读 TMPDIR);**jcmd 10500ms 超时更可能是目标进程已退出**(34-nmt 的 NMTDemo 3 秒即结束)或 /proc 路径——"容器不支持 attach"旧结论作废
+- **实证方法论**: -Xlog:attach=trace 看触发决策("Attach triggered"/"Failed to find attach file");touch 文件+SIGQUIT 对照实验(信号二义);strace -f -e trace=stat 看服务端文件访问;pgrep 会抓到 bash(命令行含同串)——用程序自打印 pid
+- 实证: 36-attach-trigger-demo.txt
+
 ### 6.51 32-jfr/06(JNI Interface + Instrumentation + DCmd,32 域收官,大纲 10 组漂移含 6 处机制编造 + 深审 2 轮,2026-08-14)
 - **"JfrClassAdapter::transform" 编造**: 真实=JfrEventClassTransformer::on_klass_creation(jfrEventClassTransformer.cpp:1515);调用点 klassFactory.cpp:222 JFR_ONLY(ON_KLASS_CREATION)(jfrKlassExtension.hpp:41 宏,IS_EVENT_KLASS trace_id 标记)——**类文件解析层拦截 jdk.jfr.Event 子类首次加载**,重写字节→新 InstanceKlass 替换+tag_as;日志字符串 "JfrClassAdapter:"(:1522)是旧名唯一来源
 - **"方法入口 ASM 插桩" 错**: 注入=**事件类 schema**(5 方法壳 commit/begin/end/isEnabled/shouldCommit,:120-145 空方法体字节+3 字段 EventHandler,:60-61);急切模式调 Java EventInstrumentation.java:60(ASM 生成方法体)经 JfrUpcalls::new_bytes_eager_instrumentation(jfrUpcalls.cpp:146;Jfr::is_recording()||force_instrumentation :1406-1428)
@@ -620,7 +633,8 @@
 - [x] 32-jfr/01-06——✅ 完结(正文 0856326/1f5d2d3/6daa7f1/328c92f/b595e6b/f2a2c2f,commit 见 §二);**32 域完结**
 - [x] 34-nmt/01——✅ 完结(正文 cb24e2a/回填 ⚠️ 9 组/README 0f2abb7/第 3 轮 58866ce/第 4 轮 434708a);**34 域 1/2**
 - [x] 34-nmt/02——✅ 完结(正文 3fba0d4 含回填 ⚠️ 11 组/README 62e48f4);**34 域完结,第 5 批 9/13**
-- [ ] **36-attach/01**(Attach Listener + Socket IPC)——**下一篇**;大纲 `planning/outlines/36-attach/01-attach-listener.md`;34-nmt/02 悬念已指向 36-attach/01
+- [x] 36-attach/01——✅ 完结(正文 3cbbe22 含回填 ⚠️ 10 组/README eb9dbf4/第 3 轮 cc3a38b);**36 域 1/2**
+- [ ] **36-attach/02**(JDK Attach API + loadAgent,客户端 VirtualMachine 封装/loadAgent 流程)——**下一篇**;大纲 `planning/outlines/36-attach/02-jdk-attach.md`;36-attach/01 悬念已指向 02
 - [ ] 36-attach 后 → 37-heapdump → 39-runtime-mon → 46-sa(第 5 批剩余 4 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
