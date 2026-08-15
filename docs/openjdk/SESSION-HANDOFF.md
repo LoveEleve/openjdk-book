@@ -625,6 +625,19 @@
 - **实证方法论**: **HotSpotDiagnostic.dumpHeap 免 attach 触发**(com.sun.management.internal,jmm_DumpHeap0 management.cpp:1901-1920)——需 -Dcom.sun.management.jmxremote.port=0 加载 libmanagement 否则 UnsatisfiedLinkError;python 解析 hprof(顶层/段内记录均 9 字节头;CLASS_DUMP 64 字节头无 serial;live 对照验证 GC);**JDK 的 sub-record 与 hprof 标准 spec 有差异——以源码为准**
 - 实证: 37-heap-dumper-demo.txt
 
+### 6.57 37-heap-dumper/02(流式压缩 + 多触发入口,37 域收官,大纲 11 组漂移含 2 处机制编造 + 深审 2 轮,2026-08-15)
+- **"deflater 在 safepoint 外异步压缩" 错(重要)**: 压缩在 **WorkGang worker 线程**(thread_loop :277-303)与遍历并行但**全程在 safepoint 内**(VM_Operation run_task STW);顺序=_finished.add_by_id 按块 id 写(finish_work :461-482);无线程时 VM 线程同步压(thread_loop(true) :259-261);无 temp 文件 ✓
+- **"JFR: GC 事件 → JfrEmergencyDump → HeapDumper::dump" 编造(重要)**: JfrEmergencyDump 是 **JFR 录制数据**应急转储,与 heap dump 无关;JDK11 JFR 无 heap dump 集成
+- **"GZipCompressor 是 DumpWriter 子类" 错**: 继承 **AbstractCompressor**(heapDumperCompression.hpp:81);DumpWriter 组合 **CompressionBackend**(块队列/worker);管线=DumpWriter(缓冲)→CompressionBackend(get_new_buffer :381-444)→FileWriter;flush=backend.get_new_buffer(heapDumper.cpp:496-498)
+- **"jcmd → JMM_DumpHeap0" 错**: jcmd 的 GC.heap_dump 走 **HeapDumpDCmd**(diagnosticCommand.cpp:510-544,注册 :92;filename **位置参数**;-all/-gz 1-9 默认 1/-overwrite);JMM_DumpHeap0 是 **JMX** 入口(management.cpp:1901-1920)
+- **"四路触发" 不全**: 真实**五路**——①attach dumpheap②DCmd GC.heap_dump(唯一压缩路)③JMX dumpHeap④OOM(HeapDumpOnOutOfMemoryError globals.hpp:660 默认 false→report_java_out_of_memory debug.cpp:322-337 **cmpxchg 只报一次**→dump_heap_from_oome :2023-2025→dump_heap(true) java_pid<pid>.hprof+HeapDumpPath+.<seq> :2032-2111,**不做 GC** :2108)⑤GC 前后(HeapDumpBeforeFullGC/AfterFullGC→full_gc_dump collectedHeap.cpp:514-528)
+- **行号漂移**: heapDumperCompression.cpp **477 行**(大纲 70-140): load_gzip_func :77-91(dlsym libzip 的 ZIP_GZip_Fully/InitParams);init :93-119(+1024 注释空间 :116);compress :121-139
+- **"找不到 libzip→fallback 无压缩" 半对**: dlsym 失败→init 错误消息→set_error→**dump 报错**(非静默降级);压缩器 NULL 才直写(finish_work :471-472)
+- **缺机制(重要)**: ①gzip 第一块带 **"HPROF BLOCKSIZE=..." 注释**(:125-132;实证 1f8b 0810 FCOMMENT);②实测压缩比 ~12x(1318476 vs 15430735);③OOM dump 顺序=OOM 消息→dump→异常;④64MB 堆→34MB dump
+- **悬念指向错**: "→ 域38 PerfData" 过期(38 域已完结);正确 **39-runtime-monitoring/01**(目录名 monitoring!)
+- **实证方法论**: **自 attach+executeJCmd 是 jcmd 通道实证路径**(--add-exports jdk.attach/sun.tools.attach=ALL-UNNAMED+cast HotSpotVirtualMachine);GC.heap_dump filename=位置参数;executeJCmd 返回流需消费读输出
+- 实证: 37-heap-dumper-gzip-oome-demo.txt
+
 ---
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
@@ -659,9 +672,10 @@
 - [x] 34-nmt/02——✅ 完结(正文 3fba0d4 含回填 ⚠️ 11 组/README 62e48f4);**34 域完结,第 5 批 9/13**
 - [x] 36-attach/01——✅ 完结(正文 3cbbe22 含回填 ⚠️ 10 组/README eb9dbf4/第 3 轮 cc3a38b/第 4 轮 e19b9f3);**36 域 1/2**
 - [x] 36-attach/02——✅ 完结(正文 80537ed 含回填 ⚠️ 9 组/README a2f0430);**36 域完结,第 5 批 10/13**
-- [x] 37-heap-dumper/01——✅ 完结(正文 b4d58cd 含回填 ⚠️ 11 组/README 8800102);**37 域 1/2**
-- [ ] **37-heap-dumper/02**(流式压缩 + 多触发入口: GZipCompressor/jcmd/JMX/JFR/OOM)——**下一篇**;大纲 `planning/outlines/37-heap-dumper/02-compression-triggers.md`;37-heap-dumper/01 悬念已指向 02
-- [ ] 37-heap-dumper 后 → 39-runtime-mon → 46-sa(第 5 批剩余 2 域)
+- [x] 37-heap-dumper/01——✅ 完结(正文 b4d58cd 含回填 ⚠️ 11 组/README 8800102/第 4 轮 da7f010);**37 域 1/2**
+- [x] 37-heap-dumper/02——✅ 完结(正文 5150644 含回填 ⚠️ 11 组/README 5528a26);**37 域完结,第 5 批 11/13**
+- [ ] **39-runtime-monitoring/01**(ServiceThread——JVM 的后台线程做什么?)——**下一篇**;大纲 `planning/outlines/39-runtime-monitoring/01-service-thread.md`;37-heap-dumper/02 悬念已指向 39-runtime-monitoring/01
+- [ ] 39-runtime-monitoring 后 → 46-sa(第 5 批剩余 1 域)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
