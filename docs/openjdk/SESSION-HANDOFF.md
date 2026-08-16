@@ -977,6 +977,8 @@
 - **分配链补全(第 2 轮)**: 编译代码慢路径 new_instance_C(opto/runtime.cpp:196)→InstanceKlass::allocate_instance(instanceKlass.cpp:1241)→obj_allocate(collectedHeap.hpp:301)→ObjAllocator(memAllocator.hpp:81)→MemAllocator;G1: mem_allocate(g1CollectedHeap.cpp:398-408)→attempt_allocation(:730-742)→attempt_allocation_slow(:410-500: Heap_lock+attempt_allocation_locked→GCLocker 时 attempt_allocation_force(扩 young)→do_collection_pause(_g1_inc_collection_pause :459-460)→OOM :468-473)
 - **PLAB** ✓(plab.hpp:38+ "A per-thread allocation buffer used during GC",_bottom/_top/_end/_hard_end;YoungPLABSize=4096/OldPLABSize=1024 gc_globals.hpp:642/:646)——GC 期间晋升分配,与 TLAB 同构
 - **实证方法论**: ①**-Xlog:gc+tlab=trace 是 TLAB 全生命周期观察窗**(compute_size/desired_size/refill waste/slow allocs);②**-Xlog:gc 括号=GCCause**(Evacuation/Humongous/Diagnostic Command/OOM 链);③**UseTLAB 对照是分配路径的最强实证**(pd product 可开关,2 亿次分配 1.35s→8s 6 倍);④jcmd GC.run 触发 (Diagnostic Command);⑤素材 25-gc-heap-alloc-demo.txt
+- **第 3 轮 REVIEW 修正(commit f62279d)**: ①**'C2 内联成 3 条指令'无据删**(15-c2/07 只讲'快路径内联 TLAB bump'未提条数——跨篇断言只保留目标篇实证过的内容);②GCCause 三组表述与源码注释语义对齐(public=用户/工具触发/implementation independent=_no_gc+_allocation_failure/implementation specific=metadata+CMS+G1+Z);③PLAB 补 G1 形态: G1PLABAllocator(g1ParScanThreadState.hpp:40/:52)封装,par_allocate_during_gc 按 InCSetState::Young/Old 分 survivor/old(g1Allocator.cpp:170-185)
+- **check.py 工具缺陷(重要发现)**: 引用检查 regex `(c|h|java)` 只匹配 .c/.h/.java 单字符后缀——**.cpp/.hpp 的行号文字引用从不被检查**(历史盲区,历篇文章的 .cpp/.hpp 文字引用靠深审人工 grep 兜底;代码块检查不受影响因块首行格式独立);建议: regex 改 `(?:c|h|hpp|cpp|java)` 或先按扩展名分拣
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
