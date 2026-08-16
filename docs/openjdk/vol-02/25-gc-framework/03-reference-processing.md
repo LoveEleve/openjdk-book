@@ -149,9 +149,9 @@ bool LRUMaxHeapPolicy::should_clear_reference(oop p,
 }
 ```
 
-*关键设计: **最近被访问过的软引用不清**——`interval` 是"距上次访问的 GC 轮数",`_max_interval = 堆大小 × SoftRefLRUPolicyMSPerMB`(LRUMaxHeapPolicy :69;LRUCurrentHeapPolicy 用上次 GC 后剩余空间 :38)。**server 编译模式默认 LRUMaxHeapPolicy,否则 LRUCurrentHeapPolicy**(referenceProcessor.cpp:60-64)。默认 `SoftRefLRUPolicyMSPerMB=1000`(globals.hpp:1852):堆 32MB → max_interval = 32×1000 = 32000 个 clock 单位。**"1ms×heap MB"不是存活时间,而是"访问间隔的容忍度"**——soft ref 被 `get()` 后 timestamp 刷新,interval 归零,继续存活;设为 0 → 永不保留(等同弱引用)。*
+*关键设计: **最近被访问过的软引用不清**——clock 是**毫秒时间戳**(`update_soft_ref_master_clock` 用 `os::javaTimeNanos()/1e6`,referenceProcessor.cpp:157-161,"We need a monotonically non-decreasing time in ms"),`interval = clock - timestamp` 是**距上次访问的毫秒数**;`_max_interval = 堆 MB 数 × SoftRefLRUPolicyMSPerMB`(LRUMaxHeapPolicy :69;LRUCurrentHeapPolicy 用上次 GC 后剩余空间 :38)。**server 编译模式默认 LRUMaxHeapPolicy,否则 LRUCurrentHeapPolicy**(referenceProcessor.cpp:60-64)。默认 `SoftRefLRUPolicyMSPerMB=1000`(globals.hpp:1852):堆 32MB → max_interval = 32×1000 = 32000 毫秒 = **32 秒内被访问过的软引用都保留**。**它不是"存活时间",而是"访问间隔的容忍度"**——soft ref 被 `get()` 后 timestamp 刷新,interval 归零,继续存活;设为 0 → 永不保留(等同弱引用)。*
 
-**G1 的接线**: G1 持有**两个** ReferenceProcessor——`_ref_processor_cm`(并发标记周期用)与 `_ref_processor_stw`(STW GC 用)(g1CollectedHeap.cpp:1009-1106)。发现发生在**并发标记遍历对象图时**(closure 的 `ref_discoverer()` 指向处理器,instanceRefKlass 的 try_discover);处理在 STW 阶段(GC 阶段树的 "Reference Processing")。**大纲的"OopStorage 存储 discovered refs"是错的**: JDK11 的 ReferenceProcessor 不碰 OopStorage(grep 零命中)——discovered 链走 Reference 对象自身的字段;OopStorage 是 JNI handles 的存储(27-jni/01 篇),用途不同。
+**G1 的接线**: G1 持有**两个** ReferenceProcessor——`_ref_processor_cm`(并发标记周期用)与 `_ref_processor_stw`(STW GC 用)(g1CollectedHeap.cpp:1009-1106)。发现挂在**扫描 closure** 上(`set_ref_discoverer`,g1OopClosures.hpp:101-102 与 g1ParScanThreadState.hpp:95)——**并发标记与 STW 年轻代/Full GC 的对象图扫描都会发现引用**(closure 的 `ref_discoverer()` 指向处理器,instanceRefKlass 的 try_discover);处理在 STW 阶段(GC 阶段树的 "Reference Processing")。**大纲的"OopStorage 存储 discovered refs"是错的**: JDK11 的 ReferenceProcessor 不碰 OopStorage(grep 零命中)——discovered 链走 Reference 对象自身的字段;OopStorage 是 JNI handles 的存储(27-jni/01 篇),用途不同。
 
 ## 核心悬念
 
