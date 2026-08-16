@@ -3,6 +3,16 @@
 > 🔴 Deep | 2 KP 中的运行时决策
 > 读者处境: C2 编译 `obj.foo()` 时假设 obj 一直是 Foo 类型——直接内联 Foo.foo()。运行时 obj 是 Bar(Foo子类)——IC 发现不匹配——需要"逆优化"回解释器。
 
+> ⚠️ 写作期修正(2026-08-16,22-deoptimization/01 完成,第 7 批开篇):
+> - **"Reason→Action 映射表 (deoptimization.cpp:200-350) + action_for_reason" 编造(重要)**: 都不存在;action 是**编译器在生成 trap 代码时选的**——C2 的 GraphKit::uncommon_trap(reason, action, ...)(graphKit.hpp:733-740)显式带 action;运行时 uncommon_trap_inner(deoptimization.cpp:1526)按 action switch(:1797-1837)+MDO 计数做 hysteresis
+> - **"trap_state 31-bit [action:3][reason:5][debug_id:23] 存 MethodData" 混淆(重要)**: 31 位 action+reason+debug_id 是 **trap_request**(一次调用的编码,deoptimization.hpp:117-125 位域常量,_action_shift=0/_reason_shift=3/_debug_id_shift=8;补码 ~ 编码,:304-347 解包;大纲的 "trap_bits >> 24=action" 全错);**trap_state 是另一回事**=DataLayout::trap_bits **1+31 位**(methodData.hpp:139-142): 1 位 recompile + 31 位 reason 格(0=无/reason/Reason_many 格底,trap_state_reason :2118/trap_state_add_reason :2149)——per-bci 只有 1 位计数(注释 :1879-1883 "{0,1,(per-method count)}")
+> - **"PerBytecodeTrapLimit 默认 100" 错**: 默认 **4**(globals.hpp:1788);PerMethodTrapLimit=**100**(:1779)/PerMethodSpecTrapLimit=5000(:1783)/PerBytecodeRecompilationCutoff=**200**(:1775)/PerMethodRecompilationCutoff=**400**(:1771);per_method_trap_limit(deoptimization.hpp:408-411)
+> - **"100 次反复 deopt→永久禁用 JIT" 简化**: 真实=**三种防死循环措施**(deoptimization.cpp:1745-1769 注释): ①同点同因二次重编译→调整 reinterpret+overflow_recompile_count(:1750-1756);②overflow_recompile_count>PerBytecodeRecompilationCutoff→make_not_compilable(:1960-1966 set_not_compilable :1980);③PerMethodRecompilationCutoff 大限(:1765-1769);per-bci 达 PerBytecodeTrapLimit 就 make_not_entrant(:1875-1883)
+> - **"null_check→Action_maybe_recompile 映射" 是编译器的选择**: parse2.cpp 的 uncommon_trap(reason, ...)(:150/:190/:245)带 action 参数;运行时只管执行
+> - **per-method 计数**: _trap_hist u1 数组 per reason(methodData.hpp:1986-2007,tenured 除外)+_nof_overflow_traps;MethodData::trap_count(:2384)
+> - **DeoptReason 行号 ✓**(deoptimization.hpp:42-106: per-bytecode 8 个注释 :45-46/null_check :52/tenured=TRAP_HISTORY_LENGTH :96/RECORDED_LIMIT :103);DeoptAction ✓(:108-115)
+> - **悬念指向** ✓(02-unpack-frames);素材: 22-deopt-type-demo.txt(类型切换三次: 75 % 4 内联 Square→74 3 made not entrant+201 % 4 双路内联→200 3 made not entrant+202 4)
+
 ### 1. "为什么我挂了？" — 20 种 DeoptReason
 
 场景: JIT 编译了 1000 个方法——每秒钟可能有 0.1 个需要 deopt。deopt 的原因不是统一的——有的是 null 出现了(不常见但合法)，有的是类型假设彻底破了(需要重新编译)。
