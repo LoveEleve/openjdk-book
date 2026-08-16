@@ -1129,6 +1129,7 @@
 - **LambdaForm**: prepare()(:827-843)在 COMPILE_THRESHOLD==0(**默认 0**,MethodHandleStatics.java:71-72 属性 java.lang.invoke.MethodHandle.COMPILE_THRESHOLD)时 compileToBytecode()(:857-878→InvokerBytecodeGenerator.generateCustomizedCode :688);否则 vmentry=LF_INTERPRET 解释器入口(generateLambdaFormInterpreterEntryPoint :840);编译产物=普通 Java 方法(基本类型签名)可被 C2 内联
 - **实证工具箱(新)**: ①**-Xbatch+PrintInlining** 直看 MH 决策("force inline by annotation"=@ForceInline 适配器/invokeExact_MT 24 bytes/receiver not constant=折叠失败打印);②**常量 vs 参数 MH 性能对照**(static final 字段=编译期常量,1.11x vs 5.78x);③反射对照树(acquireMethodAccessor/MethodAccessorImpl no static binding/装箱)——"50x"实测 4-5x
 - 实证: 29-mh-invoke-demo.txt
+- **第 3 轮 REVIEW 修正(2026-08-16)**: ①后续链接标题对齐——02 实际标题="ricochet frame 怎么传参数？— x86 Adapter Stubs"(大纲 02-x86-adapter.md),原写"方法句柄的调用约定怎么适配";②§5 "invokeExact 的 JVM 生成适配器"措辞错——invokeExact_MT 是 **Invokers 生成的调用器**(Java 侧)非 JVM 生成,改 "带类型检查调用器 @ForceInline";③§4 补 LF 编译产物加载机制(隐含断言追查): `UNSAFE.defineAnonymousClass` 定义**匿名类**静态方法(InvokerBytecodeGenerator.java:299-302,loadMethod :286-290)——PrintInlining 的 Invokers$Holder 就是这类匿名类;④§3 "两步指针跳"补全中间跳(ResolvedMethodName);⑤§5 装箱精确化(valueOf 装箱/intValue 拆箱);⑥素材 (D) templateTable 引用断行修正;⑦§6.85 行号全量核验 0 错误
 
 
 ## 七、用户偏好与纪律(重要,违背会被批评)

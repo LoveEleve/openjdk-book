@@ -1,7 +1,7 @@
 # 01. invokeExact 怎么做到 50x faster than reflection？— MH invoke 链路
 
 > **前置依赖**:[28-jvmti/03 — 为每个对象打 tag — TagMap + 事件分派细节](openjdk/vol-02/28-jvmti/03-auxiliary.md):ResolvedMethodName/ResolvedMethodTable(方法句柄↔Method* 的登记表)已讲;[08-interpreter/04 — 符号引用怎么变成直接引用？— LinkResolver + Rewriter](openjdk/vol-02/08-interpreter/04-linkresolver-rewriter.md):方法解析/虚分派的先例;[15-c2/02 — Parse + GraphKit — 字节码→Ideal Graph](openjdk/vol-02/15-c2-compiler/02-c2-parse-graphkit.md):内联决策链(doCall.cpp 的 MH 分支)已讲;[13-jit-framework/01 — 谁决定编译、怎么排队、谁执行？— CompileBroker 编译队列](openjdk/vol-02/13-jit-framework/01-compile-broker-queue.md):编译产物如何进入 CodeCache
-> → **后续**:[02-x86-adapter — 方法句柄的调用约定怎么适配?— x86 adapter stubs](02-x86-adapter.md)
+> → **后续**:[02-x86-adapter — ricochet frame 怎么传参数？— x86 Adapter Stubs](02-x86-adapter.md)
 > 关联域: 28-jvmti(ResolvedMethodName 桥)、08-interpreter(解析)、15-c2(内联)、16-code-cache(nmethod)
 
 ## 先纠正标题: 50x 是历史说法
@@ -63,7 +63,7 @@ linkToInterface(:435-466): MemberName.clazz+vmindex → lookup_interface_method(
   之后统一 jump_from_method_handle(:482)跳到 Method* 的 from_interpreted/from_compiled 入口
 ```
 
-*关键设计: 链接器是"手写汇编的 invoke* 模板"。linkToVirtual 的注释点破本质——它做的正是 invokevirtual 字节码该做的事(接收者类型→vtable 槽),只是省掉了常量池解析与画像;invokeBasic 则直接穿透 MH 内部结构(三层 oop 字段)拿到目标 Method*。这是"两步指针跳"的落点: MemberName→vmtarget→Method*,没有哈希表查找。*
+*关键设计: 链接器是"手写汇编的 invoke* 模板"。linkToVirtual 的注释点破本质——它做的正是 invokevirtual 字节码该做的事(接收者类型→vtable 槽),只是省掉了常量池解析与画像;invokeBasic 则直接穿透 MH 内部结构(三层 oop 字段)拿到目标 Method*。这是"两步指针跳"的落点: MemberName→ResolvedMethodName→Method*(两次 oop 字段读取),没有哈希表查找。*
 
 ## 4. LambdaForm — Java 侧生成的小方法
 
@@ -81,7 +81,7 @@ class LambdaForm {
     MemberName vmentry;   // low-level behavior, or null if not yet prepared
 ```
 
-`vmentry`(注释 "low-level behavior, or null if not yet prepared")就是 §3 链接器取的那个 MemberName——**懒准备**: `prepare()`(LambdaForm.java:827-843)在 `COMPILE_THRESHOLD == 0`(**默认 0**,MethodHandleStatics.java:71-72 的系统属性 `java.lang.invoke.MethodHandle.COMPILE_THRESHOLD`)时先 `compileToBytecode()`——用 `InvokerBytecodeGenerator.generateCustomizedCode` 生成定制字节码(:857-878,`vmentry = InvokerBytecodeGenerator.generateCustomizedCode(this, invokerType)`);其余情况退回 `generateLambdaFormInterpreterEntryPoint`(:840,解释器入口)。**LF 编译产物是普通 Java 方法**(基本类型签名)——进入 CodeCache 后就能被 C2 当作普通方法内联。这就是"MH 调用 = 一串可内联小方法"的构造: 直接方法句柄的 LF 极小(invokeBasic 直达),组合方法句柄的 LF 是生成的字节码序列。
+`vmentry`(注释 "low-level behavior, or null if not yet prepared")就是 §3 链接器取的那个 MemberName——**懒准备**: `prepare()`(LambdaForm.java:827-843)在 `COMPILE_THRESHOLD == 0`(**默认 0**,MethodHandleStatics.java:71-72 的系统属性 `java.lang.invoke.MethodHandle.COMPILE_THRESHOLD`)时先 `compileToBytecode()`——用 `InvokerBytecodeGenerator.generateCustomizedCode` 生成定制字节码(:857-878,`vmentry = InvokerBytecodeGenerator.generateCustomizedCode(this, invokerType)`);其余情况退回 `generateLambdaFormInterpreterEntryPoint`(:840,解释器入口)。**LF 编译产物是普通 Java 方法**(基本类型签名)——由 `UNSAFE.defineAnonymousClass` 定义为**匿名类**里的静态方法(InvokerBytecodeGenerator.java:299-302;PrintInlining 里的 `Invokers$Holder` 就是这类匿名类),进入 CodeCache 后就能被 C2 当作普通方法内联。这就是"MH 调用 = 一串可内联小方法"的构造: 直接方法句柄的 LF 极小(invokeBasic 直达),组合方法句柄的 LF 是生成的字节码序列。
 
 *关键设计: LambdaForm 把"调用形态"物化成字节码。组合 MH(filter/bind/转换类型)的 LF 由 LambdaFormEditor 编辑而来,再经 InvokerBytecodeGenerator 生成成一个小方法,方法体直接内联——于是复杂 MH 的性能损失只剩"生成字节码的常量性"问题。这与 28-01 的事件系统"把结论烫成标志"是同一思路: 运行时决策尽量前移到编译期/生成期。*
 
@@ -96,7 +96,7 @@ class LambdaForm {
 | `mh.invokeExact(foo, i)`(方法参数) | 52ms | 5.78 |
 | `Method.invoke(foo, i)` 反射 | 218ms | 24.2(且为 invokeExact 参数的 4.19 倍) |
 
-PrintInlining 树(素材 B/C)印证: ①invokeExactCall 树里 `Invokers$Holder::invokeExact_MT (24 bytes) force inline by annotation`(invokeExact 的 JVM 生成适配器 @ForceInline 强制内联)+ `checkExactType/checkCustomized`(类型/定制化检查,均 force inline)+ **`MethodHandle::invokeBasic(LI)I (0 bytes) receiver not constant`**(callGenerator.cpp:861-863 的失败打印——接收者非常量,走链接器);②反射树则是 `acquireMethodAccessor`(不内联)+ `MethodAccessorImpl::invoke no static binding` + `Integer::valueOf/intValue` **装箱**——反射每次调用都在做 MH 编译期就做完的事。
+PrintInlining 树(素材 B/C)印证: ①invokeExactCall 树里 `Invokers$Holder::invokeExact_MT (24 bytes) force inline by annotation`(Invokers 生成的带类型检查调用器,@ForceInline 强制内联)+ `checkExactType/checkCustomized`(类型/定制化检查,均 force inline)+ **`MethodHandle::invokeBasic(LI)I (0 bytes) receiver not constant`**(callGenerator.cpp:861-863 的失败打印——接收者非常量,走链接器);②反射树则是 `acquireMethodAccessor`(不内联)+ `MethodAccessorImpl::invoke no static binding` + `Integer::valueOf`(参数**装箱**)/`Integer::intValue`(返回值拆箱)——反射每次调用都在做 MH 编译期就做完的事。
 
 ## 核心悬念
 
