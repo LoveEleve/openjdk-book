@@ -53,7 +53,7 @@ G1 的一次年轻代 GC,扫描任务被 N 个 worker 平分。难的不是"平�
 
 ### 三个操作
 
-**push**(taskqueue.inline.hpp:78-98): 写 `_elems[localBot]` → `release_store(&_bottom, localBot+1)`——owner 独写,无锁。队列满时 OverflowTaskQueue 用独立 overflow stack 兜底(:100-108)。
+**push**(taskqueue.inline.hpp:78-98): 写 `_elems[localBot]` → `release_store(&_bottom, increment_index(localBot))`(:92,环形递增)——owner 独写,无锁。队列满时 OverflowTaskQueue 用独立 overflow stack 兜底(:100-108)。
 
 **pop_local**(taskqueue.inline.hpp:154-194)——owner 取底:
 
@@ -87,7 +87,7 @@ GenericTaskQueue<E, F, N>::pop_local(volatile E& t, uint threshold) {
 
 *关键设计: 正常路径 owner 自减 `_bottom` 即取走任务,零竞争;只有**最后一个元素**才可能和 thief 撞车——`pop_local_slow`(inline.hpp:122-152)用 `Age(localBot, oldAge.tag()+1)` 与 thief 的 `pop_global` 竞争 CAS,赢家拿走元素,输家把空队列表示修正为规范形态(:149,"Fix this representation of the empty queue to become the canonical one")。*
 
-**pop_global**(taskqueue.inline.hpp:204-233)——thief 偷顶: `load_acquire(_bottom)`(:213)→ 队列空返回 → 读 `_elems[oldAge.top()]`(:224)→ `newAge.increment()`(top+1)→ **`_age.cmpxchg(newAge, oldAge)`**(:227)——CAS 成功才真正"偷到"。一次只偷一个。多个 thief 抢同一元素,只有一个 CAS 成功。**偷哪个队列**由 `GenericTaskQueueSet::steal_best_of_2`(:235-241)决定: 随机挑两个受害者队列各试一次——比全局轮询少冲突。
+**pop_global**(taskqueue.inline.hpp:204-233)——thief 偷顶: `load_acquire(_bottom)`(:213)→ 队列空返回 → 读 `_elems[oldAge.top()]`(:224)→ `newAge.increment()`(top+1)→ **`_age.cmpxchg(newAge, oldAge)`**(:227)——CAS 成功才真正"偷到"。一次只偷一个。多个 thief 抢同一元素,只有一个 CAS 成功。**偷哪个队列**由 `GenericTaskQueueSet::steal_best_of_2`(:235-250)决定: 随机挑两个受害者队列,**比较各自的 size,偷较大的那个**("Sample both and try the larger",:245-247)——比全局轮询少冲突。
 
 ## 2. WorkGang — worker 的调度骨架
 
