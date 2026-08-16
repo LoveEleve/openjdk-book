@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-16 | 卷 2 写作中: **133/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 28) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 50 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(2,33 域 2/3)**;下一篇 33-jmx/03(GC Notifier+LowMemory+Flags,33 域收官,第 6 批 5/5)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-16 | 卷 2 写作中: **134/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 29) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 51 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结)**;下一篇 43-nio-net/01(TCP Socket,第 6 批收官)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -46,7 +46,7 @@
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
-第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 ✅(3/3,28 域完结)** → **29 ✅(2/2,29 域完结)** → **33 ✅(2/3)** → 43
+第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 ✅(3/3,28 域完结)** → **29 ✅(2/2,29 域完结)** → **33 ✅(3/3,33 域完结)** → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
@@ -95,7 +95,7 @@
 | **25-gc-framework** | 1-6 | `01-barrier-access.md`(195)+`02-collected-heap.md`(199)+`03-reference-processing.md`(160)+`04-workgang-taskqueue.md`(155)+`05-cardtable-dirtycardq.md`(67)+`06-oopstorage-stringdedup-stats.md`(113) | ✅ **25 域完结(本会话)** |
 | **28-jvmti** | 3 | `28-jvmti/01-agent-architecture.md`(317)+`02-redefine-classes.md`(270)+`03-auxiliary.md`(135) | ✅ **28 域完结(本会话)** |
 | **29-mh** | 2 | `29-mh/01-invoke-chain.md`(105)+`02-x86-adapter.md`(96) | ✅ **29 域完结(本会话)** |
-| **33-jmx** | 2 | `33-jmx/01-memory-service.md`(185)+`02-jmm-interface.md`(168) | ✅ 33 域 2/3(本会话) |
+| **33-jmx** | 3 | `33-jmx/01-memory-service.md`(185)+`02-jmm-interface.md`(168)+`03-gc-notifier-flags.md`(161) | ✅ **33 域完结(本会话)** |
 
 ### 本会话 50 篇的 commit 清单(按 git log 为准,2026-08-14/16)
 
@@ -106,6 +106,8 @@
 **33-jmx/02(JMM 接口+JDK Management,33 域 2/3)**: 正文 236ea72(168 行)→ 大纲回填 ⚠️ 12 块 8e4a2ed→ README de710ad(133/152,33 域 2/3,第 6 批 5/5)→ 素材 33-jmx-jmm-demo.txt
 
 **33-jmx 第 3 轮深度 REVIEW(两篇,2026-08-16)**: e5da1d9——①注册点函数名 genesis→universe_post_init(universe.cpp:1002,genesis 仅 :321-462);②行号修正 9 处(management.cpp 数组 :2232/get_jmm_interface :2275/recalculate_sizes :182/jmm.h:30/management_ext.c:39/PlatformMBeanProviderImpl.java:55/:706-758/:1862-1883 等);③代码块标注错位 2 处(:138-147/:285-292,check.py 线性匹配掩盖);④HANDOFF 结构事故: 6.87/6.88 双副本(anchor "## 七、" 命中 6.68 教训文本反引号内引用)→删错位副本+拼回教训+教训补充 2;commit 清单 48→50
+
+**33-jmx/03(GC Notifier+LowMemory+Flags,33 域收官)**: 正文+大纲 621f389(161 行,含大纲回填 ⚠️ 10 块)→ README 9be7e2f(134/152,33 域完结,第 6 批 5/5 域收官)→ 素材 33-jmx-notify-demo.txt+33-jmx-flag-demo.txt
 
 **33-jmx/02(JMM 接口+JDK Management,33 域 2/3)**: 正文 236ea72(168 行)→ 大纲回填 ⚠️ 12 块 8e4a2ed→ README de710ad(133/152,33 域 2/3,第 6 批 5/5)→ 素材 33-jmx-jmm-demo.txt
 
@@ -245,7 +247,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 48 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 50 个**(全部 gitignore 不入库,在 materials/commands/):
 - `29-mh-adapter-demo.txt`(x86 Adapter 实证——**JDK11 无 ricochet frame**: (A) grep 铁证——'ricochet' 在 hotspot methodHandles.cpp/hpp/methodHandles_x86.cpp 与 Java 侧 java.lang.invoke 全部零命中(JDK8 的手写 adapter 汇编整体移除);(B) MethodHandlesAdapterBlob=BufferBlob(codeBlob.hpp:452-454),adapter_code_size LP64=32000(methodHandles_x86.hpp:30),只含 6 个签名多态入口(29-01);(C) jump_from_method_handle(methodHandles_x86.cpp:120-155)逐行: 空 Method*→throw_AbstractMethodError :153-154/interp_only_mode 检查 :130-147(28-01 §4 衔接)/jmp from_compiled|from_interpreted :149-151——**参数零搬运**(调用约定共享);(D) Java 侧 adapter: asType 三级路径(MethodHandle.java:836-852 fast path+asTypeCache→makePairwiseConvert MethodHandleImpl.java:250-255→makePairwiseConvertByEditor :266+ 逐参数 filter)/LambdaFormEditor 编辑 LF(LambdaFormEditor.java:45: permute :848/spread :510/collect :555/filter :627)/guardWithTest :768;(E) 历史对照: JDK8 ricochet frame 汇编 vs JDK11 LF 字节码(演进动机标注为推断))
 - `29-mh-invoke-demo.txt`(MH invoke 链路实证: (A) 性能对照(核心)——2000 万次 -Xbatch: 直接 9ms/invokeExact(参数 MH)52ms/**invokeExact(static final 常量 MH)10ms(1.11 倍,与直接调用几乎持平)**/反射 218ms;reflection/invokeExact(param)=4.19——**'50x'是 JDK8 历史说法,JDK11 实测 ~4-5 倍**;(B) PrintInlining invokeExactCall 树: Invokers$Holder::invokeExact_MT(24 bytes) force inline by annotation+checkExactType/checkCustomized(force inline)+**MethodHandle::invokeBasic(LI)I (0 bytes) receiver not constant**(callGenerator.cpp:861-863 失败打印)+DirectMethodHandle::internalMemberName force inline;(C) 反射树: acquireMethodAccessor 不内联+MethodAccessorImpl no static binding+Integer::valueOf/intValue 装箱;(D) 源码定位: 6 intrinsic vmSymbols.hpp:1435-1441/generate_method_handle_interpreter_entry methodHandles_x86.cpp:203-290/jump_to_lambda_form :157-198 链 MH→form→vmentry→method→ResolvedMethodName→Method*/generate_method_handle_dispatch :292-489(linkToVirtual vtable 'same as TemplateTable::invokevirtual' :408-409)/callGenerator.cpp for_method_handle_inline :824-957/LambdaForm prepare :827-843+compileToBytecode :857-878/COMPILE_THRESHOLD 默认 0 MethodHandleStatics.java:71-72)
 - `28-jvmti-tagmap-demo.txt`(TagMap 全链路: (A) SetTag 3 对象(1001/2002/3003)→重打更新(1001→1002)→GetObjectsWithTags 精确返回 2 个→IterateThroughHeap(UNTAGGED filter)回调 3 个 tagged→丢弃强引用+ForceGarbageCollection→**ObjectFree×3 tag 精确匹配**→GetObjectsWithTags 返回 0;(B) -Xlog:jvmti+objecttagging=trace 看到 do_weak_oops 日志 **(3->0, 3 freed, 0 total moves)**(:3427-3428);(C) **filter 反直觉语义**: JVMTI_HEAP_FILTER_TAGGED 传进去回调 43650 个(untagged!),UNTAGGED 才 3 个——filter 位=排除类别(is_filtered_by_heap_filter :1017-1034 "filter out tagged objects");(D) 源码定位: entry phantom oop :92/hash (addr>>3)%size :194/load_factor 4.0 :166/tag_map_for 懒创建 :529-541/set_tag 三态 :738-767/weak 清理链 weakProcessor.cpp:36-41→do_weak_oops :3335/ObjectMarker mark 位 :1654-1734/VM_HeapWalkOperation :2663-3300/ForceGarbageCollection jvmtiEnv.cpp:1954)
@@ -301,7 +303,7 @@
 
 ### 6.0 本会话精华速查(新 AI 写 33-jmx/01 前必读)
 
-**本会话覆盖(50 篇,6.52-6.88)**: 20-vm-operations/02 → 27-jni(3) → 30-jvm-entry(3) → 32-jfr(6) → 34-nmt(2) → 36-attach(2) → 37-heap-dumper(2) → 39-runtime-monitoring(2) → 46-sa(1) → 14-c1(4,完结) → 15-c2(8,完结) → 21-shared-runtime(3,完结) → 25-gc-framework(6,完结) → **28-jvmti(3,完结)** → **29-mh(2,完结)** → **33-jmx(2/3)**。下一篇 33-jmx/03(GC Notifier+LowMemory+Flags,33 域收官,第 6 批 5/5;剩余 33-03→43,然后第 7 批 22/26/35/40/47)。
+**本会话覆盖(51 篇,6.52-6.89)**: 20-vm-operations/02 → 27-jni(3) → 30-jvm-entry(3) → 32-jfr(6) → 34-nmt(2) → 36-attach(2) → 37-heap-dumper(2) → 39-runtime-monitoring(2) → 46-sa(1) → 14-c1(4,完结) → 15-c2(8,完结) → 21-shared-runtime(3,完结) → 25-gc-framework(6,完结) → **28-jvmti(3,完结)** → **29-mh(2,完结)** → **33-jmx(3,完结)**。下一篇 43-nio-net/01(TCP Socket,第 6 批收官;剩余 43→第 7 批 22/26/35/40/47)。
 
 **大纲漂移的高发类型(28/29 域新实例)**:
 1. **文件/类名编造**: jvmtiEnv.hpp 不存在(28-01,真实 jvmtiEnvBase.hpp+生成类)、relocator.cpp 位置错(28-02,真实 share/runtime 非 prims,且只是 ldc→ldc_w 配角)、"weak hash table auto-removed"(28-03,真实普通哈希表+phantom oop+GC 显式清理)、LambdaForm 在 hpp(29-01,真实 Java 侧 LambdaForm.java)——**文件名/类名一律 find/grep**
@@ -1160,6 +1162,22 @@
 - **实证方法论(新)**: setVerbose(true)→jmm_SetBoolAttribute(JMM_VERBOSE_GC :778→MemoryService::set_verbose→LogConfiguration 打出 `[0.102s][info][gc] GC(0) Pause Full (System.gc())`——**JMM 写接口的可观察副作用**;getCurrentThreadAllocatedBytes 1MB delta=1048592(GetThreadAllocatedMemory :2126);GcInfo 需 --add-modules jdk.management(否则无 getLastGcInfo);ThreadMXBean 实例=com.sun.management.internal.HotSpotThreadImpl(jdk.management 加载后替换)
 - 素材: 33-jmx-jmm-demo.txt
 
+
+### 6.89 33-jmx/03(GC Notifier + LowMemory + Flags,33 域收官,大纲 10+ 处漂移含 3 处机制编造 + 深审 2 轮,2026-08-16)
+
+- **"只在 GC cycle 中检测" 错(重要)**: 检测**三入口**——①GC 后 track_memory_usage→detect_low_memory(memoryService.cpp:155,01 篇 gc_epilogue);②**分配慢路径**(MemAllocator::Allocation::notify_allocation_low_memory_detector memAllocator.cpp:232-236→detect_low_memory_for_collected_pools lowMemoryDetector.hpp:258-277,used>high 才查;头注释 :55-58 "detection will be performed when GC finishes and also in the slow path allocation"——**快路径零开销**);③GC 结束 gc_end 内 detect_after_gc_memory(memoryManager.cpp:274-278,**collection usage 阈值唯一检测点**)
+- **"GcNotifier::post_gc_notification" 编造**: 真实=**GCNotifier::pushNotification**(gcNotifier.cpp:45-54:**复制账本** new GCStatInfo+get_last_gc_stat,注释 "GC may occur between now and the creation of the notification";GCNotificationRequest 链表 Service_lock 尾插+notify :56-65)+has_event :76-78+sendNotification(:165-172 清异常,39-01 衔接)/sendNotificationInternal(:189-224: createGcInfo :99-163 构造 com.sun.management.GcInfo(builder+index+起止 ms+before/after 数组+GC 线程数,survivor max==0 特例 :120-127)→GarbageCollectorExtImpl.createGCNotification GarbageCollectorExtImpl.java:93-114,hasListeners 检查)
+- **"GC_NOTIFICATION" 编造**: 真实通知类型=**GARBAGE_COLLECTION_NOTIFICATION**(GarbageCollectorExtImpl.java:98)
+- **"clear_sensor() in GC begin" 编造**: 无 GC begin 清除;SensorInfo::clear(lowMemoryDetector.cpp:345-374)由 process_pending_requests(:283-291)按 pending_clear 分派
+- **"trigger_count/trigger_time" 半对**: 真实=**_sensor_on/_sensor_count/_pending_trigger_count/_pending_clear_count 状态机**(hpp:118-134);检测线程 Service_lock 下只改 pending 计数,ServiceThread 锁外 trigger/clear(process_sensor_changes :60-77)
+- **阈值通知两种语义(大纲漏,核心)**: **gauge**(set_gauge_sensor_level cpp:206-239,超 high 触发一次,降 low 以下才可再触发——**迟滞 hysteresis**;实证 threshold.exceeded 只报一次 count=1)vs **counter**(set_counter_sensor_level :261-277,**每次**超阈值都 pending;实证 collection.threshold.exceeded 每次 GC 报,count=1→2)
+- **trigger 落点**: JavaCalls 调 sun.management.Sensor.trigger(int, MemoryUsage)(Sensor.java:128-136)→triggerAction→PoolSensor(MemoryPoolImpl.java:297-300,发 MEMORY_THRESHOLD_EXCEEDED)/CollectionSensor(:325-331,MEMORY_COLLECTION_THRESHOLD_EXCEEDED)→MemoryImpl.createNotification(MemoryImpl.java:138-161,hasListeners 检查没监听不发);**OOM 时降级 trigger(int)**(cpp:307-313,注释);trigger 回调后锁内更新 _sensor_on/_sensor_count(:335-342)
+- **通知开关自动开启(大纲漏,重要)**: GarbageCollectorExtImpl.addNotificationListener(GarbageCollectorExtImpl.java:118-126)在"从无监听器变有监听器"时 setNotificationEnabled(this,true)→native→jmm_SetGCNotificationEnabled(management.cpp:1893-1900)置 _notification_enabled;removeNotificationListener 对称关闭——**挂监听器即自动开通知**(实证 13 条通知无需配置)
+- **WriteableFlags**: 三入口同一函数——jmm_SetVMGlobal(management.cpp:1569-1580,JVMFlag::MANAGEMENT origin)/attach setflag(attachListener.cpp:288,ATTACH_ON_DEMAND)/VM.set_flag DCmd(diagnosticCommand.cpp:282)→WriteableFlags::set_flag(writeableFlags.cpp:243-267: 参数空 MISSING_NAME/VALUE→find_flag 找不到 INVALID_FLAG→**is_writeable() 检查 NON_WRITABLE**→setter 按类型分派 set_flag_from_char :269/set_flag_from_jvalue :298);"writeable"=manageable/product_rw 宏(globals.hpp:166-208 注释,**编译期声明**);实证(jcmd VM.set_flag): HeapDumpBeforeFullGC/HeapDumpOnOutOfMemoryError/MaxHeapFreeRatio "Command executed successfully"、PrintGC/PrintJNIResolving "only 'writeable' flags can be set"、NonExistingFlag "flag NonExistingFlag does not exist"
+- **悬念指向错**: "域34 NMT"过期(34 域第 5 批已完结)——正确 **43-nio-net**(第 6 批收官;01 标题="TCP Socket — PlainSocketImpl + ServerSocket + epoll")
+- **实证方法论**: MemoryPoolMXBean.setUsageThreshold/setCollectionUsageThreshold+GarbageCollectorMXBean.addNotificationListener 三监听同挂一 demo;GarbageCollectionNotificationInfo.from 需 (CompositeData) 强转+--add-modules jdk.management;threshold.exceeded 只报一次 vs collection 每次 GC 报的对照=**gauge vs counter 语义的直接证据**;GC NOTIF 的 action("end of minor GC"/"end of major GC")=GCMemoryManager 构造参数(g1CollectedHeap.cpp:1424-1425);jcmd VM.set_flag 正反例(可写/manageable vs 不可写/不存在)
+- 素材: 33-jmx-notify-demo.txt + 33-jmx-flag-demo.txt
+
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
@@ -1225,7 +1243,8 @@
 - [x] 29-mh/02——✅ 完结(正文 b12b700,96 行,含大纲回填 ⚠️ 4 块/README 2871ec8);**29 域完结,第 6 批 4/5**
 - [x] 33-jmx/01——✅ 完结(正文 73982eb,185 行,含大纲回填 ⚠️ 10 块/README 7a29d4b);**33 域 1/3**
 - [x] 33-jmx/02——✅ 完结(正文 236ea72,168 行/大纲回填 ⚠️ 12 块 8e4a2ed/README de710ad);**33 域 2/3**
-- [ ] **33-jmx/03**——**下一篇**;大纲 `planning/outlines/33-jmx-management/03-gc-notifier-flags.md`(内存快满时怎么得到通知？— GC Notifier + LowMemory + Flags);33 域收官;02 篇悬念已指向 03
+- [x] 33-jmx/03——✅ 完结(正文+大纲 621f389,161 行,含回填 ⚠️ 10 块/README 9be7e2f);**33 域完结,第 6 批 5/5 域收官**
+- [ ] **43-nio-net/01**——**下一篇**;大纲 `planning/outlines/43-nio-net/01-tcp-epoll.md`(TCP Socket — PlainSocketImpl + ServerSocket + epoll);第 6 批收官;33-03 悬念已指向 43
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -1251,7 +1270,8 @@
 | GC 框架源码(25 域已完结) | `share/oops/access*.hpp`(Access 管线)+`share/gc/shared/barrierSet.hpp`+`threadLocalAllocBuffer.*`+`memAllocator.cpp`+`referenceProcessor.*`+`taskqueue.*`+`workgroup.*`+`share/gc/g1/dirtyCardQueue.*`+`g1RemSet.cpp`+`share/gc/shared/stringdedup/`+`oopStorage.*`——六篇正文即索引(§6.4 有全部行号) |
 | MH 源码(29 域已完结) | `share/prims/methodHandles.cpp`(1610 行: generate_adapters :75-90(启动 init.cpp:145)/init_MemberName :172/init_method_MemberName :219)+`methodHandles.hpp`(217 行)+`cpu/x86/methodHandles_x86.cpp`(643 行: jump_from_method_handle :120-155(interp_only 检查 :130-147)/jump_to_lambda_form :157-198(MH→form→vmentry→MemberName→ResolvedMethodName→Method*)/generate_method_handle_interpreter_entry :203-290/generate_method_handle_dispatch :292-489)+`cpu/x86/methodHandles_x86.hpp`(adapter_code_size :30 LP64=32000)+`codeBlob.hpp`(MethodHandlesAdapterBlob :452-454);JDK 侧 java/lang/invoke/(LambdaForm.java:123/prepare :827/compileToBytecode :857/InvokerBytecodeGenerator.java:688/299(MethodHandleImpl.java:250/makeGuardWithTest :768/LambdaFormEditor.java:45);29-01/02 正文即索引 |
 | 33-jmx 源码(33 域 1/3) | `share/services/memoryPool.hpp/cpp`(MemoryPool :45-140/get_memory_usage 纯虚 :133/类层次 :142-171/get_memory_pool_instance 懒创建 :77-138/record_peak :144-153)+`memoryService.hpp/cpp`(注册表 set_universe_heap :71-92/peaks+LowMemoryDetector track :147-166/create_MemoryUsage_obj :234-248/TraceMemoryManagerStats :250-296)+`memoryManager.hpp/cpp`(GCMemoryManager :136-183/gc_begin :211-236/gc_end :241-298 双缓冲交换 :284-292/get_last_gc_stat :300-312/GCStatInfo hpp:88-134)+`memoryUsage.hpp`(四元组 undefined_size :66/convert_to_jlong :68-78)+`share/gc/g1/g1MemoryPool.cpp`(G1 三池 :42-88)+`g1MonitoringSupport.cpp`(recalculate_sizes :190-206)+`g1CollectedHeap.cpp`(manager 构造 :1424-1425/pool 创建 :1738-1740/TraceMemoryManagerStats :2881/update_sizes 时序 :3096-3100/gc_epilogue track :2495)+`management.cpp`(jmm_GetMemoryPoolUsage :557-567/jmm_GetMemoryUsage :706-754/jmm_interface 数组 :2235)+JDK 侧 java.management(MemoryPoolImpl.c:44/ManagementFactoryHelper.java:571-574);01 正文即索引 |
-| JMM 接口源码(33 域 2/3) | `share/include/jmm.h`(349 行: 版本 :46-55/`struct jmmInterface_1_` :221-343 **38 槽**/jmmOptionalSupport :57-68/jmmGCStat :185-195)+`services/management.cpp`(2282 行: jmm_interface 数组 :2235-2273/get_jmm_interface :2276-2282 版本检查/jmm_GetMemoryPools :470/jmm_GetMemoryManagers :514/jmm_GetMemoryPoolUsage :557/jmm_GetMemoryUsage :706/jmm_SetPoolSensor :601/jmm_SetPoolThreshold :644/jmm_SetBoolAttribute :778/jmm_GetLastGCStat :1831/jmm_SetGCNotificationEnabled :1893)+`jvm.cpp`(JVM_GetManagement :3686)+JDK 侧 java.management/share/native/libmanagement(management.c JNI_OnLoad :38-55/MemoryImpl.c :35-48/VMManagementImpl.c :35-41)+jdk.management/share/native/libmanagement_ext(GcInfoBuilder.c :199-240 调用者填槽/DiagnosticCommandImpl.c :45/Flag.c :46/HotSpotDiagnostic.c :35)+ManagementFactory.java:1018-1020/PlatformMBeanProviderImpl.java:53-59;02 正文即索引,03 篇主题=LowMemory+GCNotifier+WriteableFlags
+| JMM 接口源码(33 域 2/3) | `share/include/jmm.h`(349 行: 版本 :46-55/`struct jmmInterface_1_` :221-343 **38 槽**/jmmOptionalSupport :57-68/jmmGCStat :185-195)+`services/management.cpp`(2282 行: jmm_interface 数组 :2235-2273/get_jmm_interface :2276-2282 版本检查/jmm_GetMemoryPools :470/jmm_GetMemoryManagers :514/jmm_GetMemoryPoolUsage :557/jmm_GetMemoryUsage :706/jmm_SetPoolSensor :601/jmm_SetPoolThreshold :644/jmm_SetBoolAttribute :778/jmm_GetLastGCStat :1831/jmm_SetGCNotificationEnabled :1893)+`jvm.cpp`(JVM_GetManagement :3686)+JDK 侧 java.management/share/native/libmanagement(management.c JNI_OnLoad :38-55/MemoryImpl.c :35-48/VMManagementImpl.c :35-41)+jdk.management/share/native/libmanagement_ext(GcInfoBuilder.c :199-240 调用者填槽/DiagnosticCommandImpl.c :45/Flag.c :46/HotSpotDiagnostic.c :35)+ManagementFactory.java:1018-1020/PlatformMBeanProviderImpl.java:55-59;02 正文即索引 |
+| 33-jmx 通知源码(33 域已完结) | `share/services/lowMemoryDetector.hpp/cpp`(ThresholdSupport :67/SensorInfo 状态机 :116-212/gauge vs counter :206-239/:261-277/trigger :293-343 OOM 降级 :307-313/clear :345-374)+`gcNotifier.hpp/cpp`(GCNotificationRequest :33-54/pushNotification 深拷贝账本 :45-54/sendNotificationInternal :189-224/createGcInfo :99-163)+`writeableFlags.cpp`(set_flag :243-267 错误码/入口 jmm_SetVMGlobal management.cpp:1569-1580+attachListener.cpp:288+diagnosticCommand.cpp:282)+`memAllocator.cpp`(慢路径检测 :232-236)+JDK 侧(Sensor.java:128-136/MemoryPoolImpl.java:297-300 PoolSensor/GarbageCollectorExtImpl.java:93-114 createGCNotification+118-126 自动开启/MemoryImpl.java:138-161);03 正文即索引,下一篇 43-nio-net
 | JVMTI 源码(28 域已开工) | `share/prims/jvmtiEnvBase.hpp`(655 行: 状态成员 :94-105/JvmtiEnv_from_jvmti_env :157-159/JvmtiEnvIterator :318)+`jvmtiEnv.cpp`(3733 行: SetEventNotificationMode :521/AddCapabilities :603)+`jvmtiEventController.hpp/cpp`(三级 bitset: JvmtiEnvEventEnable hpp:151-171/重算 :571-657/INTERP_EVENT_BITS :96-97/VM_EnterInterpOnlyMode :194-245)+`jvmtiExport.cpp`(3001 行: post_method_entry :1508/wrapper 调用侧/load_agent_library :2638)+`jvmtiManageCapabilities.cpp`(四集合 :70-146/add :233/update :292)+`jvmtiImpl.hpp/cpp`(JvmtiDeferredEvent 只服务 4 类编译事件 :454-549)+`jvmtiHpp.xsl`/`jvmtiEnter.xsl`/`jvmti.xml`(14993 行,154 函数/34 事件/44 能力,构建期生成源);28-01 正文即索引 |
 | JDK 侧源码 | `/data/workspace/jdk11u/src/java.base/`、`/data/workspace/jdk11u/src/jdk.jfr/` |
 | 工具素材 | `docs/openjdk/planning/outlines/00-jvm-tools/materials/`(commands/ 150+ 文件) |
@@ -1273,25 +1293,21 @@
 ## 十、下一步(读完立即做)
 
 ```
-【33-jmx/03 写作指引——33 域收官,GC Notifier + LowMemory + Flags】
-1. 读 planning/outlines/33-jmx-management/03-gc-notifier-flags.md(注意 ⚠️ 块;01/02 篇回填 10+12 块,03 大概率同样漂移)。
-   33-03 主题=内存快满时怎么得到通知 + 运行时可改 flags,按大纲实际内容验证,预判要点(以实际 grep 为准):
-   - 01/02 篇已铺底: pool 的 _usage_sensor/_gc_usage_sensor+ThresholdSupport(memoryPool.hpp:70-74)/
-     jmm_SetPoolSensor/jmm_SetPoolThreshold(management.cpp:601/644)/jmm_SetGCNotificationEnabled(:1893)/
-     GCNotifier::pushNotification(gc_end :294-296)/LowMemoryDetector::detect_after_gc_memory(:274-278)/
-     ServiceThread 的 5 条件(39-01: LowMemoryDetector::has_pending_requests+GCNotifier::has_event+DCmdFactory 通知)
-   - 可能涉及: lowMemoryDetector.cpp(detect_low_memory :81/SensorInfo 触发)、gcNotifier.cpp(sendNotification、
-     GcInfoBuilder 的 Java 侧 com.sun.management.GcInfo 构造)、writeableFlags.cpp(VM.set_flag/SetVMGlobal)
-   - 03 大纲的 GcNotifier::post_gc_notification/GC_NOTIFICATION 名字疑为 JDK8 残留,以实际 grep 为准
-2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;03 大纲行号 lowMemoryDetector.hpp:40-100/
-   gcNotifier.cpp:50-200/writeableFlags.cpp:40-150 大概率漂移
+【43-nio-net/01 写作指引——第 6 批收官,TCP Socket 与 epoll】
+1. 读 planning/outlines/43-nio-net/01-tcp-epoll.md(注意 ⚠️ 块;33 域回填 10-12 块/篇,43-01 大概率同样漂移)。
+   43-01 主题=TCP Socket(PlainSocketImpl+ServerSocket+epoll),按大纲实际内容验证,预判要点(以实际 grep 为准):
+   - JDK 侧: java.base 的 sun/nio/ch/ 与 java.net(PlainSocketImpl/SocketInputStream)、
+     jdk.net 模块?;native 在 src/java.base/linux/native/libnet/(PlainSocketImpl.c/Net.c/epoll 相关)
+   - hotspot 侧: JVM_* 相关?socket 主要走 native(JNI)+JVM_GetManagement 无关;注意 os::socket 系列(os_linux.cpp)
+   - 前会话沉淀: 42-core-native 域(Process/File IO)已写 3 篇(42-core-native/),43 域与其相邻,避免重复
+2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;43 域是 JDK 侧为主,check.py 用 MAPPINGS/EXTERNAL
+   (SRC=java.base 可直接;PlainSocketImpl.java 等路径要 find 确认)
 3. 实证优先用 /data/tmp/opencode/jdk11:
-   - MemoryPoolMXBean.setUsageThreshold(0 或小阈值)+分配循环 → 观察通知(需注册 NotificationListener 或
-     用 com.sun.management.GarbageCollectorMXBean 通知);阈值=0 表示关闭检测
-   - jcmd VM.set_flag 走 WriteableFlags(36 域 jcmd 通道已实证可用)
-   - -Xlog:gc+... 与通知的对应
-4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/EXTERNAL;ART 改回当前文件)→ 深审 2 轮 → 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.89
-5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68-6.88)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容)——**禁止用 "## 七" 整行当 oldString**(6.82 曾直接吞掉标题);③**立即 `grep -n "^### 6\.8"` 校验连续递增 + `grep -n "^## 七\|^## 八"` 标题仍在**;④再做其他编辑
-6. 33 域后 → 43-nio-net(第 6 批收官,然后第 7 批 22/26/35/40/47)
+   - strace 看 socket/connect/epoll_wait 系统调用(容器可用?之前 strace 用过)
+   - lsof / ss 看连接;nc/curl 做客户端
+   - -Xlog: 无直接标签,主要靠 strace/jstack
+4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/EXTERNAL;ART 改回当前文件)→ 深审 2 轮 → 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.90
+5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68-6.89,含强化)**: ①新节内容先写成独立文本;②插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`,教训补充 2)——**禁止用 "## 七" 整行当 oldString**(6.82 曾吞标题;6.87 曾命中反引号内引用致双副本);③**立即 `grep -n "^### 6\.8\|^### 6\.9"` 校验连续递增 + `grep -n "^## 七"` 标题恰好 1 个 + `grep -n "^## 八"` 仍在**;④再做其他编辑
+6. 43 域后 → 第 7 批 22/26/35/40/47
 ```
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
