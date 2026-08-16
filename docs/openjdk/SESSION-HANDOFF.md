@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-15 | 卷 2 写作中: **120/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 15) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 37 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结)**;下一篇 25-gc-framework/01(第 6 批 5 域之首,25 域 6 篇)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-15 | 卷 2 写作中: **121/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 16) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 38 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(1)**;下一篇 25-gc-framework/02(CollectedHeap+分配路径,25 域共 6 篇)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -46,11 +46,11 @@
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
-第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → **21 ✅(3/3)** → 25 → 28 → 29 → 33 → 43
+第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(1/6)** → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 120 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 121 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -92,6 +92,7 @@
 | **14-c1-compiler** | 1-4 | `14-c1-compiler/01-c1-pipeline-ir.md`(88)+`02-c1-optimizations.md`(56)+`03-c1-register-codegen.md`(45)+`04-c1-runtime-frame.md`(61) | ✅ **14 域完结(本会话)** |
 | **15-c2-compiler** | 1-8 | `01-c2-ideal-graph.md`(253)+`02-c2-parse-graphkit.md`(230)+`03-c2-optimizations.md`(138)+`04-c2-loops.md`(140)+`05-c2-register-alloc.md`(143)+`06-c2-codegen.md`(129)+`07-c2-macro-intrinsics.md`(74)+`08-c2-library-calls.md`(104) | ✅ **15 域完结(本会话)** |
 | **21-shared-runtime** | 1-3 | `21-shared-runtime/01-runtime-stubs.md`(96)+`02-c2i-i2c-adapter.md`(120)+`03-exception-handling.md`(191) | ✅ **21 域完结(本会话)** |
+| **25-gc-framework** | 1 | `25-gc-framework/01-barrier-access.md`(195) | 🚧 **25 域 1/6(本会话)** |
 
 ### 本会话 26 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
@@ -231,7 +232,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 33 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 34 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -254,6 +255,7 @@
 - `15-c2-ideal-graph-demo.txt`(C2 编译事件: IGVNDemo idn/phi 编到 level 4、cfold 常量方法 level 1、旧 nmethod made not entrant;PrintInlining 内联树 diagnostic 可用;PrintIdeal/PrintIdealGraph notproduct 拒启错误信息原文;PrintOptoAssembly 接受但 release 静默;CITime 阶段树 Parse/Optimize(GVN1/IGVN/Cond Const Prop/GVN2)/Matcher/Scheduler/Regalloc;bigsum 50 常量 javac 折叠成 bipush 50→3 字节)
 - `21-runtime-stubs-demo.txt`(IC miss 实证: ICDemo 双态调用点(Circle/Square 各半)PrintInlining 显示 TypeProfile (20650/41300 counts)+两路 inline (hot)——类型画像驱动的双态分支内联;IC3Demo 三态(Tri 加入)显示 virtual call——不内联走 vtable;flag: TraceCallFixup develop(globals.hpp:486)/ICMissHistogram notproduct(:1453);源码核对: generate_stubs 顺序/handle_ic_miss_helper :1552/DeoptimizationBlob 4 变体 codeBlob.hpp:558-562/generate_deopt_blob x86 层 :2810)
 - `21-exception-handling-demo.txt`(-Xlog:exceptions=info 全链路: (A) 隐式 NPE 编译代码 "thrown [sharedRuntime.cpp, line 606]"+固定 throwing PC+"continuing at PC";(B) 显式 athrow try-catch 同 nmethod(handler 与抛点差 16 字节);(C) 隐式除零 SIGFPE→ArithmeticException;(D) 跨帧逃逸: 编译 escape→解释器 escapeMain at bci 8;(E) SOE 同一 oop 沿栈逐帧传播 24395 条;ExceptionDemo.java 五场景源)
+- `25-gc-barrier-demo.txt`(-Xlog:gc+phases=debug 阶段树: Update RS/Scan RS/Evacuate,2 亿次老对象引用写后 Update RS 处理卡片(barrier 工作量在 GC 侧可见);PrintAssembly 无 hsdis nmethod header: C1 1248/1344 vs C2 576;flag 盘点: ReduceInitialCardMarks {C2 product} true/UseCondCardMark {product} false/UseG1GC ergonomic;标签可用性: gc+barrier/remset/phases 可用,gc+cardtable 无效;源码级: store_check 汇编 shr9+movb 0/g1_write_barrier_pre SATB 链/C2 IdealKit 同构;GcPhaseDemo/BarrierDemo.java)
 - `15-c2-macro-demo.txt`(PrintInlining: System.arraycopy→"intrinsic"(0 字节 native 被替换)+lockElim(synchronized(new Object()) 锁消除候选)整体内联+Object.<init> 内联;CITime Macro Expand/Macro Eliminate 阶段;源码核对: expand_macro_nodes 编排/eliminate_locking_node/expand_lock_node fast-slow/expand_arraycopy_node+generate_arraycopy;flag: PrintEliminateLocks notproduct(c2_globals.hpp:508)/ReduceBulkZeroing product(:263))
 - `15-c2-codegen-demo.txt`(CITime Code_Gen 阶段: Matcher/Scheduler/Regalloc/Block Ordering/Peephole/Build OOP maps/Code Installation;源码核对: MachNode::peephole 默认 NULL(machnode.cpp:415)、.ad 三文件行数 36815、addI 变体 x86_64.ad:7473-7519、Compile::Output output.cpp:57、do_global_code_motion gcm.cpp:1612;flag 类型: OptoPeephole develop_pd/PrintOptoPeephole notproduct)
 - `15-c2-register-alloc-demo.txt`(CITime Regalloc 阶段树: RADemo.heavy 32 局部变量高寄存器压力——Regalloc 0.001s 下 Ctor Chaitin/Build IFG(virt+phys)/Compute Liveness/Regalloc Split/Postalloc Copy Rem/Fixup Spills/Coalesce 1-3/Simplify/Select;RA flag 类型: OptoCoalesce develop(c2_globals.hpp:244)/VerifyRegisterAllocator notproduct(:285)/VerifyGraphEdges notproduct(:276)/OptoRegScheduling+OptoBundling product_pd;heavy 编译事件 level 4)
@@ -950,7 +952,19 @@
 - **实证方法论(重要,新发现)**: **-Xlog:exceptions=info 是 release 可用的异常全链路观察窗**——①"thrown [sharedRuntime.cpp, line 606]"=Exceptions::_throw 来源(throw_and_post_jvmti_exception);②"thrown in C1 compiled method"=c1_Runtime1.cpp:522-529 的 Exceptions::log_exception;③"continuing at PC ... for exception thrown at PC ..."=c1_Runtime1.cpp:608-611;C2 编译代码异常**不打任何 thrown in trace**(内联 catch+rethrow 路径);④**"N [Exception (...)" = OptoRuntime::trace_exception(opto/runtime.cpp:1672-1691)=handle_exception_C 的 trace,每条=异常穿过一个 C2 帧的 exception_blob**——SOE 素材 24395 条=C2 递归帧数(初稿解读"逐帧传播记录"错,第 3 轮修正);素材 ExceptionDemo(acbench)五场景+21-exception-handling-demo.txt
 - **第 3 轮 REVIEW 重大修正(2026-08-15,commit 99f2cac,两代编译器异常出口设计——gdb 实证)**: ①**C2 编译代码异常主路径不是 exception_blob 单一路径**: 调用点有 handler→**编译代码内联 catch**(doCall.cpp:836 catch_inline_exceptions: gen_subtype_check+CheckCastPP+merge_exception :913-943,不进运行时);不匹配/无 handler→make_runtime_call(rethrow_stub :965-971)或 throw_to_exit(parse1.cpp:906-930)→**方法级 RethrowNode**(parse1.cpp:883-895)→jmp rethrow_stub(x86_64.ad:12941-12955,enc_rethrow :2810);②**逐帧逃逸链**: rethrow_C(opto/runtime.cpp:1447-1466,注释: callee 帧已移除/同步已解锁/callee-saved 已恢复)→raw_exception_handler→caller->exception_begin→**exception_blob**(rax=oop/rdx=pc 由 TailJump popq rdx 准备,x86_64.ad:12914-125;oop 经 TLS vm_result 回 rax,generateOptoStub pass_tls)→handle_exception_C(:1390-1423)→helper(:1269-1381);**gdb 实证 C2EscapeDemo(-XX:MaxInlineSize=0)**: rethrow_C 57 次/handle_exception_C 29 次(=29 次逃逸全命中)/compute 只 2 次(27 次 ExceptionCache 缓存命中);③**C1 异常出口**: exception_begin(c1_LIRAssembler_x86.cpp:388-414)=直接 call Runtime1::handle_exception_from_callee_id(非 jump exception_blob);无 handler→unwind_handler_begin(remove_frame+jump unwind_exception :415-478);④**素材 E 两类日志并存=C1/C2 帧混合**(-Xcomp 后仍 tiered 升级,-Xcomp 是首次调用即编译非停 tiered);⑤**栈 zone 顺序**: 栈顶往下 shadow/reserved/yellow/red(初稿反了);⑥表查找: 默认 handler 条目恒追加(doCall.cpp:759-761),无 handler 方法无 CatchNode 走 throw_to_exit;⑦遗留谜(未闭合): C2 无 handler 方法的 compute_compiled_exc_handler 实测不触发 guarantee(false),可能与该实验 C1/C2 混合/OSR 形态有关,正文未断言
 
+### 6.76 25-gc-framework/01(BarrierSet + Access API,25 域开篇,大纲 10+ 处漂移含 3 处机制编造 + 深审 2 轮,2026-08-15)
+- **文件位置错**: access.hpp/accessBackend.hpp/accessDecorators.hpp 在 **share/oops/**(非 share/gc/shared);barrierSetAssembler.hpp 是 CPU_HEADER 转发,x86 实现在 cpu/x86/gc/shared/barrierSetAssembler_x86.cpp
+- **"编译期静态分派,零运行时开销" 错(重要)**: 真实=**5 步模板管线**(access.hpp:63-92 权威注释: ①默认装饰器+类型衰减 ②类型归约 ③Pre-runtime dispatch(能否避免 runtime 调用)④Runtime-dispatch ⑤a. Barrier resolution+函数指针 patch / b. Post-runtime dispatch)+**RuntimeDispatch 函数指针缓存**(accessBackend.hpp:452-459 注释+465-474 结构:`static func_t _store_func` 初始指向 store_init;首次调用 resolve 后 `_store_func = function`(access.inline.hpp:284-288),之后每次访问一次间接调用)——**运行时分派**(BarrierResolver switch(bs->kind()) access.inline.hpp:218-235),因 **GC 是启动时 flag 选的**,同一 libjvm.so 服务所有 GC;AS_RAW 旁路绕过(accessDecorators.hpp:139-145);VM 内部 C++ 走间接调用,**解释器/JIT 直插不走**
+- **"三层架构" 简化**: 真实骨架=BarrierSet(FakeRtti :58-71 + Name 枚举 FOR_EACH_BARRIER_SET_DO :50-55 + **三子组件 _barrier_set_assembler/_c1/_c2 :72-74** ✓ + AccessBarrier 嵌套模板 :166-299 默认委托 RawAccessBarrier);特化链 G1BarrierSet::AccessBarrier→ModRef→BarrierSet→RawAccessBarrier(g1BarrierSet.hpp:88-108);barrier_set_cast<T> :302-306(FakeRtti 断言+static_cast)
+- **装饰器不是 12 种**: 6 组约 24 个(内部 3+build-time 2+rt 1 / MO 6 / AS 3 / ON 4 / IN 2 / IS 3 / ARRAYCOPY+PTR 若干,accessDecorators.hpp:51-255)
+- **"BarrierSetC2::ideal_node()" 编造(重要)**: barrierSetC2.hpp 无 ideal_node;真实=BarrierSetC2 虚方法 store_at/load_at(barrierSetC2.hpp:166-188)→G1BarrierSetC2::pre_barrier/post_barrier(g1BarrierSetC2.cpp:175/:372)用 **IdealKit** 生成节点序列(与汇编版同构: marking 检查→load 旧值→非空?→index!=0?(减 8 写入 buffer)/=0?(make_leaf_call write_ref_field_pre_entry :267-268));**节点可优化**: g1_can_remove_pre/post_barrier(:86/:306)+ReduceInitialCardMarks 跳过"刚分配未发布对象"卡标记(:391-398,obj==just_allocated_object);young 卡快速路径(:418)
+- **三视角注入(大纲漏,重要)**: 汇编层=BarrierSetAssembler(默认 load_at/store_at 裸存取+压缩 oop 编解码 barrierSetAssembler_x86.cpp:34-130;解释器 do_oop_store templateTable_x86.cpp:146-158→store_heap_oop macroAssembler_x86.cpp:5501→access_store_at 虚分派);C1=G1BarrierSetC1 pre/post LIR(g1BarrierSetC1.cpp:51/:110)+Runtime1 blob 慢路径("g1_pre_barrier_slow" :194-221);C2=graphKit.cpp:56 `_barrier_set`+store_at/load_at 分派 :1606
+- **CardTable**: card_shift=9/card_size=512 在 **cardTable.hpp:231-232**(大纲 80-150 漂移);CardValues :95-102(clean=-1/dirty=0/precleaned=1/claimed=2/deferred=4);byte_for :153-158;store_check 汇编(cardTableBarrierSetAssembler_x86.cpp:88-132): shrptr :97 + byte_map_base 位移寻址(simm32 或 ArrayAddress :101-117)+ movb dirty :130;UseCondCardMark 先 cmpb 后 movb :120-128(默认关);G1 的 oop_store_at 仅 in_heap+val 非空做 post(:134-153)
+- **"G1SATBCardTableLogging/CardTableExtension" 是 JDK8 名**: JDK11 G1 用 G1BarrierSet+DirtyCardQueue(share/gc/g1/dirtyCardQueue.hpp:46+,PtrQueue 线程本地 index/buf,满转 DirtyCardQueueSet),G1-only 构建无 Parallel 分支
+- **悬念指向** ✓(02-collected-heap 正确);大纲标题与 21-03 悬念链接文本对齐(半角→全角问号)
+- **实证方法论**: ①-gc+phases=debug 阶段树(Update RS/Scan RS/Evacuate)是卡标记工作量的 GC 侧观察窗——2 亿次老对象引用写后 Update RS 真实处理卡片;②PrintAssembly 无 hsdis 的 nmethod header 可比较 C1 vs C2 代码尺寸(C1 1248/1344 vs C2 576);③**ReduceInitialCardMarks 的机器码对照不敏感**(G1 young 卡快速路径+OSR 形态使然,不要用 nmethod 尺寸做 RICM 证据);④gc+barrier/gc+remset 标签存在但无日志点;gc+cardtable 无效;⑤flag: ReduceInitialCardMarks {C2 product}/UseCondCardMark {product} 可开关
 
+## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
 2. **每篇都做深度 REVIEW(2 轮)**: 用户会要求"按照方法论深度的 REVIEW",写完后**主动自查深审,不要等**;用户还会追加"再次深度的 REVIEW"(第 3/4 轮)——按同样方法重新质疑,重点抓上一轮没抓到的"顺理成章"错误
@@ -1002,7 +1016,8 @@
 - [x] 21-shared-runtime/01——✅ 完结(正文 8aa51b6 含回填 ⚠️ 3 块 14 条/README 4023db8);**21 域 1/3,第 6 批 3/8**
 - [x] 21-shared-runtime/02——✅ 完结(正文 d9d2141 含回填 ⚠️ 3 块 15 条/README e6b5fbe);**21 域 2/3,第 6 批 4/8**
 - [x] 21-shared-runtime/03——✅ 完结(正文 e6ec256 含回填 ⚠️ 3 块/README e6ec256 同提交);**21 域完结,第 6 批 5/8**
-- [ ] **25-gc-framework/01**——**下一篇**;大纲 `planning/outlines/25-gc-framework/01-barrier-access.md`;25 域共 6 篇(01-barrier-access/02-collected-heap/03-reference-processing/04-workgang-taskqueue/05-cardtable-dirtycardq/06-oopstorage-stringdedup-stats);21-03 悬念已指向 01
+- [x] 25-gc-framework/01——✅ 完结(正文 27dc391 含回填 ⚠️ 3 块/README 640c033);**25 域 1/6,第 6 批 6/8**
+- [ ] **25-gc-framework/02**——**下一篇**;大纲 `planning/outlines/25-gc-framework/02-collected-heap.md`(CollectedHeap+分配路径: TLAB/PLAB/全局分配);25 域共 6 篇;25-01 悬念已指向 02
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -1045,22 +1060,22 @@
 ## 十、下一步(读完立即做)
 
 ```
-【25-gc-framework/01 写作指引——第 6 批 5 域之首,21 域已收官】
-1. 读 planning/outlines/25-gc-framework/01-barrier-access.md(注意 ⚠️ 块;21 域三篇回填 3 块 14/15/各条,25-01 大概率同样漂移)。
-   25-01 主题=BarrierSet + Access API(GC 屏障注入),按大纲实际内容验证,预判要点(以实际 grep 为准):
-   - BarrierSet 层级: BarrierSet(share/gc/shared/barrierSet.*)/ModRefBarrierSet/CardTableBarrierSet/G1BarrierSet 的职责划分与实例化(GC 配置 gcConfig/Arguments)
-   - Access API: 06-oops/05(access-api-barrier)已拆 Access 内部机制,本篇应从"屏障注入点"角度: 编译期 barrier 生成(C2 BarrierSetC2/parse 的 access_barrier 节点)、解释器/runtime 层、JNI/Unsafe 路径
-   - 与 21-03 衔接: 异常对象分配/字段写入同样经过 barrier——异常处理是纯运行时的跨层通道,GC 屏障是纯读写的无感插入
-   - 前置依赖: 06-oops/05(已完结)、09-memory-core、18-safepoint、25 域 KP(planning/knowledge-planning/25-gc-framework.md)
-2. 验证大纲所有 file:line 与专有名词——前几域已验证的高发漂移类型照旧: ①函数名错;②行号全错(规划期估算差几百行);③机制编造(凭"想当然");④归属错(函数在别的文件/另一场景);⑤数字无据。25 域是 GC 大域,barrier 相关的"谁在哪步注入"最易错(C2 的 BarrierSetC2 与 C1 的 BarrierSetC1 不同、解释器走模板、runtime 走 barrier_set())
-3. 实证优先用 /data/tmp/opencode/jdk11;barrier 的实证思路:
-   - -XX:+UseG1GC 默认;GC 日志(-Xlog:gc+barrier?先验证标签存在性)
-   - 写屏障行为: 对象提升/跨代引用场景下观察 card table(素材可复用 37-heap-dumper 或 jstat);SATB 相关在 G1 域(26)细讲,本篇点到
-   - flag 边界: 先查类型再定方案(PrintBarrierSet? 等,notproduct/develop/diagnostic/product 分类)
-   - 复用素材: 06-oops/05 的素材、materials/INDEX.md 按域查
-4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP;ART 改回当前文件;25 域 GC 文件大多不在 HS_MAP,注意追加)→ 深审 2 轮(第 2 轮逐机制回源码质疑;用户常追加第 3/4 轮,重点抓: 跨段遗留、隐含断言、跨篇引用只保留目标篇实证过的内容)→ 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
-5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68/6.73/6.74/6.75,已连续 10 次违规)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容);③**立即 `grep -n "### 6.6"` 校验连续递增**;④再做其他编辑。禁止"new 含旧节标题"的替换模式
-6. 25 域后 → 28-jvmti → 29-mh → 33-jmx → 43-nio-net(第 6 批剩余 4 域;25-gc 共 6 篇大纲,写完 25 域后 25-01 悬念衔接按 writing-order 续)
+【25-gc-framework/02 写作指引——25 域 2/6,CollectedHeap + 分配路径】
+1. 读 planning/outlines/25-gc-framework/02-collected-heap.md(注意 ⚠️ 块;25-01 回填 3 块,02 大概率同样漂移)。
+   25-02 主题=CollectedHeap+分配路径(TLAB/PLAB/全局分配),按大纲实际内容验证,预判要点(以实际 grep 为准):
+   - CollectedHeap 基类(collectedHeap.hpp/cpp,share/gc/shared): universe 单例/initialize/allocate/collect/GC cause
+   - 分配三层: TLAB(bump pointer,threadLocalAllocBuffer.* tlab.cpp)/PLAB(promotion,plab.*)/全局分配(memAllocator.cpp 慢路径)
+   - G1 视角: g1CollectedHeap 的 mem_allocate/tlab_allocate;25-01 已铺垫 barrier 保证引用图完整,本篇讲"顶点从哪来"
+   - 与 25-01 衔接: 分配本身也过 barrier(ReduceInitialCardMarks/on_slowpath_allocation_exit 已提);GC 阶段树(gc+phases)实证可复用
+2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧: ①函数名错;②行号全错(规划期估算);③机制编造(三层分配的边界/TLAB 大小计算);④归属错;⑤数字无据(cycle 数删)。09-memory-core 已讲过 Universe/堆,注意区分"堆结构"与"分配路径"
+3. 实证优先用 /data/tmp/opencode/jdk11:
+   - TLAB 行为: -Xlog:gc+heap=debug(TLAB 大小)/-Xlog:gc+phases=debug;jstat -gcutil
+   - -XX:+PrintTLAB(diagnostic?)验证;UseTLAB flag 开关对照(14-c1/04 用过 -XX:-UseTLAB)
+   - 分配路径对照: 大量小对象(全 TLAB)vs 大对象(直接进 humongous/全局)——GC 日志 heap 区观察
+   - flag 边界: TLABSize/MinTLABSize/MaxTLABSize 等默认值 PrintFlagsFinal
+4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP;ART 改回当前文件)→ 深审 2 轮(第 2 轮逐机制回源码质疑;用户常追加第 3/4 轮,重点抓: 跨段遗留、隐含断言、跨篇引用只保留目标篇实证过的内容)→ 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
+5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68/6.73/6.74/6.75/6.76)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容);③**立即 `grep -n "### 6.6"` 校验连续递增**;④再做其他编辑。禁止"new 含旧节标题"的替换模式。**另注意: 6.75 插入时曾误删 "## 七" 标题行(e34b53c),本次已修复(6.76 处)——任何编辑后检查 ## 七/## 八 标题仍在**
+6. 25 域后 → 28-jvmti → 29-mh → 33-jmx → 43-nio-net(25-gc 共 6 篇大纲,写完 25 域后按 writing-order 续)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
