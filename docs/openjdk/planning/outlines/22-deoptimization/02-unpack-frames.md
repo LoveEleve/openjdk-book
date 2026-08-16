@@ -3,6 +3,15 @@
 > 🔴 Deep | 2 KP 中的执行引擎
 > 读者处境: deopt 决定已做——nmethod marked not_entrant。但当前线程的栈顶还在这个 nmethod 的 frame 中。需要反编译整个内联树(6层内联→6个解释器帧)→重建所有 locals/expressions/monitors→切回解释器。
 
+> ⚠️ 写作期修正(2026-08-16,22-deoptimization/02 完成,22 域收官):
+> - **"deoptimization.cpp:623-700 scope→vframe" 编造**: 打包在 **fetch_unroll_info**(deoptimization.cpp:139)→**fetch_unroll_info_helper**(:158): 收集 compiledVFrame 链→**create_vframeArray**(:1169)→vframeArrayElement::**fill_in**(vframeArray.cpp:60);"unpack_deoptimization" 函数不存在(真实=unpack_frames :623+unpack_to_stack vframeArray.cpp:567)
+> - **行号漂移**: vframeArray 类在 **vframeArray.hpp**(非 deoptimization.hpp:35): class :121/布局注释 :127-140/Element :50;UnrollBlock 在 deoptimization.hpp:178;unpack_on_stack(vframeArray.cpp:171)的 bcp/pc 决定在 :183-201、exec_mode 覆盖 :262-283、layout_activation :292-300(abstractInterpreter_x86.cpp:57)、monitors :312-319、bcp/mdp :322-330;frame_sizes :381-460(索引方向注释 :439-440,pc 占位 :447-449);unpack_frames 尾部 :655-700(exception :660-663/VerifyStack :667-700)
+> - **"deoptimization.cpp:900-1200 逐帧 unpack" 行号错**: 逐帧填充=unpack_to_stack(vframeArray.cpp:567-630,骨架定位 :580-586/从老到幼 :591-619/unwind_callee_save_values :615)
+> - **"populate_monitors (deoptimization.cpp:1450-1650)" 编造**: 监视器复制在 **unpack_on_stack 内**(vframeArray.cpp:312-319,BasicObjectLock move_to),无独立 populate_monitors 函数
+> - **"return entry (deoptimization.cpp:1200-1350)" 编造**: 控制权交接=unpack_frames 尾(:655-700)return_type→deopt blob 汇编;pc 由 Interpreter::deopt_entry/deopt_continue_after_entry/deopt_reexecute_entry(abstractInterpreter.hpp:178-194)决定——**精确恢复,已执行字节码绝不重跑**
+> - **悬念指向错**: "域23 StubRoutines"过期(23 域第 4 批已完结)——正确 **26-g1-gc/01**(第 7 批;"堆被切成 2048 块 — HeapRegion + G1CollectedHeap")
+> - 素材: 22-deopt-unpack-demo.txt(计时对照: compiled 10M=0ms/after-switch 10M=8ms(reinterpret 窗口)/recompiled 10M=0ms,三组稳定)
+
 ### 1. "反编译内联树" — scope + vframeArray
 
 场景: C2 编译时内联了 `A.bar()→B.baz()→C.qux()` —— 一个 compiled frame 包含 3 层 inline。deopt 时需要展开成 3 个解释器帧。
