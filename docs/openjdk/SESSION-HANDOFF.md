@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-16 | 卷 2 写作中: **127/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 22) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 44 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(1)**;下一篇 28-jvmti/02(RedefineClasses)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-16 | 卷 2 写作中: **128/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 23) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 45 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(2)**;下一篇 28-jvmti/03(辅助设施,28 域收官)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -11,7 +11,7 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3/4 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 28-jvmti/02(RedefineClasses,大纲 `planning/outlines/28-jvmti/02-redefine-classes.md`;28 域 3 篇之二;28-01 悬念已指向 02)。
+**下一步(唯一,无选择)**: 28-jvmti/03(辅助设施,大纲 `planning/outlines/28-jvmti/03-auxiliary.md`;28 域 3 篇收官;28-02 悬念已指向 03)。
 
 **铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,126 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(三次编造代码块被抓: 44-02 的 check_end_stack、11-01 的 is_loading_success、25-03 的 try_discover 签名);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
@@ -46,7 +46,7 @@
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
-第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 🚧(1/3: 01 ✅)** → 29 → 33 → 43
+第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 🚧(2/3: 01 ✅ 02 ✅)** → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
@@ -93,7 +93,7 @@
 | **15-c2-compiler** | 1-8 | `01-c2-ideal-graph.md`(253)+`02-c2-parse-graphkit.md`(230)+`03-c2-optimizations.md`(138)+`04-c2-loops.md`(140)+`05-c2-register-alloc.md`(143)+`06-c2-codegen.md`(129)+`07-c2-macro-intrinsics.md`(74)+`08-c2-library-calls.md`(104) | ✅ **15 域完结(本会话)** |
 | **21-shared-runtime** | 1-3 | `21-shared-runtime/01-runtime-stubs.md`(96)+`02-c2i-i2c-adapter.md`(120)+`03-exception-handling.md`(191) | ✅ **21 域完结(本会话)** |
 | **25-gc-framework** | 1-6 | `01-barrier-access.md`(195)+`02-collected-heap.md`(199)+`03-reference-processing.md`(160)+`04-workgang-taskqueue.md`(155)+`05-cardtable-dirtycardq.md`(67)+`06-oopstorage-stringdedup-stats.md`(113) | ✅ **25 域完结(本会话)** |
-| **28-jvmti** | 1 | `28-jvmti/01-agent-architecture.md`(317) | ✅ **28 域 1/3(本会话)** |
+| **28-jvmti** | 2 | `28-jvmti/01-agent-architecture.md`(317)+`02-redefine-classes.md`(270) | ✅ **28 域 2/3(本会话)** |
 
 ### 本会话 26 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
@@ -233,7 +233,8 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 40 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 41 个**(全部 gitignore 不入库,在 materials/commands/):
+- `28-jvmti-redefine-demo.txt`(RedefineClasses 全链路: (A) 成功 redefine——改 3 个方法体→"mark ... as obsolete"×3+EMCP_cnt=4, obsolete_cnt=3;"redefined name=HotSwapDemo, count=1";timer 日志 vm_op: all=1 prologue=0 doit=1;重定义后 sayHello()=v2/extra()=42 立即生效;ClassFileLoadHook 在 redefine 解析路径也触发(redefining=YES,class_being_redefined 机制);(B) EMCP 对照——同字节重定义 merge_cp_len=143, index_map_len=0,EMCP_cnt=7, obsolete_cnt=0;(C) 编译失效——热循环后 sayHello(level1)/main(level3) 在 redefine 时刻同刻 made not entrant 且只有这 2 个(精确失效,all_dependencies_are_recorded 分支);(D) 两次 redefine count=1→2,previous version is alive→is dead(purge 解链),ResolvedMethodTable adjust 日志;(E) 错误场景 67 METHOD_DELETED(v2 缺 static 块/native 声明)/63 METHOD_ADDED(v3 加 brandNew))
 - `28-jvmti-agent-demo.txt`(自写 JVMTI agent 全链路: Agent_OnLoad 里 GetPhase=ONLOAD;无能力 SetEventNotificationMode→99 MUST_POSSESS_CAPABILITY,AddCapabilities 后 0;VMInit 回调 phase=LIVE;606900 次 MethodEntry/606896 MethodExit/5 次 Exception(throwMany(5) 精确吻合);VMStart 未触发(需 can_generate_early_vmstart);-XX:TraceJVMTI=MethodEntry+t 触发点日志 "Trg Method Entry triggered";-XX:TraceJVMTI=ec 事件控制器重算全流程(set event callbacks→user enabled→Enabling event VMInit→recompute after 2(hex,VM_INIT_BIT)→VM live→每线程 Entering interpreter only mode);编译对照: 带 agent 时 Jvmtidemo::fib 零编译事件/总编译 4 vs 17(interp_only 证据);agent 侧 (*jvmti)->Func 语法=函数表接口实证)
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
@@ -1079,6 +1080,23 @@
 - 实证: 28-jvmti-agent-demo.txt
 - **第 3 轮 REVIEW 修正(2026-08-16)**: ①"枚举值是历史遗产"无据推断删除(phase 非递增是事实,动机无注释可证);②§2.4 "每个事件声明 required 能力"过强——**34 个事件中只有 21 个带 required**(VMStart/VMInit/VMDeath 等无),补 SuspendThread 函数级例(jvmti.xml:1558);③§3.2 实证解读精确化("VMInit 在 Live 前唯一可发事件"歧义→"该 agent 启用的 4 个事件里只有 VMInit 属于 early 集,其余被 phase 过滤");④§4.3 实证②措辞(先 Enabling 三事件再 Entering,同 0.026s);⑤02 后续链接全角问号(与大纲标题一致);⑥素材 compilationPolicy 行号统一 421-428→421-427;⑦跨篇引用验证: 27-jni/02 确讲函数表(quicken_jni_functions/copy_jni_function_table safepoint 原子写,正文 48-78 行)——"函数表接口先例"引用成立;⑧验证 JvmtiEventController::vm_init 存在(:1074-1079,签名拆行致最初 grep 未中)与编译代码异常路径无直接 post_exception_throw(opto/runtime.cpp 零命中,can_post_on_exceptions 时走 deoptimize_caller_frame :1316-1322)——§4.3 不加异常事件对比断言(避免未实证强化)
 
+### 6.83 28-jvmti/02(RedefineClasses 类热替换,28 域 2/3,大纲 10+ 处漂移含 3 处机制编造 + 深审 2 轮,2026-08-16)
+
+- **"jvmtiRedefineClasses.cpp:200-800" 行号全错(重要)**: 文件 **4338 行**;核心函数: doit_prologue :117/doit :185/doit_epilogue :242/is_modifiable_class :267/compare_and_normalize_class_versions :776/load_new_class_versions :1116/merge_constant_pools :1363/merge_cp_and_rewrite :1568/rewrite_cp_refs :1708/rewrite_cp_refs_in_methods :1816/rewrite_cp_refs_in_method :1853/update_jmethod_ids :3511/check_methods_and_mark_as_obsolete :3534/flush_dependent_code :3819/compute_added_deleted_matching_methods :3843/redefine_single_class :3926
+- **三阶段 VM 操作骨架(大纲缺,重要)**: jvmtiRedefineClasses.hpp:58-99 权威注释——①doit_prologue(JavaThread, 去 safepoint 路上)=校验+load_new_class_versions(:1116 parse_stream 同 loader/保护域→link→compare_and_normalize(:776)→Verifier::verify(:1242)→merge_cp_and_rewrite(:1258)→Rewriter::rewrite+link_methods(:1291));②doit(VMThread safepoint)=redefine_single_class(:3926)+AdjustAndCleanMetadata(:216)+ResolvedMethodTable::adjust_method_entries(:222)+set_has_redefined_a_class(:227);③doit_epilogue 清理;注释 "A JavaThread must do the above work"
+- **"ClassFileParser re-parse" 简化错**: 真实=SystemDictionary::parse_stream(the_class_sym, **the_class 的 loader+保护域**)(:1147-1167,ClassFileStream 伪文件名 "__VM_RedefineClasses__");**解析路径经 class_being_redefined(线程状态)也触发 ClassFileLoadHook**(klassFactory.cpp:110-160 check_class_file_load_hook,原类缓存字节作为 cached_class_file 给 agent——redefine 时可再改字节)
+- **"replace vtable entries" 错**: 互换 methods/常量池后 **vtable/itable 整体重建**(initialize_vtable/initialize_itable :4085-4097);互换语义=the_class->set_methods(新)/scratch_class->set_methods(旧)(注释 "prevent potential GCing of the old methods...undo operation easily" :4008-4019)+常量池/inner_classes/ordering 同换
+- **schema 冻结(实证)**: 方法集必须完全一致——加方法→63 METHOD_ADDED/删方法(如缺 static 块)→67 METHOD_DELETED(jvmti.h:365/:369);字段/修饰符/继承结构/nest 全查(compare_and_normalize :776)
+- **CP 合并两段式(重要)**: merge_constant_pools(:1363)=Pass 0 **旧池整体复制**(索引原样,Class→UnresolvedClass 回退,注释 "any code using old_cp does not have to change")+Pass 1 走 scratch 池 append_entry(:296,三类条目 direct/indirect/double-indirect,hpp:118-131;Fieldref 比较 16 次解引用 hpp:170-174)+_index_map_p 映射(:1317);映射非空→rewrite_cp_refs(:1708: nest/方法字节码/各类注解/stack map/source_file/generic_signature)
+- **"relocator 是字节码重写主角" 错(重要)**: relocator.cpp/hpp 在 **share/runtime/**(780 行)非 prims;**只是字节码空间调整工具**——真实 CP 索引重写=rewrite_cp_refs_in_method(:1853,逐字节码扫描换合并池新索引,注释 "adapted from Rewriter::rewrite_method()");Relocator 仅 **ldc→ldc_w**(索引>255 需 3 字节)时 insert_space_at(runtime/relocator.hpp:45/:48,调用点 :1914-1919)
+- **MethodComparator(大纲"branch 比 jump target"错)**: methods_EMCP(:40)=code_size 相同+max_stack/max_locals/参数相同(:316)+**逐字节码相同**+args_same(:71: 带 CP 索引指令比**索引所指常量**(pool_constants_same :266 递归);**分支指令比偏移量相等**(get_offset_s2);bipush/iinc/load/store 比操作数);EMCP 定义(类头注释)="only difference is constantpool indices...point to the same constants"
+- **EMCP vs obsolete(大纲漏,核心)**: check_methods_and_mark_as_obsolete(:3534-3668)EMCP→set_is_old 不 obsolete(**同 jmethodID**,断点通用,注释 :3613-3619)/不 EMCP→set_is_obsolete+新 method_idnum(:3627-3631)/deleted→三标全打;Method flags=access_flags 位(method.hpp:761-766);**update_jmethod_ids(:3511-3533): matching 已分发 jmethodID 重定向新方法(change_method_associated_with_jmethod_id),deleted→Universe::throw_no_such_method_error(NSME)**
+- **编译失效(实证精确分支)**: flush_dependent_code(:3819-3842)两路——all_dependencies_are_recorded(can_redefine_classes 在 ONLOAD 声明→jvmtiManageCapabilities.cpp:323-328)→CodeCache::flush_evol_dependents_on(codeCache.cpp:1292,mark_for_evol_deoptimization→deoptimize_dependents→make_marked_nmethods_not_entrant,**只失效依赖该类进化的 nmethod**);否则全量+置位;实证: redefine 时刻仅 sayHello(231)/main(234) 两个 nmethod made not entrant
+- **previous versions 链**: add_previous_version(instanceKlass.cpp:3901-3957)——**scratch_class 池 on_stack 才挂链**(constantPool.hpp:198 _on_stack 位;MetadataOnStackMark 标记: 栈上方法+CodeCache+编译队列+断点,metadataOnStackMark.cpp:48-73);每次 redefine 先 purge_previous_version_list(:3747: 池不在栈→解链+清 jmethodID+进 deallocate 列表);EMCP 方法 on_stack→set_running_emcp
+- **实证工具箱(新)**: ①**-Xlog:redefine+class+obsolete+mark=trace**(mark as obsolete/EMCP_cnt/obsolete_cnt);②redefine+class+load=info("redefined name=..., count=N");③redefine+class+timer=info(vm_op all/prologue/doit);④redefine+class+constantpool=info(merge_cp_len/index_map_len);⑤redefine+class+iklass+purge=trace(previous version alive/dead);⑥redefine+class+methodcomparator=debug;⑦redefine+class+update=info(ResolvedMethodTable adjust);⑧**RetransformClasses 无缓存字节时 JvmtiClassFileReconstituter 重建**(jvmtiEnv.cpp:428-440);⑨实测 67=缺 static 块(METHOD_DELETED)——v2 必须方法集完全一致
+- 实证: 28-jvmti-redefine-demo.txt
+
+
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
@@ -1138,7 +1156,8 @@
 - [x] 25-gc-framework/05——✅ 完结(正文 d42f723 含回填 ⚠️ 2 块/README f2f557d);**25 域 5/6**
 - [x] 25-gc-framework/06——✅ 完结(正文 21fc803 含回填 ⚠️ 4 块/README ca1f29a);**25 域完结,第 6 批 8 域全收官**
 - [x] 28-jvmti/01——✅ 完结(正文 61443a2,317 行,含大纲回填 ⚠️ 4 块/README 10c8a5d);**28 域 1/3,第 6 批 1/4**
-- [ ] **28-jvmti/02**——**下一篇**;大纲 `planning/outlines/28-jvmti/02-redefine-classes.md`(RedefineClasses — 怎么不重启 JVM 替换一个类的字节码?);28 域 3 篇之二;28-01 悬念已指向 02
+- [x] 28-jvmti/02——✅ 完结(正文 c292b56,270 行,含大纲回填 ⚠️ 4 块/README d5c8c45);**28 域 2/3,第 6 批 2/4**
+- [ ] **28-jvmti/03**——**下一篇**;大纲 `planning/outlines/28-jvmti/03-auxiliary.md`(JVMTI 辅助设施 — TagMap + 事件分派细节);28 域收官;28-02 悬念已指向 03
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -1183,23 +1202,21 @@
 ## 十、下一步(读完立即做)
 
 ```
-【28-jvmti/02 写作指引——28 域 3 篇之二,RedefineClasses 类重定义】
-1. 读 planning/outlines/28-jvmti/02-redefine-classes.md(注意 ⚠️ 块;28-01 已回填 4 块,02 大概率同样漂移)。
-   28-02 主题=类热替换,按大纲实际内容验证,预判要点(以实际 grep 为准):
-   - jvmtiRedefineClasses.cpp/hpp(接口实现)、jvmtiClassFileReconstituter.cpp(字节码重建,28-01 已见文件清单)
-   - methodComparator.*(新旧字节码比较——一致则保留 nmethod 免 deopt)、relocator.*(常量池/跳转重定位)、resolvedMethodTable.*
-   - 旧类→新类的 metamorphosis;constant_pool merge;nmethod 失效(not_entrant,与 15-c2/24-frame 的 deopt 链衔接)
-   - 与 28-01 衔接: can_redefine_classes 能力(always 集合,jvmtiManageCapabilities.cpp:91)+update() 的
-     set_can_hotswap_or_post_breakpoint(jvmtiManageCapabilities.cpp:333-336)+all_dependencies_are_recorded(:325-328)
-   - 实例: VM_RedefineClasses 是 VM_Operation(20 域);JvmtiEventController 的 04 篇已提 redefine 类事件
-2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;28 域文件归属 jvmti*.cpp/hpp 最易错(jvmtiRedefineClasses vs jvmtiClassFileReconstituter 别混)
+【28-jvmti/03 写作指引——28 域收官篇,JVMTI 辅助设施】
+1. 读 planning/outlines/28-jvmti/03-auxiliary.md(注意 ⚠️ 块;01/02 已回填各 4 块,03 大概率同样漂移)。
+   28-03 主题=TagMap + 事件分派细节,按大纲实际内容验证,预判要点(以实际 grep 为准):
+   - jvmtiTagMap.cpp/hpp(SetTag/GetTag/FollowReferences/IterateOverHeap 对象遍历)
+   - 28-01 的悬念铺垫: 事件系统的 per-thread 细节(JvmtiThreadState/JvmtiEnvThreadState);
+     ServiceThread 延迟事件(39-01 已讲)与 GenerateEvents 补发(28-01 §5 已讲)
+   - 可能涉及: 弱引用/标记对象如何与 GC 交互(oops_do/weak_oops_do,27-jni/01 的 OopStorage 先例)
+2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;jvmtiTagMap 是 JVMTI 里与 GC 耦合最深的部分,
+   行号与机制最易错(参考 25 域六篇的 GC 交互经验)
 3. 实证优先用 /data/tmp/opencode/jdk11:
-   - Instrumentation API(Java agent,36-attach/02 已讲 instrument 库)或 -XX:+TraceRedefineClasses 类 flag;
-     自写 agent 用 RetransformClasses/RedefineClasses 演示
-   - 28-01 素材可复用(agentdemo.c 结构: GetEnv/AddCapabilities(can_redefine_classes)/SetEventCallbacks)
+   - agentdemo.c/redefagent.c 结构可复用(GetEnv/AddCapabilities/SetEventCallbacks);
+   - 对象 tag: SetTag 后 -Xlog:gc 观察标记对象影响;IterateOverHeap 计数
+   - 28-01/02 素材可复用(-Xlog:jvmti? 标签边界已验证)
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP;ART 改回当前文件)→ 深审 2 轮 → 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
-5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68-6.82,含新失败模式)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容)——**禁止用 "## 七" 整行当 oldString**(6.82 曾直接吞掉标题);③**立即 `grep -n "^### 6\.8"` 校验连续递增 + `grep -n "^## 七\|^## 八"` 标题仍在**;④再做其他编辑
+5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68-6.83)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容)——**禁止用 "## 七" 整行当 oldString**(6.82 曾直接吞掉标题);③**立即 `grep -n "^### 6\.8"` 校验连续递增 + `grep -n "^## 七\|^## 八"` 标题仍在**;④再做其他编辑
 6. 28 域后 → 29-mh → 33-jmx → 43-nio-net(第 6 批收官,然后第 7 批 22/26/35/40/47)
 ```
-
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
