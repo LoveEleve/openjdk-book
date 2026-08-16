@@ -40,9 +40,9 @@ class JvmtiTagHashmapEntry : public CHeapObj<mtInternal> {
 
 ### 1.2 set/get: 一把锁 + 增删改查
 
-`set_tag`/`get_tag`(jvmtiTagMap.cpp:738-777)是热路径(注释 "This function is performance critical...Mutex...will be a hot lock"): **每 map 一把 `_lock`**,`find` 后三态——不在→`create_entry`+`add`;在且 tag≠0→`set_tag` 更新;**在且 tag=0→`remove`+`destroy_entry`**(tag 归零即删除,这是"解除标记"的唯一方式)。`create_entry` 优先取 env 的 free list(:494-512,已删条目复用)。
+`set_tag`/`get_tag`(jvmtiTagMap.cpp:738-777)是热路径(注释 "This function is performance critical...Mutex...will be a hot lock"): **每 map 一把 `_lock`**,`find` 后三态——不在→`create_entry`+`add`;在且 tag≠0→`set_tag` 更新;**在且 tag=0→`remove`+`destroy_entry`**(tag 归零即删除,解除标记的常规方式)。`create_entry` 优先取 env 的 free list(:494-512,已删条目复用)。
 
-JVMTI 侧入口 `JvmtiEnv::SetTag/GetTag`(jvmtiEnv.cpp:1933/:1924): 校验对象后 `JvmtiTagMap::tag_map_for(this)`(**懒创建**,jvmtiTagMap.cpp:529-541)——**不 SetTag 就不建 map**,能力声明不产生任何开销(28-01 §2 的"能力只是位"在此兑现)。
+JVMTI 侧入口 `JvmtiEnv::SetTag/GetTag`(jvmtiEnv.cpp:1933/:1924): 校验对象后 `JvmtiTagMap::tag_map_for(this)`(**懒创建**,jvmtiTagMap.cpp:529-541)——**不 SetTag 就不建 map**——能力声明只置标志不分配结构(28-01 §2 的"能力只是位"在此兑现;update() 里 can_tag_objects 的唯一副作用是 set_can_walk_any_space,jvmtiManageCapabilities.cpp:340-341)。
 
 ### 1.3 GC 集成: 弱处理阶段的清理
 
@@ -76,7 +76,7 @@ tag 的对象死了怎么办?**tag map 的清理挂在 GC 的弱处理阶段**�
 
 每个 entry 三态: ①`is_alive` 判死 → 删除+入 free list+**可选的 OBJECT_FREE 事件**;②活着且 `f->do_oop` 更新了引用(压缩 oop/移动 GC)→ **按新地址 re-hash 换桶**(:3389-3407,新位置靠后的 entry 用 `delayed_add` 暂存,遍历结束后统一插回——注释 "Delay adding this entry to it's new position as we'd end up hitting it again during this iteration",防本次遍历重复命中;`moved` 计数);③没动 → 保持。
 
-*关键设计: "弱"的落点。tag map 不参与可达性——`is_alive` 判死、死条目即删,天然与 GC 结果一致;对象移动由 `do_oop` 更新+re-hash 跟上。这与 27-jni/01 的 JNI weak 同处 WeakProcessor 的弱处理阶段(weakProcessor.cpp:36-41 同一调用链,`JNIHandles::weak_oops_do` 与 `JvmtiExport::weak_oops_do` 相邻),但 tag map 更进一步——对象死后还发 ObjectFree 事件,agent 得以知道"那个被标记的对象没了"。*
+*关键设计: "弱"的落点。tag map 不参与可达性——`is_alive` 判死、死条目即删,天然与 GC 结果一致(发布瞬时有一次 `keep_alive` 防 SATB 竞态,create_entry :499);对象移动由 `do_oop` 更新+re-hash 跟上。这与 27-jni/01 的 JNI weak 同处 WeakProcessor 的弱处理阶段(weakProcessor.cpp:36-41 同一调用链,`JNIHandles::weak_oops_do` 与 `JvmtiExport::weak_oops_do` 相邻),但 tag map 更进一步——对象死后还发 ObjectFree 事件,agent 得以知道"那个被标记的对象没了"。*
 
 [实证](materials/commands/28-jvmti-tagmap-demo.txt)(素材 A/B): SetTag 3 个对象→GetObjectsWithTags 精确返回→丢弃强引用+`ForceGarbageCollection`(jvmtiEnv.cpp:1954,`GCCause::_jvmti_force_gc`)→ **ObjectFree 回调 3 次,tag=1002/2002/3003 精确匹配**;`-Xlog:jvmti+objecttagging=trace` 看到 `do_weak_oops` 的日志 **`(3->0, 3 freed, 0 total moves)`**(:3427-3428,entry_count 3→0/清除 3/无移动);之后 GetObjectsWithTags 返回 0。
 
@@ -116,7 +116,7 @@ SingleStep/Breakpoint 是 per-thread 事件,同一位置可能重复触发(指�
 
 ## 3. ResolvedMethodTable — 大纲整节误读的 JSR-292 桥
 
-大纲说它 "Method*→quick lookup for JVMTI;breakpoint at method X→快速找到 Method*;每类一个 hash table(per class loader)"——**全错**。真实的类头注释(resolvedMethodTable.hpp:33-36)就是它的全部用途:
+大纲说它 "Method*→quick lookup for JVMTI;breakpoint at method X→快速找到 Method*;每类一个 hash table(per class loader)"——**全错**。真实的类头注释(resolvedMethodTable.hpp:32-34)就是它的全部用途:
 
 ```cpp
 // resolvedMethodTable.hpp:32-34(截取核心,逐字)
@@ -128,12 +128,12 @@ SingleStep/Breakpoint 是 per-thread 事件,同一位置可能重复触发(指�
 
 - Java 侧方法句柄解析 → `java_lang_invoke_ResolvedMethodName::find_resolved_method`(javaClasses.cpp:3800-3821): 查表(`find_method` :119)→ 无则 new 一个 ResolvedMethodName oop(**vmtarget=Method*\*,vmholder=java_mirror 保活** meta 不被卸载)→ `add_method`(:124)入表;
 - 表条目弱引用其 oop(**ClassLoaderWeakHandle**,hpp:40),ResolvedMethodName oop 被回收的条目由 `unlink`(:155)清理;
-- `set_vmtarget`(:3796-3799,注释 "Used by redefinition to change Method* to new Method* with same hash")——redefine 后方法句柄自动指向新方法,**无需重解析**。
+- `set_vmtarget`(:3795-3799,注释 "Used by redefinition to change Method* to new Method* with same hash")——redefine 后方法句柄自动指向新方法,**无需重解析**。
 
 *关键设计: 方法句柄是"方法的稳定句柄"——它不能因 redefine 而失效。ResolvedMethodTable 把 (ResolvedMethodName oop ↔ Method*) 的关系登记在案,redefine 时按表改写,句柄持有者无感知。这也是它为什么不在"JVMTI 内部设施"而在 JSR-292 的桥上的原因——大纲把它当断点查找表,是"名字像内部表"的误读。*
 
 ## 核心悬念
 
-28 域收官。辅助设施到齐: **TagMap**(每 env 一个哈希表,phantom 语义的 oop 槽位、SetTag/GetTag 三态、GC 弱处理阶段清死条目+ObjectFree 通知、对象移动 re-hash、mark 位借用的堆遍历、反直觉的 filter 语义)、**事件细节**(单步/断点位置去重、ObjectFree 只有 tag 的死亡通知)、**ResolvedMethodTable**(方法句柄↔Method* 的登记表,redefine 的自动改写通道)。——最后一节埋了线索: **方法句柄(ResolvedMethodName)是 JVM 里"方法的稳定句柄"**。Java 层调用 MethodHandle 时,invokedynamic 怎么找到它?签名多态调用怎么分派?下一篇: 方法句柄。
+28 域收官。辅助设施到齐: **TagMap**(每 env 一个哈希表,phantom 语义的 oop 槽位、SetTag/GetTag 三态、GC 弱处理阶段清死条目+ObjectFree 通知、对象移动 re-hash、mark 位借用的堆遍历、反直觉的 filter 语义)、**事件细节**(单步/断点位置去重、ObjectFree 只有 tag 的死亡通知)、**ResolvedMethodTable**(方法句柄↔Method* 的登记表,redefine 的自动改写通道)。——最后一节埋了线索: **方法句柄解析产物的 ResolvedMethodName 是"方法的稳定句柄"**。Java 层调用 MethodHandle 时,invokedynamic 怎么找到它?签名多态调用怎么分派?下一篇: 方法句柄。
 
 > → [29-mh/01 — invokeExact 怎么做到 50x faster than reflection？— MH invoke 链路](openjdk/vol-02/29-mh/01-invoke-chain.md)

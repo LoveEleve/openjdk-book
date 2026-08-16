@@ -1111,6 +1111,7 @@
 - **§3 ResolvedMethodTable 大纲整节错(重要)**: 不是 JVMTI 断点查找表/per-loader 表——真实=**java.lang.invoke.ResolvedMethodName ↔ Method* 映射单例表**(1007 桶,Hashtable 子类 hpp:49/:54;用途注释 hpp:33-34 "needed for redefinition")——JSR-292 桥;填充=find_resolved_method(javaClasses.cpp:3800-3821: 查 find_method :119→new oop vmtarget=Method*/vmholder=java_mirror 保活→add_method :124);清理 unlink(:155,oop 回收条目);28-02 的 adjust_method_entries(:204-241)改 vmtarget 旧→新,句柄持有者无感知
 - **实证工具箱(新)**: ①**-Xlog:jvmti+objecttagging=trace**(do_weak_oops 日志 "(N->M, X freed, Y total moves)" :3427-3428 + GetObjectsWithTags/IterateOverReachableObjects 的 TraceTime);②ForceGarbageCollection 触发 GC(jvmtiEnv.cpp:1954 _jvmti_force_gc);③GetObjectsWithTags 返回数组要 Deallocate;④ObjectFree 回调签名无 JNIEnv
 - 实证: 28-jvmti-tagmap-demo.txt
+- **第 3 轮 REVIEW 修正(2026-08-16)**: ①§3 文字引用 33-36 与块标注 32-34 不一致→统一 :32-34(跨段一致性,第 3 轮高发);②"能力声明不产生任何开销"过强→补唯一副作用 set_can_walk_any_space(jvmtiManageCapabilities.cpp:340-341 "disable sharing in onload phase");③§1.3 关键设计补 create_entry 发布瞬时 keep_alive 防 SATB 竞态(:499)——"不参与可达性"表述边界;④悬念"方法句柄(ResolvedMethodName)"措辞→"方法句柄解析产物的 ResolvedMethodName";⑤set_vmtarget 注释归属 :3796-3799→:3795-3799;⑥"解除标记唯一方式"删"唯一"(DisposeEnvironment 也是途径);⑦大纲回填的 jvmtiTagMap.hpp:40-150 是原大纲遗留文本(⚠️ 块已纠正,非新错误);⑧6.84 行号全量核验 0 错误
 
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
