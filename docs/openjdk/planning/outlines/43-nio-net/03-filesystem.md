@@ -3,6 +3,17 @@
 > 🟡 Working | POSIX syscall JNI + inotify 文件监视
 > 读者处境: `Files.readAttributes(path, "*")`→UnixNativeDispatcher.stat→struct stat→BasicFileAttributes。`Files.list(dir)`→openat+fdopendir+readdir→Stream<Path>。`WatchService`→inotify_init→inotify_add_watch(IN_CREATE|IN_DELETE|IN_MODIFY)→poll events→StandardWatchEventKinds。
 
+> ⚠️ 写作期修正(2026-08-16,43-nio-net/03 完成,43 域收官,第 6 批收官):
+> - **"stat0 收 String + JNU_GetPlatformString" 错(重要)**: 路径统一走 **jlong 地址**——Java 侧 copyToNativeBuffer(UnixNativeDispatcher.java:39,NativeBuffer=NativeBuffers.java:35)→stat0(buffer.address(), attrs)(:298-311);C 侧 `jlong_to_ptr(pathAddress)`(UnixNativeDispatcher.c:548);**stat64 非 stat**(:546)
+> - **"openat0 的 dfd==AT_FDCWD 分支" 编造**: 真实=**my_openat64_func 运行时函数指针**(init 时 dlsym(RTLD_DEFAULT, "openat64"),:262-267)+RESTARTABLE(:458);openat(dfd 相对路径)减少 TOCTOU 竞态 ✓
+> - **"fdopendir(env, this, dfd, path)" 签名错**: 真实 fdopendir(:748)只收 dfd(jlong 地址);opendir0(:733)收 pathAddress;readdir(:774)收 DIR* 的 jlong
+> - **"readdir 返回 d_type(DT_REG/DT_DIR)省 stat" 编造(重要)**: JDK11 readdir 只把 **d_name 拷成字节数组**返回(:774-793,readdir64),d_type 不看;strace 里 getdents64=glibc readdir 内部实现
+> - **inotify 行号 ✓**(eventSize :49/eventOffsets :55 布局五元组/inotifyInit :72=**inotify_init() 旧 API**(悬念段 inotify_init1 误记)/inotifyAddWatch :83/inotifyRmWatch :97/configureBlocking :106/socketpair :118/poll :133)
+> - **"Java 层在 WatchKey 注册时递归子目录(Files.walk)" 编造**: implRegister(LinuxWatchService.java:208-262)只对传入目录一次 inotifyAddWatch(:260),**不递归**;子目录由使用方逐个注册
+> - **Poller 消费链(大纲漏,重要)**: run(:310)→poll(ifd, socketpair[0])(:316)阻塞→read(ifd, address, BUFFER_SIZE)(:320)→unsafe 按 eventOffsets 解析变长事件(wd/mask/len+name 去尾部 null 对齐,:323-352)→maskToEventKind(:384-390): IN_CREATE/MOVED_TO→ENTRY_CREATE、IN_DELETE/MOVED_FROM→ENTRY_DELETE、IN_MODIFY/IN_ATTRIB→ENTRY_MODIFY——**inotify 无"移动"事件,JDK 合成 CREATE/DELETE**;register/close 写 socketpair(:201)自唤醒
+> - **悬念指向错**: "域44 Class Verification"过期(44 域第 4 批已完结)——正确 **22-deoptimization/01**(第 7 批开篇,"编译代码什么时候回退？— Deopt 决策表")
+> - 素材: 33-nio-fs-strace.txt(stat("/tmp/fsdemo/a.txt",S_IFREG|0644,size=5)/openat+getdents64 3 entries/inotify_init+add_watch(IN_MODIFY|IN_ATTRIB|IN_MOVED_FROM|IN_MOVED_TO|IN_CREATE|IN_DELETE)+rm_watch)
+
 ### 1. "UnixNativeDispatcher — stat/open/readdir"
 
 场景: `Files.readAttributes(path, BasicFileAttributes.class)`→UnixFileSystemProvider.readAttributes→UnixNativeDispatcher.stat→struct stat→FileAttribute→Java BasicFileAttributes。
