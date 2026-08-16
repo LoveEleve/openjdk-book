@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-15 | 卷 2 写作中: **124/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 19) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 41 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(4)**;下一篇 25-gc-framework/05(CardTable + DirtyCardQueue,25 域共 6 篇)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-15 | 卷 2 写作中: **125/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 20) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 42 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(5)**;下一篇 25-gc-framework/06(OopStorage + StringDedup + GC Stats,25 域收官篇)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -46,11 +46,11 @@
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
-第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(4/6)** → 28 → 29 → 33 → 43
+第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(5/6)** → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 124 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 125 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -92,7 +92,7 @@
 | **14-c1-compiler** | 1-4 | `14-c1-compiler/01-c1-pipeline-ir.md`(88)+`02-c1-optimizations.md`(56)+`03-c1-register-codegen.md`(45)+`04-c1-runtime-frame.md`(61) | ✅ **14 域完结(本会话)** |
 | **15-c2-compiler** | 1-8 | `01-c2-ideal-graph.md`(253)+`02-c2-parse-graphkit.md`(230)+`03-c2-optimizations.md`(138)+`04-c2-loops.md`(140)+`05-c2-register-alloc.md`(143)+`06-c2-codegen.md`(129)+`07-c2-macro-intrinsics.md`(74)+`08-c2-library-calls.md`(104) | ✅ **15 域完结(本会话)** |
 | **21-shared-runtime** | 1-3 | `21-shared-runtime/01-runtime-stubs.md`(96)+`02-c2i-i2c-adapter.md`(120)+`03-exception-handling.md`(191) | ✅ **21 域完结(本会话)** |
-| **25-gc-framework** | 1-4 | `01-barrier-access.md`(195)+`02-collected-heap.md`(199)+`03-reference-processing.md`(160)+`04-workgang-taskqueue.md`(155) | 🚧 **25 域 4/6(本会话)** |
+| **25-gc-framework** | 1-5 | `01-barrier-access.md`(195)+`02-collected-heap.md`(199)+`03-reference-processing.md`(160)+`04-workgang-taskqueue.md`(155)+`05-cardtable-dirtycardq.md`(67) | 🚧 **25 域 5/6(本会话)** |
 
 ### 本会话 26 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
@@ -232,7 +232,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 37 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 38 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -259,6 +259,7 @@
 - `25-gc-heap-alloc-demo.txt`(-Xlog:gc+tlab=trace: compute_size(2) returns 36702/desired_size 286KB/refill waste 4584B=desired/64(TLABRefillWasteFraction);GC cause 括号实证: Pause Young (Normal) (G1 Evacuation Pause)/Humongous Allocation/Diagnostic Command(jcmd GC.run)/OOM 链;UseTLAB 对照 2 亿次分配 1.35s→8s(6 倍);flag 盘点 MinTLABSize=2K/TLABSize=0/TLABWasteTargetPercent=1/YoungPLABSize=4096/OldPLABSize=1024;源码级: TLAB allocate bump/refill 链/G1 attempt_allocation_slow/PLAB;GcPhaseDemo/HumDemo/OomDemo.java)
 - `25-gc-reference-demo.txt`(RefDemo 内存压力四类引用生命周期: weak null/soft false/phantom enqueued/queue 2;SoftRefLRUPolicyMSPerMB 对照: 无压力默认保活对象(weak 同活=软可达)vs 0 立即清 vs 压力清;flag: SoftRefLRUPolicyMSPerMB=1000 {product}/RegisterReferences;标签 gc+ref=debug 可用;源码级: process 四阶段/work 三态/discover 过滤链/SoftRefPolicy interval vs max_interval/G1 双 ReferenceProcessor/instanceRefKlass try_discover;RefDemo/RefDemo2.java)
 - `25-gc-workgang-demo.txt`(flag 盘点: ParallelGCThreads=23 上限/ConcGCThreads=6/UseDynamicNumberOfGCThreads=true;gc+phases Workers: 2 动态 worker 实证;SIGQUIT 线程转储 GC Thread#0/G1 Conc#0 懒创建;标签 gc+task/gc+workgang 可用;源码级: ABP 队列/Age tag 防 ABA/pop_local_slow 竞争/pop_global CAS/SemaphoreGangTaskDispatcher 信号量派发/GangWorker NearMaxPriority;SleepDemo/GcPhaseDemo)
+- `25-gc-cardqueue-demo.txt`(flag: G1UpdateBufferSize=256/G1SATBBufferSize=1024/G1ConcRefinementThreads ergonomic;标签 gc+refine=debug 可用(Stopping N);Update RS Processed Buffers 消费读数(复用 25-01/25-04 素材);源码级: PtrQueue 递减索引/enqueue_known_active/handle_zero_index/DirtyCardQueueSet 消费链(get_completed_buffer _cbl_mon/apply_closure_to_completed_buffer)/refine_card_concurrently 语义(region 过滤+HCC 热卡缓存+清卡后扫描登记 RSet)/refine_card_during_gc Update RS 接力;G1 Refine 线程名)
 - `15-c2-macro-demo.txt`(PrintInlining: System.arraycopy→"intrinsic"(0 字节 native 被替换)+lockElim(synchronized(new Object()) 锁消除候选)整体内联+Object.<init> 内联;CITime Macro Expand/Macro Eliminate 阶段;源码核对: expand_macro_nodes 编排/eliminate_locking_node/expand_lock_node fast-slow/expand_arraycopy_node+generate_arraycopy;flag: PrintEliminateLocks notproduct(c2_globals.hpp:508)/ReduceBulkZeroing product(:263))
 - `15-c2-codegen-demo.txt`(CITime Code_Gen 阶段: Matcher/Scheduler/Regalloc/Block Ordering/Peephole/Build OOP maps/Code Installation;源码核对: MachNode::peephole 默认 NULL(machnode.cpp:415)、.ad 三文件行数 36815、addI 变体 x86_64.ad:7473-7519、Compile::Output output.cpp:57、do_global_code_motion gcm.cpp:1612;flag 类型: OptoPeephole develop_pd/PrintOptoPeephole notproduct)
 - `15-c2-register-alloc-demo.txt`(CITime Regalloc 阶段树: RADemo.heavy 32 局部变量高寄存器压力——Regalloc 0.001s 下 Ctor Chaitin/Build IFG(virt+phys)/Compute Liveness/Regalloc Split/Postalloc Copy Rem/Fixup Spills/Coalesce 1-3/Simplify/Select;RA flag 类型: OptoCoalesce develop(c2_globals.hpp:244)/VerifyRegisterAllocator notproduct(:285)/VerifyGraphEdges notproduct(:276)/OptoRegScheduling+OptoBundling product_pd;heavy 编译事件 level 4)
@@ -1006,6 +1007,18 @@
 - **实证方法论**: ①**ParallelGCThreads 是上限不是实际并发**(UseDynamicNumberOfGCThreads=true 小 GC Workers: 2,gc+phases);②SIGQUIT 线程转储 GC Thread#N/G1 Conc#N 懒创建;③gc+task/gc+workgang 标签可用;④素材 25-gc-workgang-demo.txt
 - **第 3 轮 REVIEW 修正(commit f71d3da)**: ①**'steal_best_of_2 随机两受害者各试一次'错**——真实=挑 k1/k2 后**比较 size 偷较大的**(taskqueue.inline.hpp:245-247 "Sample both and try the larger");②push 用 increment_index 环形递增非 localBot+1(:92);③验证: G1 并发标记用 WorkGang(_concurrent_workers g1ConcurrentMark.hpp:367)+WorkGangBarrierSync(:338-339);G1 remset 任务(G1ClearCardTableTask g1RemSet.cpp:57/G1RebuildRemSetTask :742)是 AbstractGangTask
 
+### 6.80 25-gc-framework/05(CardTable + DirtyCardQueue,25 域 5/6,大纲 10+ 处漂移含 2 处机制编造 + 深审 2 轮,2026-08-15)
+- **与 25-01 分工**: 卡表结构(card_shift/byte_for/store_check)25-01 已详;本篇=标记之后的 DirtyCardQueue 与消费链
+- **"CardTableRS/ModUnionTable" 死代码(重要)**: 仅 GenCollectedHeap/cardGeneration 引用(cardGeneration.cpp:42、genCollectedHeap.cpp:133)——G1-only 构建不适用;G1 remembered set=region 级 RSet(G1RemSet),卡表是索引入口;**"MOVNTI" 断言错**(store_check 普通 movb,25-01 已证)
+- **文件位置错**: ptrQueue.*/dirtyCardQueue.* 在 **share/gc/g1/**(大纲 gc/shared 错);SATBMarkQueue(satbMarkQueue.hpp:45)=同套机制另一实例(G1SATBBufferSize=1K vs G1UpdateBufferSize=256)
+- **入队动作(大纲漏)**: write_ref_field_post_slow(g1BarrierSet.cpp:99-114): storeload fence→非 dirty 才标→Java 线程入 G1ThreadLocalData::dirty_card_queue/非 Java 线程 Shared_DirtyCardQ_lock 共享队列;入队的是**卡字节地址 jbyte\***
+- **PtrQueue 机制**: _active(:49)/_index 字节索引从容量递减(:56-59 "Starts at capacity_in_bytes...goes towards zero")/_capacity_in_bytes/_buf(:92);enqueue :141-144(不活跃返回)→enqueue_known_active(ptrQueue.cpp:64-74: while(_index==0) handle_zero_index→_index-=8→_buf[index()]=ptr);G1UpdateBufferSize=256(dirtyCardQueue.cpp:161);PtrQueueSet 满处理(free list 优先 :127-142)
+- **"swap 用 CAS 替换 buffer" 错**: buffer 转移在 handle_zero_index(锁 _cbl_mon/_fl_lock);"20 cycles" 无据删
+- **消费链(大纲漏,重要)**: 并发精炼=G1ConcurrentRefine::do_refinement_step(g1ConcurrentRefine.cpp:429-446,yellow zone)→refine_completed_buffer_concurrently(dirtyCardQueue.cpp:249-252,G1RefineCardConcurrentlyClosure :43-53)→apply_closure_to_completed_buffer(:259-280: get_completed_buffer _cbl_mon :226-247→逐卡→全处理 deallocate/部分放回 :274-277);**refine_card_concurrently 语义**(g1RemSet.cpp:539-634): 非 dirty 返回→region 非 old/humongous 忽略(:574-576)→**HCC 热卡缓存拦截(命中入缓存不精炼,满驱逐旧卡 :587-607)**→卡裁剪到 region top(:609-626)→**清卡 :631 后扫描引用登记 RSet**;young 卡标记并发(注释 :557-563);Update RS 接力(refine_card_during_gc :673;update_rem_set :477-499 含 HCC 优先)
+- 线程: "G1 Refine#%d"(g1ConcurrentRefineThread.cpp:55);G1ConcRefinementThreads ergonomic
+- **实证方法论**: G1UpdateBufferSize=256/G1SATBBufferSize=1K flag;gc+refine=debug 可用(Stopping N);Update RS Processed Buffers=消费读数(25-01/25-04 素材复用);素材 25-gc-cardqueue-demo.txt
+- **悬念指向** ✓(06-oopstorage;06 标题="字符串去重和 GC 统计 — OopStorage + StringDedup + GC Stats")
+
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
@@ -1062,7 +1075,8 @@
 - [x] 25-gc-framework/02——✅ 完结(正文 cb4192b 含回填 ⚠️ 3 块/README 58df4b9);**25 域 2/6,第 6 批 7/8**
 - [x] 25-gc-framework/03——✅ 完结(正文 e6332a8 含回填 ⚠️ 2 块/README 177d56b);**25 域 3/6,第 6 批 8/8 收官**
 - [x] 25-gc-framework/04——✅ 完结(正文 1e31bb8 含回填 ⚠️ 2 块/README 0574af2);**25 域 4/6**
-- [ ] **25-gc-framework/05**——**下一篇**;大纲 `planning/outlines/25-gc-framework/05-cardtable-dirtycardq.md`(一次赋值在 GC 眼里怎么变成"脏卡片"？— CardTable + DirtyCardQueue);25 域共 6 篇;25-04 悬念已指向 05
+- [x] 25-gc-framework/05——✅ 完结(正文 d42f723 含回填 ⚠️ 2 块/README f2f557d);**25 域 5/6**
+- [ ] **25-gc-framework/06**——**下一篇,25 域收官篇**;大纲 `planning/outlines/25-gc-framework/06-oopstorage-stringdedup-stats.md`(字符串去重和 GC 统计 — OopStorage + StringDedup + GC Stats);25 域共 6 篇;25-05 悬念已指向 06
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -1105,21 +1119,21 @@
 ## 十、下一步(读完立即做)
 
 ```
-【25-gc-framework/05 写作指引——25 域 5/6,CardTable + DirtyCardQueue】
-1. 读 planning/outlines/25-gc-framework/05-cardtable-dirtycardq.md(注意 ⚠️ 块;25-01/02/03/04 回填 2-3 块,05 大概率同样漂移)。
-   25-05 主题=CardTable + DirtyCardQueue,按大纲实际内容验证,预判要点(以实际 grep 为准):
-   - **与 25-01 的分工**: 25-01 已讲 CardTable 结构(card_shift=9/byte_for/store_check 汇编)与卡标记;25-05 应聚焦 **DirtyCardQueue**(dirtyCardQueue.hpp:46+,PtrQueue 线程本地 index/buf,满转 DirtyCardQueueSet)与 **GC 侧消费**(Update RS 阶段处理卡片)
-   - PtrQueue(ptrQueue.hpp/cpp,share/gc/g1): index/buf 语义、enqueue/flush、激活状态;DirtyCardQueueSet 的并行处理(G1RefineDirtyCardQueueClosure?)
-   - G1 的 card table 变体: G1CardTable(g1CardTable.hpp:47)+G1CardTableBarrierSet;年轻代卡(g1_young_card_val)语义
-   - Update RS/Scan RS 消费链: 25-01 素材 A 段已见(gc+phases),本篇讲队列怎么被 GC worker 消费
-2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;DirtyCardQueue 的"激活/缓冲转移"机制最易错;注意与 27-jni/01 的 JNI Handle 队列(OopStorage)区分
+【25-gc-framework/06 写作指引——25 域 6/6 收官篇,OopStorage + StringDedup + GC Stats】
+1. 读 planning/outlines/25-gc-framework/06-oopstorage-stringdedup-stats.md(注意 ⚠️ 块;25-01/02/03/04/05 回填 2-3 块,06 大概率同样漂移)。
+   25-06 主题=OopStorage + StringDedup + GC Stats(GC 辅助设施),按大纲实际内容验证,预判要点(以实际 grep 为准):
+   - **OopStorage 与 27-jni/01 的分工**: 27-jni/01 已讲 JNI handles 用 OopStorage(Global/Weak 两实例);本篇从 GC 视角: 无锁 block 分配(每个 block 独立+并发 iteration)、defragment、弱清理(weakProcessor)
+   - StringDedup: stringdedup/(stringDedupTable/Queue,G1 的 stringDedup 集成);共享 hash table+queue,dedup 请求→queue→deduplicate→table lookup
+   - GC Stats: gcCause(25-02 已讲枚举)/gcId/gcTimer/gcTrace/GCTraceTimeImpl(39-02 已讲计时家族)——本篇从"一次暂停的可观测性"角度
+   - 与 25-01/02/03/04/05 衔接: 辅助设施如何挂进 GC 阶段树
+2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;OopStorage 的 block 分配细节(27-jni/01 有部分)、StringDedup 的 G1 集成、gc 统计的类归属最易错
 3. 实证优先用 /data/tmp/opencode/jdk11:
-   - 25-01 素材 A 已可复用(Update RS/Processed Buffers Workers: N);25-04 素材 B 的 Processed Buffers 行
-   - 引用写压力场景的 dirty card 处理(素材 A 段同款实验)
-   - -Xlog:gc+refine=debug? 标签验证
+   - 字符串去重: -XX:+UseStringDedup(G1)开/关对照(-Xlog:gc+stringdedup=debug 标签验证);jstat -gcutil
+   - OopStorage: 27-jni/01 素材复用(JNI handles 计数)
+   - GC 统计: -Xlog:gc+phases 已大量复用;GCTraceTime 日志格式(39-02 素材)
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP;ART 改回当前文件)→ 深审 2 轮(第 2 轮逐机制回源码质疑;用户常追加第 3/4 轮,重点抓: 跨段遗留、隐含断言、跨篇引用只保留目标篇实证过的内容)→ 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
-5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68/6.73/6.74/6.75/6.76/6.77/6.78/6.79)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容);③**立即 `grep -n "### 6.6"` 校验连续递增**;④再做其他编辑。禁止"new 含旧节标题"的替换模式。**注意: 6.75 插入曾误删 "## 七" 标题行(e34b53c)已修复;任何编辑后检查 ## 七/## 八 标题仍在**
-6. 25 域后 → 28-jvmti → 29-mh → 33-jmx → 43-nio-net(25-gc 共 6 篇,05 后剩 06-oopstorage-stringdedup-stats)
+5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68/6.73/6.74/6.75/6.76/6.77/6.78/6.79/6.80)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容);③**立即 `grep -n "### 6.7"` 校验连续递增(注意 6.80 起模式是 6.8X,grep 用 `^### 6\.` 全量校验)**;④再做其他编辑。禁止"new 含旧节标题"的替换模式。**注意: 6.75 插入曾误删 "## 七" 标题行(e34b53c)已修复;任何编辑后检查 ## 七/## 八 标题仍在**
+6. 25 域后 → 28-jvmti → 29-mh → 33-jmx → 43-nio-net(25 域完结后按 writing-order 续)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
