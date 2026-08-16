@@ -1004,6 +1004,7 @@
 - **动态 worker 数(大纲漏,重要)**: AbstractWorkGang(workgroup.hpp:109-201): _total_workers 上限/_active_workers 实际(UseDynamicNumberOfGCThreads 初始 1 :137,update_active_workers 按任务量上调 :163-171);GangWorker 懒创建(add_workers "Add GC workers as needed" :174);WorkGangBarrierSync(:297)
 - **消费方**: AbstractRefProcTaskExecutor(referenceProcessor.hpp:672-681,execute(ProcessTask&, ergo_workers) 纯虚)+G1 实现(G1FullGCReferenceProcessingExecutor g1FullGCReferenceProcessorExecutor.hpp:40/G1CMRefProcTaskExecutor)——25-03 的四列表分槽+maybe_balance_queues
 - **实证方法论**: ①**ParallelGCThreads 是上限不是实际并发**(UseDynamicNumberOfGCThreads=true 小 GC Workers: 2,gc+phases);②SIGQUIT 线程转储 GC Thread#N/G1 Conc#N 懒创建;③gc+task/gc+workgang 标签可用;④素材 25-gc-workgang-demo.txt
+- **第 3 轮 REVIEW 修正(commit f71d3da)**: ①**'steal_best_of_2 随机两受害者各试一次'错**——真实=挑 k1/k2 后**比较 size 偷较大的**(taskqueue.inline.hpp:245-247 "Sample both and try the larger");②push 用 increment_index 环形递增非 localBot+1(:92);③验证: G1 并发标记用 WorkGang(_concurrent_workers g1ConcurrentMark.hpp:367)+WorkGangBarrierSync(:338-339);G1 remset 任务(G1ClearCardTableTask g1RemSet.cpp:57/G1RebuildRemSetTask :742)是 AbstractGangTask
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
