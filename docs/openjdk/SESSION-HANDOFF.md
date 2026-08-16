@@ -11,9 +11,9 @@
 
 **当前正在做**: 卷 2 按 48 域依赖拓扑写源码文章,每篇严格按方法论: 读大纲 → **所有行号重新 grep 验证** → 写 → 代码块与源码逐字核对 → **深审 2 轮(用户常追加第 3/4 轮 REVIEW)** → 回填大纲 ⚠️ 块 → 提交 → README → HANDOFF。
 
-**下一步(唯一,无选择)**: 21-shared-runtime/03(异常处理,大纲 `planning/outlines/21-shared-runtime/03-exception-handling.md`;**21 域收官篇**;21 域 01/02 篇已完结,悬念已指向 03)。
+**下一步(唯一,无选择)**: 28-jvmti/01(JVMTI Agent 架构,大纲 `planning/outlines/28-jvmti/01-agent-architecture.md`;28 域 3 篇之首;25-06 悬念已指向 28)。
 
-**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,96 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(本会话两次编造代码块: 44-02 的 check_end_stack、11-01 的 is_loading_success);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
+**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,126 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(三次编造代码块被抓: 44-02 的 check_end_stack、11-01 的 is_loading_success、25-03 的 try_discover 签名);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
 ---
 
@@ -279,7 +279,7 @@
 
 ---
 
-## 六、本会话实战经验(最重要,新 AI 必读;6.1-6.51 旧会话沉淀,6.52-6.74 本会话 23 篇新沉淀)
+## 六、本会话实战经验(最重要,新 AI 必读;6.1-6.51 旧会话沉淀,6.52-6.81 本会话 43 篇新沉淀)
 
 ### 6.0 本会话精华速查(新 AI 写 28-jvmti/01 前必读)
 
@@ -329,7 +329,7 @@
 
 
 
-### 6.1 大纲漂移的规律(96 篇全部出现,2-15 处/篇;前会话沉淀 02/03/04/45/48/06/16/38/41/42/07/09/17/10/19/23/24/08/31/44/11/12/13/18 域,本会话沉淀 20/27/30/32 域)
+### 6.1 大纲漂移的规律(126 篇全部出现,2-15 处/篇;前会话沉淀 02/03/04/45/48/06/16/38/41/42/07/09/17/10/19/23/24/08/31/44/11/12/13/18 域,本会话沉淀 20/27/30/32/34/36/37/39/46/14/15/21/25 域)
 **任何机制描述/行号/值/专有名词,一律当"线索"而非"事实"**。高频漂移类型:
 1. **机制编造**(最严重): 大纲把"想当然的实现"写成机制——实证全部是编造
 2. **版本漂移**: 大纲写的是 JDK 8/其他版本的机制(31-01 的 CAS 单路径是 JDK8 形态;30-03 的 field_get 是 JDK8 反射)
@@ -992,7 +992,7 @@
 - **CardTable**: card_shift=9/card_size=512 在 **cardTable.hpp:231-232**(大纲 80-150 漂移);CardValues :95-102(clean=-1/dirty=0/precleaned=1/claimed=2/deferred=4);byte_for :153-158;store_check 汇编(cardTableBarrierSetAssembler_x86.cpp:88-132): shrptr :97 + byte_map_base 位移寻址(simm32 或 ArrayAddress :101-117)+ movb dirty :130;UseCondCardMark 先 cmpb 后 movb :120-128(默认关);G1 的 oop_store_at 仅 in_heap+val 非空做 post(:134-153)
 - **"G1SATBCardTableLogging/CardTableExtension" 是 JDK8 名**: JDK11 G1 用 G1BarrierSet+DirtyCardQueue(share/gc/g1/dirtyCardQueue.hpp:46+,PtrQueue 线程本地 index/buf,满转 DirtyCardQueueSet),G1-only 构建无 Parallel 分支
 - **悬念指向** ✓(02-collected-heap 正确);大纲标题与 21-03 悬念链接文本对齐(半角→全角问号)
-- **实证方法论**: ①-gc+phases=debug 阶段树(Update RS/Scan RS/Evacuate)是卡标记工作量的 GC 侧观察窗——2 亿次老对象引用写后 Update RS 真实处理卡片;②PrintAssembly 无 hsdis 的 nmethod header 可比较 C1 vs C2 代码尺寸(C1 1248/1344 vs C2 576);③**ReduceInitialCardMarks 的机器码对照不敏感**(G1 young 卡快速路径+OSR 形态使然,不要用 nmethod 尺寸做 RICM 证据);④gc+barrier/gc+remset 标签存在但无日志点;gc+cardtable 无效;⑤flag: ReduceInitialCardMarks {C2 product}/UseCondCardMark {product} 可开关
+- **实证方法论**: ①-gc+phases=debug 阶段树(Update RS/Scan RS/Evacuate)是卡标记工作量的 GC 侧观察窗——2 亿次老对象引用写后 Update RS 真实处理卡片;②PrintAssembly 无 hsdis 的 nmethod header 可比较 C1 vs C2 代码尺寸(C1 1248/1344 vs C2 576);③**ReduceInitialCardMarks 的机器码对照不敏感**(G1 young 卡快速路径+OSR 形态使然,不要用 nmethod 尺寸做 RICM 证据);④gc+barrier/gc+remset 标签存在但无日志点;gc+cardtable 无效;⑤flag: ReduceInitialCardMarks {C2 product}/UseCondCardMark {product} 可开关;⑥素材 25-gc-barrier-demo.txt
 
 ### 6.77 25-gc-framework/02(CollectedHeap+分配路径,25 域 2/6,大纲 12+ 处漂移含 3 处机制编造 + 深审 2 轮,2026-08-15)
 - **"tlab.cpp/tlab.hpp" 文件不存在**: 真实=**threadLocalAllocBuffer.hpp/cpp/inline.hpp**(share/gc/shared);`ThreadLocalAllocBuffer::allocate`(inline.hpp:34-54)=top()→end-top>=size→set_top+return(bump);compute_size :56-74(MIN3(available, desired+obj, max),"最后一个 TLAB 可以小一点" :58-59);record_slow_allocation :82-97(refill_waste_limit += desired/64,注释 :83-85 防"同尺寸对象卡慢路径")
@@ -1108,10 +1108,10 @@
 - [x] 15-c2-compiler/08——✅ 完结(正文 4e53b4a 含回填 ⚠️ 3 块 17 条/README ee988b7);**15 域完结,第 6 批 2/8**
 - [x] 21-shared-runtime/01——✅ 完结(正文 8aa51b6 含回填 ⚠️ 3 块 14 条/README 4023db8);**21 域 1/3,第 6 批 3/8**
 - [x] 21-shared-runtime/02——✅ 完结(正文 d9d2141 含回填 ⚠️ 3 块 15 条/README e6b5fbe);**21 域 2/3,第 6 批 4/8**
-- [x] 21-shared-runtime/03——✅ 完结(正文 e6ec256 含回填 ⚠️ 3 块/README e6ec256 同提交);**21 域完结,第 6 批 5/8**
+- [x] 21-shared-runtime/03——✅ 完结(正文 e6ec256 含回填 ⚠️ 3 块/README e6ec256 同提交);**21 域完结,第 6 批 3/8(域口径)**
 - [x] 25-gc-framework/01——✅ 完结(正文 27dc391 含回填 ⚠️ 3 块/README 640c033);**25 域 1/6,第 6 批 6/8**
 - [x] 25-gc-framework/02——✅ 完结(正文 cb4192b 含回填 ⚠️ 3 块/README 58df4b9);**25 域 2/6,第 6 批 7/8**
-- [x] 25-gc-framework/03——✅ 完结(正文 e6332a8 含回填 ⚠️ 2 块/README 177d56b);**25 域 3/6,第 6 批 8/8 收官**
+- [x] 25-gc-framework/03——✅ 完结(正文 e6332a8 含回填 ⚠️ 2 块/README 177d56b);**25 域 3/6,第 6 批 3/8(域口径,勿与 25 域完结混淆)**
 - [x] 25-gc-framework/04——✅ 完结(正文 1e31bb8 含回填 ⚠️ 2 块/README 0574af2);**25 域 4/6**
 - [x] 25-gc-framework/05——✅ 完结(正文 d42f723 含回填 ⚠️ 2 块/README f2f557d);**25 域 5/6**
 - [x] 25-gc-framework/06——✅ 完结(正文 21fc803 含回填 ⚠️ 4 块/README ca1f29a);**25 域完结,第 6 批 8 域全收官**
