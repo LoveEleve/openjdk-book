@@ -13,7 +13,7 @@
 
 **下一步(唯一,无选择)**: 33-jmx/01(内存服务,大纲 `planning/outlines/33-jmx-management/01-memory-service.md`,标题="JConsole 怎么知道 Eden 用了多少？— MemoryService + MemoryPool";第 6 批 4/5;29-02 悬念已指向 33)。
 
-**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,126 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(三次编造代码块被抓: 44-02 的 check_end_stack、11-01 的 is_loading_success、25-03 的 try_discover 签名);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
+**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,131 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(三次编造代码块被抓: 44-02 的 check_end_stack、11-01 的 is_loading_success、25-03 的 try_discover 签名);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
 ---
 
@@ -286,57 +286,31 @@
 
 ---
 
-## 六、本会话实战经验(最重要,新 AI 必读;6.1-6.51 旧会话沉淀,6.52-6.81 本会话 43 篇新沉淀)
+## 六、本会话实战经验(最重要,新 AI 必读;6.1-6.51 旧会话沉淀,6.52-6.86 本会话 48 篇新沉淀)
 
-### 6.0 本会话精华速查(新 AI 写 28-jvmti/01 前必读)
+### 6.0 本会话精华速查(新 AI 写 33-jmx/01 前必读)
 
-**本会话覆盖**: 21-shared-runtime/03(异常,21 域收官)+ **25-gc-framework 六篇全完结**(01 BarrierSet+Access API/02 CollectedHeap+分配/03 Reference Processing/04 WorkGang+TaskQueue/05 CardTable+DirtyCardQueue/06 OopStorage+StringDedup+GC Stats)+ **28-jvmti/01(Agent 架构,28 域 1/3)**。25 域是第 6 批最大域,**已收官**;下一篇 28-jvmti/02(RedefineClasses,28 域 3 篇之二;剩余 28→29→33→43,然后第 7 批 22/26/35/40/47)。
+**本会话覆盖(48 篇,6.52-6.86)**: 20-vm-operations/02 → 27-jni(3) → 30-jvm-entry(3) → 32-jfr(6) → 34-nmt(2) → 36-attach(2) → 37-heap-dumper(2) → 39-runtime-monitoring(2) → 46-sa(1) → 14-c1(4,完结) → 15-c2(8,完结) → 21-shared-runtime(3,完结) → 25-gc-framework(6,完结) → **28-jvmti(3,完结)** → **29-mh(2,完结)**。下一篇 33-jmx/01(MemoryService+MemoryPool,第 6 批 4/5;剩余 33→43,然后第 7 批 22/26/35/40/47)。
 
-**大纲漂移的高发类型**(21-03+25 域七篇实测,每篇 10-15 处,含 3-5 处机制编造):
-1. **文件/类名编造(25 域新实例)**: access* 在 share/oops 非 gc/shared(01)、tlab.cpp 不存在(真实 threadLocalAllocBuffer.*,02)、allocate_from_tlab 不存在(02)、G1SATBCardTableLogging/CardTableExtension 是 JDK8 名(01)、CardTableRS/ModUnionTable 死代码(05)、ptrQueue 在 share/gc/g1(05)——**文件名/类名一律 find/grep**
-2. **机制编造(最严重)**: 编译期静态分派零开销(01,真实 RuntimeDispatch 函数指针缓存)、OopStorage 无锁分配(06,真实 allocate 锁 _allocation_mutex)、dedup table 用 OopStorage(06)、"编译代码异常主路径=exception_blob 单一"(21-03,真实 C2 内联 catch+RethrowNode)——**机制描述全部回源码验证**
-3. **数字/配置臆测**: TLAB 512KB-2MB(02,实测 286KB)、10% GC cycles 触发 dedup(06,真实默认关+AgeThreshold=3)、1ms×heap MB 存活(03,真实 interval 毫秒容忍度)、cycles/98%/5% overhead(各篇,一律删)
-4. **行号全错**: 大纲行号是规划期估算,差几十到几百行——每篇 2-15 处,全部重 grep
-5. **归属错**: dsin 在 sharedRuntimeTrig.cpp 非 Trans(21-03)、GCCause 名 _g1_evacuation_pause 不存在(02,真实 _g1_inc_collection_pause)、humongous 阈值 region/2 非 45%(02)
-6. **悬念指向过期**: 大纲"下一篇"常按规划期顺序写(21-03→22-deopt、25-06→26-g1 均过期)——**以 writing-order 实际批次为准**
+**大纲漂移的高发类型(28/29 域新实例)**:
+1. **文件/类名编造**: jvmtiEnv.hpp 不存在(28-01,真实 jvmtiEnvBase.hpp+生成类)、relocator.cpp 位置错(28-02,真实 share/runtime 非 prims,且只是 ldc→ldc_w 配角)、"weak hash table auto-removed"(28-03,真实普通哈希表+phantom oop+GC 显式清理)、LambdaForm 在 hpp(29-01,真实 Java 侧 LambdaForm.java)——**文件名/类名一律 find/grep**
+2. **机制编造(最严重)**: MethodEntry 走 deferred 队列(28-01,真实同步回调+interp_only)、"vmentry 平台 stub"(29-01,真实 MemberName)、**ricochet frame 整节 JDK8**(29-02,JDK11 grep 零命中,链接器参数零搬运)、ResolvedMethodTable 断点查找表(28-03,真实 JSR-292 桥)——**机制描述全部回源码验证**
+3. **数字/配置臆测**: "~100 capability"(28-01,真实 44)、"50x faster than reflection"(29-01,JDK11 实测 ~4-5 倍,常量 MH 1.11 倍)——**数字一律实证**
+4. **版本漂移**: JDK8 机制当 JDK11(ricochet frame/GC 名 G1SATBCardTableLogging/retransform 形态)——**grep 零命中即怀疑版本漂移**
+5. **悬念指向过期**: 28-02→22-deopt、28-03→26-g1、29-02→30-jvm-entry(30 已完结)——**以 writing-order 实际批次为准**
 
 **本会话新增教训(高优先级)**:
-- **check.py 工具缺陷(重要)**: 引用检查 regex `(c|h|java)` 只匹配单字符后缀——**.cpp/.hpp 的行号文字引用从不被机器检查**(历史盲区,靠深审人工 grep 兜底);代码块检查不受影响。改进建议已记录,新 AI 可修 regex 后重跑历史文章
-- **写作期编造代码块被自查抓出(25-03)**: try_discover 签名凭记忆写成 3 模板参数(真实 2 参数)+reference_discoverer()(真实 ref_discoverer())——**代码块宁可多抄几行真实代码,绝不凭记忆补全**(第 3 次犯,前两次 44-02/11-01)
-- **跨篇断言纪律**: "C2 内联成 3 条指令"(25-02)无据删(15-c2/07 只讲快路径未提条数);"发现发生在并发标记"(25-03)过强(G1 young GC 也发现,set_ref_discoverer 在 ParScan closure)——**跨篇引用只保留目标篇实证过的内容**
-- **HANDOFF 章节维护**: 6.75 插入曾误删 "## 七" 标题行(e34b53c)——任何编辑后检查 ## 七/## 八 标题仍在;grep 校验模式 6.80 起用 `^### 6\.8`
+- **check.py 工具缺陷(.cpp/.hpp 行号文字引用从不被机器检查)**——靠深审人工 grep 兜底;本次 28/29 域每篇仍人工全量核验
+- **HANDOFF §6 追加新节的强制操作顺序**: ①新节独立文本;②插入点=## 七、前一行;③立即 `grep -n "^### 6\.8"` 校验连续递增 + `grep -n "^## 七\|^## 八"` 标题仍在;**禁止用 "## 七" 整行当 oldString**(6.82 曾吞标题;**6.86 又遇 ``` 与环境行同行导致误删环境行**——替换前先 `grep -n "^```$"` 确认块边界独立成行)
+- **read 工具行号与 grep 可能不一致**(28-02 发现 1148→实际 1147)——**以 grep/awk 为准**
+- **JDK 侧源码引用注意 MAPPINGS**(check.py 的 .java 文件走 SRC=java.base,勿加进 HS_MAP)
 
-**深审第 3/4 轮的高发错误**(用户追加 REVIEW 时重点):
-- **跨段遗留**(改了正文没改悬念): 32-03 的 4/8 字节、03 篇四步→五步同源错误出现 5 处——修正后全文 grep 同源表述
-- **跨篇断言**: rep movsq(07,实际向量循环)、VDSO(08,39-02 未提)——**跨篇引用只保留目标篇实证过的内容**
-- **flag 类型凭记忆**: TraceLoopOpts develop 非 notproduct(04)、UseSSE42Intrinsics 默认 false+ergonomics(08)
-- **术语对齐**: megamorphic=vtable/itable(21-01 第 3 轮)、FALSE IC miss 与 icholder 呼应(21-01)
+**实证工具箱(28/29 域新沉淀,release 可用)**:
+- JVMTI: -XX:TraceJVMTI=ec/事件名+t(product,globals.hpp:1008;COMPILER2 构建 release 也带 JVMTI_TRACE);-Xlog:redefine+class+* 系列(obsolete+mark/load/timer/constantpool/iklass+purge/methodcomparator/update);-Xlog:jvmti+objecttagging=trace(do_weak_oops "(N->M, X freed, Y moves)")
+- MH: -Xbatch+PrintInlining 直看 MH 决策("force inline by annotation"/"receiver not constant"=折叠失败);常量 vs 参数 MH 性能对照;ObjectFree 回调签名无 JNIEnv(误写 3 参读垃圾值)
+- 性能对照教训: -Xbatch+长运行(2000 万次);短运行噪声 ±20% 不可靠
 
-**HANDOFF §6 追加新节**: 已连续 9 次因"new 含旧节标题"导致新节插到标题前——**强制顺序**: 独立文本→## 七、前插入→grep -n "### 6.6" 校验→再做其他**
-
-**实证工具箱**(本会话沉淀,release 可用的):
-- PrintInlining(diagnostic)= 内联决策树/类型画像(双态 vs 三态)/intrinsic 标记——**虚调用与 intrinsic 的主观察窗**
-- -Xlog:jit+compilation=debug(product)= 编译事件(OSR %/made not entrant)
-- CITime(product)= 阶段树(Parse/Optimize 各子阶段/Matcher/Regalloc/Output)
-- PrintCompilation+Verbose 不可用(Verbose 是 develop)
-- EA 开关对照(EliminateAllocations product)= 标量替换量级实证(0 次 GC vs 6 次)
-- 循环性能对照需 -Xbatch+超长运行(容器噪声 ±20%,短运行不可靠)
-- 已探明的 flag 边界: PrintIdeal/PrintIdealGraph notproduct(拒启)、PrintOptoAssembly diagnostic 但 NOT_PRODUCT(静默)、TraceCallFixup/ICMissHistogram/TraceSuperWord 不可用
-
-**GC 域实证工具箱(25 域六篇沉淀,release 可用的)**:
-- **-Xlog:gc+phases=debug**= GC 阶段树(Evacuate 子阶段/Update RS/Scan RS/**Workers: N**/**Processed Buffers**——25-01/04/05 的消费读数)
-- **-Xlog:gc+tlab=trace**= TLAB 全生命周期(compute_size 返回值/desired_size/refill waste=desired/64/slow allocs)
-- **-Xlog:gc 括号=GCCause**(Pause Young (Normal) (G1 Evacuation Pause)/(G1 Humongous Allocation)/(Diagnostic Command)=jcmd GC.run)
-- **-Xlog:exceptions=info**= 异常全链路(21-03:"thrown [file,line]"/"thrown in C1 compiled method"/"continuing at PC"/"N [Exception...)"=handle_exception_C trace)
-- **-Xlog:gc+ref=debug/gc+stringdedup=trace/gc+refine=debug/gc+task/gc+workgang**= 各机制观察窗(引用/去重并发阶段/精炼线程/worker 派发)
-- **开关对照**: UseTLAB(2 亿次分配 1.35s→8s 6 倍)/UseStringDeduplication(flag 名陷阱: -XX:+UseStringDedup 报错)/SoftRefLRUPolicyMSPerMB(0 即弱引用)/ReduceInitialCardMarks(机器码对照不敏感勿用)
-- **PrintAssembly 无 hsdis 的 nmethod header**: main code 尺寸可比 C1 vs C2(1248/1344 vs 576)
-- **SIGQUIT 线程转储**: GC Thread#N/G1 Conc#N/G1 Refine#N 懒创建观察;os_prio=0(NearMaxPriority 实证)
-- **flag 类型**: UseTLAB {pd product}/ReduceInitialCardMarks {C2 product}/UseCondCardMark {product}/SoftRefLRUPolicyMSPerMB {product}/UseStringDeduplication {product}/ParallelGCThreads 上限非实际(UseDynamicNumberOfGCThreads)
-
-
-
-### 6.1 大纲漂移的规律(126 篇全部出现,2-15 处/篇;前会话沉淀 02/03/04/45/48/06/16/38/41/42/07/09/17/10/19/23/24/08/31/44/11/12/13/18 域,本会话沉淀 20/27/30/32/34/36/37/39/46/14/15/21/25 域)
+### 6.1 大纲漂移的规律(131 篇全部出现,2-15 处/篇;前会话沉淀 02/03/04/45/48/06/16/38/41/42/07/09/17/10/19/23/24/08/31/44/11/12/13/18 域,本会话沉淀 20/27/30/32/34/36/37/39/46/14/15/21/25/28/29 域)
 **任何机制描述/行号/值/专有名词,一律当"线索"而非"事实"**。高频漂移类型:
 1. **机制编造**(最严重): 大纲把"想当然的实现"写成机制——实证全部是编造
 2. **版本漂移**: 大纲写的是 JDK 8/其他版本的机制(31-01 的 CAS 单路径是 JDK8 形态;30-03 的 field_get 是 JDK8 反射)
