@@ -1,7 +1,7 @@
 # 01. JVMTI Agent 怎么工作？— Agent 架构与事件系统
 
 > **前置依赖**:[36-attach/02 — 怎么在运行时动态加载 JVMTI agent?— JDK Attach API + loadAgent](openjdk/vol-02/36-attach/02-jdk-attach.md):agent 的加载链(`-agentpath`/attach/DCmd 三通道、`Agent_OnLoad`/`Agent_OnAttach` 两符号)已拆;[27-jni/02 — JNI GetIntField 200 cycles → 怎么做到 30 cycles?— JNI Fast Path](openjdk/vol-02/27-jni/02-jni-fast-path.md):函数表接口(`jni_NativeInterface` 结构)的先例;[39-runtime-monitoring/01 — JVM 的后台线程做什么?— ServiceThread](openjdk/vol-02/39-runtime-monitoring/01-service-thread.md):JVMTI 延迟事件的 ServiceThread 队列
-> → **后续**:[02-redefine-classes — 怎么不重启 JVM 替换一个类的字节码?— RedefineClasses](02-redefine-classes.md)
+> → **后续**:[02-redefine-classes — 怎么不重启 JVM 替换一个类的字节码？— RedefineClasses](02-redefine-classes.md)
 > 关联域: 36-attach(加载通道)、27-jni(接口先例)、39-runtime-monitoring(延迟事件)、21-shared-runtime(异常发布)
 
 ## 一个"从外面看 JVM"的窗口
@@ -44,7 +44,7 @@ void Threads::create_vm_init_agents() {
 
 两个关键点: ①**时机**——调用点在 `create_vm` 里**早于 `vm_init_globals()`**(thread.cpp:3800 vs :3809),注释明写 "Called very early -- before JavaThreads exist";②**phase 由 agent 装载驱动**——调用前 `enter_onload_phase()`,全部 agent 初始化完才 `enter_primordial_phase()`。所以 Agent_OnLoad 里的 `GetPhase` 返回 **ONLOAD**(JVM 侧 `JvmtiEnvBase::_phase` 静态量,由 `set_phase` 维护,jvmtiEnvBase.hpp:77-79)。
 
-phase 全序列(create_vm 时间线): **ONLOAD**(agent 装载,thread.cpp:4213)→ **PRIMORDIAL**(agent 之后,:4228)→ **START**(initPhase2 后,`enter_start_phase` :4002 + `post_vm_start` :4005)→ **LIVE**(initPhase3 后,`enter_live_phase` :4029 + `post_vm_initialized` :4032)→ **DEAD**(退出前,`post_vm_death` 内 set_phase,jvmtiExport.cpp:716)。枚举值是历史遗产: ONLOAD=1/PRIMORDIAL=2/START=6/LIVE=4/DEAD=8(jvmti.xml:11213-11385)——**非递增排列**(LIVE=4 < START=6),通用大小比较不可靠;源码里只用它做"early phase"判定(`get_phase() <= JVMTI_PHASE_PRIMORDIAL`,jvmtiExport.cpp:998-1000)——只有对 PRIMORDIAL 的比较是安全的。
+phase 全序列(create_vm 时间线): **ONLOAD**(agent 装载,thread.cpp:4213)→ **PRIMORDIAL**(agent 之后,:4228)→ **START**(initPhase2 后,`enter_start_phase` :4002 + `post_vm_start` :4005)→ **LIVE**(initPhase3 后,`enter_live_phase` :4029 + `post_vm_initialized` :4032)→ **DEAD**(退出前,`post_vm_death` 内 set_phase,jvmtiExport.cpp:716)。枚举值非递增排列(ONLOAD=1/PRIMORDIAL=2/START=6/LIVE=4/DEAD=8,jvmti.xml:11213-11385;LIVE=4 < START=6),**通用大小比较不可靠**——源码只用它做"early phase"判定(`get_phase() <= JVMTI_PHASE_PRIMORDIAL`,jvmtiExport.cpp:998-1000),只有对 PRIMORDIAL 的比较是安全的。
 
 ### 1.2 JvmtiEnv: 生成类的壳 + 手写的体
 
@@ -175,7 +175,7 @@ jvmtiError JvmtiManageCapabilities::add_capabilities(const jvmtiCapabilities *cu
 
 ### 2.4 实证: 缺能力直接 99
 
-[实证](materials/commands/28-jvmti-agent-demo.txt)(素材 A): agent 在 AddCapabilities **之前**调 `SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_METHOD_ENTRY, NULL)` → 返回 **99 (MUST_POSSESS_CAPABILITY)**。这里有两级能力检查: ①**事件级**——每个事件在 jvmti.xml 里声明自己的 required 能力(MethodEntry 要求 `can_generate_method_entry_events`,jvmti.xml:12308),生成成 `JvmtiUtil::has_event_capability`(jvmtiEnter.xsl:168-193 的事件→能力映射表),在 jvmtiEnv.cpp:536 检查——SetEventNotificationMode 的 99 正是这里;②**函数级**——带 `<required>` 的函数(如 SuspendThread 要求 can_suspend)在 wrapper 里检查(jvmtiEnter.xsl:452-468 `get_capabilities()->xxx == 0`)。AddCapabilities 后重试 → 0。能力位本身在 `GetCapabilities` 里可见(`current.can_generate_method_entry_events=1`)。
+[实证](materials/commands/28-jvmti-agent-demo.txt)(素材 A): agent 在 AddCapabilities **之前**调 `SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_METHOD_ENTRY, NULL)` → 返回 **99 (MUST_POSSESS_CAPABILITY)**。这里有两级能力检查: ①**事件级**——**多数事件**(34 个中 21 个)在 jvmti.xml 里声明自己的 required 能力(MethodEntry 要求 `can_generate_method_entry_events`,jvmti.xml:12308;VMInit/VMStart/VMDeath 等无 required),生成成 `JvmtiUtil::has_event_capability`(jvmtiEnter.xsl:168-193 的事件→能力映射表),在 jvmtiEnv.cpp:536 检查——SetEventNotificationMode 的 99 正是这里;②**函数级**——带 `<required>` 的函数(如 SuspendThread 要求 can_suspend,jvmti.xml:1558)在 wrapper 里检查(jvmtiEnter.xsl:452-468 `get_capabilities()->xxx == 0`)。AddCapabilities 后重试 → 0。能力位本身在 `GetCapabilities` 里可见(`current.can_generate_method_entry_events=1`)。
 
 ## 3. 事件系统 — bitset 与"真启用"重算
 
@@ -209,7 +209,7 @@ recompute_enabled()(jvmtiEventController.cpp:571-657):
 
 *关键设计: "user 开了"≠"会发"。回调没设、phase 不允许、能力缺失,任何一个不满足都不发。重算是"整体快照"式的——任何状态变化全量重算三级 bitset,而不是增量维护;代价是 O(env×thread),收益是结论永远一致、且发布路径只有一个布尔判断。*
 
-[实证](materials/commands/28-jvmti-agent-demo.txt)(素材 C): `-XX:TraceJVMTI=ec`(product flag,globals.hpp:1008;COMPILER2 构建的 release 也带 JVMTI_TRACE,jvmtiTrace.hpp:31-38)直接看到重算过程: `[*] # set event callbacks` → `[ALL] # user enabled event MethodEntry` → `[-] # Enabling event VMInit` + `recompute enabled - before 0 / after 2`(十六进制 bitset: VMInit 在 Live 前是唯一可发事件)→ `[-] # VM live` → 每个线程 `# Enabling event ...` + `# Entering interpreter only mode`。
+[实证](materials/commands/28-jvmti-agent-demo.txt)(素材 C): `-XX:TraceJVMTI=ec`(product flag,globals.hpp:1008;COMPILER2 构建的 release 也带 JVMTI_TRACE,jvmtiTrace.hpp:31-38)直接看到重算过程: `[*] # set event callbacks` → `[ALL] # user enabled event MethodEntry` → `[-] # Enabling event VMInit` + `recompute enabled - before 0 / after 2`(十六进制 bitset 0x2=VM_INIT_BIT——该 agent 启用的 4 个事件里只有 VMInit 属于 early 集,MethodEntry/MethodExit/Exception 在 ONLOAD 阶段被 phase 过滤)→ `[-] # VM live` → 每个线程 `# Enabling event ...` + `# Entering interpreter only mode`。
 
 ## 4. 事件发布 — MethodEntry 的真相: 同步回调,不是延迟队列
 
@@ -299,7 +299,7 @@ static const jlong  INTERP_EVENT_BITS =  SINGLE_STEP_BIT | METHOD_ENTRY_BIT | ME
 
 *关键设计: 以"线程降速"换"事件完备"。方法级事件只能在解释器里发,与其让编译代码到处留事件钩子(每个方法入口一条分支,所有线程都付钱),不如只让**想要的线程**回解释器——其他线程零成本。interp_only 是计数而非布尔,因为事件开关可以嵌套(多个 env/多类事件)。*
 
-[实证](materials/commands/28-jvmti-agent-demo.txt)(素材 B/D): ①`-XX:TraceJVMTI=MethodEntry+t` 看到触发点 `[main] Trg Method Entry triggered java/lang/System.getProperty`——EVT_TRIG_TRACE 在 jvmtiExport.cpp:1512-1515;②`ec` 跟踪看到 `[main] # Entering interpreter only mode`(0.026s,紧跟在 "Enabling event MethodEntry" 之后)且**每个 JavaThread 都进**(全局启用→每线程都算);③编译对照: 带 agent 时 `Jvmtidemo::fib` **零编译事件**(无 agent 时 C1→C2 两级+OSR),总编译事件 4 vs 17——interp_only 线程不派发编译代码的直接证据。
+[实证](materials/commands/28-jvmti-agent-demo.txt)(素材 B/D): ①`-XX:TraceJVMTI=MethodEntry+t` 看到触发点 `[main] Trg Method Entry triggered java/lang/System.getProperty`——EVT_TRIG_TRACE 在 jvmtiExport.cpp:1512-1515;②`ec` 跟踪看到 `[main]` 线程在 0.026s 先 `# Enabling event Exception/MethodEntry/MethodExit` 再 `# Entering interpreter only mode`(且**每个 JavaThread 都进**,全局启用→每线程都算);③编译对照: 带 agent 时 `Jvmtidemo::fib` **零编译事件**(无 agent 时 C1→C2 两级+OSR),总编译事件 4 vs 17——interp_only 线程不派发编译代码的直接证据。
 
 ## 5. 延迟事件 — 编译代码事件的"回头补发"
 
@@ -314,4 +314,4 @@ static const jlong  INTERP_EVENT_BITS =  SINGLE_STEP_BIT | METHOD_ENTRY_BIT | ME
 
 外部观察者进场的通道已通: **装载**(create_vm_init_agents 在 vm_init_globals 前、phase 由它驱动)、**env**(生成类壳+手写 JvmtiEnvBase,函数表接口与 JNI 同构,多 agent 链表)、**能力**(44 位、四集合、ONLOAD 独占能力两阶段语义、AddCapabilities→update 重算全局标志)、**事件**(34+1 个事件装进 jlong、三级使能快照重算、真启用=用户&回调&phase)、**发布**(方法级事件同步回调+interp_only 保证解释执行;编译事件延迟到 ServiceThread/per-thread 队列补发)。——但这里有个未解的转折: **agent 最大胆的能力是改类**。can_redefine_classes 声明后,怎么在运行中替换一个类的字节码?旧方法还在栈上、编译代码还在 CodeCache,怎么办?下一篇: RedefineClasses。
 
-> → [02-redefine-classes — 怎么不重启 JVM 替换一个类的字节码?— RedefineClasses](02-redefine-classes.md)
+> → [02-redefine-classes — 怎么不重启 JVM 替换一个类的字节码？— RedefineClasses](02-redefine-classes.md)
