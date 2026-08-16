@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-15 | 卷 2 写作中: **122/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 17) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 39 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(2)**;下一篇 25-gc-framework/03(Reference Processing,25 域共 6 篇)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-15 | 卷 2 写作中: **123/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 18) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 40 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(3)**;下一篇 25-gc-framework/04(WorkGang + TaskQueue,25 域共 6 篇)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -46,11 +46,11 @@
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
-第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(2/6)** → 28 → 29 → 33 → 43
+第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(3/6)** → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 122 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 123 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -92,7 +92,7 @@
 | **14-c1-compiler** | 1-4 | `14-c1-compiler/01-c1-pipeline-ir.md`(88)+`02-c1-optimizations.md`(56)+`03-c1-register-codegen.md`(45)+`04-c1-runtime-frame.md`(61) | ✅ **14 域完结(本会话)** |
 | **15-c2-compiler** | 1-8 | `01-c2-ideal-graph.md`(253)+`02-c2-parse-graphkit.md`(230)+`03-c2-optimizations.md`(138)+`04-c2-loops.md`(140)+`05-c2-register-alloc.md`(143)+`06-c2-codegen.md`(129)+`07-c2-macro-intrinsics.md`(74)+`08-c2-library-calls.md`(104) | ✅ **15 域完结(本会话)** |
 | **21-shared-runtime** | 1-3 | `21-shared-runtime/01-runtime-stubs.md`(96)+`02-c2i-i2c-adapter.md`(120)+`03-exception-handling.md`(191) | ✅ **21 域完结(本会话)** |
-| **25-gc-framework** | 1-2 | `25-gc-framework/01-barrier-access.md`(195)+`02-collected-heap.md`(199) | 🚧 **25 域 2/6(本会话)** |
+| **25-gc-framework** | 1-3 | `01-barrier-access.md`(195)+`02-collected-heap.md`(199)+`03-reference-processing.md`(160) | 🚧 **25 域 3/6(本会话)** |
 
 ### 本会话 26 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
@@ -232,7 +232,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 35 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 36 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -257,6 +257,7 @@
 - `21-exception-handling-demo.txt`(-Xlog:exceptions=info 全链路: (A) 隐式 NPE 编译代码 "thrown [sharedRuntime.cpp, line 606]"+固定 throwing PC+"continuing at PC";(B) 显式 athrow try-catch 同 nmethod(handler 与抛点差 16 字节);(C) 隐式除零 SIGFPE→ArithmeticException;(D) 跨帧逃逸: 编译 escape→解释器 escapeMain at bci 8;(E) SOE 同一 oop 沿栈逐帧传播 24395 条;ExceptionDemo.java 五场景源)
 - `25-gc-barrier-demo.txt`(-Xlog:gc+phases=debug 阶段树: Update RS/Scan RS/Evacuate,2 亿次老对象引用写后 Update RS 处理卡片(barrier 工作量在 GC 侧可见);PrintAssembly 无 hsdis nmethod header: C1 1248/1344 vs C2 576;flag 盘点: ReduceInitialCardMarks {C2 product} true/UseCondCardMark {product} false/UseG1GC ergonomic;标签可用性: gc+barrier/remset/phases 可用,gc+cardtable 无效;源码级: store_check 汇编 shr9+movb 0/g1_write_barrier_pre SATB 链/C2 IdealKit 同构;GcPhaseDemo/BarrierDemo.java)
 - `25-gc-heap-alloc-demo.txt`(-Xlog:gc+tlab=trace: compute_size(2) returns 36702/desired_size 286KB/refill waste 4584B=desired/64(TLABRefillWasteFraction);GC cause 括号实证: Pause Young (Normal) (G1 Evacuation Pause)/Humongous Allocation/Diagnostic Command(jcmd GC.run)/OOM 链;UseTLAB 对照 2 亿次分配 1.35s→8s(6 倍);flag 盘点 MinTLABSize=2K/TLABSize=0/TLABWasteTargetPercent=1/YoungPLABSize=4096/OldPLABSize=1024;源码级: TLAB allocate bump/refill 链/G1 attempt_allocation_slow/PLAB;GcPhaseDemo/HumDemo/OomDemo.java)
+- `25-gc-reference-demo.txt`(RefDemo 内存压力四类引用生命周期: weak null/soft false/phantom enqueued/queue 2;SoftRefLRUPolicyMSPerMB 对照: 无压力默认保活对象(weak 同活=软可达)vs 0 立即清 vs 压力清;flag: SoftRefLRUPolicyMSPerMB=1000 {product}/RegisterReferences;标签 gc+ref=debug 可用;源码级: process 四阶段/work 三态/discover 过滤链/SoftRefPolicy interval vs max_interval/G1 双 ReferenceProcessor/instanceRefKlass try_discover;RefDemo/RefDemo2.java)
 - `15-c2-macro-demo.txt`(PrintInlining: System.arraycopy→"intrinsic"(0 字节 native 被替换)+lockElim(synchronized(new Object()) 锁消除候选)整体内联+Object.<init> 内联;CITime Macro Expand/Macro Eliminate 阶段;源码核对: expand_macro_nodes 编排/eliminate_locking_node/expand_lock_node fast-slow/expand_arraycopy_node+generate_arraycopy;flag: PrintEliminateLocks notproduct(c2_globals.hpp:508)/ReduceBulkZeroing product(:263))
 - `15-c2-codegen-demo.txt`(CITime Code_Gen 阶段: Matcher/Scheduler/Regalloc/Block Ordering/Peephole/Build OOP maps/Code Installation;源码核对: MachNode::peephole 默认 NULL(machnode.cpp:415)、.ad 三文件行数 36815、addI 变体 x86_64.ad:7473-7519、Compile::Output output.cpp:57、do_global_code_motion gcm.cpp:1612;flag 类型: OptoPeephole develop_pd/PrintOptoPeephole notproduct)
 - `15-c2-register-alloc-demo.txt`(CITime Regalloc 阶段树: RADemo.heavy 32 局部变量高寄存器压力——Regalloc 0.001s 下 Ctor Chaitin/Build IFG(virt+phys)/Compute Liveness/Regalloc Split/Postalloc Copy Rem/Fixup Spills/Coalesce 1-3/Simplify/Select;RA flag 类型: OptoCoalesce develop(c2_globals.hpp:244)/VerifyRegisterAllocator notproduct(:285)/VerifyGraphEdges notproduct(:276)/OptoRegScheduling+OptoBundling product_pd;heavy 编译事件 level 4)
@@ -980,6 +981,16 @@
 - **第 3 轮 REVIEW 修正(commit f62279d)**: ①**'C2 内联成 3 条指令'无据删**(15-c2/07 只讲'快路径内联 TLAB bump'未提条数——跨篇断言只保留目标篇实证过的内容);②GCCause 三组表述与源码注释语义对齐(public=用户/工具触发/implementation independent=_no_gc+_allocation_failure/implementation specific=metadata+CMS+G1+Z);③PLAB 补 G1 形态: G1PLABAllocator(g1ParScanThreadState.hpp:40/:52)封装,par_allocate_during_gc 按 InCSetState::Young/Old 分 survivor/old(g1Allocator.cpp:170-185)
 - **check.py 工具缺陷(重要发现)**: 引用检查 regex `(c|h|java)` 只匹配 .c/.h/.java 单字符后缀——**.cpp/.hpp 的行号文字引用从不被检查**(历史盲区,历篇文章的 .cpp/.hpp 文字引用靠深审人工 grep 兜底;代码块检查不受影响因块首行格式独立);建议: regex 改 `(?:c|h|hpp|cpp|java)` 或先按扩展名分拣
 
+### 6.78 25-gc-framework/03(Reference Processing,25 域 3/6,大纲 10+ 处漂移含 3 处编造 + 深审 2 轮,2026-08-15)
+- **"四条链表" 半对**: 真实=DiscoveredList(referenceProcessor.hpp:61-84)只存 **head 指针+长度**,链接走 **Reference 对象自身的 discovered 字段**串链(add_to_discovered_list cpp:1050-1073 头插;load_ptrs :269-286);四列表=**一个连续数组的四段**(cpp:123-126 weak/final/phantom 指向 soft 数组偏移),每段 _max_num_queues 槽
+- **"process 用 4 个 while" 简化**: 真实=四阶段任务(referenceProcessor.cpp:201-261): 停用 discovery :213/同步 soft clock :223/统计 :225-228/**RefPhase1** process_soft_ref_reconsider(:232,:795-837)/update_soft_ref_master_clock :236/**RefPhase2** process_soft_weak_final_refs(:240,:839-915)/**RefPhase3** process_final_keep_alive(:245,:917+)/**RefPhase4** process_phantom_refs(:250,:956+);work 函数 :348-377(软引用重审: 死+policy 清→留列表;死+policy 留→remove+make_alive 救活)/:379-423(三态: NULL→remove/活→remove+make_alive/死→clear+enqueue;软弱 do_enqueue=true,final false :885/:895/:905)/:425-450(全部 make_referent_alive 复活+set_next_raw 自环 :436-437+enqueue :439)/:452-481(phantom: 死→clear+enqueue)
+- **"四阶段 discover/enqueue/process/verify" 编造**: 真实四阶段=软引用重审/清理/复活/phantom;"verify" 只是 DEBUG 断言;顺序硬约束=复活必须在 phantom 前
+- **"OopStorage 存储 discovered refs" 编造(大纲 §2 整节错位,重要)**: JDK11 ReferenceProcessor **零 OopStorage**;discovered=对象字段串链;OopStorage 用于 JNI handles(27-jni/01)等,与引用处理无关
+- **发现机制(大纲漏,重要)**: instanceRefKlass.inline.hpp try_discover(:64-90: **ref_discoverer()**(非 reference_discoverer)/referent 未标记 is_gc_marked 才尝试)+discover_reference(cpp:1146-1239: 开关 :1148/final 已入队跳过 :1152/ReferenceBased vs ReferentBased :1157-1163/:1212-1226/referent 强可达不发现 :1165-1172/**软引用当场 policy 裁决** :1173-1184/已发现跳过 :1191-1210/add_to_discovered_list :1234);**写作期编造代码块被抓**: try_discover 签名凭记忆写成 3 模板参数(真实 2 参数)
+- **"SoftRefLRUPolicyMSPerMB=1ms×heap MB 存活 256ms" 简化错**: 真实=interval(clock-timestamp,距上次访问)<= max_interval 保留(referencePolicy.cpp:69+);_max_interval=heap×policy(LRUMaxHeapPolicy :69)或 heap_free_at_last_gc/M×policy(LRUCurrentHeapPolicy :38);**server 模式默认 LRUMaxHeapPolicy**(referenceProcessor.cpp:60-64);SoftRefLRUPolicyMSPerMB=1000(globals.hpp:1852)——"访问间隔容忍度"非绝对存活时间;SoftReference timestamp 实例+clock 静态(javaClasses.cpp:3560)
+- **G1 双 ReferenceProcessor**: _ref_processor_cm(并发标记)/_ref_processor_stw(g1CollectedHeap.cpp:1009-1106);发现=并发标记遍历(closure ref_discoverer);处理=STW 阶段树 "Reference Processing"
+- **实证方法论**: RefDemo 内存压力四类引用生命周期(weak null/soft false/phantom enqueued/queue 2);**SoftRefLRUPolicyMSPerMB 对照**(无压力默认保活对象且 weak 同活=软可达语义证据/0 即弱引用);gc+ref=debug 可用;素材 25-gc-reference-demo.txt
+
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
@@ -1034,7 +1045,8 @@
 - [x] 21-shared-runtime/03——✅ 完结(正文 e6ec256 含回填 ⚠️ 3 块/README e6ec256 同提交);**21 域完结,第 6 批 5/8**
 - [x] 25-gc-framework/01——✅ 完结(正文 27dc391 含回填 ⚠️ 3 块/README 640c033);**25 域 1/6,第 6 批 6/8**
 - [x] 25-gc-framework/02——✅ 完结(正文 cb4192b 含回填 ⚠️ 3 块/README 58df4b9);**25 域 2/6,第 6 批 7/8**
-- [ ] **25-gc-framework/03**——**下一篇**;大纲 `planning/outlines/25-gc-framework/03-reference-processing.md`(SoftReference 什么时候被清除？— Reference Processing);25 域共 6 篇;25-02 悬念已指向 03
+- [x] 25-gc-framework/03——✅ 完结(正文 e6332a8 含回填 ⚠️ 2 块/README 177d56b);**25 域 3/6,第 6 批 8/8(第 6 批收官!剩余 25-04/05/06 属 25 域内部,批内顺序完结)**
+- [ ] **25-gc-framework/04**——**下一篇**;大纲 `planning/outlines/25-gc-framework/04-workgang-taskqueue.md`(4 个 GC worker 怎么平分扫描任务？— WorkGang + TaskQueue);25 域共 6 篇;25-03 悬念已指向 04
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -1077,22 +1089,21 @@
 ## 十、下一步(读完立即做)
 
 ```
-【25-gc-framework/03 写作指引——25 域 3/6,Reference Processing】
-1. 读 planning/outlines/25-gc-framework/03-reference-processing.md(注意 ⚠️ 块;25-01/02 回填 3 块,03 大概率同样漂移)。
-   25-03 主题=Reference Processing(Soft/Weak/Phantom/Final 四类引用生命周期),按大纲实际内容验证,预判要点(以实际 grep 为准):
-   - ReferenceProcessor(referenceProcessor.hpp/cpp,share/gc/shared,15 文件/3368 行): discover_reference/process_discovered_references/RefProcPhase1-4
-   - 四类引用: SoftRefLRUPolicyMSPerMB 软引用策略/Weak/Phantom/Final(java_lang_ref_Finalizer 与 ReferenceQueue)
-   - G1 视角: G1 的 ref processing 集成(并发标记中的引用发现/回收);reference processing 在 GC 阶段树的位置(25-01 素材 A 段见过 "Reference Processing" 阶段)
-   - 与 25-02 衔接: 分配/存活判断之后,引用类对象的特殊生命周期
-2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧(函数名/行号/机制编造/归属/数字);ReferenceProcessor 是历史悠久的代码,JDK8 概念(如"discovered list 单向链表")与 JDK11(OopStorage 存储)差异要注意;引用处理四阶段 Phase1-4 的真实内容需回源码
+【25-gc-framework/04 写作指引——25 域 4/6,WorkGang + TaskQueue】
+1. 读 planning/outlines/25-gc-framework/04-workgang-taskqueue.md(注意 ⚠️ 块;25-01/02/03 回填 3+ 块,04 大概率同样漂移)。
+   25-04 主题=WorkGang + TaskQueue(GC 并行骨架),按大纲实际内容验证,预判要点(以实际 grep 为准):
+   - WorkGang(workgroup.hpp/cpp,share/gc/shared): run_task→GangWorker loop→dispatch;WorkGangBarrierSync
+   - GenericTaskQueue(taskqueue.hpp/inline.hpp): Arora 算法(_bottom/_age 双指针),pop_local/pop_global(steal),overflow stack
+   - 消费方: 25-03 的 RefProcPhase1-4Task 用 AbstractRefProcTaskExecutor(引用处理并行);G1 的扫描任务(G1ParScanThreadState 等)
+   - 与 25-03 衔接: 四类列表按 worker 分槽(_max_num_queues)+maybe_balance_queues——并行引用处理的接线
+2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;Arora 算法细节(_age 的 tag/parity)与"无锁"边界最易错;TaskQueue 的 ABA/steal 语义回源码
 3. 实证优先用 /data/tmp/opencode/jdk11:
-   - WeakReference/PhantomReference 生命周期: 小堆+System.gc() 观察引用被清/enqueue(jcmd GC.run 已实证可用)
-   - -Xlog:gc+ref=debug/refproc 标签验证;GC 日志 "Reference Processing" 阶段(25-01 素材 A 段已有 0.1ms)
-   - SoftReference 策略: -XX:SoftRefLRUPolicyMSPerMB 默认 1000,构造压力场景观察
-   - Finalizer: 终结器对象分配计数(-Xlog:gc+phases 或 jstat?)
+   - GC worker 线程观察: SIGQUIT 线程转储的 "GC Thread#N" 数量/优先级;UseDynamicNumberOfGCThreads/ParallelGCThreads flag
+   - -Xlog:gc+task=debug? 或 gc+phases 的 "Workers: N"(25-01 素材 A 段 Update RS Workers: 2 已见)
+   - 并行阶段计时: gc+phases 的并行 vs 串行阶段对比
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP;ART 改回当前文件)→ 深审 2 轮(第 2 轮逐机制回源码质疑;用户常追加第 3/4 轮,重点抓: 跨段遗留、隐含断言、跨篇引用只保留目标篇实证过的内容)→ 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
-5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68/6.73/6.74/6.75/6.76/6.77)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容);③**立即 `grep -n "### 6.6"` 校验连续递增**;④再做其他编辑。禁止"new 含旧节标题"的替换模式。**注意: 6.75 插入曾误删 "## 七" 标题行(e34b53c)已修复;任何编辑后检查 ## 七/## 八 标题仍在**
-6. 25 域后 → 28-jvmti → 29-mh → 33-jmx → 43-nio-net(25-gc 共 6 篇,03 后剩 04-workgang/05-cardtable/06-oopstorage)
+5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68/6.73/6.74/6.75/6.76/6.77/6.78)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容);③**立即 `grep -n "### 6.6"` 校验连续递增**;④再做其他编辑。禁止"new 含旧节标题"的替换模式。**注意: 6.75 插入曾误删 "## 七" 标题行(e34b53c)已修复;任何编辑后检查 ## 七/## 八 标题仍在**
+6. 25 域后 → 28-jvmti → 29-mh → 33-jmx → 43-nio-net(25-gc 共 6 篇,04 后剩 05-cardtable-dirtycardq/06-oopstorage-stringdedup-stats)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
