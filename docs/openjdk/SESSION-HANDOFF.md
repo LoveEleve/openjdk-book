@@ -109,8 +109,6 @@
 
 **33-jmx/03(GC Notifier+LowMemory+Flags,33 域收官)**: 正文+大纲 621f389(161 行,含大纲回填 ⚠️ 10 块)→ README 9be7e2f(134/152,33 域完结,第 6 批 5/5 域收官)→ 素材 33-jmx-notify-demo.txt+33-jmx-flag-demo.txt
 
-**33-jmx/02(JMM 接口+JDK Management,33 域 2/3)**: 正文 236ea72(168 行)→ 大纲回填 ⚠️ 12 块 8e4a2ed→ README de710ad(133/152,33 域 2/3,第 6 批 5/5)→ 素材 33-jmx-jmm-demo.txt
-
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(372 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true)
 
 **27-jni/01(Handle 系统,27 域 1/3)**: 正文 f64d2af(171 行)→ 回填 ⚠️ 9 组 → README f64d2af 同提交(85/152)→ 素材 27-jni-handles-demo.txt→ **第 3 轮** 6d6b59f(参数 handle 机制精确化——编译代码 object_move sharedRuntime_x86_64.cpp:1157-1180+解释器 pass_object interpreterRT_x86_64.cpp:214-260;06-oops/01 链接文本对齐;jweak 对齐=weak_tag_alignment=2)→ **第 4 轮** 786af8f(①free list 成因精确化——由 rebuild_free_list 扫描清空槽构建(:548-575),非 DeleteLocalRef 直接串链;②OopStorage release 细节——CAS 清位 :575-587+延迟清理 :416;③悬念"函数表查 env"→"经 JNIEnv 函数表间接调用";④SIGQUIT 摘要行措辞)
