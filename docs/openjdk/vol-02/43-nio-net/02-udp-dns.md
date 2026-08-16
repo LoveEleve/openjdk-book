@@ -49,7 +49,7 @@ send0 还有两个值得记的细节: ①**大缓冲必须 malloc 整包**(:391-
 
 `receive0`(:708)对称: `NET_RecvFrom(fd, fullPacket, packetBufferLen, 0, ...)`(:818)→ `NET_SockaddrToInetAddress(env, &rmtaddr, &port)`(:864)把来源地址写回 DatagramPacket。**socketCreate 的选项**在 `datagramSocketCreate`(:891): `SO_BROADCAST`(:939)+`IP_MULTICAST_ALL`(:949,默认关多播接收)。
 
-**组播**: Java 侧 `joinGroup` 走 native `join`(:2180)/`leave`(:2192)(大纲的 "joinGroup" 函数名是 JDK8 残留),都进 `mcast_join_leave`(:1890): IPv4 用 `setsockopt(IPPROTO_IP, IP_ADD_MEMBERSHIP/IP_DROP_MEMBERSHIP, &mreq)`(注释 :1925-1927 "For IPv4 join use IP_ADD_MEMBERSHIP...");IPv6 把 IPv4 组地址转成 **IPv4-mapped 地址**(:2110-2121,`::ffff:a.b.c.d`)走 `IPV6_JOIN_GROUP`;**接口选择**——`netIf` 参数为空则 `getsockopt(IPV6_MULTICAST_IF)`(:2133)取当前默认接口 index,非空则用 `ni_indexID` 字段。TTL 经 `setTimeToLive`(:1786)→`setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, &ittl)`(:1761)。
+**组播**: Java 侧 `joinGroup` 走 native `join`(:2180)/`leave`(:2192)(大纲的 "joinGroup" 函数名是 JDK8 残留),都进 `mcast_join_leave`(:1890): IPv4 用 `setsockopt(IPPROTO_IP, IP_ADD_MEMBERSHIP/IP_DROP_MEMBERSHIP, &mreq)`(注释 :1925-1927 "For IPv4 join use IP_ADD_MEMBERSHIP...");IPv6 把 IPv4 组地址转成 **IPv4-mapped 地址**(:2110-2125,`::ffff:a.b.c.d`)走 `IPV6_JOIN_GROUP`;**接口选择**——`netIf` 参数为空则 `getsockopt(IPV6_MULTICAST_IF)`(:2133)取当前默认接口 index,非空则用 `ni_indexID` 字段。TTL 经 `setTimeToLive`(:1786)→`setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, &ittl)`(:1761)。
 
 ## 2. InetAddress: getaddrinfo 的解析链
 
