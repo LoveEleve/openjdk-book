@@ -24,7 +24,7 @@ GC G1 Old Generation count=1 time=6ms
 
 ## 1. jmm.h: 一份函数表契约
 
-`jmm.h:29-38`(share/include/jmm.h:349 行)头注释开门见山: "This is a private interface used by JDK for JVM monitoring and management"(:29-38)——**它是 JDK 与 JVM 之间的私有契约,不是公开 API**。文件不声明"几十个函数",而是声明**一份函数指针结构体** `struct jmmInterface_1_`(:221-343,typedef 名 JmmInterface):
+`jmm.h:29-37`(share/include/jmm.h:349 行)头注释开门见山: "This is a private interface used by JDK for JVM monitoring and management"(:29-37)——**它是 JDK 与 JVM 之间的私有契约,不是公开 API**。文件不声明"几十个函数",而是声明**一份函数指针结构体** `struct jmmInterface_1_`(:221-343,typedef 名 JmmInterface):
 
 ```cpp
 // jmm.h:221-249(截取核心,逐字)
@@ -56,13 +56,13 @@ typedef struct jmmInterface_1_ {
 
 数一遍槽位: `reserved1` + **37 个函数指针 = 38 槽**——从 GetOneThreadAllocatedMemory 到 SetDiagnosticFrameworkNotificationEnabled(:223-342)。版本常量在文件开头(:46-55): JMM_VERSION_1=0x20010000(JDK 6 起)一路到 **JMM_VERSION_2=0x20020000(JDK 10 加),当前 JMM_VERSION=JMM_VERSION_2**——契约变了就 bump 版本(头注释 :33-37)。附带的结构/枚举还有: `jmmOptionalSupport`(9 个能力位,:57-68)、`jmmLongAttribute` 枚举(:70-107,从类加载计数 1 到 OS 属性 202)、`jmmBoolAttribute` 枚举(21-25,:109-115)、`jmmThresholdType`(901-904,03 篇的传感器类型)、`jmmGCStat`(:185-195,GC 账本载体)、`dcmdInfo`/`dcmdArgInfo`(诊断命令,35 域)。
 
-两个与 JNI 函数表的对照点。**第一,结构同构**: 27-jni/03 拆过 JNI 的 `jni_NativeInterface`(jni.cpp:3528)——JDK 侧 native 代码也是拿一个函数指针表间接调用。**第二,定位不同**: JNI 是"任意 native 库 ↔ JVM"的通用桥;JMM 是"JDK 的 management 库 ↔ JVM"的专用桥——jmm.h:31 头注释自己写了 "private interface used by JDK"。
+两个与 JNI 函数表的对照点。**第一,结构同构**: 27-jni/03 拆过 JNI 的 `jni_NativeInterface`(jni.cpp:3528)——JDK 侧 native 代码也是拿一个函数指针表间接调用。**第二,定位不同**: JNI 是"任意 native 库 ↔ JVM"的通用桥;JMM 是"JDK 的 management 库 ↔ JVM"的专用桥——jmm.h:30 头注释自己写了 "private interface used by JDK"。
 
 *关键设计: JMM 接口 = 一份纯数据(函数指针数组),没有 JNI 的注册/查找机制*——JNI 函数是 libjvm 导出的符号按需解析(30-jvm-entry/02),JMM 是**整个表一次交付**。
 
 ## 2. 函数表的交付: 两次握手
 
-表在 JVM 侧,是一个全局数组 `jmm_interface`(management.cpp:2235-2273,38 个槽与 jmm.h:221-343 一一对应,首槽 NULL)。JDK 怎么拿到?**`JVM_GetManagement`**(jvm.cpp:3686)——30-jvm-entry/01 的 JVM_* 家族成员:
+表在 JVM 侧,是一个全局数组 `jmm_interface`(management.cpp:2232-2273,38 个槽与 jmm.h:221-343 一一对应,首槽 NULL)。JDK 怎么拿到?**`JVM_GetManagement`**(jvm.cpp:3686)——30-jvm-entry/01 的 JVM_* 家族成员:
 
 ```cpp
 // jvm.cpp:3685-3688(截取核心,逐字)
@@ -72,7 +72,7 @@ JVM_ENTRY_NO_ENV(void*, JVM_GetManagement(jint version))
 JVM_END
 ```
 
-`Management::get_jmm_interface`(management.cpp:2276-2282)做**版本检查**: 传入的 version == JMM_VERSION 才返回 `&jmm_interface`,否则 NULL——整个实现包在 `#if INCLUDE_MANAGEMENT` 里(不带 management 的构建直接返回 NULL)。JDK 侧拿表在**库加载时**(libmanagement 的 JNI_OnLoad,management.c:39-54):
+`Management::get_jmm_interface`(management.cpp:2275-2282)做**版本检查**: 传入的 version == JMM_VERSION 才返回 `&jmm_interface`,否则 NULL——整个实现包在 `#if INCLUDE_MANAGEMENT` 里(不带 management 的构建直接返回 NULL)。JDK 侧拿表在**库加载时**(libmanagement 的 JNI_OnLoad,management.c:39-54):
 
 ```cpp
 // management.c:38-55(截取核心,逐字)
@@ -98,7 +98,7 @@ JNIEXPORT jint JNICALL
 
 触发点在 Java 侧 `java.lang.management.ManagementFactory` 的静态块(ManagementFactory.java:1018-1020): `System.loadLibrary("management")`——**第一次触碰 ManagementFactory 任何 API 时库才加载,函数表才就位**。加载后 `jmm_interface`/`jmm_version` 是 libmanagement 的全局指针;`jmm_version` 还被 `VMManagementImpl.getVersion0`(VMManagementImpl.c:35-41)解包成 "2.0"(major/minor 从 0x20020000 拆位)。
 
-**同一张表,两个消费者**: libmanagement(java.management 模块)与 libmanagement_ext(jdk.management 模块)都各自 `JVM_GetManagement(JMM_VERSION)`(management_ext.c:31-54,代码几乎相同)。区别在谁加载它们: libmanagement 由 ManagementFactory 加载(基础 MXBean);libmanagement_ext 由 jdk.management 模块的 PlatformMBeanProviderImpl 静态块加载(PlatformMBeanProviderImpl.java:53-59,扩展 MXBean: HotSpotDiagnostic/GcInfo/Flag 等)。01 篇实证里 `createGarbageCollector` 检查 `GarbageCollectorExtImpl` 是否存在(memoryManager.cpp:83-87)——就是检测 jdk.management 是否已加载。
+**同一张表,两个消费者**: libmanagement(java.management 模块)与 libmanagement_ext(jdk.management 模块)都各自 `JVM_GetManagement(JMM_VERSION)`(management_ext.c:39-54,代码几乎相同)。区别在谁加载它们: libmanagement 由 ManagementFactory 加载(基础 MXBean);libmanagement_ext 由 jdk.management 模块的 PlatformMBeanProviderImpl 静态块加载(PlatformMBeanProviderImpl.java:55-59,扩展 MXBean: HotSpotDiagnostic/GcInfo/Flag 等)。01 篇实证里 `createGarbageCollector` 检查 `GarbageCollectorExtImpl` 是否存在(memoryManager.cpp:83-87)——就是检测 jdk.management 是否已加载。
 
 ## 3. 内存族: 查询链的最后一跳
 
@@ -107,7 +107,7 @@ JNIEXPORT jint JNICALL
 - **GetMemoryPools**(`jmm_GetMemoryPools` :470-512): 参数 obj==NULL 枚举**全部**池,否则按传入的 manager 过滤(`mgr->get_memory_pool(i)`);返回 `MemoryPoolMXBean[]`——数组里每个元素就是 01 篇的懒创建实例;
 - **GetMemoryManagers**(:514-546): 对称——枚举全部 manager 或按池过滤;
 - **GetMemoryPoolUsage / GetPeakMemoryPoolUsage / GetPoolCollectionUsage**(:557-599): 01 篇已拆,现算 usage/峰值/GC 后快照;
-- **GetMemoryUsage**(`jmm_GetMemoryUsage` :706-757): 汇总——遍历池求和、undefined 传染(任一池 undefined 则整体 -1)、`init=InitialHeapSize`/`max=Universe::heap()->max_capacity()`。
+- **GetMemoryUsage**(`jmm_GetMemoryUsage` :706-758): 汇总——遍历池求和、undefined 传染(任一池 undefined 则整体 -1)、`init=InitialHeapSize`/`max=Universe::heap()->max_capacity()`。
 
 四兄弟的 JDK 侧封装薄到极致——每个 native 方法就是一行表调用(MemoryImpl.c:35-48):
 
@@ -133,7 +133,7 @@ JNIEXPORT jobject JNICALL Java_sun_management_MemoryImpl_getMemoryUsage0
 
 ## 4. 扩展接口: libmanagement_ext 与 GcInfo
 
-jdk.management 模块的 native 在 `jdk.management/share/native/libmanagement_ext/`——七个文件: management_ext.c:31(表交付,JNI_OnLoad)与 management_ext.h:31(同款 JNI_OnLoad)+ DiagnosticCommandImpl.c:45(诊断命令)+ Flag.c:46(VM flags)+ GarbageCollectorExtImpl.c:39(GC 扩展)+ **GcInfoBuilder.c:234**(GC 详情)+ HotSpotDiagnostic.c:35(heap dump/flag 查询)。大纲假设的 "management_ext.cpp" 不存在。各文件都是"一行表调用": HotSpotDiagnostic.c:35 `jmm_interface->DumpHeap0(env, outputfile, live)`(37 域实证过的 JMX dumpHeap 就是它)、DiagnosticCommandImpl.c:45/:250 的 GetDiagnosticCommands/ExecuteDiagnosticCommand 等。
+jdk.management 模块的 native 在 `jdk.management/share/native/libmanagement_ext/`——七个文件: management_ext.c:39(表交付,JNI_OnLoad)与 management_ext.h:39(同款 JNI_OnLoad)+ DiagnosticCommandImpl.c:45(诊断命令)+ Flag.c:46(VM flags)+ GarbageCollectorExtImpl.c:39(GC 扩展)+ **GcInfoBuilder.c:234**(GC 详情)+ HotSpotDiagnostic.c:35(heap dump/flag 查询)。大纲假设的 "management_ext.cpp" 不存在。各文件都是"一行表调用": HotSpotDiagnostic.c:35 `jmm_interface->DumpHeap0(env, outputfile, live)`(37 域实证过的 JMX dumpHeap 就是它)、DiagnosticCommandImpl.c:45/:250 的 GetDiagnosticCommands/ExecuteDiagnosticCommand 等。
 
 GcInfo 是最值得拆的一条——**它是 03 篇 GC 通知的数据体**。`GarbageCollectorExtImpl.getLastGcInfo()`(GarbageCollectorExtImpl.java:68-69)→ `GcInfoBuilder.getLastGcInfo0`(GcInfoBuilder.c:199-234):
 
@@ -155,7 +155,7 @@ GcInfo 是最值得拆的一条——**它是 03 篇 GC 通知的数据体**。`
     }
 ```
 
-注意**调用者先填、被调用者回填**的协议: Java 侧把 before/after 两个 MemoryUsage 对象数组和扩展属性槽**预先放进 `jmmGCStat` 结构**(jmm.h:185-195 注释 "Caller has to set the following fields...")——hotspot 端的 `jmm_GetLastGCStat`(management.cpp:1831-1892)拿着这些槽,从 01 篇的**双缓冲账本**复制数据: `mgr->get_last_gc_stat(&stat)`(:1845,GC 还没发生返回 0 → 调用方得到 null,实证 `lastGcInfo=null (no GC yet)`)→ 逐池构造 MemoryUsage 填进数组(:1866-1883,还处理 survivor 池 GC 后 max 为 0 的特殊情况)——**表调用返回后,Java 侧再把 jvalue 按类型逐个写回**(GcInfoBuilder.c:255-282 的 switch 'Z'/'B'/'C'/'S'/'I'/'J'/'F'/'D')。实证输出 `id=1 duration=7ms beforePools=8 afterPools=8`——**8 个池 × before/after 各一份**,正是 01 篇账本的形状。
+注意**调用者先填、被调用者回填**的协议: Java 侧把 before/after 两个 MemoryUsage 对象数组和扩展属性槽**预先放进 `jmmGCStat` 结构**(jmm.h:185-195 注释 "Caller has to set the following fields...")——hotspot 端的 `jmm_GetLastGCStat`(management.cpp:1831-1892)拿着这些槽,从 01 篇的**双缓冲账本**复制数据: `mgr->get_last_gc_stat(&stat)`(:1845,GC 还没发生返回 0 → 调用方得到 null,实证 `lastGcInfo=null (no GC yet)`)→ 逐池构造 MemoryUsage 填进数组(:1862-1883,还处理 survivor 池 GC 后 max 为 0 的特殊情况)——**表调用返回后,Java 侧再把 jvalue 按类型逐个写回**(GcInfoBuilder.c:255-282 的 switch 'Z'/'B'/'C'/'S'/'I'/'J'/'F'/'D')。实证输出 `id=1 duration=7ms beforePools=8 afterPools=8`——**8 个池 × before/after 各一份**,正是 01 篇账本的形状。
 
 ## 5. 传感器与阈值: 03 篇的伏笔
 

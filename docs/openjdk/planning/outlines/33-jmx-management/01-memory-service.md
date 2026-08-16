@@ -5,7 +5,7 @@
 
 > ⚠️ 写作期修正(2026-08-16,33-jmx/01 完成):
 > - **池数 "~10 个" 错**: 实证(G1+jdk11)只有 **8 个 pool**——G1 Eden/Survivor/Old Gen(3)+ Metaspace + Compressed Class Space(2)+ **CodeCache 3 段**(non-nmethods/profiled nmethods/non-profiled nmethods,JDK11 分段 code cache,不是 1 个 CodeCache 池)
-> - **"MemoryService 创建所有 MemoryPool" 错**: 池是 **GC 自己创建的**(G1CollectedHeap 构造 :1738-1740 new G1EdenPool 等,g1MemoryPool.cpp:42-88),MemoryService 只**注册**(set_universe_heap memoryService.cpp:71-92,universe.cpp:1105-1107 genesis 里);Metaspace/Compressed Class 由 add_metaspace_memory_pools(universe.cpp:1105),CodeHeap×3 由 add_code_heap_memory_pool(codeCache.cpp:423)
+> - **"MemoryService 创建所有 MemoryPool" 错**: 池是 **GC 自己创建的**(G1CollectedHeap 构造 :1738-1740 new G1EdenPool 等,g1MemoryPool.cpp:42-88),MemoryService 只**注册**(set_universe_heap memoryService.cpp:71-92,universe.cpp:1105-1107 universe_post_init 里,init_globals 调用 init.cpp:141);Metaspace/Compressed Class 由 add_metaspace_memory_pools(universe.cpp:1105),CodeHeap×3 由 add_code_heap_memory_pool(codeCache.cpp:423)
 > - **"MemoryPool 追踪 usage/peak/collection" 半对**: 当前 usage **不缓存**——`get_memory_usage()` 是纯虚每次现算(memoryPool.hpp:133);`_peak_usage`/`_after_gc_usage` 才是缓存(:67-68);数据源=G1MonitoringSupport(g1MonitoringSupport.cpp:190-206 recalculate_sizes,eden_used=region 数×GrainBytes :199,old=总用量减 young :202)
 > - **MemoryUsage 四元组 undefined 语义**: undefined_size()=(size_t)-1(memoryUsage.hpp:66);跨 JNI 转 jlong 有溢出保护 convert_to_jlong(:68-78);G1 Eden max=undefined、Old max=old_gen_max()=整体保留(实证 16001269760≈14.9GB=MaxHeapSize)
 > - **"MemoryManager——G1 Young 管 Eden+Survivor、Old 管 Old" 错**: G1 的两个 GC manager **都管理全部 3 个堆池**(g1CollectedHeap.cpp:1742-1748),按 **GC 类型**分工——young GC 记 _memory_manager("G1 Young Generation",:2881)、full GC 记 _full_gc_memory_manager("G1 Old Generation",:1136+G1FullGCScope.hpp:55);区别=always_affected_by_gc(Old 池对 young GC false,:1748);"ZGC 可能只有一个"无源码(jdk11u 树 G1-only)
@@ -29,7 +29,7 @@ MemoryPool(基类,memoryPool.hpp:45)——纯虚 get_memory_usage()=每次现算
 G1 的池不在 services/: G1EdenPool/G1SurvivorPool/G1OldGenPool(g1MemoryPool.cpp:42-88,used=region 数×GrainBytes)
 ```
 - 源码: `memoryPool.hpp:45-171` + `g1MemoryPool.cpp:42-88` + `memoryService.cpp:71-125`(注册)
-- 关键设计: 池是"区域统计的活视图"——当前 usage 不缓存,GC 内部数字变读数就变;G1 池在 G1CollectedHeap 构造时创建(g1CollectedHeap.cpp:1738-1740),注册在 genesis(universe.cpp:1105-1107)
+- 关键设计: 池是"区域统计的活视图"——当前 usage 不缓存,GC 内部数字变读数就变;G1 池在 G1CollectedHeap 构造时创建(g1CollectedHeap.cpp:1738-1740),注册在 universe_post_init(universe.cpp:1002/:1105-1107)
 - [C++: `MemoryPool::record_peak_memory_usage()`(memoryPool.cpp:144-153)取 max 记峰值;`_after_gc_usage` 由 gc_end 里 `set_last_collection_usage()` 刷新;Metaspace/CodeCache 峰值各自 track(spaceManager.cpp:164-169/memoryService.hpp:85-90)]
 
 ### 2. "MemoryManager — G1/ZGC/Parallel 各一个" ⚠️ 按 GC 类型分工,不分区域

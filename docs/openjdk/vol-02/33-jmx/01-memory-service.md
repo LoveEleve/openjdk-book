@@ -66,9 +66,9 @@ MemoryUsage G1EdenPool::get_memory_usage() {
 }
 ```
 
-`used_in_bytes()` 是 `_g1mm->eden_space_used()`(g1MemoryPool.hpp:72-73)——数据源是 `G1MonitoringSupport`(g1MonitoringSupport.cpp:190-206 `recalculate_sizes`): **young 区已提交的 region 数量 × region 大小**(`_eden_used = eden_list_length * HeapRegion::GrainBytes` :199),Old 的 used 是"堆总用量减去 young"(`subtract_up_to_zero(_overall_used, _eden_used + _survivor_used)` :202)。注意 max: G1EdenPool/G1SurvivorPool 传 `_undefined_max`、G1OldGenPool 传 `g1h->g1mm()->old_gen_max()`(=整体保留容量)——所以实证里 Eden max=undefined、Old max=16001269760(≈14.9GB=MaxHeapSize)。
+`used_in_bytes()` 是 `_g1mm->eden_space_used()`(g1MemoryPool.hpp:72-73)——数据源是 `G1MonitoringSupport`(g1MonitoringSupport.cpp:182-206 `recalculate_sizes`): **young 区已提交的 region 数量 × region 大小**(`_eden_used = eden_list_length * HeapRegion::GrainBytes` :199),Old 的 used 是"堆总用量减去 young"(`subtract_up_to_zero(_overall_used, _eden_used + _survivor_used)` :202)。注意 max: G1EdenPool/G1SurvivorPool 传 `_undefined_max`、G1OldGenPool 传 `g1h->g1mm()->old_gen_max()`(=整体保留容量)——所以实证里 Eden max=undefined、Old max=16001269760(≈14.9GB=MaxHeapSize)。
 
-**池是谁建的?**——GC 堆。`G1CollectedHeap` 构造时 `_eden_pool = new G1EdenPool(this)` 等三个(g1CollectedHeap.cpp:1738-1740);`MemoryService` 只负责**注册**(把池收进自己的列表)。注册发生在启动早期(genesis 阶段,universe.cpp:1105-1107): `MemoryService::add_metaspace_memory_pools()`(Metaspace Manager + Metaspace 池 + Compressed Class Space 池)+ `set_universe_heap(Universe::heap())`——后者调 `heap->memory_pools()` 取 G1 的三个池收进 `_pools_list`(memoryService.cpp:71-92)。CodeCache 的三个池是 CodeCache 初始化每个 CodeHeap 时注册的(`add_code_heap_memory_pool`,codeCache.cpp:423;JDK11 把 CodeCache 分成 non-nmethods/profiled/non-profiled 三段,所以 CodeCache 是 **3 个池**,大纲假设的"1 个 CodeCache 池、共约 10 个池"与实测(8 个)不符)。
+**池是谁建的?**——GC 堆。`G1CollectedHeap` 构造时 `_eden_pool = new G1EdenPool(this)` 等三个(g1CollectedHeap.cpp:1738-1740);`MemoryService` 只负责**注册**(把池收进自己的列表)。注册发生在启动早期(universe_post_init 里,universe.cpp:1002/:1105-1107;该函数在 init_globals 中调用,init.cpp:141): `MemoryService::add_metaspace_memory_pools()`(Metaspace Manager + Metaspace 池 + Compressed Class Space 池)+ `set_universe_heap(Universe::heap())`——后者调 `heap->memory_pools()` 取 G1 的三个池收进 `_pools_list`(memoryService.cpp:71-92)。CodeCache 的三个池是 CodeCache 初始化每个 CodeHeap 时注册的(`add_code_heap_memory_pool`,codeCache.cpp:423;JDK11 把 CodeCache 分成 non-nmethods/profiled/non-profiled 三段,所以 CodeCache 是 **3 个池**,大纲假设的"1 个 CodeCache 池、共约 10 个池"与实测(8 个)不符)。
 
 ## 2. MemoryUsage: 四元组与 undefined 的语义
 
@@ -100,7 +100,7 @@ MemoryUsage G1EdenPool::get_memory_usage() {
 池描述"哪块内存",`MemoryManager` 描述"谁管理它"。`class MemoryManager`(memoryManager.hpp:47-86)只有名字加一个池数组(`_pools[max_num_pools=10]`);真正的记账能力在子类 `GCMemoryManager`(:136-183):
 
 ```cpp
-// memoryManager.hpp:137-147(截取核心,逐字)
+// memoryManager.hpp:138-147(截取核心,逐字)
   // TODO: We should unify the GCCounter and GCMemoryManager statistic
   size_t       _num_collections;
   elapsedTimer _accumulated_timer;
@@ -130,7 +130,7 @@ GC 两侧的打点由一个 RAII 对象完成——`TraceMemoryManagerStats`(mem
 **账本载体 GCStatInfo**(memoryManager.hpp:88-134)是"一次 GC 的全部内存账": 索引、起止时间、以及**每个池的 before/after usage 两个数组**(`_before_gc_usage_array`/`_after_gc_usage_array`,按 MemoryService 的池列表顺序)。双缓冲交换在 gc_end 的 countCollection 分支:
 
 ```cpp
-// memoryManager.cpp:284-292(截取核心,逐字)
+// memoryManager.cpp:285-292(截取核心,逐字)
     {
       MutexLockerEx ml(_last_gc_lock, Mutex::_no_safepoint_check_flag);
       GCStatInfo *tmp = _last_gc_stat;
@@ -141,7 +141,7 @@ GC 两侧的打点由一个 RAII 对象完成——`TraceMemoryManagerStats`(mem
     }
 ```
 
-*关键设计: "最近一次完成的 GC"必须原子发布*——GC 是 VM 线程上的串行事件,但 JMX 查询线程随时在读 `_last_gc_stat`(读端 `get_last_gc_stat` :300-312 也持同一把 `_last_gc_lock`);双缓冲让"发布"只是一个指针交换,读者永远看到完整的账本。GC 还没结束时 `get_last_gc_stat` 返回 0(`gc_index()==0` 表示还没有完成过 GC,注释 :177-179 "Zero signifies no gc has taken place")。
+*关键设计: "最近一次完成的 GC"必须原子发布*——GC 是 VM 线程上的串行事件,但 JMX 查询线程随时在读 `_last_gc_stat`(读端 `get_last_gc_stat` :300-312 也持同一把 `_last_gc_lock`);双缓冲让"发布"只是一个指针交换,读者永远看到完整的账本。GC 还没结束时 `get_last_gc_stat` 返回 0(`gc_index()==0` 表示还没有完成过 GC,注释 :177-178 "Zero signifies no gc has taken place")。
 
 **更新的顺序是这篇最重要的时序**: G1 年轻代 GC 结束处(g1CollectedHeap.cpp:3096-3100)——
 
