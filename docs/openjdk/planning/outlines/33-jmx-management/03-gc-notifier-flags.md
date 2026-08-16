@@ -12,7 +12,7 @@
 > - **阈值通知两种语义(大纲漏,核心)**: **gauge**(set_gauge_sensor_level cpp:206-239,超 high 触发一次,降 low 以下才可再触发——**迟滞**;实证 threshold.exceeded 只报一次 count=1)vs **counter**(set_counter_sensor_level :261-277,**每次**超阈值都 pending;实证 collection.threshold.exceeded 每次 GC 报,count=1→2)
 > - **trigger 落点**: JavaCalls 调 sun.management.Sensor.trigger(int, MemoryUsage)(Sensor.java:128-136)→triggerAction→PoolSensor(MemoryPoolImpl.java:297-300,发 MEMORY_THRESHOLD_EXCEEDED)/CollectionSensor(:325-331,MEMORY_COLLECTION_THRESHOLD_EXCEEDED)→MemoryImpl.createNotification(MemoryImpl.java:138-161,hasListeners 检查);**OOM 时降级 trigger(int)**(cpp:307-313)
 > - **通知开关自动开启(大纲漏,重要)**: GarbageCollectorExtImpl.addNotificationListener(GarbageCollectorExtImpl.java:118-126)在从无监听器变有监听器时 setNotificationEnabled→jmm_SetGCNotificationEnabled(management.cpp:1893-1900)
-> - **WriteableFlags**: 三入口同一函数——jmm_SetVMGlobal(management.cpp:1569-1580,MANAGEMENT origin)/attach setflag(attachListener.cpp:288,ATTACH_ON_DEMAND)/VM.set_flag DCmd(diagnosticCommand.cpp:282)→WriteableFlags::set_flag(writeableFlags.cpp:243-267: find_flag→**is_writeable() 检查**→setter);错误码 MISSING_NAME/MISSING_VALUE/NON_WRITABLE/INVALID_FLAG;"writeable"=manageable/product_rw 宏(globals.hpp:166-208 注释,编译期声明);实证: HeapDumpBeforeFullGC/MaxHeapFreeRatio 成功、PrintGC "only 'writeable' flags can be set"、NonExistingFlag "flag ... does not exist"
+> - **WriteableFlags**: 三入口同一函数——jmm_SetVMGlobal(management.cpp:1569-1580,MANAGEMENT origin)/attach setflag(attachListener.cpp:288,ATTACH_ON_DEMAND)/VM.set_flag DCmd(diagnosticCommand.cpp:282)→WriteableFlags::set_flag(writeableFlags.cpp:243-266: find_flag→**is_writeable() 检查**→setter);错误码 MISSING_NAME/MISSING_VALUE/NON_WRITABLE/INVALID_FLAG;"writeable"=manageable/product_rw 宏(globals.hpp:166-208 注释,编译期声明);实证: HeapDumpBeforeFullGC/MaxHeapFreeRatio 成功、PrintGC "only 'writeable' flags can be set"、NonExistingFlag "flag ... does not exist"
 > - **悬念指向错**: "域34 NMT"过期(34 域第 5 批已完结)——正确 **43-nio-net**(第 6 批收官)
 > - 素材: 33-jmx-notify-demo.txt(三类通知全触发: threshold.exceeded seq=1 count=1/collection seq=2,3 count=1→2/GC NOTIF 13 条含 young(G1 Humongous Allocation)+full(System.gc()))/33-jmx-flag-demo.txt(jcmd VM.set_flag 正反例)
 
@@ -61,7 +61,7 @@ createGcInfo(:99-163): before/after MemoryUsage 数组(survivor max==0 特例 :1
 **WriteableFlags** (`services/writeableFlags.hpp/cpp`):
 ```
 三入口: jmm_SetVMGlobal(management.cpp:1569-1580)/attach setflag(attachListener.cpp:288)/VM.set_flag DCmd(diagnosticCommand.cpp:282)
-WriteableFlags::set_flag(writeableFlags.cpp:243-267):
+WriteableFlags::set_flag(writeableFlags.cpp:243-266):
   参数空→MISSING_NAME/MISSING_VALUE;find_flag 找不到→INVALID_FLAG;!is_writeable()→NON_WRITABLE
   通过→setter(set_flag_from_char :269 / set_flag_from_jvalue :298,按类型分派 bool/int/uint/intx/...)
 "writeable"=manageable/product_rw 宏(globals.hpp:166-208 注释,编译期声明)

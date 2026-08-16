@@ -158,10 +158,10 @@ GC 两侧的打点由一个 RAII 对象完成——`TraceMemoryManagerStats`(mem
 
 ## 5. 查询链路: JMX 请求怎么落到池上
 
-JConsole 调 `MemoryPoolMXBean.getUsage()` → Java 侧 `MemoryPoolImpl.getUsage0()`(native,MemoryPoolImpl.c:44)→ 通过 **JMM 函数表** `jmm_interface->GetMemoryPoolUsage(env, pool)`(02 篇拆 JMM 全貌)→ 对应 `jmm_GetMemoryPoolUsage`(management.cpp:557-567):
+JConsole 调 `MemoryPoolMXBean.getUsage()` → Java 侧 `MemoryPoolImpl.getUsage0()`(native,MemoryPoolImpl.c:44)→ 通过 **JMM 函数表** `jmm_interface->GetMemoryPoolUsage(env, pool)`(02 篇拆 JMM 全貌)→ 对应 `jmm_GetMemoryPoolUsage`(management.cpp:557-568):
 
 ```cpp
-// management.cpp:557-567(截取核心,逐字)
+// management.cpp:557-568(截取核心,逐字)
 JVM_ENTRY(jobject, jmm_GetMemoryPoolUsage(JNIEnv* env, jobject obj))
   ResourceMark rm(THREAD);
 
@@ -174,7 +174,7 @@ JVM_ENTRY(jobject, jmm_GetMemoryPoolUsage(JNIEnv* env, jobject obj))
 
 两件值得注意的事。**第一,池的 Java 镜像(pool 参数)是懒创建的**: 第一次被 JMX 枚举/查询(jmm_GetMemoryPools 或本函数)时才调 `get_memory_pool_instance`(memoryPool.cpp:77-138)——经 `JavaCalls::call_static` 调 `sun.management.ManagementFactoryHelper.createMemoryPool(name, isHeap, usageThreshold, gcThreshold)`(ManagementFactoryHelper.java:571-574,`new MemoryPoolImpl(...)`)。懒创建+双检锁(`_memory_pool_obj` 判空→建→`OrderAccess::release_store` 发布,:80-134): *启动时零开销,只在第一次被 JMX 触碰时建堆对象*;并发时多余的实例直接 GC 掉(注释 "Extra pool instances will just be gc'ed")。**第二,`create_MemoryUsage_obj`(memoryService.cpp:234-248)用 JavaCalls 构造 `java.lang.management.MemoryUsage`**——四个 jlong 参数,签名 `long_long_long_long_void_signature`——即"每个池的 usage 对象都是新构造的,查询时现算现装"。
 
-`MemoryMXBean.getHeapMemoryUsage()`(JConsole 顶部那条曲线)则是**汇总**: `jmm_GetMemoryUsage`(management.cpp:706-754)遍历所有 heap 池把 used/committed 求和,`init=InitialHeapSize`、`max=Universe::heap()->max_capacity()`,任一池 undefined 则整体 -1。所以 Heap 曲线 = 三个 G1 池之和,曲线上的"锯齿"(每次 GC 后回落)正是 §4 的时序保证的数据。
+`MemoryMXBean.getHeapMemoryUsage()`(JConsole 顶部那条曲线)则是**汇总**: `jmm_GetMemoryUsage`(management.cpp:706-758)遍历所有 heap 池把 used/committed 求和,`init=InitialHeapSize`、`max=Universe::heap()->max_capacity()`,任一池 undefined 则整体 -1。所以 Heap 曲线 = 三个 G1 池之和,曲线上的"锯齿"(每次 GC 后回落)正是 §4 的时序保证的数据。
 
 与 39-02 的 jstat 对照: jstat 直接读 hsperf 文件的 PerfData 计数器(GC 计数/区域容量,是"推"的数据);**JMX 这条是"拉"的**——查询时从 GC 内部统计现算。两条读口各自独立记录在本篇素材里(33-jmx-jstat-gc.txt 与 33-jmx-pool-demo.txt),底层同源: region 计数与 GC 计数。
 

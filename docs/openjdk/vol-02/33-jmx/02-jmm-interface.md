@@ -102,7 +102,7 @@ JNIEXPORT jint JNICALL
 
 ## 3. 内存族: 查询链的最后一跳
 
-01 篇从 `getUsage()` 追到 `jmm_GetMemoryPoolUsage`(management.cpp:557-567);本篇把内存族四兄弟放一起看:
+01 篇从 `getUsage()` 追到 `jmm_GetMemoryPoolUsage`(management.cpp:557-568);本篇把内存族四兄弟放一起看:
 
 - **GetMemoryPools**(`jmm_GetMemoryPools` :470-512): 参数 obj==NULL 枚举**全部**池,否则按传入的 manager 过滤(`mgr->get_memory_pool(i)`);返回 `MemoryPoolMXBean[]`——数组里每个元素就是 01 篇的懒创建实例;
 - **GetMemoryManagers**(:514-546): 对称——枚举全部 manager 或按池过滤;
