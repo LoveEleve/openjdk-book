@@ -4,6 +4,11 @@
 > 读者处境: JVM 堆中有 100 万个相同 String "hello"。StringDedup 消除重复(节约 ~30MB)。OopStorage 是这些重复 string 的并发存储。GC Stats 报告每次 GC 的详细信息。
 
 ### 1. "OopStorage — 无锁并发 oop 存储"
+> ⚠️ 写作期修正(2026-08-15, vol-02/25-gc-framework/06 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"无锁 block 分配/thread-local/CMpxchg 链头" 编造(重要)**: JDK11 **allocate 锁 _allocation_mutex**(oopStorage.hpp:105-108 注释 "Locks _allocation_mutex");无锁的是 **release(CAS 清位,27-jni/01 :575-587)与迭代**;**GC 迭代走 ActiveArray 快照**(hpp:175/:209)+SingleWriterSynchronizer(:220)+ParState(:152 "Parallel iteration is for the exclusive use of the GC");Block=固定大小数组+AllocationList 双向链表(:179-205);delete_empty_blocks_safepoint/concurrent(:157-158)
+> - **"_block_size=64/oop _data[64]" 伪代码编造**: Block 内部实现未公开(私有类,TestAccess 供单测);不写伪字段
+> - **与 27-jni/01 分工**: 存储语义(Global/Weak 实例/release)已讲;本篇补 GC 视角(allocate 锁/ActiveArray 迭代/弱清理 weakProcessor.cpp:37)
+
 
 场景: ReferenceProcessor、StringTable、JNI global refs 都需要无锁并发存储 oop。OopStorage 用分段 block 分配避免全局锁。
 
@@ -27,6 +32,13 @@ class OopStorage {
 - [C++: Block 分配用 `Atomic::cmpxchg` for block chain head insert. 线程冲突时: 1 线程抢到→others retry with new head→~2-3 retries in high contention]
 
 ### 2. "StringDedup — 字符串去重"
+> ⚠️ 写作期修正(2026-08-15, vol-02/25-gc-framework/06 已按真实源码成文):
+> - **"默认 10% GC cycles 触发" 错**: UseStringDeduplication **默认 false**(globals.hpp:2586);StringDeduplicationAgeThreshold=3(globals.hpp:2589)是 **String 年龄阈值**(flag 注释 "A string must reach this age (or be promoted to an old region)"),非"10% GC cycles"
+> - **"dedup 在 GC 的 Reference Processing 期间处理" 错(重要)**: 真实=两阶段(stringDedup.hpp:35-49 注释): GC 周期内检查候选入 dedup 队列 + **GC 后并发阶段**(StringDedupThread 拉队列处理,"The second part...is a concurrent phase which starts right after the stop-the-wold marking/evacuation phase...executed by the deduplication thread")
+> - **"dedup table 用 oopStorage 分配...4MB" 编造**: 真实=StringDedupTable 传统 hashtable+entry cache(stringDedupTable.cpp:204 单例/add :246/lookup :280),**非 OopStorage**;条目**弱指向** char 数组(hpp:35/:97)
+> - **候选选择 GC 特定**: G1 按年龄判定(g1StringDedup.cpp:47-75);interned 字符串插入 StringTable 前立即 dedup(stringDedup.hpp:65-73 注释);JEP 192
+> - **实证**: "Concurrent String Deduplication" 并发阶段日志(100 万重复 String 检查 31 万/4488B->2816B);flag 名 UseStringDeduplication(-XX:+UseStringDedup 报错)
+
 
 场景: 年轻代和年老代中有大量重复 String(如 "com.example.User" 类名)→StringDedup 在 GC 期间检查并合并它们。
 
@@ -41,6 +53,11 @@ Deduplication:     if two Strings' value arrays identical→redirect reference�
 - [C++: dedup table 用 `oopStorage` 分配—每个 block 64 oop, 1K blocks=64K oops→~4MB for table。collision rate: ~5%(table load factor → capacity automatic resize)]
 
 ### 3. "GC 统计 — 每次 GC 的完整报告"
+> ⚠️ 写作期修正(2026-08-15, vol-02/25-gc-framework/06 已按真实源码成文):
+> - **类归属**: GCTimer(gcTimer.hpp:131,187 行)/GCId(gcId.hpp:30,59 行)/gcTrace.hpp(313 行);**GCTraceTime 在 39-02 已证是 GCTraceTimeImpl**(gcTraceTime.hpp:46-65)非 gcTrace.hpp 的类
+> - **"GCTraceTime RAII...析构时调用 UnifiedLogging::gc_log" 简化**: 真实=GCTraceTimeImpl RAII+日志框架(39-02 已详);本篇补 GCId("GC(N)" 前缀,跨标签共享,GCIdMark 入栈)
+> - **悬念指向错(重要)**: "下一篇域 26 G1 GC"过期(26 是第 7 批)——正确 **28-jvmti**(第 6 批剩余;01 标题="JVMTI Agent 怎么工作？— Agent 架构与事件系统")
+
 
 场景: 生产环境 GC log — `[GC pause (G1 Evacuation Pause) 123.4ms]`。背后是一整套统计基础设施。
 
@@ -55,6 +72,10 @@ GCId:         唯一 GC ID (JFR tracing 用)
 - 关键设计: GCTraceTime RAII 让 timer 自动记录——不需要显式 start/stop。析构时调用 `UnifiedLogging::gc_log(gc_id, phase_name, duration)`——统一 logging 框架(minimal overhead)
 
 ### 4. "死代码——历史的见证" — GenCollectedHeap 经典代际
+> ⚠️ 写作期修正(2026-08-15, vol-02/25-gc-framework/06 已按真实源码成文):
+> - **"per-region overhead ~5% heap" 无源码依据删**(正文明确不采信)
+> - 死代码链确认: GenCollectedHeap/cardGeneration/CardTableRS(25-05 已证)/generation/space——INCLUDE_SERIALGC/PARALLELGC/CMSGC=0
+
 
 场景: G1-ONLY 构建中，GenCollectedHeap 的代码从未执行——INCLUDE_SERIALGC=INCLUDE_PARALLELGC=0。但这些代码保留了并行代际模型的设计意图——对理解 GC 设计演进有价值。
 
