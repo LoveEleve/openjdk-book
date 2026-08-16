@@ -34,7 +34,7 @@
 - **per-method 一批**(`unloaded`/`uninitialized`/`unreached`/`unhandled`/`constraint`/`div0_check`/`age`/`predicate`/`loop_limit_check`/`speculate_class_check`/`speculate_null_check`/`rtm_state_change`/`unstable_if`/`unstable_fused_if`): 全局性的失效(类卸载、代码老化);
 - 尾巴上 `Reason_tenured`(=Reason_TRAP_HISTORY_LENGTH,代码老化到寿命上限,:96)单独计数,`Reason_RECORDED_LIMIT = profile_predicate`(:103,per-bytecode 记录的上限)。
 
-**DeoptAction**(:108-115)是五种"怎么办":
+**DeoptAction**(:108-114)是五种"怎么办":
 
 ```cpp
 // deoptimization.hpp:108-115(截取核心,逐字)
@@ -48,11 +48,11 @@
   };
 ```
 
-*关键设计: action 不是运行时从 reason 查表算出来的*——**是编译器在生成 trap 代码时选的**。C2 的 `GraphKit::uncommon_trap(reason, action, ...)`(graphKit.hpp:733-740)在每次"这里可能失败"的假设处显式带上 action: 类型检查假设→make_not_entrant,循环谓词→maybe_recompile,等等。大纲的"Reason→Action 映射表(deoptimization.cpp:200-350)"与 `action_for_reason()` 都不存在——运行时拿到的 action 是编译代码里编码好的。
+*关键设计: action 不是运行时从 reason 查表算出来的*——**是编译器在生成 trap 代码时选的**。C2 的 `GraphKit::uncommon_trap(reason, action, ...)`(graphKit.hpp:733-739)在每次"这里可能失败"的假设处显式带上 action: 类型检查假设→make_not_entrant,循环谓词→maybe_recompile,等等。大纲的"Reason→Action 映射表(deoptimization.cpp:200-350)"与 `action_for_reason()` 都不存在——运行时拿到的 action 是编译代码里编码好的。
 
 ## 2. trap_request: 一次调用的编码
 
-假设被打破时,编译代码跳 UncommonTrapBlob(21-01),把"要什么 action、为什么、哪个类"编码进一个 int 传进 `Deoptimization::uncommon_trap(thread, trap_request, exec_mode)`(:2095)。编码在位域里(:117-124):
+假设被打破时,编译代码跳 `UncommonTrapBlob`(codeBlob.hpp:642,21-01 的 generate_uncommon_trap_blob 生成),把"要什么 action、为什么、哪个类"编码进一个 int 传进 `Deoptimization::uncommon_trap(thread, trap_request, exec_mode)`(:2095)。编码在位域里(:117-124):
 
 ```cpp
 // deoptimization.hpp:117-125(截取核心,逐字)
@@ -72,7 +72,7 @@
 
 ## 3. 运行时: uncommon_trap_inner 的决策
 
-`uncommon_trap_inner`(:1526)是真正的决策中心。先做一堆准备工作(解包 reason/action/debug_id、取 trap scope、日志、必要时加载类,:1526-1740),然后进入核心——:1745 起的大注释"Flush the nmethod if necessary and desirable"是设计文档,讲了**防 deopt-重编译死循环的三种措施**: ①同点同因第二次重编译→action 调整为 reinterpret,给解释器时间(:1750-1756);②overflow_recompile_count 超限→make_not_compilable,放弃该方法(:1758-1763);③PerMethodRecompilationCutoff 大限(:1765-1769)。
+`uncommon_trap_inner`(:1526)是真正的决策中心。先做一堆准备工作(解包 reason/action/debug_id、取 trap scope、日志、必要时加载类,:1526-1740),然后进入核心——:1745 起的大注释"Flush the nmethod if necessary and desirable"是设计文档,讲了**防 deopt-重编译死循环的三种措施**: ①同点同因第二次重编译→action 调整为 reinterpret,给解释器时间(:1755-1757);②overflow_recompile_count 超限→make_not_compilable,放弃该方法(:1758-1763);③PerMethodRecompilationCutoff 大限(:1765-1769)。
 
 决策本身是**按 action 的 switch**(:1797-1837)+ **MDO 计数的 hysteresis**:
 
@@ -103,15 +103,15 @@
       break;
 ```
 
-然后 MDO 计数介入(:1858-1918): `query_update_method_data` 更新 per-bci 的 trap 历史并取回 `this_trap_count`;对 per-bytecode 原因,**`this_trap_count >= PerBytecodeTrapLimit`(默认 4,globals.hpp:1788)就强制 make_not_entrant**(:1875-1883,注释还点破一个细节: per-bci 只有 1 位计数器,可能的计数是 {0, 1, per-method count}——多位点会互相抢功);再检查 `per_method_trap_limit(reason)`(=PerMethodTrapLimit 100,speculate 用 5000,:408-411)兜底(:1907)。
+然后 MDO 计数介入(:1852-1918): `query_update_method_data` 更新 per-bci 的 trap 历史并取回 `this_trap_count`;对 per-bytecode 原因,**`this_trap_count >= PerBytecodeTrapLimit`(默认 4,globals.hpp:1788)就强制 make_not_entrant**(:1875-1883,注释还点破一个细节: per-bci 只有 1 位计数器,可能的计数是 {0, 1, per-method count}——多位点会互相抢功);再检查 `per_method_trap_limit(reason)`(=PerMethodTrapLimit 100,speculate 用 5000,:408-411)兜底(:1907)。
 
-落地动作(:1925-1982): `make_not_entrant → nm->make_not_entrant()`(:1929,实证里 "made not entrant" 就是它)→ 在 pdata 记 recompile 位;`overflow_recompile_count > PerBytecodeRecompilationCutoff(200)`→`set_not_compilable`(:1960-1966);`reprofile → CompilationPolicy::reprofile`(:1973)重置计数器;`make_not_compilable → method->set_not_compilable`(:1980)。**注意: Action_none 时 update_trap_state=false,什么都不记、什么也不失效**——trap 结果只是多跑几遍解释器。
+落地动作(:1925-1982): `make_not_entrant → nm->make_not_entrant()`(:1929,类型切换场景的失效走的就是这条路;实证里阶段 1 的 OSR 版本失效是替换导致)→ 在 pdata 记 recompile 位;`overflow_recompile_count > PerBytecodeRecompilationCutoff(200)`→`set_not_compilable`(:1960-1966);`reprofile → CompilationPolicy::reprofile`(:1974)重置计数器;`make_not_compilable → method->set_not_compilable`(:1980)。**注意: Action_none 时 update_trap_state=false,什么都不记、什么也不失效**——trap 结果只是多跑几遍解释器。
 
 ## 4. trap 历史: MDO 里的账
 
 编译器下次编译时怎么知道"这个 bci 老出事"?——**MethodData**。两个记账点:
 
-**per-bci: `DataLayout::trap_bits`(methodData.hpp:139-142)= 1+31 位**——1 位 recompile + 31 位 reason(格)。trap_state 的语义是**格**(trap_state_reason :2118): 0=无 trap、某个 reason 值、`DS_REASON_MASK`=Reason_many(格底,多个原因);高位 `DS_RECOMPILE_BIT` 表示"这里重编译过"。`trap_state_add_reason`(:2149)把新 reason 并入格(不同 reason→掉到格底)。**这不是 3+5+23 的压缩计数器,而是"最近一次原因+是否重编译过"的格**——大纲的 31 位 action+reason+debug_id 编码与位提取公式全是对 trap_request 的误植。
+**per-bci: `DataLayout::trap_bits`(methodData.hpp:139-142)= 1+31 位**——1 位 recompile + 31 位 reason(格)。trap_state 的语义是**格**(trap_state_reason :2118): 0=无 trap、某个 reason 值、reason 字段全 1(=`DS_REASON_MASK`,deoptimization.cpp:2113)时解码为 `Reason_many`(格底,多个原因);高位 `DS_RECOMPILE_BIT`(:2114)表示"这里重编译过"。`trap_state_add_reason`(:2149)把新 reason 并入格(不同 reason→掉到格底)。**这不是 3+5+23 的压缩计数器,而是"最近一次原因+是否重编译过"的格**——大纲的 31 位 action+reason+debug_id 编码与位提取公式全是对 trap_request 的误植。
 
 **per-method: `_trap_hist`(methodData.hpp:1986-2007)**——`u1 _array[Reason_TRAP_HISTORY_LENGTH]`,每个 reason 一字节计数(tenured 除外),加 `_nof_overflow_traps`/`overflow_recompile_count`;`MethodData::trap_count(reason)`(:2384)读它。per-bci 的 1 位 + per-method 的多字节,合起来给编译器"重编译时保守多少"的输入。
 
