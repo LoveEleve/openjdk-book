@@ -1,7 +1,7 @@
 # 03. 编译代码里抛了异常——JVM 怎么找 handler?— 异常处理
 
 > **前置依赖**:[21-shared-runtime/01 — 编译代码遇到问题——向谁求助?— Runtime Stubs](openjdk/vol-02/21-shared-runtime/01-runtime-stubs.md):IC miss/resolve/deopt 桩网络是这篇"求助电话"的另一半,`unpack_with_exception` 变体在异常处理里反复出现;[23-stub/01 — JVM 启动时预生成哪些汇编例程?— StubRoutines 全局桩](openjdk/vol-02/23-stub/01-stub-entry.md):`generate_throw_exception` 生成的 throw stub 家族是 StubRoutines 的成员;[21-shared-runtime/02 — 从编译跳到解释: c2i/i2c Adapter](openjdk/vol-02/21-shared-runtime/02-c2i-i2c-adapter.md):异常穿越编译↔解释接缝的落点;[24-frame/03 — deopt 怎么从编译帧重建解释器帧?— Deopt 重建 + GC 扫描](openjdk/vol-02/24-frame/03-deopt-gc-scan.md):异常处理中"帧被丢弃"与 deopt 重建同源的 RegisterMap;[19-sync/01 — synchronized 三步曲](openjdk/vol-02/19-sync/01-lock-hierarchy.md):monitor helper 的被调方
-> → **后续**:[25-gc-framework/01 — GC 怎么在每次 oop 访问时悄悄插入 barrier?— BarrierSet + Access API](openjdk/vol-02/25-gc-framework/01-barrier-access.md)
+> → **后续**:[25-gc-framework/01 — GC 怎么在每次 oop 访问时悄悄插入 barrier？— BarrierSet + Access API](openjdk/vol-02/25-gc-framework/01-barrier-access.md)
 > 关联域: 24-frame(帧展开)、08-interpreter(解释器异常分派)、16-code-cache(nmethod 异常表)、15-c2(编译代码的异常节点)
 
 ## 编译代码里的一行空指针
@@ -207,4 +207,4 @@ C1 的 `exception_begin` 不是 jump exception_blob,而是直接 `call Runtime1:
 
 异常这条通道封好了: **隐式异常**(SIGSEGV/SIGFPE → `continuation_for_implicit_exception` → nmethod 隐式异常表 → 继续点)、**显式异常**(C1 每帧问运行时 / C2 内联 catch + RethrowNode 逐帧逃逸,经 exception_blob → 缓存/字节码表/编译异常表 → handler 或展开)、**栈溢出两阶段**(bang 链 + reserved 逃生窗)。但全文反复出现两个"幽灵": 异常 oop 一路挂在 `Thread` 的 TLS 上、经 `Handle` 保活——它和栈上一切引用一样,必须在 GC 扫描时被正确识别;异常对象的字段写入也要经过 GC 的写屏障。这正是 GC 每次读写的屏障和堆对象分配要回答的问题。下一篇进入 GC Framework。
 
-> → [25-gc-framework/01 — GC 怎么在每次 oop 访问时悄悄插入 barrier?— BarrierSet + Access API](openjdk/vol-02/25-gc-framework/01-barrier-access.md)
+> → [25-gc-framework/01 — GC 怎么在每次 oop 访问时悄悄插入 barrier？— BarrierSet + Access API](openjdk/vol-02/25-gc-framework/01-barrier-access.md)
