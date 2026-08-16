@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-15 | 卷 2 写作中: **125/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 20) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 42 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(5)**;下一篇 25-gc-framework/06(OopStorage + StringDedup + GC Stats,25 域收官篇)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-15 | 卷 2 写作中: **126/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 21) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 43 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结)**;下一篇 28-jvmti/01(第 6 批剩余 4 域之首)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -46,11 +46,11 @@
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
-第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(5/6)** → 28 → 29 → 33 → 43
+第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → 28 → 29 → 33 → 43
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
-**已完成 125 篇**(全部在 `docs/openjdk/vol-02/`):
+**已完成 126 篇**(全部在 `docs/openjdk/vol-02/`):
 
 | 域 | 篇 | 文件 | 状态 |
 |---|---|---|---|
@@ -92,7 +92,7 @@
 | **14-c1-compiler** | 1-4 | `14-c1-compiler/01-c1-pipeline-ir.md`(88)+`02-c1-optimizations.md`(56)+`03-c1-register-codegen.md`(45)+`04-c1-runtime-frame.md`(61) | ✅ **14 域完结(本会话)** |
 | **15-c2-compiler** | 1-8 | `01-c2-ideal-graph.md`(253)+`02-c2-parse-graphkit.md`(230)+`03-c2-optimizations.md`(138)+`04-c2-loops.md`(140)+`05-c2-register-alloc.md`(143)+`06-c2-codegen.md`(129)+`07-c2-macro-intrinsics.md`(74)+`08-c2-library-calls.md`(104) | ✅ **15 域完结(本会话)** |
 | **21-shared-runtime** | 1-3 | `21-shared-runtime/01-runtime-stubs.md`(96)+`02-c2i-i2c-adapter.md`(120)+`03-exception-handling.md`(191) | ✅ **21 域完结(本会话)** |
-| **25-gc-framework** | 1-5 | `01-barrier-access.md`(195)+`02-collected-heap.md`(199)+`03-reference-processing.md`(160)+`04-workgang-taskqueue.md`(155)+`05-cardtable-dirtycardq.md`(67) | 🚧 **25 域 5/6(本会话)** |
+| **25-gc-framework** | 1-6 | `01-barrier-access.md`(195)+`02-collected-heap.md`(199)+`03-reference-processing.md`(160)+`04-workgang-taskqueue.md`(155)+`05-cardtable-dirtycardq.md`(67)+`06-oopstorage-stringdedup-stats.md`(113) | ✅ **25 域完结(本会话)** |
 
 ### 本会话 26 篇的 commit 清单(按 git log 为准,2026-08-14/15)
 
@@ -232,7 +232,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 38 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 39 个**(全部 gitignore 不入库,在 materials/commands/):
 - `20-background-init-demo.txt`(SIGQUIT "VM Periodic Task Thread" waiting on condition/BiasedLockingStartupDelay=0/PerfDataSamplingInterval=50)
 - `27-jni-handles-demo.txt`(JNI demo: NewGlobalRef refType=2/NewWeakGlobalRef 地址 lsb=1 refType=3/参数变 local ref=1/deleteGlobal+GC 后弱引用清空/SIGQUIT "JNI global refs: 29, weak refs: 1" 基线 28/0/DeleteGlobalRef(local ref) SIGSEGV 实测)
 - `27-jni-fastpath-demo.txt`(UseFastJNIAccessors=true 默认;2000 万次 GetIntField 快 1.4ns/次 vs 慢 15ns/次约 10 倍)
@@ -260,6 +260,7 @@
 - `25-gc-reference-demo.txt`(RefDemo 内存压力四类引用生命周期: weak null/soft false/phantom enqueued/queue 2;SoftRefLRUPolicyMSPerMB 对照: 无压力默认保活对象(weak 同活=软可达)vs 0 立即清 vs 压力清;flag: SoftRefLRUPolicyMSPerMB=1000 {product}/RegisterReferences;标签 gc+ref=debug 可用;源码级: process 四阶段/work 三态/discover 过滤链/SoftRefPolicy interval vs max_interval/G1 双 ReferenceProcessor/instanceRefKlass try_discover;RefDemo/RefDemo2.java)
 - `25-gc-workgang-demo.txt`(flag 盘点: ParallelGCThreads=23 上限/ConcGCThreads=6/UseDynamicNumberOfGCThreads=true;gc+phases Workers: 2 动态 worker 实证;SIGQUIT 线程转储 GC Thread#0/G1 Conc#0 懒创建;标签 gc+task/gc+workgang 可用;源码级: ABP 队列/Age tag 防 ABA/pop_local_slow 竞争/pop_global CAS/SemaphoreGangTaskDispatcher 信号量派发/GangWorker NearMaxPriority;SleepDemo/GcPhaseDemo)
 - `25-gc-cardqueue-demo.txt`(flag: G1UpdateBufferSize=256/G1SATBBufferSize=1024/G1ConcRefinementThreads ergonomic;标签 gc+refine=debug 可用(Stopping N);Update RS Processed Buffers 消费读数(复用 25-01/25-04 素材);源码级: PtrQueue 递减索引/enqueue_known_active/handle_zero_index/DirtyCardQueueSet 消费链(get_completed_buffer _cbl_mon/apply_closure_to_completed_buffer)/refine_card_concurrently 语义(region 过滤+HCC 热卡缓存+清卡后扫描登记 RSet)/refine_card_during_gc Update RS 接力;G1 Refine 线程名)
+- `25-gc-aux-demo.txt`(StringDedup 并发阶段实证: 'Concurrent String Deduplication' 日志(100 万重复 String 检查 311381/4488B->2816B 共享 char[]);flag: UseStringDeduplication=false 默认/StringDeduplicationAgeThreshold=3(flag 名注意 -XX:+UseStringDedup 报错);GCId='GC(N)' 前缀跨标签;源码级: OopStorage allocate 锁/ActiveArray/ParState/StringDedup 两阶段/hashtable 弱指向/GCTimer/GCId;DedupDemo.java)
 - `15-c2-macro-demo.txt`(PrintInlining: System.arraycopy→"intrinsic"(0 字节 native 被替换)+lockElim(synchronized(new Object()) 锁消除候选)整体内联+Object.<init> 内联;CITime Macro Expand/Macro Eliminate 阶段;源码核对: expand_macro_nodes 编排/eliminate_locking_node/expand_lock_node fast-slow/expand_arraycopy_node+generate_arraycopy;flag: PrintEliminateLocks notproduct(c2_globals.hpp:508)/ReduceBulkZeroing product(:263))
 - `15-c2-codegen-demo.txt`(CITime Code_Gen 阶段: Matcher/Scheduler/Regalloc/Block Ordering/Peephole/Build OOP maps/Code Installation;源码核对: MachNode::peephole 默认 NULL(machnode.cpp:415)、.ad 三文件行数 36815、addI 变体 x86_64.ad:7473-7519、Compile::Output output.cpp:57、do_global_code_motion gcm.cpp:1612;flag 类型: OptoPeephole develop_pd/PrintOptoPeephole notproduct)
 - `15-c2-register-alloc-demo.txt`(CITime Regalloc 阶段树: RADemo.heavy 32 局部变量高寄存器压力——Regalloc 0.001s 下 Ctor Chaitin/Build IFG(virt+phys)/Compute Liveness/Regalloc Split/Postalloc Copy Rem/Fixup Spills/Coalesce 1-3/Simplify/Select;RA flag 类型: OptoCoalesce develop(c2_globals.hpp:244)/VerifyRegisterAllocator notproduct(:285)/VerifyGraphEdges notproduct(:276)/OptoRegScheduling+OptoBundling product_pd;heavy 编译事件 level 4)
@@ -1019,6 +1020,17 @@
 - **实证方法论**: G1UpdateBufferSize=256/G1SATBBufferSize=1K flag;gc+refine=debug 可用(Stopping N);Update RS Processed Buffers=消费读数(25-01/25-04 素材复用);素材 25-gc-cardqueue-demo.txt
 - **悬念指向** ✓(06-oopstorage;06 标题="字符串去重和 GC 统计 — OopStorage + StringDedup + GC Stats")
 
+### 6.81 25-gc-framework/06(OopStorage + StringDedup + GC Stats,25 域收官,大纲 12+ 处漂移含 4 处机制编造 + 深审 2 轮,2026-08-15)
+- **"OopStorage 无锁 block 分配/thread-local/CMpxchg 链头" 编造(重要)**: JDK11 **allocate 锁 _allocation_mutex**(oopStorage.hpp:105-108 注释 "Locks _allocation_mutex");无锁的是 **release(CAS 清位,27-jni/01 :575-587)与迭代**;**GC 迭代走 ActiveArray 快照**(hpp:175/:209)+SingleWriterSynchronizer(:220)+ParState(:152 "Parallel iteration is for the exclusive use of the GC");Block=固定大小数组+AllocationList 双向链表(:179-205);delete_empty_blocks_safepoint/concurrent(:157-158);**"_block_size=64 伪代码" 编造**(Block 私有类,TestAccess 供单测)
+- **"dedup table 用 oopStorage...4MB" 编造**: 真实=StringDedupTable 传统 hashtable+entry cache(stringDedupTable.cpp:204 单例/add :246/lookup :280),**非 OopStorage**;条目**弱指向** char 数组(hpp:35/:97)
+- **"默认 10% GC cycles 触发" 错**: UseStringDeduplication **默认 false**(globals.hpp:2586);StringDeduplicationAgeThreshold=3(globals.hpp:2589)=**String 年龄阈值**(flag 注释 "A string must reach this age (or be promoted to an old region) to be considered for deduplication");G1 候选检测按年龄(g1StringDedup.cpp:47-75)
+- **"dedup 在 Reference Processing 期间处理" 错(重要)**: 真实=**两阶段**(stringDedup.hpp:35-49 注释): GC 周期内检查候选入 dedup 队列 + **GC 后并发阶段**(StringDedupThread,"The second part...is a concurrent phase which starts right after the stop-the-wold marking/evacuation phase...executed by the deduplication thread");interned 插入 StringTable 前立即 dedup(:65-73);JEP 192
+- **GCTraceTime 归属**: GCTimer(gcTimer.hpp:131)/GCId(gcId.hpp:30,"GC(N)" 前缀)/gcTrace.hpp(313 行);**39-02 已证 GC 计时=GCTraceTimeImpl**(gcTraceTime.hpp:46-65)——大纲"GCTraceTime 在 gcTrace.hpp"错位
+- **"per-region overhead ~5% heap" 无据删**
+- **悬念指向错**: "域 26 G1 GC"过期(26 第 7 批)——正确 **28-jvmti**(01 标题="JVMTI Agent 怎么工作？— Agent 架构与事件系统";大纲文件 01-agent-architecture.md 非 01-jvmti-overview)
+- **实证方法论**: ①StringDedup 并发日志 "-Xlog:gc+stringdedup=trace"(DedupDemo 100 万重复 String: "Concurrent String Deduplication" 检查 311381/4488B->2816B);②**flag 名 UseStringDeduplication**(-XX:+UseStringDedup 报 Unrecognized);③GCId=GC(N) 前缀跨标签共享;④素材 25-gc-aux-demo.txt
+- **25 域完结**: 6 篇全成(01 barrier/02 heap/03 ref/04 workgang/05 cardqueue/06 aux),126/152,第 6 批剩 28/29/33/43
+
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
@@ -1076,7 +1088,8 @@
 - [x] 25-gc-framework/03——✅ 完结(正文 e6332a8 含回填 ⚠️ 2 块/README 177d56b);**25 域 3/6,第 6 批 8/8 收官**
 - [x] 25-gc-framework/04——✅ 完结(正文 1e31bb8 含回填 ⚠️ 2 块/README 0574af2);**25 域 4/6**
 - [x] 25-gc-framework/05——✅ 完结(正文 d42f723 含回填 ⚠️ 2 块/README f2f557d);**25 域 5/6**
-- [ ] **25-gc-framework/06**——**下一篇,25 域收官篇**;大纲 `planning/outlines/25-gc-framework/06-oopstorage-stringdedup-stats.md`(字符串去重和 GC 统计 — OopStorage + StringDedup + GC Stats);25 域共 6 篇;25-05 悬念已指向 06
+- [x] 25-gc-framework/06——✅ 完结(正文 21fc803 含回填 ⚠️ 4 块/README ca1f29a);**25 域完结,第 6 批 8 域全收官**
+- [ ] **28-jvmti/01**——**下一篇**;大纲 `planning/outlines/28-jvmti/01-agent-architecture.md`(JVMTI Agent 怎么工作？— Agent 架构与事件系统);28 域共 3 篇(01-agent-architecture/02-redefine-classes/03-auxiliary);25-06 悬念已指向 28
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -1119,21 +1132,20 @@
 ## 十、下一步(读完立即做)
 
 ```
-【25-gc-framework/06 写作指引——25 域 6/6 收官篇,OopStorage + StringDedup + GC Stats】
-1. 读 planning/outlines/25-gc-framework/06-oopstorage-stringdedup-stats.md(注意 ⚠️ 块;25-01/02/03/04/05 回填 2-3 块,06 大概率同样漂移)。
-   25-06 主题=OopStorage + StringDedup + GC Stats(GC 辅助设施),按大纲实际内容验证,预判要点(以实际 grep 为准):
-   - **OopStorage 与 27-jni/01 的分工**: 27-jni/01 已讲 JNI handles 用 OopStorage(Global/Weak 两实例);本篇从 GC 视角: 无锁 block 分配(每个 block 独立+并发 iteration)、defragment、弱清理(weakProcessor)
-   - StringDedup: stringdedup/(stringDedupTable/Queue,G1 的 stringDedup 集成);共享 hash table+queue,dedup 请求→queue→deduplicate→table lookup
-   - GC Stats: gcCause(25-02 已讲枚举)/gcId/gcTimer/gcTrace/GCTraceTimeImpl(39-02 已讲计时家族)——本篇从"一次暂停的可观测性"角度
-   - 与 25-01/02/03/04/05 衔接: 辅助设施如何挂进 GC 阶段树
-2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;OopStorage 的 block 分配细节(27-jni/01 有部分)、StringDedup 的 G1 集成、gc 统计的类归属最易错
+【28-jvmti/01 写作指引——第 6 批剩余 4 域之首,JVMTI Agent 架构】
+1. 读 planning/outlines/28-jvmti/01-agent-architecture.md(注意 ⚠️ 块;25 域六篇回填 2-4 块,28-01 大概率同样漂移)。
+   28-01 主题=JVMTI Agent 架构与事件系统,按大纲实际内容验证,预判要点(以实际 grep 为准):
+   - JVMTI 总览: jvmti.hpp 的接口/能力枚举/事件枚举;jvmtiEnv 实现(jvmtiEnv.cpp 数千行接口)
+   - Agent 加载: 36-attach/02 已讲 loadAgent 链路(JVMTI.agent_load DCmd/Agent_OnAttach);本篇从"JVMTI 内部"角度: JvmtiExport/jvmtiEventController 事件分发
+   - 事件系统: JvmtiEventController 的事件开关/线程过滤;事件回调分发(如 MethodEntry/Exception 事件——21-03 的 throw_and_post_jvmti_exception 是实例)
+   - 与 25 域衔接: JVMTI 事件挂在 safepoint/GC 阶段(ServiceThread 的 deferred 事件,39-01 已讲)
+2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧(函数名/行号/机制编造);JVMTI 是巨大接口层,jvmtiEnv.cpp 与 jvmti_*.cpp 的文件归属最易错
 3. 实证优先用 /data/tmp/opencode/jdk11:
-   - 字符串去重: -XX:+UseStringDedup(G1)开/关对照(-Xlog:gc+stringdedup=debug 标签验证);jstat -gcutil
-   - OopStorage: 27-jni/01 素材复用(JNI handles 计数)
-   - GC 统计: -Xlog:gc+phases 已大量复用;GCTraceTime 日志格式(39-02 素材)
+   - 36-attach/02 素材可复用(自定义 agent 全链路);-Xlog:jvmti? 标签验证;jcmd JVMTI.agent_load 或 -agentlib
+   - 事件观察: JVMTI agent 打印事件回调(generic events: VMInit/MethodEntry/Exception)
 4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP;ART 改回当前文件)→ 深审 2 轮(第 2 轮逐机制回源码质疑;用户常追加第 3/4 轮,重点抓: 跨段遗留、隐含断言、跨篇引用只保留目标篇实证过的内容)→ 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
-5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68/6.73/6.74/6.75/6.76/6.77/6.78/6.79/6.80)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容);③**立即 `grep -n "### 6.7"` 校验连续递增(注意 6.80 起模式是 6.8X,grep 用 `^### 6\.` 全量校验)**;④再做其他编辑。禁止"new 含旧节标题"的替换模式。**注意: 6.75 插入曾误删 "## 七" 标题行(e34b53c)已修复;任何编辑后检查 ## 七/## 八 标题仍在**
-6. 25 域后 → 28-jvmti → 29-mh → 33-jmx → 43-nio-net(25 域完结后按 writing-order 续)
+5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68-6.81)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容);③**立即 `grep -n "^### 6\.8"` 校验连续递增(6.80 起 6.8X 模式)**;④再做其他编辑。禁止"new 含旧节标题"的替换模式。**注意: 6.75 插入曾误删 "## 七" 标题行(e34b53c)已修复;任何编辑后检查 ## 七/## 八 标题仍在**
+6. 28 域后 → 29-mh → 33-jmx → 43-nio-net(第 6 批收官,然后第 7 批 22/26/35/40/47)
 ```
 
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
