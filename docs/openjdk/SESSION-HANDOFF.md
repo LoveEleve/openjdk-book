@@ -1238,18 +1238,20 @@
 ## 十、下一步(读完立即做)
 
 ```
-【29-mh/01 写作指引——第 6 批 3/4,方法句柄 invoke 链路】
-1. 读 planning/outlines/29-method-handles/01-invoke-chain.md(注意 ⚠️ 块;28 域三篇已回填 4 块/篇,29-01 大概率同样漂移)。
-   29-01 主题=MethodHandle invokeExact 调用链,按大纲实际内容验证,预判要点(以实际 grep 为准):
-   - 28-03 的线索: ResolvedMethodName/ResolvedMethodTable(方法句柄↔Method* 登记表,javaClasses.cpp:3800-3821)是 JSR-292 的桥——本篇从 Java 侧 MethodHandle.invokeExact 调用出发
-   - invokedynamic/签名多态调用(MH.invokeExact 是签名多态方法);LinkResolver 的 resolve_invoke 家族(08-interpreter/04 已讲)
-   - CallSite/MethodType/MemberName/方法句柄种类(refKind);calling convention 适配(29-02 x86 adapter)
-   - 与 13-jit(CompileBroker)/15-c2(MH intrinsic,doCall.cpp:141-152 的 MH 分支)衔接
-2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;java.lang.invoke 是 JDK 侧代码(src/java.base/share/classes/java/lang/invoke/),热点在 hotspot 的 methodHandle 支持(methodHandles.cpp/methodHandle.cpp 等)
+【29-mh/02 写作指引——29 域收官篇,方法句柄 x86 adapter stubs】
+1. 读 planning/outlines/29-method-handles/02-x86-adapter.md(注意 ⚠️ 块;29-01 已回填 3 块,02 大概率同样漂移)。
+   29-02 主题=方法句柄的调用约定适配,按大纲实际内容验证,预判要点(以实际 grep 为准):
+   - 29-01 的悬念: jump_from_method_handle 跳到目标入口后参数怎么摆——本篇拆 adapter
+   - 可能涉及: sharedRuntime 的 generate_method_handle_adapter?(与 21-02 的 c2i/i2c
+     adapter 同族);methodHandles_x86.cpp 的其余部分(jump_from_method_handle 之后)
+   - 与 21-shared-runtime/02(c2i/i2c adapter,参数映射 c_rarg0-5/8 XMM/栈槽)对照
+2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;adapter 是手写汇编,
+   "生成的 CodeBlob/桩"与"Java 侧 adapter 方法"别混
 3. 实证优先用 /data/tmp/opencode/jdk11:
-   - invokeExact vs reflection 性能对照(PrintInlining 观察 MH 内联/intrinsic)
-   - -Xlog:methodhandles=debug 标签?验证;MethodHandles.lookup 链路
-4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP 与 JDK 侧 MAPPINGS;ART 改回当前文件)→ 深审 2 轮 → 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
-5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68-6.84)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容)——**禁止用 "## 七" 整行当 oldString**(6.82 曾直接吞掉标题);③**立即 `grep -n "^### 6\.8"` 校验连续递增 + `grep -n "^## 七\|^## 八"` 标题仍在**;④再做其他编辑
+   - 29-01 的 MhDemo 可复用(PrintInlining 观察 adapter 内联与否)
+   - nmethod header / CodeBlob 尺寸观察(PrintAssembly 无 hsdis 的 header 模式)
+4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP;ART 改回当前文件)→ 深审 2 轮 → 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.6x
+5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68-6.85)**: ①新节内容先写成独立文本;②插入点=## 七、前一行(文件末尾追加,不碰任何旧节内容)——**禁止用 "## 七" 整行当 oldString**(6.82 曾直接吞掉标题);③**立即 `grep -n "^### 6\.8"` 校验连续递增 + `grep -n "^## 七\|^## 八"` 标题仍在**;④再做其他编辑
 6. 29 域后 → 33-jmx → 43-nio-net(第 6 批收官,然后第 7 批 22/26/35/40/47)
-```**环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
+```
+**环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
