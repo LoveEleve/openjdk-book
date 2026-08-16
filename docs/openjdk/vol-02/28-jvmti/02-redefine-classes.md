@@ -1,6 +1,6 @@
 # 02. 怎么不重启 JVM 替换一个类的字节码？— RedefineClasses
 
-> **前置依赖**:[28-jvmti/01 — JVMTI Agent 怎么工作？— Agent 架构与事件系统](openjdk/vol-02/28-jvmti/01-agent-architecture.md):env/capability(44 位、四集合、`can_redefine_classes` 在 always 集)/事件系统/函数表接口已拆;[08-interpreter/04 — 符号引用怎么变成直接引用？— LinkResolver + Rewriter](openjdk/vol-02/08-interpreter/04-linkresolver-rewriter.md):常量池/cpCache 与 Rewriter 重写的先例;[13-jit-framework/01 — 谁决定编译、怎么排队、谁执行？— CompileBroker 编译队列](openjdk/vol-02/13-jit-framework/01-compile-broker-queue.md):nmethod 生命周期与失效语义;[24-frame/03 — deopt 怎么从编译帧重建解释器帧？— Deopt 重建 + GC 扫描](openjdk/vol-02/24-frame/03-deopt-gc-scan.md):deopt 重建帧的机制
+> **前置依赖**:[28-jvmti/01 — JVMTI Agent 怎么工作？— Agent 架构与事件系统](openjdk/vol-02/28-jvmti/01-agent-architecture.md):env/capability(44 位、四集合、`can_redefine_classes` 在 always 集)/事件系统/函数表接口已拆;[08-interpreter/04 — 符号引用怎么变成直接引用？— LinkResolver + Rewriter](openjdk/vol-02/08-interpreter/04-linkresolver-rewriter.md):常量池/cpCache 与 Rewriter 重写的先例;[16-code-cache/03 — nmethod 生命周期 — 扫除器怎么判断一段代码不需要了](openjdk/vol-02/16-code-cache/03-nmethod-lifecycle.md):not_entrant/made not entrant 的失效语义;[24-frame/03 — deopt 怎么从编译帧重建解释器帧？— Deopt 重建 + GC 扫描](openjdk/vol-02/24-frame/03-deopt-gc-scan.md):deopt 重建帧的机制
 > → **后续**:[03-auxiliary — JVMTI 辅助设施](03-auxiliary.md)
 > 关联域: 28-jvmti(接口层)、07-classfile-classloader(类解析)、13-jit(编译失效)、24-frame(deopt)、27-jni(jmethodID)
 
@@ -72,7 +72,7 @@ JvmtiEnv::RedefineClasses(jint class_count, const jvmtiClassDefinition* class_de
 
 `compare_and_normalize_class_versions` 强制"新类与旧类的**方法集合完全一致**"——同 name+同 signature 一一对应,多余或缺失都拒绝:
 
-[实证](materials/commands/28-jvmti-redefine-demo.txt)(素材 E): v2 少了 `<clinit>`(static 块)与 native 声明 → **67 (UNSUPPORTED_REDEFINITION_METHOD_DELETED)**;v3 加了 `brandNew()` → **63 (UNSUPPORTED_REDEFINITION_METHOD_ADDED)**(jvmti.h:365/:369)。方法**体**可以随便改(→obsolete,§4/§5),但**方法集**(以及字段/修饰符/继承结构)在 JDK11 一律冻结——这是 HotSwap 语义的核心约束: 所有现有调用点(jmethodID、vtable 槽、编译代码里的调用)的位置都不能变。
+[实证](materials/commands/28-jvmti-redefine-demo.txt)(素材 E): v2 少了 `<clinit>`(static 块)与 native 声明 → **67 (UNSUPPORTED_REDEFINITION_METHOD_DELETED)**;v3 加了 `brandNew()` → **63 (UNSUPPORTED_REDEFINITION_METHOD_ADDED)**(jvmti.h:365/:369)。方法**体**可以随便改(→obsolete,§4/§5),但**方法集**(以及字段/修饰符/继承结构)在 JDK11 一律冻结——这是 HotSwap 语义的核心约束: 所有现有引用(jmethodID、vtable 槽、编译代码里的调用点)都能一一对应到新方法。
 
 *关键设计: 为什么只能改方法体?因为"位置不变"是热替换可行性的基础。jmethodID 在 27-jni/03 拆过——它指向 Method;vtable 槽位、编译代码里的直接调用都假设方法集合稳定。加/删方法会让所有现存引用错位,所以宁可拒绝。*
 
@@ -119,7 +119,7 @@ Double-indirect(双重): JVM_CONSTANT_{Fieldref,Methodref,InterfaceMethodref} �
   }
 ```
 
-`rewrite_cp_refs`(:1708-1799)重写范围: nest 属性、**方法字节码**(`rewrite_cp_refs_in_methods` :1816→`rewrite_cp_refs_in_method` :1853)、类/字段/方法的注解(含类型注解)、stack map、source_file_name/generic_signature 索引。方法字节码的重写=大纲里"relocator"的职责,但主角不是它: **CP 索引重写是 `rewrite_cp_refs_in_method` 逐字节码扫描完成的**(凡带 CP 索引的指令(ldc/ldc_w/field/invoke 系)把索引换成合并池里的新索引,代码注释 "This code was adapted from Rewriter::rewrite_method()");**只有索引超过 255 需要把 2 字节的 `ldc` 换成 3 字节的 `ldc_w` 时,才调用 `Relocator` 插入字节空间**(runtime/relocator.hpp:45 `insert_space_at` :48,注释 "ldc is 2 bytes and ldc_w is 3 bytes",:1914-1919)——relocator.cpp(780 行)在 share/runtime/ 不在 prims,且只是字节码空间调整工具。
+`rewrite_cp_refs`(:1708-1799)重写范围: nest 属性、**方法字节码**(`rewrite_cp_refs_in_methods` :1816→`rewrite_cp_refs_in_method` :1853)、类/字段/方法的注解(含类型注解)、stack map、source_file_name/generic_signature 索引。方法字节码的重写=大纲里"relocator"的职责,但主角不是它: **CP 索引重写是 `rewrite_cp_refs_in_method` 逐字节码扫描完成的**(凡带 CP 索引的指令(ldc/ldc_w/field/invoke 系)把索引换成合并池里的新索引,代码注释 "This code was adapted from Rewriter::rewrite_method()");**只有索引超过 255 需要把 2 字节的 `ldc` 换成 3 字节的 `ldc_w` 时,才调用 `Relocator` 插入字节空间**(runtime/relocator.hpp:45 `insert_space_at` :48,注释 "ldc is 2 bytes and ldc_w is 3 bytes",构造 :1916/调用 :1922)——relocator.cpp(780 行)在 share/runtime/ 不在 prims,且只是字节码空间调整工具。
 
 [实证](materials/commands/28-jvmti-redefine-demo.txt)(素材 B): 用 v1 的**原字节**重定义自己 → `merge_cp_len=143, index_map_len=0`——新旧池完全等价,零映射,跳过重写。
 
@@ -156,7 +156,7 @@ bool MethodComparator::methods_EMCP(Method* old_method, Method* new_method) {
 }
 ```
 
-EMCP(Equivalent Method, Constant Pool)的定义——类头注释: "two versions of the same method are EMCP, if they don't differ on the source code level. Practically, we check whether the only difference between method versions is some constantpool indices embedded into the bytecodes, and whether these indices eventually point to the same constants"——**字节码必须逐条相同,CP 索引可以不同但指向的常量必须相同**。所以:
+EMCP(Equivalent Method, Constant Pool)的定义——`methods_EMCP` 声明上方的注释(methodComparator.hpp:44-48): "two versions of the same method are EMCP, if they don't differ on the source code level. Practically, we check whether the only difference between method versions is some constantpool indices embedded into the bytecodes, and whether these indices eventually point to the same constants for both method versions"——**字节码必须逐条相同,CP 索引可以不同但指向的常量必须相同**。所以:
 
 - 前置检查: code_size 相同 + max_stack/max_locals/参数个数相同(`check_stack_and_locals_size` :316-324);
 - **逐字节码比较**: opcode 不同即失败;
@@ -227,7 +227,7 @@ void VM_RedefineClasses::flush_dependent_code(InstanceKlass* ik, TRAPS) {
 
 ### 5.3 旧版本追踪: previous versions 链
 
-obsolete 方法可能还在栈上执行——不能立即释放。`add_previous_version`(instanceKlass.cpp:3901-3957)把 scratch_class(装着旧 methods/旧池)挂到 InstanceKlass 的 `_previous_versions` 链上,关键判定是**常量池是否 on_stack**:
+obsolete 方法可能还在栈上执行——不能立即释放。`add_previous_version`(instanceKlass.cpp:3901-3961)把 scratch_class(装着旧 methods/旧池)挂到 InstanceKlass 的 `_previous_versions` 链上,关键判定是**常量池是否 on_stack**:
 
 ```cpp
 // instanceKlass.cpp:3901-3954(截取核心,逐字)
@@ -255,16 +255,16 @@ void InstanceKlass::add_previous_version(InstanceKlass* scratch_class,
 
 ### 5.4 全堆调整与 jmethodID
 
-doit 的最后三件事(:212-227): **AdjustAndCleanMetadata**(遍历 ClassLoaderDataGraph,调整其他类里指向旧方法的 cpCache/vtable 引用)、**`ResolvedMethodTable::adjust_method_entries`**(resolvedMethodTable.cpp:204-235,safepoint 里把方法句柄的 vmtarget 从旧方法换成新方法,deleted 的换 NSME——JSR-292 支持)、`JvmtiExport::set_has_redefined_a_class()`(通知全 VM"类被改过",后续反优化等策略以此为据)。
+doit 的最后三件事(:212-227): **AdjustAndCleanMetadata**(遍历 ClassLoaderDataGraph,调整其他类里指向旧方法的 cpCache/vtable 引用)、**`ResolvedMethodTable::adjust_method_entries`**(resolvedMethodTable.cpp:204-241,safepoint 里把方法句柄的 vmtarget 从旧方法换成新方法,deleted 的换 NSME——JSR-292 支持)、`JvmtiExport::set_has_redefined_a_class()`(通知全 VM"类被改过",后续反优化等策略以此为据)。
 
 jmethodID 的语义(27-jni/03 的 8 维度校验还记着): **matching 方法的已分发 jmethodID 被重定向到新方法**(`update_jmethod_ids` :3511-3533 的 `Method::change_method_associated_with_jmethod_id`)——EMCP 版本由此共享同一 jmethodID、断点对所有版本通用(注释 :3613-3619 "An EMCP method has the same jmethodID as the current method");**obsolete 方法被分配新的 method_idnum**(:3627-3631,与当前方法不同 id,未来 jmethodID 缓存新条目);**deleted 方法的 jmethodID 指向 `Universe::throw_no_such_method_error()`**——已持有旧 id 的代码后续解析得到 NSME。
 
 ## 6. 实证: 一次完整热替换
 
-[实证](materials/commands/28-jvmti-redefine-demo.txt): 自写 agent + Java 侧 native 方法调 `RedefineClasses`(素材 A),三个观察窗: ①`-Xlog:redefine+class+obsolete+mark=trace`——改 `sayHello`/`extra`/`main` 方法体后 `mark ... as obsolete` ×3 + `EMCP_cnt=4, obsolete_cnt=3`(native 声明与 static 块等价);②`-Xlog:redefine+class+load=info`——`redefined name=HotSwapDemo, count=1`;③`-Xlog:redefine+class+timer=info`——`vm_op: all=1 prologue=0 doit=1`,`redefine_single_class: phase1=1 phase2=0`(本机 safepoint 内安装 1ms)。重定义后 `sayHello()="hello-v2-CHANGED"`、`extra()=42` 立即生效;ClassFileLoadHook 回调在 redefine 的解析路径也触发(`redefining=YES`,§2.1 的 `class_being_redefined` 机制)。
+[实证](materials/commands/28-jvmti-redefine-demo.txt): 自写 agent + Java 侧 native 方法调 `RedefineClasses`(素材 A),三个观察窗: ①`-Xlog:redefine+class+obsolete+mark=trace`——改 `sayHello`/`extra`/`main` 方法体后 `mark ... as obsolete` ×3 + `EMCP_cnt=4, obsolete_cnt=3`(redefine/isModifiable/<clinit>/<init> 4 个方法字节码未变);②`-Xlog:redefine+class+load=info`——`redefined name=HotSwapDemo, count=1`;③`-Xlog:redefine+class+timer=info`——`vm_op: all=1 prologue=0 doit=1`,`redefine_single_class: phase1=1 phase2=0`(本机 safepoint 内安装 1ms)。重定义后 `sayHello()="hello-v2-CHANGED"`、`extra()=42` 立即生效;ClassFileLoadHook 回调在 redefine 的解析路径也触发(`redefining=YES`,§2.1 的 `class_being_redefined` 机制)。
 
 ## 核心悬念
 
-热替换链路全通: **三阶段 VM 操作**(JavaThread 解析/VMThread 安装)、**schema 冻结**(方法集必须一致,否则 63/67 拒绝)、**常量池合并**(三类条目+索引映射+字节码重写,relocator.cpp 只是空间调整配角)、**EMCP 判定**(逐字节码+索引所指常量等价)、**安装**(互换 methods/池+标记 obsolete+重建 vtable)、**编译失效**(依赖精确失效 made not entrant)、**旧版本追踪**(on_stack 决定 previous version 生死)。——但有两个辅助机制藏在角落: 重定义**没改**的类,agent 怎么拿到它的字节码(RetransformClasses 的 `JvmtiClassFileReconstituter`)?JVMTI 还能给对象打 tag、遍历堆——下一篇: 辅助设施。
+热替换链路全通: **三阶段 VM 操作**(JavaThread 解析/VMThread 安装)、**schema 冻结**(方法集必须一致,否则 63/67 拒绝)、**常量池合并**(三类条目+索引映射+字节码重写,relocator.cpp 只是空间调整配角)、**EMCP 判定**(逐字节码+索引所指常量等价)、**安装**(互换 methods/池+标记 obsolete+重建 vtable)、**编译失效**(依赖精确失效 made not entrant)、**旧版本追踪**(on_stack 决定 previous version 生死)。——但有两个辅助机制藏在角落: agent 想对已加载类**重放**转换(RetransformClasses)却没缓存字节时,JVM 怎么把类文件**重建**出来(`JvmtiClassFileReconstituter`)?JVMTI 还能给对象打 tag、遍历堆——下一篇: 辅助设施。
 
 > → [03-auxiliary — JVMTI 辅助设施](03-auxiliary.md)

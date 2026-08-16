@@ -53,7 +53,7 @@
 
 ### 3. "relocator — 字节码重写"
 > ⚠️ 写作期修正(2026-08-16, vol-02/28-jvmti/02 已按真实源码成文):
-> - **位置错+职责错(重要)**: relocator.cpp/hpp 在 **share/runtime/**(780 行,大纲写 prims);且**只是字节码空间调整工具**——真实 CP 索引重写主角=VM_RedefineClasses::rewrite_cp_refs_in_method(jvmtiRedefineClasses.cpp:1853,逐字节码扫描换合并池新索引,"adapted from Rewriter::rewrite_method()");Relocator 只在 **ldc→ldc_w 换格式**(索引>255 需 3 字节指令)时 insert_space_at(runtime/relocator.hpp:45/:48,注释 "ldc is 2 bytes and ldc_w is 3 bytes",调用点 :1914-1919)
+> - **位置错+职责错(重要)**: relocator.cpp/hpp 在 **share/runtime/**(780 行,大纲写 prims);且**只是字节码空间调整工具**——真实 CP 索引重写主角=VM_RedefineClasses::rewrite_cp_refs_in_method(jvmtiRedefineClasses.cpp:1853,逐字节码扫描换合并池新索引,"adapted from Rewriter::rewrite_method()");Relocator 只在 **ldc→ldc_w 换格式**(索引>255 需 3 字节指令)时 insert_space_at(runtime/relocator.hpp:45/:48,注释 "ldc is 2 bytes and ldc_w is 3 bytes",构造 :1916/调用 :1922)
 > - **CP 合并两段式**: Pass 0 旧池整体复制(索引不动,Class→UnresolvedClass 回退,注释 "any code using old_cp does not have to change")+Pass 1 走 scratch 池 append_entry(:296)+_index_map_p 映射(:1317);映射非空→rewrite_cp_refs(:1708 重写范围: nest/方法字节码/各类注解/stack map/source_file/generic_signature)
 > - **合并动机**: 不能直接换池——旧方法可能还在栈上,引用旧池索引(hpp:102-109 注释)
 
