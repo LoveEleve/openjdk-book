@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-16 | 卷 2 写作中: **137/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32) | 第 1-6 批**全部完结**;**本会话 54 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结,第 6 批收官)**;下一篇 22-deoptimization/01(第 7 批开篇)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-16 | 卷 2 写作中: **138/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 1) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 55 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(1,22 域 1/2)**;下一篇 22-deoptimization/02(unpack 帧重建,22 域收官)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -47,7 +47,7 @@
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
 第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 ✅(3/3,28 域完结)** → **29 ✅(2/2,29 域完结)** → **33 ✅(3/3,33 域完结)** → **43 ✅(3/3,43 域完结,第 6 批收官)** → 第 7 批: 22 → 26 → 35 → 40 → 47
-第 7 批(上层): 22 → 26 → 35 → 40 → 47
+第 7 批(上层): 22 ✅(1/2) → 26 → 35 → 40 → 47
 ```
 
 **已完成 126 篇**(全部在 `docs/openjdk/vol-02/`):
@@ -97,6 +97,7 @@
 | **29-mh** | 2 | `29-mh/01-invoke-chain.md`(105)+`02-x86-adapter.md`(96) | ✅ **29 域完结(本会话)** |
 | **33-jmx** | 3 | `33-jmx/01-memory-service.md`(185)+`02-jmm-interface.md`(168)+`03-gc-notifier-flags.md`(161) | ✅ **33 域完结(本会话)** |
 | **43-nio-net** | 3 | `43-nio-net/01-tcp-epoll.md`(108)+`02-udp-dns.md`(122)+`03-filesystem.md`(167) | ✅ **43 域完结,第 6 批收官(本会话)** |
+| **22-deoptimization** | 1 | `22-deoptimization/01-deopt-decision.md`(149) | ✅ 22 域 1/2(本会话) |
 
 ### 本会话 50 篇的 commit 清单(按 git log 为准,2026-08-14/16)
 
@@ -115,6 +116,8 @@
 **43-nio-net/02(UDP+DNS+NetworkInterface,43 域 2/3)**: 正文 90c7a2a(122 行)→ 大纲回填 ⚠️ 8 块 dec2722→ README 95c07f2(136/152,43 域 2/3)→ 素材 33-nio-udp-strace.txt
 
 **43-nio-net/03(NIO FileSystem,43 域收官,第 6 批收官)**: 正文 d03cc8d(167 行)→ 大纲回填 ⚠️ 9 块 bb15605→ README 5e3358d(137/152,43 域完结,第 6 批收官)→ 素材 33-nio-fs-strace.txt
+
+**22-deoptimization/01(Deopt 决策表,22 域 1/2,第 7 批开篇)**: 正文 b561914(149 行)→ 大纲回填 ⚠️ 8 块 a4e0eda→ README fa1353a(138/152)→ 素材 22-deopt-type-demo.txt
 
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(372 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true)
 
@@ -252,7 +255,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 53 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 54 个**(全部 gitignore 不入库,在 materials/commands/):
 - `29-mh-adapter-demo.txt`(x86 Adapter 实证——**JDK11 无 ricochet frame**: (A) grep 铁证——'ricochet' 在 hotspot methodHandles.cpp/hpp/methodHandles_x86.cpp 与 Java 侧 java.lang.invoke 全部零命中(JDK8 的手写 adapter 汇编整体移除);(B) MethodHandlesAdapterBlob=BufferBlob(codeBlob.hpp:452-454),adapter_code_size LP64=32000(methodHandles_x86.hpp:30),只含 6 个签名多态入口(29-01);(C) jump_from_method_handle(methodHandles_x86.cpp:120-155)逐行: 空 Method*→throw_AbstractMethodError :153-154/interp_only_mode 检查 :130-147(28-01 §4 衔接)/jmp from_compiled|from_interpreted :149-151——**参数零搬运**(调用约定共享);(D) Java 侧 adapter: asType 三级路径(MethodHandle.java:836-852 fast path+asTypeCache→makePairwiseConvert MethodHandleImpl.java:250-255→makePairwiseConvertByEditor :266+ 逐参数 filter)/LambdaFormEditor 编辑 LF(LambdaFormEditor.java:45: permute :848/spread :510/collect :555/filter :627)/guardWithTest :768;(E) 历史对照: JDK8 ricochet frame 汇编 vs JDK11 LF 字节码(演进动机标注为推断))
 - `29-mh-invoke-demo.txt`(MH invoke 链路实证: (A) 性能对照(核心)——2000 万次 -Xbatch: 直接 9ms/invokeExact(参数 MH)52ms/**invokeExact(static final 常量 MH)10ms(1.11 倍,与直接调用几乎持平)**/反射 218ms;reflection/invokeExact(param)=4.19——**'50x'是 JDK8 历史说法,JDK11 实测 ~4-5 倍**;(B) PrintInlining invokeExactCall 树: Invokers$Holder::invokeExact_MT(24 bytes) force inline by annotation+checkExactType/checkCustomized(force inline)+**MethodHandle::invokeBasic(LI)I (0 bytes) receiver not constant**(callGenerator.cpp:861-863 失败打印)+DirectMethodHandle::internalMemberName force inline;(C) 反射树: acquireMethodAccessor 不内联+MethodAccessorImpl no static binding+Integer::valueOf/intValue 装箱;(D) 源码定位: 6 intrinsic vmSymbols.hpp:1435-1441/generate_method_handle_interpreter_entry methodHandles_x86.cpp:203-290/jump_to_lambda_form :157-198 链 MH→form→vmentry→method→ResolvedMethodName→Method*/generate_method_handle_dispatch :292-489(linkToVirtual vtable 'same as TemplateTable::invokevirtual' :408-409)/callGenerator.cpp for_method_handle_inline :824-957/LambdaForm prepare :827-843+compileToBytecode :857-878/COMPILE_THRESHOLD 默认 0 MethodHandleStatics.java:71-72)
 - `28-jvmti-tagmap-demo.txt`(TagMap 全链路: (A) SetTag 3 对象(1001/2002/3003)→重打更新(1001→1002)→GetObjectsWithTags 精确返回 2 个→IterateThroughHeap(UNTAGGED filter)回调 3 个 tagged→丢弃强引用+ForceGarbageCollection→**ObjectFree×3 tag 精确匹配**→GetObjectsWithTags 返回 0;(B) -Xlog:jvmti+objecttagging=trace 看到 do_weak_oops 日志 **(3->0, 3 freed, 0 total moves)**(:3427-3428);(C) **filter 反直觉语义**: JVMTI_HEAP_FILTER_TAGGED 传进去回调 43650 个(untagged!),UNTAGGED 才 3 个——filter 位=排除类别(is_filtered_by_heap_filter :1017-1034 "filter out tagged objects");(D) 源码定位: entry phantom oop :92/hash (addr>>3)%size :194/load_factor 4.0 :166/tag_map_for 懒创建 :529-541/set_tag 三态 :738-767/weak 清理链 weakProcessor.cpp:36-41→do_weak_oops :3335/ObjectMarker mark 位 :1654-1734/VM_HeapWalkOperation :2663-3300/ForceGarbageCollection jvmtiEnv.cpp:1954)
@@ -308,7 +311,7 @@
 
 ### 6.0 本会话精华速查(新 AI 写 33-jmx/01 前必读)
 
-**本会话覆盖(54 篇,6.52-6.92)**: 20-vm-operations/02 → 27-jni(3) → 30-jvm-entry(3) → 32-jfr(6) → 34-nmt(2) → 36-attach(2) → 37-heap-dumper(2) → 39-runtime-monitoring(2) → 46-sa(1) → 14-c1(4,完结) → 15-c2(8,完结) → 21-shared-runtime(3,完结) → 25-gc-framework(6,完结) → **28-jvmti(3,完结)** → **29-mh(2,完结)** → **33-jmx(3,完结)** → **43-nio-net(3,完结,第 6 批收官)**。下一篇 22-deoptimization/01(第 7 批开篇;剩余 22-02→26/35/40/47)。
+**本会话覆盖(55 篇,6.52-6.93)**: 20-vm-operations/02 → 27-jni(3) → 30-jvm-entry(3) → 32-jfr(6) → 34-nmt(2) → 36-attach(2) → 37-heap-dumper(2) → 39-runtime-monitoring(2) → 46-sa(1) → 14-c1(4,完结) → 15-c2(8,完结) → 21-shared-runtime(3,完结) → 25-gc-framework(6,完结) → **28-jvmti(3,完结)** → **29-mh(2,完结)** → **33-jmx(3,完结)** → **43-nio-net(3,完结)** → **22-deopt(1/2)**。下一篇 22-deoptimization/02(unpack 帧重建;剩余 22-02→26/35/40/47)。
 
 **大纲漂移的高发类型(28/29 域新实例)**:
 1. **文件/类名编造**: jvmtiEnv.hpp 不存在(28-01,真实 jvmtiEnvBase.hpp+生成类)、relocator.cpp 位置错(28-02,真实 share/runtime 非 prims,且只是 ldc→ldc_w 配角)、"weak hash table auto-removed"(28-03,真实普通哈希表+phantom oop+GC 显式清理)、LambdaForm 在 hpp(29-01,真实 Java 侧 LambdaForm.java)——**文件名/类名一律 find/grep**
@@ -1227,6 +1230,21 @@
 - **实证方法论**: strace -e trace=stat,statfs,newfstatat,openat,getdents,getdents64,inotify_init,inotify_add_watch,inotify_rm_watch,read,close(启动噪音过滤: 前 ~700 行是类加载的 newfstatat);Files.readAttributes=stat(S_IFREG|0644,size=5)/Files.list=getdents64(3 entries= . .. a.txt)/WatchService=inotify_init→add_watch(mask 含 IN_ATTRIB+MOVED_* 合成)→rm_watch;inotify_add_watch 在 strace 里被截断(<unfinished ...>+resume 两行)——正文展示加 "..." 对齐
 - 素材: 33-nio-fs-strace.txt
 
+
+### 6.93 22-deoptimization/01(编译代码什么时候回退？— Deopt 决策表,22 域 1/2,第 7 批开篇,大纲 10+ 处漂移含 3 处机制编造 + 深审 3 轮,2026-08-16)
+
+- **"Reason→Action 映射表 (deoptimization.cpp:200-350) + action_for_reason" 编造(重要)**: 都不存在;action 是**编译器在生成 trap 代码时选的**——C2 的 `GraphKit::uncommon_trap(reason, action, ...)`(graphKit.hpp:733-740,make_trap_request 编码);运行时 uncommon_trap_inner(deoptimization.cpp:1526)按 action switch(:1797-1837)+MDO 计数 hysteresis——**"决策"=编译器预设 action + 运行时计数微调的两层**
+- **"trap_state 31-bit [action:3][reason:5][debug_id:23] 存 MethodData" 混淆(重要)**: 3+5+23 位是 **trap_request**(一次调用的编码,deoptimization.hpp:117-125 位域:_action_bits=3/_reason_bits=5/_debug_id_bits=23,_action_shift=0/_reason_shift=3/_debug_id_shift=8;补码 ~,trap_request_reason/action/debug_id 解包 :304-347;**大纲 "trap_bits >> 24=action" 全错**);**trap_state 是另一回事**=DataLayout::trap_bits **1+31 位**(methodData.hpp:139-142): 1 位 recompile+31 位 reason 格(0=无/reason/Reason_many 格底;trap_state_reason :2118/trap_state_add_reason :2149)——**per-bci 只有 1 位计数**(注释 :1879-1883 "{0,1,(per-method count)}")
+- **"PerBytecodeTrapLimit 默认 100" 错**: 默认 **4**(globals.hpp:1788);PerMethodTrapLimit=**100**(:1779)/PerMethodSpecTrapLimit=5000(:1783)/PerBytecodeRecompilationCutoff=**200**(:1775)/PerMethodRecompilationCutoff=**400**(:1771);per_method_trap_limit=speculate?Spec:Method(deoptimization.hpp:408-411)
+- **"100 次反复 deopt→永久禁用 JIT" 简化**: 真实=**三种防死循环措施**(:1745-1769 权威注释): ①同点同因二次重编译→调整 reinterpret+overflow_recompile_count(:1750-1756);②overflow_recompile_count>PerBytecodeRecompilationCutoff→make_not_compilable(:1960-1966;set_not_compilable :1980);③PerMethodRecompilationCutoff 大限(:1765-1769);per-bci 达 PerBytecodeTrapLimit→make_not_entrant(:1875-1883)
+- **"null_check→Action_maybe_recompile 等映射" 是编译器的选择**(parse2.cpp uncommon_trap(reason) :150/:190/:245 带 action),运行时只管执行+计数
+- **per-method 计数**: _trap_hist u1 数组 per reason(methodData.hpp:1986-2007,tenured 除外)+_nof_overflow_traps;MethodData::trap_count(:2384);bci_to_data→pdata->trap_state
+- **DeoptReason ✓**(deoptimization.hpp:42-106: per-bytecode 8 个注释 :45-46/null_check :52/bimorphic/profile_predicate/tenured=TRAP_HISTORY_LENGTH :96/RECORDED_LIMIT=profile_predicate :103);DeoptAction ✓(:108-115)
+- **落地**: nm->make_not_entrant(:1929)/reprofile→CompilationPolicy::reprofile(:1973)/set_not_compilable(:1980);Action_none 时 update_trap_state=false 什么都不记
+- **实证方法论**: -Xlog:jit+compilation=debug+jit+inlining=debug(类型切换三次: 75 % 4 内联 Square→[0.557s] 74 3 made not entrant+201 % 4 **双路内联**(Square+Circle)→[0.562s] 200 3 made not entrant+202 4);TraceDeoptimization 是 develop 不可用;deopt 的直接执行观察留给 22-02
+- **悬念指向** ✓(02-unpack-frames,标题="从编译帧回到解释器——unpack 帧重建")
+- 素材: 22-deopt-type-demo.txt
+
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
@@ -1296,7 +1314,8 @@
 - [x] 43-nio-net/01——✅ 完结(正文 634f710,108 行/大纲回填 ⚠️ 12 块 4047b2e/README 53780ec);**43 域 1/3**
 - [x] 43-nio-net/02——✅ 完结(正文 90c7a2a,122 行/大纲回填 ⚠️ 8 块 dec2722/README 95c07f2);**43 域 2/3**
 - [x] 43-nio-net/03——✅ 完结(正文 d03cc8d,167 行/大纲回填 ⚠️ 9 块 bb15605/README 5e3358d);**43 域完结,第 6 批收官**
-- [ ] **22-deoptimization/01**——**下一篇**;大纲 `planning/outlines/22-deoptimization/01-deopt-decision.md`(编译代码什么时候回退？— Deopt 决策表);第 7 批开篇;43-03 悬念已指向 22
+- [x] 22-deoptimization/01——✅ 完结(正文 b561914,149 行/大纲回填 ⚠️ 8 块 a4e0eda/README fa1353a);**22 域 1/2,第 7 批开篇**
+- [ ] **22-deoptimization/02**——**下一篇**;大纲 `planning/outlines/22-deoptimization/02-unpack-frames.md`(从编译帧回到解释器——unpack 帧重建);22 域收官;01 篇悬念已指向 02
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -1326,7 +1345,8 @@
 | 33-jmx 通知源码(33 域已完结) | `share/services/lowMemoryDetector.hpp/cpp`(ThresholdSupport :67/SensorInfo 状态机 :116-212/gauge vs counter :206-239/:261-277/trigger :293-343 OOM 降级 :307-313/clear :345-374)+`gcNotifier.hpp/cpp`(GCNotificationRequest :33-54/pushNotification 深拷贝账本 :45-54/sendNotificationInternal :189-224/createGcInfo :99-163)+`writeableFlags.cpp`(set_flag :243-267 错误码/入口 jmm_SetVMGlobal management.cpp:1569-1580+attachListener.cpp:288+diagnosticCommand.cpp:282)+`memAllocator.cpp`(慢路径检测 :232-236)+JDK 侧(Sensor.java:128-135/MemoryPoolImpl.java:297-303 PoolSensor/GarbageCollectorExtImpl.java:93-112 createGCNotification+118-128 自动开启/MemoryImpl.java:138-161);03 正文即索引 |
 | 43-nio-net 源码(43 域 1/3) | JDK 侧 java.base/unix/native/libnet/PlainSocketImpl.c(1038 行: socketConnect :227 带超时=poll(2)+EINPROGRESS :348/socketAccept :587 NET_Timeout :644-652/socketClose0 :769 deferred close marker_fd :73/:783-786/socketCreate SO_REUSEADDR :203-215)+SocketInputStream.c:91(NET_ReadWithTimeout :127)/SocketOutputStream.c:57+net_util_md.h:80-92(NET_* 工具)+libnio/ch/Net.c(814 行: connect0 :306-322 三态/handleSocketError :783-812)+linux/libnio/ch/EPoll.c(97 行: 布局三兄弟 :41-56/create :59/ctl :69/wait :83)+linux/classes/sun/nio/ch/(EPoll.java:58-67 常量+allocatePollArray :72-74/EPollSelectorImpl.java:50-93 构造+processUpdateQueue :143-170/EPollPort.java:178-180 EPOLLONESHOT);01 正文即索引 |
 | 43-nio-net/02 源码 | java.base/unix/native/libnet/PlainDatagramSocketImpl.c(2221 行: send0 :334(connected→rmtaddrP=NULL :380/大缓冲整包 :391-404/ECONNREFUSED→PortUnreachable :437)/receive0 :708(NET_RecvFrom :818/NET_SockaddrToInetAddress :864)/datagramSocketCreate :891/mcast_join_leave :1890(IP_ADD_MEMBERSHIP 注释 :1925-1927/IPv4-mapped :2110-2125)/join :2180+leave :2192/setTimeToLive :1786)+Inet4AddressImpl.c(517 行: lookupAllHostAddr :105(getaddrinfo :128/去重 :145-178)/getLocalHostName :60)+NetworkInterface.c(2172 行: getAll :422/enumInterfaces :816→enumIPv4Interfaces :2004(getifaddrs :2007)/createNetworkInterface :659/getMacAddress :1275(ioctl SIOCGIFHWADDR :1288/全 0 检测 :1298-1304)/getMTU :1307)+JDK 侧 InetAddress.java:1255 getByName/:930 lookupAllHostAddr/NetworkInterface.java:357;02 正文即索引 |
-| 43-nio-net/03 源码(43 域已完结) | java.base/unix/native/libnio/fs/UnixNativeDispatcher.c(1244 行,49 个 JNIEXPORT: stat0 :543(stat64+RESTARTABLE+prepAttributes)/stat1 :559/openat0 :452(my_openat64_func dlsym :262-267)/opendir0 :733/fdopendir :748/readdir :774(readdir64 只返 d_name))+linux/native/libnio/fs/LinuxWatchService.c(153 行: eventSize :49/eventOffsets :55 布局五元组/inotifyInit :72/inotifyAddWatch :83/poll :133)+JDK 侧 LinuxWatchService.java(implRegister mask 映射 :208-262/Poller run :310→poll :316→read :320→unsafe 解析/maskToEventKind :384-390)+UnixNativeDispatcher.java(copyToNativeBuffer :39/stat :298/stat1 :315)+NativeBuffers.java:35;03 正文即索引,下一篇 22-deoptimization/01(第 7 批开篇)
+| 43-nio-net/03 源码(43 域已完结) | java.base/unix/native/libnio/fs/UnixNativeDispatcher.c(1244 行,49 个 JNIEXPORT: stat0 :543(stat64+RESTARTABLE+prepAttributes)/stat1 :559/openat0 :452(my_openat64_func dlsym :262-267)/opendir0 :733/fdopendir :748/readdir :774(readdir64 只返 d_name))+linux/native/libnio/fs/LinuxWatchService.c(153 行: eventSize :49/eventOffsets :55 布局五元组/inotifyInit :72/inotifyAddWatch :83/poll :133)+JDK 侧 LinuxWatchService.java(implRegister mask 映射 :208-262/Poller run :310→poll :316→read :320→unsafe 解析/maskToEventKind :384-390)+UnixNativeDispatcher.java(copyToNativeBuffer :39/stat :298/stat1 :315)+NativeBuffers.java:35;03 正文即索引 |
+| 22-deopt 源码(22 域 1/2) | `share/runtime/deoptimization.hpp`(DeoptReason :42-106(per-bytecode 8 个注释 :45-46/tenured :96/RECORDED_LIMIT :103)/DeoptAction :108-115/trap_request 位域 :117-125(_action_bits=3/_reason_bits=5/_debug_id_bits=23)/解包 :304-347/per_method_trap_limit :408-411)+`deoptimization.cpp`(uncommon_trap_inner :1526/防循环注释 :1745-1769/action switch :1797-1837/MDO 计数 :1858-1918/PerBytecodeTrapLimit 检查 :1875/make_not_entrant :1929/overflow :1960-1966/reprofile :1973/set_not_compilable :1980/uncommon_trap :2095/trap_state_reason :2118/add_reason :2149)+`opto/graphKit.hpp`(uncommon_trap(reason,action) :733-740)+`oops/methodData.hpp`(trap_bits 1+31 :139-142/_trap_hist :1986-2007/trap_count :2384)+`globals.hpp`(PerMethodRecompilationCutoff :1771=400/PerBytecodeRecompilationCutoff :1775=200/PerMethodTrapLimit :1779=100/PerMethodSpecTrapLimit :1783=5000/PerBytecodeTrapLimit :1788=4);01 正文即索引,02 篇主题=unpack 帧重建(vframeArray/fetch_unroll_info)
 | JVMTI 源码(28 域已开工) | `share/prims/jvmtiEnvBase.hpp`(655 行: 状态成员 :94-105/JvmtiEnv_from_jvmti_env :157-159/JvmtiEnvIterator :318)+`jvmtiEnv.cpp`(3733 行: SetEventNotificationMode :521/AddCapabilities :603)+`jvmtiEventController.hpp/cpp`(三级 bitset: JvmtiEnvEventEnable hpp:151-171/重算 :571-657/INTERP_EVENT_BITS :96-97/VM_EnterInterpOnlyMode :194-245)+`jvmtiExport.cpp`(3001 行: post_method_entry :1508/wrapper 调用侧/load_agent_library :2638)+`jvmtiManageCapabilities.cpp`(四集合 :70-146/add :233/update :292)+`jvmtiImpl.hpp/cpp`(JvmtiDeferredEvent 只服务 4 类编译事件 :454-549)+`jvmtiHpp.xsl`/`jvmtiEnter.xsl`/`jvmti.xml`(14993 行,154 函数/34 事件/44 能力,构建期生成源);28-01 正文即索引 |
 | JDK 侧源码 | `/data/workspace/jdk11u/src/java.base/`、`/data/workspace/jdk11u/src/jdk.jfr/` |
 | 工具素材 | `docs/openjdk/planning/outlines/00-jvm-tools/materials/`(commands/ 150+ 文件) |
@@ -1348,21 +1368,19 @@
 ## 十、下一步(读完立即做)
 
 ```
-【22-deoptimization/01 写作指引——第 7 批开篇,Deopt 决策表】
-1. 读 planning/outlines/22-deoptimization/01-deopt-decision.md(注意 ⚠️ 块;43 域回填 9-12 块/篇,22-01 大概率同样漂移)。
-   22-01 主题=编译代码什么时候回退(Deopt 决策),预判要点(以实际 grep 为准):
-   - share/runtime/deoptimization.cpp(Deoptimization::deoptimize/deoptimize_frame)+deoptimization.hpp
-   - 触发点: VM_Deoptimize/DeoptimizeSelectedFrames(VM 操作)、nmethod deopt 原因(编译代码内 deopt 陷阱)、
-     JVMTI(28 域 interp_only_mode→mark_for_deoptimization 已铺底)、依赖失效(16-05 dependencies-deopt 已写!注意衔接)
-   - 22-02=unpack 帧重建(DeoptimizationBlob+unpack 汇编,21-01 已提到 4 个 unpack 变体 codeBlob.hpp:558-562)
-   - 前会话已写: 16-code-cache/05-dependencies-deopt.md、24-frame/03-deopt-gc-scan.md——**跨篇衔接重点,避免重复**
-2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;deopt 相关函数名/行号以 grep 为准
+【22-deoptimization/02 写作指引——22 域收官,unpack 帧重建】
+1. 读 planning/outlines/22-deoptimization/02-unpack-frames.md(注意 ⚠️ 块;01 篇回填 8 块,02 大概率同样漂移)。
+   22-02 主题=从编译帧回到解释器(unpack 帧重建),预判要点(以实际 grep 为准):
+   - 01 篇已铺底: uncommon_trap(:2095)→UnrollBlock 准备;本篇=unpack_frames/fetch_unroll_info(:1990+)/vframeArray
+   - 涉及: deoptimization.cpp(unpack_frames/vframeArray 构造/recreate_vframe)、vframeArray.hpp/cpp、
+     DeoptimizationBlob 4 个 unpack 变体(codeBlob.hpp:558-562,21-01 已提)、24-frame/03(deopt 的 GC 扫描)衔接
+   - 前会话已写: 24-frame/03-deopt-gc-scan.md、21-01(DeoptimizationBlob)——**跨篇衔接重点**
+2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;unpack/vframeArray 相关行号以 grep 为准
 3. 实证优先用 /data/tmp/opencode/jdk11:
-   - -Xlog:deopt=debug?标签可用性验证;PrintDeoptimization?;deopt 日志(21-03 素材 E 的 "N [Exception" 已见)
-   - jcmd VM.deopt?无;可用 -XX:UnlockDiagnosticVMOptions 相关 flag(DeoptimizeALot 等 develop 不可用)
-   - JVMTI redefine(28 域素材)触发 made not entrant→后续调用 deopt 的实证可复用
-4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP;ART 改回当前文件)→ 深审 2 轮 → 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.93
-5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68-6.92,含强化)**: ①新节内容先写成独立文本;②插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`,教训补充 2)——**禁止用 "## 七" 整行当 oldString**(6.82 曾吞标题;6.87 曾命中反引号内引用致双副本);③**立即 `grep -n "^### 6\.9"` 校验连续递增 + `grep -n "^## 七"` 标题恰好 1 个 + `grep -n "^## 八"` 仍在**;④再做其他编辑
+   - 复用 22-01 的类型切换 demo;deopt 执行本身难以直接观察(develop flag 不可用)
+   - 可观察: deopt 后解释器计数(28 域方法);jstack 看栈帧形态(编译 vs 解释)
+4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP;ART 改回当前文件)→ 深审 2 轮 → 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.94
+5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68-6.93,含强化)**: ①新节内容先写成独立文本;②插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`,教训补充 2)——**禁止用 "## 七" 整行当 oldString**(6.82 曾吞标题;6.87 曾命中反引号内引用致双副本);③**立即 `grep -n "^### 6\.9"` 校验连续递增 + `grep -n "^## 七"` 标题恰好 1 个 + `grep -n "^## 八"` 仍在**;④再做其他编辑
 6. 22 域后 → 26-g1 / 35-dcmd / 40-launcher / 47-instrumentation
 ```
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
