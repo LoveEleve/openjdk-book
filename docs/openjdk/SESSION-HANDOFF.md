@@ -1030,6 +1030,7 @@
 - **悬念指向错**: "域 26 G1 GC"过期(26 第 7 批)——正确 **28-jvmti**(01 标题="JVMTI Agent 怎么工作？— Agent 架构与事件系统";大纲文件 01-agent-architecture.md 非 01-jvmti-overview)
 - **实证方法论**: ①StringDedup 并发日志 "-Xlog:gc+stringdedup=trace"(DedupDemo 100 万重复 String: "Concurrent String Deduplication" 检查 311381/4488B->2816B);②**flag 名 UseStringDeduplication**(-XX:+UseStringDedup 报 Unrecognized);③GCId=GC(N) 前缀跨标签共享;④素材 25-gc-aux-demo.txt
 - **25 域完结**: 6 篇全成(01 barrier/02 heap/03 ref/04 workgang/05 cardqueue/06 aux),126/152,第 6 批剩 28/29/33/43
+- **第 3 轮 REVIEW 验证(2026-08-15)**: ①OopStorage::allocate 流程逐行核对(oopStorage.cpp:401-440: MutexLockerEx _allocation_mutex 锁内→reduce_deferred_updates→_allocation_list.head() 取块→无则锁外 Block::new_block(:414-418)→加入 _active_array;注释 :369-401 语义)——正文"锁内找块/没有新建"准确;②StringDedupTable::deduplicate(stringDedupTable.cpp:345-397): 检查/哈希→lookup_or_add→**existing_value != NULL → java_lang_String::set_value(java_string, existing_value)**(:390)改 value 字段——正文"合并动作"逐字准确;③无正文改动,验证通过
 
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
