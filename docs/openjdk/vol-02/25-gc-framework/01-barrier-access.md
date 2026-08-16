@@ -68,7 +68,7 @@
   };
 ```
 
-*关键设计: **运行时分派,不是编译期静态分派**。`_store_func` 是每个 (decorators, T, 操作) 组合的静态函数指针,初始指向 `store_init`;第一次调用时 `store_init` 调 `BarrierResolver::resolve_barrier()`——按当前 `BarrierSet::barrier_set()->kind()` 的 switch(access.inline.hpp:218-235)选到对应 GC 的 `AccessBarrier` 函数,`_store_func = function` 完成 patch(access.inline.hpp:284-288),之后每次访问就是一次间接调用。为什么必须运行时分派?因为 **GC 是启动时用 flag 选的**(-XX:+UseG1GC/UseSerialGC…),同一个 libjvm.so 编译一次要服务所有 GC——函数指针缓存是"一次解析、永久有效"的折衷。**这条路径服务 VM 内部 C++**(运行时/Unsafe/反射等);解释器与 JIT 不走它,各自直插 barrier(见 §2)。*
+*关键设计: **运行时分派,不是编译期静态分派**。`_store_func` 是每个 (decorators, T, 操作) 组合的静态函数指针,初始指向 `store_init`;第一次调用时 `store_init` 调 `BarrierResolver::resolve_barrier()`——按当前 `BarrierSet::barrier_set()->kind()` 的 switch(access.inline.hpp:218-235)选到对应 GC 的 `AccessBarrier` 函数,`_store_func = function` 完成 patch(access.inline.hpp:284-288),之后每次访问就是一次间接调用。为什么必须运行时分派?因为 **GC 是启动时用 flag 选的**(-XX:+UseG1GC/UseSerialGC…),同一个 libjvm.so 编译一次要服务所有 GC——函数指针缓存是"一次解析、永久有效"的折衷。**运行时分派有三副面孔**: VM 内部 C++(运行时/Unsafe/反射等)走这里的函数指针缓存;解释器模板走 BarrierSetAssembler 的**虚函数调用**(§2.2);C1/C2 在编译期把 barrier 编成机器码,热路径零间接调用。*
 
 `AS_RAW` 装饰器是旁路(accessDecorators.hpp:139-145): "This will bypass runtime function pointer dispatching in the pipeline and hardwire to raw accesses"——裸访问连间接调用都省了,VM 内部确定不需要 barrier 的场景用。
 
@@ -100,7 +100,7 @@ private:
 
 ### 2.2 三视角注入: 汇编层 / C1 / C2
 
-**汇编层(BarrierSetAssembler)** 服务解释器与桩。x86 的默认实现 `load_at`/`store_at`(barrierSetAssembler_x86.cpp:34-130)就是裸存取+压缩 oop 编解码;GC 子类覆盖加 barrier。解释器模板的引用写在 `do_oop_store`(templateTable_x86.cpp:146-158)→ `store_heap_oop`(macroAssembler_x86.cpp:5501-5504,`access_store_at(IN_HEAP|...)`)→ 虚分派到当前 BarrierSet 的 assembler。G1 的 SATB 写前 barrier 是整段手写汇编(g1BarrierSetAssembler_x86.cpp:142+):
+**汇编层(BarrierSetAssembler)** 服务解释器与桩。x86 的默认实现 `load_at`/`store_at`(barrierSetAssembler_x86.cpp:34-130)就是裸存取+压缩 oop 编解码;GC 子类覆盖加 barrier。解释器模板的引用写在 `do_oop_store`(templateTable_x86.cpp:146-158)→ `store_heap_oop`(macroAssembler_x86.cpp:5501-5504)→ `access_store_at`(macroAssembler_x86.cpp:5478,与 `access_load_at` :5466-5475 同构): `AS_RAW` 时显式调基类 `BarrierSetAssembler::store_at`(裸存取),否则 **虚调用** `bs->store_at(...)`——解释器每处引用访问一次**虚分派**,运行时决定 barrier 代码;这是"运行时分派"的第二副面孔。G1 的 SATB 写前 barrier 是整段手写汇编(g1BarrierSetAssembler_x86.cpp:142+):
 
 ```cpp
 // g1BarrierSetAssembler_x86.cpp:168-208(截取核心,逐字)
