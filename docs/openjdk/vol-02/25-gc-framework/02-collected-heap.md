@@ -39,7 +39,7 @@ inline HeapWord* ThreadLocalAllocBuffer::allocate(size_t size) {
 }
 ```
 
-*关键设计: 无锁的代价是"浪费可控"。比较 `end - top >= size` 失败就返回 NULL——TLAB 剩余空间不足以放一个对象时,那点空间要么丢弃、要么留到 GC 统计,但**绝不加锁等待**。每个线程独占自己的 TLAB,互不竞争;C2 把这条路径内联成 3 条指令(15-c2/07 篇的 `expand_allocate_common` 快速路径),解释器/C++ 侧经 `MemAllocator` 调用(§3)。*
+*关键设计: 无锁的代价是"浪费可控"。比较 `end - top >= size` 失败就返回 NULL——TLAB 剩余空间不足以放一个对象时,那点空间要么丢弃、要么留到 GC 统计,但**绝不加锁等待**。每个线程独占自己的 TLAB,互不竞争;C2 把这条路径内联成快速分支(15-c2/07 篇的 `expand_allocate_common`: `fast_result_path` 内联 TLAB bump,TLAB 满才跳慢路径调用),解释器/C++ 侧经 `MemAllocator` 调用(§3)。*
 
 ### 1.2 大小: 自适应的 desired_size
 
@@ -107,7 +107,7 @@ TLAB 用尽后,**不是立刻丢弃**。`allocate_inside_tlab_slow`(memAllocator
 
 ### 2.2 GC Cause — 每次 GC 都带着"为什么"
 
-GCCause 枚举(gcCause.hpp:43-92)约 30 个原因,分三组: 公共(`_java_lang_system_gc`/`_jvmti_force_gc`/`_gc_locker`/`_wb_young_gc`…)、通用分配失败(`_allocation_failure`/`_metadata_GC_threshold`)、GC 专属(**G1 的两个**: `_g1_inc_collection_pause` 与 `_g1_humongous_allocation`)。它不只在日志里好看——`gcCause.hpp:97-124` 的 `is_*` 谓词(比如 `is_allocation_failure_gc`)驱动 GC 策略分支。
+GCCause 枚举(gcCause.hpp:43-92)约 30 个原因,按源码注释分三组: **public**(用户/工具显式触发:`_java_lang_system_gc`/`_jvmti_force_gc`/`_gc_locker`/`_heap_dump`/`_wb_young_gc`/`_dcmd_gc_run`…)、**implementation independent**(`_no_gc`/`_allocation_failure`)、**implementation specific**(`_metadata_GC_threshold`/CMS 家族/**G1 的两个**: `_g1_inc_collection_pause` 与 `_g1_humongous_allocation`/Z 家族)。它不只在日志里好看——`:97-124` 的 `is_*` 谓词(比如 `is_allocation_failure_gc`/`is_user_requested_gc`)驱动 GC 策略分支。
 
 **[实证](materials/commands/25-gc-heap-alloc-demo.txt)**: `-Xlog:gc` 的括号就是 cause——分配失败触发的 `Pause Young (Normal) (G1 Evacuation Pause)`;4MB 数组(region 2MB)触发 `(G1 Humongous Allocation)`;`jcmd GC.run` 触发 `(Diagnostic Command)`(= `_dcmd_gc_run`);OOM 前的 `Pause Full (G1 Humongous Allocation)`。大纲的 `_g1_evacuation_pause` 名字不存在,真实是 `_g1_inc_collection_pause`。
 
@@ -142,7 +142,7 @@ HeapWord* G1CollectedHeap::attempt_allocation_slow(size_t word_size) {
 
 `mem_allocate`(g1CollectedHeap.cpp:398-408)先判 `is_humongous(word_size)`——**超过 region 一半的对象**(`_humongous_object_threshold_in_words = humongous_threshold_for(region_size) = region_size/2`,g1CollectedHeap.hpp:1212-1224;TLAB 也封顶在阈值之下,"we do not allow humongous TLABs" :393)走 `attempt_allocation_humongous`(整 region 分配,不经 TLAB);普通对象 `attempt_allocation`(:730-742)先试 `_allocator->attempt_allocation`(G1Allocator 从 Eden region bump),失败进 `attempt_allocation_slow`(:410-500): **Heap_lock 下再试** → GCLocker 活跃时尝试 `attempt_allocation_force`(扩 young)→ 都不行 `do_collection_pause(..., GCCause::_g1_inc_collection_pause)`(:459-460)触发 young GC,分配随 GC 完成;`succeeded` 但没分到(比如 humongous 失败)→ 返回 NULL 给上层报 OOM(:468-473)。
 
-**PLAB** 是 GC 期间的孪生兄弟(plab.hpp:38+): "A per-thread allocation buffer used during GC"——结构完全同构(`_bottom/_top/_end/_hard_end` bump),GC worker 线程用它做**晋升分配**(对象从年轻代拷贝到老年代时落到 worker 的 PLAB 里),避免 GC 内部也要抢全局。它只在 GC 期间存在,refill 走 `PLABStats` 的按需计算,与 TLAB 的自适应同源。
+**PLAB** 是 GC 期间的孪生兄弟(plab.hpp:36+): "A per-thread allocation buffer used during GC"——结构完全同构(`_bottom/_top/_end/_hard_end` bump),GC worker 线程用它做**晋升分配**(对象从年轻代拷到 survivor/old 时落到 worker 自己的 buffer),避免 GC 内部也要抢全局。它只在 GC 期间存在,refill 走 `PLABStats` 的按需计算,与 TLAB 的自适应同源。G1 的实现是 `G1PLABAllocator`(g1ParScanThreadState.hpp:40/:52)封装,GC 期间按目标区分类(`par_allocate_during_gc` 按 `InCSetState::Young/Old` 分到 survivor/old 的 alloc region,g1Allocator.cpp:170-185)。
 
 ## 核心悬念
 
