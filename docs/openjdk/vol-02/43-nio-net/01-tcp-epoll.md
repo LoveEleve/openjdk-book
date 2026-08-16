@@ -1,7 +1,7 @@
 # 01. TCP Socket — PlainSocketImpl + ServerSocket + epoll
 
-> **前置依赖**:[33-jmx/02 — JDK 怎么查询 JVM 内存状态？— JMM 接口 + JDK Management](openjdk/vol-02/33-jmx/02-jmm-interface.md):JDK 侧 native 库的 JNI_OnLoad/函数表模式,本篇的 libnet/libnio 是同样的 JNI 通道;[42-core-native/01 — JNI 与系统调用](openjdk/vol-02/42-core-native/01-jni-system.md):JNI native 方法的基本形态;[03-arguments-flags](openjdk/vol-02/03-arguments-flags/01-flag-definition-system.md) 与本篇无直接关系,但 JDK 网络栈的 flag 习惯可参照
-> → **后续**:[43-nio-net/02 — UDP + DNS + NetworkInterface](02-udp-dns.md)
+> **前置依赖**:[33-jmx/02 — JDK 怎么查询 JVM 内存状态？— JMM 接口 + JDK Management](openjdk/vol-02/33-jmx/02-jmm-interface.md):JDK 侧 native 库的 JNI_OnLoad/函数表模式,本篇的 libnet/libnio 是同样的 JNI 通道;[42-core-native/01 — JNI 工具层与系统属性 — libjava 的骨架](openjdk/vol-02/42-core-native/01-jni-system.md):JNI native 方法的基本形态与错误翻译模式
+> → **后续**:[43-nio-net/02 — UDP + DNS + NetworkInterface — Datagram + InetAddress](02-udp-dns.md)
 > 关联域: 42-core-native(JNI 通道)、33-jmx(管理通道对照)
 
 ## 一次 connect,两条路
@@ -21,7 +21,7 @@ epoll_create(256)                = 6
 epoll_ctl(6, EPOLL_CTL_ADD, 9, {events=EPOLLOUT, ...}) = 0
 epoll_wait(6, [{events=EPOLLOUT, data={u32=9, ...}}], 1024, 2000) = 1
 epoll_ctl(6, EPOLL_CTL_ADD, 10, {events=EPOLLIN, ...}) = 0
-epoll_wait(6, [{events=EPOLLOUT, data={u32=9}}, {events=EPOLLIN, data={u32=10}}], 1024, 2000) = 2
+epoll_wait(6, [{events=EPOLLOUT, data={u32=9, ...}}, {events=EPOLLIN, data={u32=10, ...}}], 1024, 2000) = 2
 ```
 
 两条值得先记住的事实: ①阻塞 Socket 的 connect 是**一条系统调用直接完成**(回环上无 EINPROGRESS);NIO 的 connect 是**非阻塞 + EPOLLOUT 等待**;②第二次 epoll_wait 返回 2 个事件——**fd 9 的 EPOLLOUT 还在**(level-triggered 的残留就绪),这就是 JDK Selector 用 level-triggered 而不是边缘触发的直接证据。这篇拆: 阻塞 Socket 的 native 管道(PlainSocketImpl.c:227 起)、NIO 通道层(Net.c:194 起)、Selector 的 epoll 底座(EPoll.c:59 起)。
@@ -30,7 +30,7 @@ epoll_wait(6, [{events=EPOLLOUT, data={u32=9}}, {events=EPOLLIN, data={u32=10}}]
 
 `java.net.Socket` 的 native 在 `java.base/unix/native/libnet/PlainSocketImpl.c:1-1038`(1038 行)——connect/accept/close/读写四个函数,每个都是"JNI 取 fd → 系统调用 → 异常翻译"的骨架。
 
-**socketConnect**(:227): 第一个分叉是**超时**。timeout<=0 直接 `NET_Connect(fd, &sa, len)`(阻塞 connect,一条调用);**timeout>0 时 JDK 在用户态模拟带超时 connect**——注释 :291-295 是权威说明:
+**socketConnect**(:227): 第一个分叉是**超时**。timeout<=0 直接 `NET_Connect(fd, &sa, len)`(阻塞 connect,一条调用);**timeout>0 时 JDK 在用户态模拟带超时 connect**——注释 :312-317 是权威说明:
 
 ```cpp
 // PlainSocketImpl.c:312-317(截取核心,逐字)
@@ -42,13 +42,13 @@ epoll_wait(6, [{events=EPOLLOUT, data={u32=9}}, {events=EPOLLIN, data={u32=10}}]
         SET_NONBLOCKING(fd);
 ```
 
-之后的流程: `connect(fd, ...)`(注释 "no need to use NET_Connect as non-blocking" :319)→ 若 `errno == EINPROGRESS`(:328)则进入**poll 循环**: `struct pollfd {fd, POLLOUT}` + `NET_Poll(&pfd, 1, timeout)`(:348)——**注意是 poll(2) 不是 epoll,POLLOUT 不是 EPOLLOUT**;EINTR 时按 `JVM_NanoTime` 重算剩余超时继续(:358-368);超时归零 → `SocketTimeoutException` + `shutdown(fd, 2)`(:373-382,注释 "Timeout out but connection may still be established...just in case we make the socket blocking again and shutdown input & output");poll 就绪后 `getsockopt(fd, SOL_SOCKET, SO_ERROR)` 确认连接结果(:388-393),最后 `SET_BLOCKING(fd)` 恢复阻塞模式。*关键设计: Java 层在 POSIX 上"模拟"了带超时的 connect*——内核只提供 connect+EINPROGRESS,等待与超时全部由 JDK 用 poll(2)+纳秒时钟实现,不依赖任何内核扩展。大纲的"PollArrayWrapper"是 Windows 类(JDK8 的 unix 版本也没有用它),Linux 这条链是纯 poll(2)。
+之后的流程: `connect(fd, ...)`(注释 "no need to use NET_Connect as non-blocking" :319)→ 若 `errno == EINPROGRESS`(:328)则进入**poll 循环**: `struct pollfd {fd, POLLOUT}` + `NET_Poll(&pfd, 1, timeout)`(:348)——**注意是 poll(2) 不是 epoll,POLLOUT 不是 EPOLLOUT**;EINTR 时按 `JVM_NanoTime` 重算剩余超时继续(:358-369);超时归零 → `SocketTimeoutException` + `shutdown(fd, 2)`(:373-382,注释 "Timeout out but connection may still be established...just in case we make the socket blocking again and shutdown input & output");poll 就绪后 `getsockopt(fd, SOL_SOCKET, SO_ERROR)` 确认连接结果(:388-393),最后 `SET_BLOCKING(fd)` 恢复阻塞模式。*关键设计: Java 层在 POSIX 上"模拟"了带超时的 connect*——内核只提供 connect+EINPROGRESS,等待与超时全部由 JDK 用 poll(2)+纳秒时钟实现,不依赖任何内核扩展。大纲的"PollArrayWrapper"是 Windows 类(JDK8 的 unix 版本也没有用它),Linux 这条链是纯 poll(2)。
 
 **socketAccept**(:587): 同样先做**可读性等待**——`NET_Timeout(env, fd, ...)`(:644-652,阻塞 accept 的超时也在这里实现);`NET_Accept(fd, &sa, &slen)`(:664);成功后 `SET_BLOCKING(newfd)`(:668)——服务端监听 fd 是非阻塞的(见下),新连接显式恢复阻塞模式;循环处理 `ECONNABORTED/EWOULDBLOCK/EAGAIN`(连接被对端 RST 抢先、或 accept 超时竞态)并调整剩余超时(:673-694)。大纲的"accept 后设置 SO_REUSEADDR"是编造的——SO_REUSEADDR 在 **socketCreate**(:159)里对**服务端 socket**(`psi_serverSocketID` 字段非空)设置(:200-215,注释 "If this is a server socket then enable SO_REUSEADDR automatically and set to non blocking"——服务端 fd 一并设成非阻塞,配合上面的 NET_Timeout 实现 accept 超时)。
 
-**socketClose0**(:769): 大纲的 "SO_LINGER→RST 硬关闭" 是 JDK8 旧形态——JDK11 的关闭是**延迟关闭(useDeferredClose)**: 若在阻塞 I/O 中关闭,`NET_Dup2(marker_fd, fd)` 用**标志 fd 顶替**(:783-786)——marker_fd 是启动时 `getMarkerFD()`(:73)用 `socketpair(AF_UNIX)` 建立并 shutdown 的 fd(注释 :66-71 "The result is an fd that can be used for read/write");被顶替后,阻塞中的 read/write 在新 fd 上立即返回而非继续阻塞,配合 Java 侧中断语义;否则置 `IO_fd_fdID=-1` + `NET_SocketClose(fd)`。**linger 是在 `socketSetOption0`(:826)里单独设置的选项**,不参与 close 的 RST 决策。
+**socketClose0**(:769): 大纲的 "SO_LINGER→RST 硬关闭" 是 JDK8 旧形态——JDK11 的关闭是**延迟关闭(useDeferredClose)**: 若在阻塞 I/O 中关闭,`NET_Dup2(marker_fd, fd)` 用**标志 fd 顶替**(:783-786)——marker_fd 是启动时 `getMarkerFD()`(:73)用 `socketpair(AF_UNIX)` 建立并 shutdown 的 fd(注释 :68-72 "The result is an fd that can be used for read/write");被顶替后,阻塞中的 read/write 在新 fd 上立即返回而非继续阻塞,配合 Java 侧中断语义;否则置 `IO_fd_fdID=-1` + `NET_SocketClose(fd)`。**linger 是在 `socketSetOption0`(:826)里单独设置的选项**,不参与 close 的 RST 决策。
 
-**读写**: 不在 PlainSocketImpl.c:1-1038(全文件)——`SocketInputStream.socketRead0`(unix/native/libnet/SocketInputStream.c:91)与 `SocketOutputStream.socketWrite0`(SocketOutputStream.c:57)。socketRead0 的骨架: 大读走堆缓冲(超过 `MAX_HEAP_BUFFER_LEN` 截断,:126-135)→ 有超时走 `NET_ReadWithTimeout`(:127)、否则 `NET_Read`(:135)。这些 `NET_*` 工具声明在 net_util_md.h:80-92(`NET_Timeout`/`NET_Read`/`NET_Connect`/`NET_Accept`/`NET_SocketClose`/`NET_Poll`),实现按平台在 net_util_md.c:1068(NET_Wait)等。
+**读写**: 不在 PlainSocketImpl.c:1-1038(全文件)——`SocketInputStream.socketRead0`(unix/native/libnet/SocketInputStream.c:91)与 `SocketOutputStream.socketWrite0`(SocketOutputStream.c:57)。socketRead0 的骨架: 大读走堆缓冲(超过 `MAX_HEAP_BUFFER_LEN` 截断,:114-131)→ 有超时走 `NET_ReadWithTimeout`(:127)、否则 `NET_Read`(:135)。这些 `NET_*` 工具声明在 net_util_md.h:80-92(`NET_Timeout`/`NET_Read`/`NET_Connect`/`NET_Accept`/`NET_SocketClose`/`NET_Poll`),实现按平台在 net_util_md.c:1068(NET_Wait)等。
 
 ## 2. NIO 通道层(Net.c:194 起)
 
@@ -91,9 +91,9 @@ Java_sun_nio_ch_EPoll_ctl(JNIEnv *env, jclass clazz, jint epfd,
 }
 ```
 
-`EPoll_wait`(:83-97): `struct epoll_event *events = jlong_to_ptr(address)`——**address 是 Java 侧 DirectBuffer 的裸地址,epoll_wait 直接往里面写事件,零拷贝**;`EINTR` 返回 `IOS_INTERRUPTED`(:89-90)让 Java 侧重试;其他错误 throw+`IOS_THROWN`。
+`EPoll_wait`(:83-97): `struct epoll_event *events = jlong_to_ptr(address)`——**address 是 Java 侧 unsafe.allocateMemory 的裸内存地址(EPoll.allocatePollArray,EPoll.java:72-74;不是 DirectBuffer),epoll_wait 直接往里面写事件,零拷贝**;`EINTR` 返回 `IOS_INTERRUPTED`(:89-90)让 Java 侧重试;其他错误 throw+`IOS_THROWN`。
 
-**Java 侧 EPoll 类**(`linux/classes/sun/nio/ch/EPoll.java`): 静态常量 `SIZEOF_EPOLLEVENT = eventSize()` 等(:53-55)——**Java 代码直接按 C 结构布局分配与读写事件**;`allocatePollArray(count) = unsafe.allocateMemory(count * SIZEOF_EPOLLEVENT)`(:72-74,DirectBuffer 之外的裸内存);`getDescriptor`/`getEvents` 用 `unsafe.getInt(eventAddress + OFFSETOF_*)` 读就绪事件(:93-105)。操作码/事件常量(:58-67): `EPOLL_CTL_ADD=1/DEL=2/MOD=3`、`EPOLLIN=0x1`、`EPOLLOUT=0x4`、`EPOLLONESHOT=1<<30`——**注意没有 EPOLLET 常量**: JDK11 的 Selector 是 **level-triggered**(大纲的 EPOLLET 描述不适用);`EPOLLONESHOT` 只被**异步通道**(EPollPort.java:178-180,AsynchronousSocketChannel 的每次事件重注册)使用。
+**Java 侧 EPoll 类**(`linux/classes/sun/nio/ch/EPoll.java`): 静态常量 `SIZEOF_EPOLLEVENT = eventSize()` 等(:53-55)——**Java 代码直接按 C 结构布局分配与读写事件**;`allocatePollArray(count) = unsafe.allocateMemory(count * SIZEOF_EPOLLEVENT)`(:72-74,裸内存——epoll_wait 的 address 参数就是它);`getDescriptor`/`getEvents` 用 `unsafe.getInt(eventAddress + OFFSETOF_*)` 读就绪事件(:93-105)。操作码/事件常量(:58-67): `EPOLL_CTL_ADD=1/DEL=2/MOD=3`、`EPOLLIN=0x1`、`EPOLLOUT=0x4`、`EPOLLONESHOT=1<<30`——**注意没有 EPOLLET 常量**: JDK11 的 Selector 是 **level-triggered**(大纲的 EPOLLET 描述不适用);`EPOLLONESHOT` 只被**异步通道**(EPollPort.java:178-180,AsynchronousSocketChannel 的每次事件重注册)使用。
 
 **EPollSelectorImpl**(`linux/classes/sun/nio/ch/EPollSelectorImpl.java`)把 Selector 语义接到 epoll 上:
 - 构造(:50-93): `epfd = EPoll.create()`(:79);`pollArrayAddress = EPoll.allocatePollArray(NUM_EPOLLEVENTS)`(NUM_EPOLLEVENTS=min(fdLimit,1024));`fd0/fd1 = IOUtil.makePipe()` **自唤醒管道**——`EPoll.ctl(epfd, ADD, fd0, EPOLLIN)`(:93)让 `Selector.wakeup()` 只需往管道写一字节,epoll_wait 立即返回;
@@ -105,6 +105,6 @@ Java_sun_nio_ch_EPoll_ctl(JNIEnv *env, jclass clazz, jint epfd,
 
 ## 核心悬念
 
-TCP 的 Java→native→内核链路拆完: 阻塞 Socket 走 PlainSocketImpl.c:227(poll(2) 模拟超时 connect、NET_Timeout 等 accept、deferred close);NIO 通道层 Net.c:306 把 connect 变成三态返回(1/IOS_UNAVAILABLE/IOS_INTERRUPTED)交给 Selector;Selector 坐在 epoll 上——EPoll.c:41-56 的布局三函数让 Java 侧直接按 `struct epoll_event` 布局读写 DirectBuffer(零拷贝),level-triggered + 自唤醒管道 + ADD/MOD/DEL 增量注册。但网络域还有两条独立的路没拆: **UDP**(DatagramSocket 的 sendto/recvfrom 无连接语义、组播 setsockopt)与 **DNS**(InetAddress.getByName→getaddrinfo 的解析链路),以及网络接口枚举。下一篇: UDP + DNS + NetworkInterface。
+TCP 的 Java→native→内核链路拆完: 阻塞 Socket 走 PlainSocketImpl.c:227(poll(2) 模拟超时 connect、NET_Timeout 等 accept、deferred close);NIO 通道层 Net.c:306 把 connect 变成三态返回(1/IOS_UNAVAILABLE/IOS_INTERRUPTED)交给 Selector;Selector 坐在 epoll 上——EPoll.c:41-56 的布局三函数让 Java 侧直接按 `struct epoll_event` 布局读写 unsafe 裸内存(零拷贝),level-triggered + 自唤醒管道 + ADD/MOD/DEL 增量注册。但网络域还有两条独立的路没拆: **UDP**(DatagramSocket 的 sendto/recvfrom 无连接语义、组播 setsockopt)与 **DNS**(InetAddress.getByName→getaddrinfo 的解析链路),以及网络接口枚举。下一篇: UDP + DNS + NetworkInterface。
 
-> → [43-nio-net/02 — UDP + DNS + NetworkInterface](02-udp-dns.md)
+> → [43-nio-net/02 — UDP + DNS + NetworkInterface — Datagram + InetAddress](02-udp-dns.md)
