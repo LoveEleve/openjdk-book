@@ -4,7 +4,7 @@
 > 读者处境: `Files.readAttributes(path, "*")`→UnixNativeDispatcher.stat→struct stat→BasicFileAttributes。`Files.list(dir)`→openat+fdopendir+readdir→Stream<Path>。`WatchService`→inotify_init→inotify_add_watch(IN_CREATE|IN_DELETE|IN_MODIFY)→poll events→StandardWatchEventKinds。
 
 > ⚠️ 写作期修正(2026-08-16,43-nio-net/03 完成,43 域收官,第 6 批收官):
-> - **"stat0 收 String + JNU_GetPlatformString" 错(重要)**: 路径统一走 **jlong 地址**——Java 侧 copyToNativeBuffer(UnixNativeDispatcher.java:39,NativeBuffer=NativeBuffers.java:35)→stat0(buffer.address(), attrs)(:298-311);C 侧 `jlong_to_ptr(pathAddress)`(UnixNativeDispatcher.c:548);**stat64 非 stat**(:546)
+> - **"stat0 收 String + JNU_GetPlatformString" 错(重要)**: 路径统一走 **jlong 地址**——Java 侧 copyToNativeBuffer(UnixNativeDispatcher.java:39,NativeBuffer=NativeBuffers.java:35)→stat0(buffer.address(), attrs)(:298-311);C 侧 `jlong_to_ptr(pathAddress)`(UnixNativeDispatcher.c:548);**stat64 非 stat**(:550)
 > - **"openat0 的 dfd==AT_FDCWD 分支" 编造**: 真实=**my_openat64_func 运行时函数指针**(init 时 dlsym(RTLD_DEFAULT, "openat64"),:262-267)+RESTARTABLE(:458);openat(dfd 相对路径)减少 TOCTOU 竞态 ✓
 > - **"fdopendir(env, this, dfd, path)" 签名错**: 真实 fdopendir(:748)只收 dfd(jlong 地址);opendir0(:733)收 pathAddress;readdir(:774)收 DIR* 的 jlong
 > - **"readdir 返回 d_type(DT_REG/DT_DIR)省 stat" 编造(重要)**: JDK11 readdir 只把 **d_name 拷成字节数组**返回(:774-793,readdir64),d_type 不看;strace 里 getdents64=glibc readdir 内部实现

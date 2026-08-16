@@ -26,7 +26,7 @@ inotify_rm_watch(4, 1)           = 0
 
 ## 1. UnixNativeDispatcher: syscall 的 JNI 包装
 
-`UnixNativeDispatcher.c`(unix/native/libnio/fs/UnixNativeDispatcher.c:1-1244,1244 行)是 **java.nio.file 的全部底层**——stat/open/readdir/mkdir/rename/chmod/unlink……约 50 个函数,模式高度统一。第一个值得记住的设计是**参数传递**: 路径不走 JNI String,而是 **jlong 地址**。Java 侧先 `copyToNativeBuffer(path)`(UnixNativeDispatcher.java:39)把路径拷进 NativeBuffer(NativeBuffers.java:35 起的类),再 `stat0(buffer.address(), attrs)`(UnixNativeDispatcher.java:298-311):
+`UnixNativeDispatcher.c`(unix/native/libnio/fs/UnixNativeDispatcher.c:1-1244,1244 行)是 **java.nio.file 的全部底层**——stat/open/readdir/mkdir/rename/chmod/unlink……约 50 个函数,模式高度统一。第一个值得记住的设计是**参数传递**: 路径不走 JNI String,而是 **jlong 地址**。Java 侧先 `copyToNativeBuffer(path)`(UnixNativeDispatcher.java:39)把路径拷进 NativeBuffer(NativeBuffers.java:35 起的类),再 `stat0(buffer.address(), attrs)`(UnixNativeDispatcher.java:298-310):
 
 ```cpp
 // UnixNativeDispatcher.c:543-556(截取核心,逐字)
@@ -110,7 +110,7 @@ Java_sun_nio_fs_UnixNativeDispatcher_readdir(JNIEnv* env, jclass this, jlong val
 `LinuxWatchService.c`(linux/native/libnio/fs/LinuxWatchService.c:1-153,153 行)与 EPoll.c:41 一样是"薄 JNI + 布局函数":
 
 - `eventSize`(:49)/`eventOffsets`(:55)——**布局五元组**(wd/mask/cookie/len/name 的 offsetof),Java 侧按它直接 unsafe 读 `struct inotify_event`(43-01 的 EPoll 模式);
-- `inotifyInit`(:72)= **`inotify_init()`(旧 API**,大纲悬念段写的 inotify_init1 是误记;fd 的 CLOEXEC 由 Java 侧 configureBlocking 外的 fcntl 或 init 时设置);
+- `inotifyInit`(:72)= **`inotify_init()`(旧 API**,大纲悬念段写的 inotify_init1 是误记;该调用不带 IN_CLOEXEC);
 - `inotifyAddWatch`(:83,path 经 jlong_to_ptr 的 NativeBuffer 地址 + mask)/`inotifyRmWatch`(:97);
 - `configureBlocking`(:106,fcntl O_NONBLOCK)/`socketpair`(:118,**自唤醒管道**,同 EPoll 的 fd0/fd1);
 - `poll`(:133-153): `poll(ufds[2], 2, -1)` 同时等 inotify fd 与 socketpair,EINTR→0(Java 层重试)。

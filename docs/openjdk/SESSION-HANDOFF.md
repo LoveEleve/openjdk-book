@@ -1215,7 +1215,7 @@
 
 ### 6.92 43-nio-net/03(NIO FileSystem — stat/readdir/inotify,43 域收官,第 6 批收官,大纲 10+ 处漂移含 4 处机制编造 + 深审 3 轮,2026-08-16)
 
-- **"stat0 收 String + JNU_GetPlatformString" 错(重要)**: 路径统一走 **jlong 地址**——Java 侧 copyToNativeBuffer(UnixNativeDispatcher.java:39,NativeBuffer 类=NativeBuffers.java:35)→stat0(buffer.address(), attrs)(:298-311);C 侧 `jlong_to_ptr(pathAddress)`(UnixNativeDispatcher.c:548);**stat64 非 stat**(:546,RESTARTABLE 防 EINTR);prepAttributes(:552)回填 UnixFileAttributes
+- **"stat0 收 String + JNU_GetPlatformString" 错(重要)**: 路径统一走 **jlong 地址**——Java 侧 copyToNativeBuffer(UnixNativeDispatcher.java:39,NativeBuffer 类=NativeBuffers.java:35)→stat0(buffer.address(), attrs)(:298-311);C 侧 `jlong_to_ptr(pathAddress)`(UnixNativeDispatcher.c:548);**stat64 非 stat**(:550,RESTARTABLE 防 EINTR);prepAttributes(:554)回填 UnixFileAttributes
 - **"openat0 的 dfd==AT_FDCWD 分支" 编造**: 真实=**my_openat64_func 运行时函数指针**(init 时 dlsym(RTLD_DEFAULT, "openat64"),:262-267,老平台 "openat")+RESTARTABLE(:458);openat(dfd 相对路径)减少 TOCTOU 竞态 ✓(大纲这点对)
 - **"fdopendir(env, this, dfd, path)" 签名错**: fdopendir(:748)只收 dfd;opendir0(:733)收 pathAddress;readdir(:774)收 DIR* 的 jlong
 - **"readdir 返回 d_type(DT_REG/DT_DIR)省 stat" 编造(重要)**: JDK11 readdir 只把 **d_name 拷成字节数组**返回(:774-793,readdir64),d_type 不看;strace 的 getdents64=glibc readdir 内部实现
