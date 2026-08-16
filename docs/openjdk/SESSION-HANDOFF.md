@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-16 | 卷 2 写作中: **134/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 29) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 51 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结)**;下一篇 43-nio-net/01(TCP Socket,第 6 批收官)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-16 | 卷 2 写作中: **135/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 30) | 第 1-5 批**全部完结**;第 6 批(JIT/GC)进行中,**本会话 52 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(1,43 域 1/3)**;下一篇 43-nio-net/02(UDP+DNS+NetworkInterface,第 6 批收官)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 > **接收者: 新 AI —— 只读本文件,按"十、下一步"执行**
 
 ---
@@ -46,7 +46,7 @@
 第 3 批(对象/类): 07(7) → 09(3) → 17(4)                          ✅ 完结 14/14
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
-第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 ✅(3/3,28 域完结)** → **29 ✅(2/2,29 域完结)** → **33 ✅(3/3,33 域完结)** → 43
+第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 ✅(3/3,28 域完结)** → **29 ✅(2/2,29 域完结)** → **33 ✅(3/3,33 域完结)** → **43 ✅(1/3)**
 第 7 批(上层): 22 → 26 → 35 → 40 → 47
 ```
 
@@ -96,6 +96,7 @@
 | **28-jvmti** | 3 | `28-jvmti/01-agent-architecture.md`(317)+`02-redefine-classes.md`(270)+`03-auxiliary.md`(135) | ✅ **28 域完结(本会话)** |
 | **29-mh** | 2 | `29-mh/01-invoke-chain.md`(105)+`02-x86-adapter.md`(96) | ✅ **29 域完结(本会话)** |
 | **33-jmx** | 3 | `33-jmx/01-memory-service.md`(185)+`02-jmm-interface.md`(168)+`03-gc-notifier-flags.md`(161) | ✅ **33 域完结(本会话)** |
+| **43-nio-net** | 1 | `43-nio-net/01-tcp-epoll.md`(108) | ✅ 43 域 1/3(本会话) |
 
 ### 本会话 50 篇的 commit 清单(按 git log 为准,2026-08-14/16)
 
@@ -108,6 +109,8 @@
 **33-jmx 第 3 轮深度 REVIEW(两篇,2026-08-16)**: e5da1d9——①注册点函数名 genesis→universe_post_init(universe.cpp:1002,genesis 仅 :321-462);②行号修正 9 处(management.cpp 数组 :2232/get_jmm_interface :2275/recalculate_sizes :182/jmm.h:30/management_ext.c:39/PlatformMBeanProviderImpl.java:55/:706-758/:1862-1883 等);③代码块标注错位 2 处(:138-147/:285-292,check.py 线性匹配掩盖);④HANDOFF 结构事故: 6.87/6.88 双副本(anchor "## 七、" 命中 6.68 教训文本反引号内引用)→删错位副本+拼回教训+教训补充 2;commit 清单 48→50
 
 **33-jmx/03(GC Notifier+LowMemory+Flags,33 域收官)**: 正文+大纲 621f389(161 行,含大纲回填 ⚠️ 10 块)→ README 9be7e2f(134/152,33 域完结,第 6 批 5/5 域收官)→ 素材 33-jmx-notify-demo.txt+33-jmx-flag-demo.txt
+
+**43-nio-net/01(TCP Socket+epoll,43 域 1/3)**: 正文 634f710(108 行)→ 大纲回填 ⚠️ 12 块 4047b2e→ README 53780ec(135/152,43 域 1/3)→ 素材 33-nio-strace.txt
 
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(372 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true)
 
@@ -245,7 +248,7 @@
 | 命令输出 | `materials/commands/` 150+ 文件 | jcmd/jstat/jmap/jfr 等真实输出 |
 | 卷 T 文章 | `vol-tools/ch01.md`~`ch07.md` | 引用格式: "[卷 T ch02](openjdk/vol-tools/ch02.md)" |
 
-**本会话新增素材 50 个**(全部 gitignore 不入库,在 materials/commands/):
+**本会话新增素材 51 个**(全部 gitignore 不入库,在 materials/commands/):
 - `29-mh-adapter-demo.txt`(x86 Adapter 实证——**JDK11 无 ricochet frame**: (A) grep 铁证——'ricochet' 在 hotspot methodHandles.cpp/hpp/methodHandles_x86.cpp 与 Java 侧 java.lang.invoke 全部零命中(JDK8 的手写 adapter 汇编整体移除);(B) MethodHandlesAdapterBlob=BufferBlob(codeBlob.hpp:452-454),adapter_code_size LP64=32000(methodHandles_x86.hpp:30),只含 6 个签名多态入口(29-01);(C) jump_from_method_handle(methodHandles_x86.cpp:120-155)逐行: 空 Method*→throw_AbstractMethodError :153-154/interp_only_mode 检查 :130-147(28-01 §4 衔接)/jmp from_compiled|from_interpreted :149-151——**参数零搬运**(调用约定共享);(D) Java 侧 adapter: asType 三级路径(MethodHandle.java:836-852 fast path+asTypeCache→makePairwiseConvert MethodHandleImpl.java:250-255→makePairwiseConvertByEditor :266+ 逐参数 filter)/LambdaFormEditor 编辑 LF(LambdaFormEditor.java:45: permute :848/spread :510/collect :555/filter :627)/guardWithTest :768;(E) 历史对照: JDK8 ricochet frame 汇编 vs JDK11 LF 字节码(演进动机标注为推断))
 - `29-mh-invoke-demo.txt`(MH invoke 链路实证: (A) 性能对照(核心)——2000 万次 -Xbatch: 直接 9ms/invokeExact(参数 MH)52ms/**invokeExact(static final 常量 MH)10ms(1.11 倍,与直接调用几乎持平)**/反射 218ms;reflection/invokeExact(param)=4.19——**'50x'是 JDK8 历史说法,JDK11 实测 ~4-5 倍**;(B) PrintInlining invokeExactCall 树: Invokers$Holder::invokeExact_MT(24 bytes) force inline by annotation+checkExactType/checkCustomized(force inline)+**MethodHandle::invokeBasic(LI)I (0 bytes) receiver not constant**(callGenerator.cpp:861-863 失败打印)+DirectMethodHandle::internalMemberName force inline;(C) 反射树: acquireMethodAccessor 不内联+MethodAccessorImpl no static binding+Integer::valueOf/intValue 装箱;(D) 源码定位: 6 intrinsic vmSymbols.hpp:1435-1441/generate_method_handle_interpreter_entry methodHandles_x86.cpp:203-290/jump_to_lambda_form :157-198 链 MH→form→vmentry→method→ResolvedMethodName→Method*/generate_method_handle_dispatch :292-489(linkToVirtual vtable 'same as TemplateTable::invokevirtual' :408-409)/callGenerator.cpp for_method_handle_inline :824-957/LambdaForm prepare :827-843+compileToBytecode :857-878/COMPILE_THRESHOLD 默认 0 MethodHandleStatics.java:71-72)
 - `28-jvmti-tagmap-demo.txt`(TagMap 全链路: (A) SetTag 3 对象(1001/2002/3003)→重打更新(1001→1002)→GetObjectsWithTags 精确返回 2 个→IterateThroughHeap(UNTAGGED filter)回调 3 个 tagged→丢弃强引用+ForceGarbageCollection→**ObjectFree×3 tag 精确匹配**→GetObjectsWithTags 返回 0;(B) -Xlog:jvmti+objecttagging=trace 看到 do_weak_oops 日志 **(3->0, 3 freed, 0 total moves)**(:3427-3428);(C) **filter 反直觉语义**: JVMTI_HEAP_FILTER_TAGGED 传进去回调 43650 个(untagged!),UNTAGGED 才 3 个——filter 位=排除类别(is_filtered_by_heap_filter :1017-1034 "filter out tagged objects");(D) 源码定位: entry phantom oop :92/hash (addr>>3)%size :194/load_factor 4.0 :166/tag_map_for 懒创建 :529-541/set_tag 三态 :738-767/weak 清理链 weakProcessor.cpp:36-41→do_weak_oops :3335/ObjectMarker mark 位 :1654-1734/VM_HeapWalkOperation :2663-3300/ForceGarbageCollection jvmtiEnv.cpp:1954)
@@ -301,7 +304,7 @@
 
 ### 6.0 本会话精华速查(新 AI 写 33-jmx/01 前必读)
 
-**本会话覆盖(51 篇,6.52-6.89)**: 20-vm-operations/02 → 27-jni(3) → 30-jvm-entry(3) → 32-jfr(6) → 34-nmt(2) → 36-attach(2) → 37-heap-dumper(2) → 39-runtime-monitoring(2) → 46-sa(1) → 14-c1(4,完结) → 15-c2(8,完结) → 21-shared-runtime(3,完结) → 25-gc-framework(6,完结) → **28-jvmti(3,完结)** → **29-mh(2,完结)** → **33-jmx(3,完结)**。下一篇 43-nio-net/01(TCP Socket,第 6 批收官;剩余 43→第 7 批 22/26/35/40/47)。
+**本会话覆盖(52 篇,6.52-6.90)**: 20-vm-operations/02 → 27-jni(3) → 30-jvm-entry(3) → 32-jfr(6) → 34-nmt(2) → 36-attach(2) → 37-heap-dumper(2) → 39-runtime-monitoring(2) → 46-sa(1) → 14-c1(4,完结) → 15-c2(8,完结) → 21-shared-runtime(3,完结) → 25-gc-framework(6,完结) → **28-jvmti(3,完结)** → **29-mh(2,完结)** → **33-jmx(3,完结)** → **43-nio-net(1/3)**。下一篇 43-nio-net/02(UDP+DNS+NetworkInterface,第 6 批收官;剩余 43-02/03→第 7 批 22/26/35/40/47)。
 
 **大纲漂移的高发类型(28/29 域新实例)**:
 1. **文件/类名编造**: jvmtiEnv.hpp 不存在(28-01,真实 jvmtiEnvBase.hpp+生成类)、relocator.cpp 位置错(28-02,真实 share/runtime 非 prims,且只是 ldc→ldc_w 配角)、"weak hash table auto-removed"(28-03,真实普通哈希表+phantom oop+GC 显式清理)、LambdaForm 在 hpp(29-01,真实 Java 侧 LambdaForm.java)——**文件名/类名一律 find/grep**
@@ -1176,6 +1179,22 @@
 - **实证方法论**: MemoryPoolMXBean.setUsageThreshold/setCollectionUsageThreshold+GarbageCollectorMXBean.addNotificationListener 三监听同挂一 demo;GarbageCollectionNotificationInfo.from 需 (CompositeData) 强转+--add-modules jdk.management;threshold.exceeded 只报一次 vs collection 两次 full GC 后各报一次(count 1→2)的对照=**gauge vs counter 语义的直接证据**;GC NOTIF 的 action("end of minor GC"/"end of major GC")=GCMemoryManager 构造参数(g1CollectedHeap.cpp:1424-1425);jcmd VM.set_flag 正反例(可写/manageable vs 不可写/不存在)
 - 素材: 33-jmx-notify-demo.txt + 33-jmx-flag-demo.txt
 
+
+### 6.90 43-nio-net/01(TCP Socket — PlainSocketImpl + ServerSocket + epoll,43 域 1/3,大纲 10+ 处漂移含 4 处机制编造 + 深审 2 轮,2026-08-16)
+
+- **"PollArrayWrapper.poll(timeout) → wait for EPOLLOUT ready" 编造(重要)**: PollArrayWrapper 是 **windows 类**(src/java.base/windows/classes/sun/nio/ch/PollArrayWrapper.java,linux 无此文件);linux 带超时 connect=**poll(2)**——`struct pollfd {fd, POLLOUT}` + `NET_Poll(&pfd, 1, timeout)`(PlainSocketImpl.c:348);**POLLOUT 不是 EPOLLOUT**
+- **带超时 connect 全流程(大纲漏,核心)**: socketConnect(PlainSocketImpl.c:227): timeout<=0→NET_Connect 直接阻塞;timeout>0→SET_NONBLOCKING(:317)→connect(:320,注释 "no need to use NET_Connect as non-blocking" :319)→EINPROGRESS(:328)→poll 循环(348)→EINTR 按 JVM_NanoTime 重算(:358-368)→超时归零 SocketTimeoutException+shutdown(fd,2)(:373-382)→就绪后 getsockopt SO_ERROR(:388-393)→SET_BLOCKING——**Java 层在 POSIX 上模拟带超时 connect**(注释 :312-317)
+- **"socketAccept 后 NET_SetSockOpt(newfd, SO_REUSEADDR)" 编造**: SO_REUSEADDR 在 **socketCreate**(:159)对**服务端 socket**(psi_serverSocketID 非空)设置(:203-215,注释 "If this is a server socket then enable SO_REUSEADDR automatically and set to non blocking");accept=NET_Timeout 可读等待(:644-652)→NET_Accept(:664)→SET_BLOCKING(newfd)(:668)→ECONNABORTED/EWOULDBLOCK/EAGAIN 循环调整超时(:673-694)
+- **"socketClose0 linger→RST" 编造(JDK8 形态)**: JDK11=**deferred close**(useDeferredClose): marker_fd=getMarkerFD()(PlainSocketImpl.c:73,socketpair(AF_UNIX)+shutdown,注释 :66-71 "The result is an fd that can be used for read/write")→NET_Dup2(marker_fd, fd)(:783-786)顶替让阻塞 read/write 立即返回;linger 在 socketSetOption0(:826)单独设置
+- **"EPoll.c:40-97/:58-65/:68-80/:82-97" 行号偏 1**: EPoll.c **97 行**;布局三兄弟 eventSize :41/eventsOffset :47/dataOffset :53(大纲漏——Java 侧按 C struct 布局的关键)/create :59(epoll_create(256),注释 "size hint not used in modern kernels")/ctl :69(event.events/data.fd+epoll_ctl,返回 0 或 errno)/wait :83(jlong_to_ptr DirectBuffer 零拷贝 :86,EINTR→IOS_INTERRUPTED :89-90)
+- **"EPOLLET vs Level-Triggered" 错(重要)**: JDK11 **无 EPOLLET 常量**(EPoll.java:58-67: EPOLL_CTL_ADD/DEL/MOD=1/2/3、EPOLLIN=0x1、EPOLLOUT=0x4、EPOLLONESHOT=1<<30)——Selector 是 **level-triggered**;EPOLLONESHOT 只被**异步通道**(EPollPort.java:178-180,AsynchronousSocketChannel)使用;**strace 实证**: 第二次 epoll_wait 仍返回 fd9 EPOLLOUT(未 MOD 持续就绪)=level-triggered 直接证据
+- **Net.c 路径错**: 在 `java.base/unix/native/libnio/ch/Net.c`(814 行,非 libnet);socket0 :194/bind0 :280/listen :299/**connect0 :306-322 三态**(1=成功/IOS_UNAVAILABLE(EINPROGRESS)/IOS_INTERRUPTED(EINTR));handleSocketError :783-812(errno→ConnectException/NoRouteToHostException/BindException/SocketException,EINPROGRESS→0)
+- **EPollSelectorImpl(大纲漏,重要)**: epfd=EPoll.create(:79)+pollArrayAddress=allocatePollArray(NUM_EPOLLEVENTS=min(fdLimit,1024),:51-52)+**自唤醒管道** fd0/fd1=IOUtil.makePipe+EPOLL_CTL_ADD fd0 EPOLLIN(:93,wakeup=IOUtil.write1(fd1,0) :254);doSelect→EPoll.wait :120;更新队列=**processUpdateQueue(:143-170,非大纲的 updateRegistrations)** DEL/ADD/MOD;注销 DEL :233-235
+- **Java 侧 EPoll 布局**: SIZEOF_EPOLLEVENT=eventSize()(:53-55);allocatePollArray=unsafe.allocateMemory(count*SIZEOF_EPOLLEVENT)(:72-74);getDescriptor/getEvents=unsafe.getInt(:93-105)——**Java 直接按 C struct epoll_event 布局读写裸内存,零拷贝**
+- **socketRead0/socketWrite0 不在 PlainSocketImpl.c**: SocketInputStream.c:91(NET_ReadWithTimeout :127/NET_Read :135)/SocketOutputStream.c:57
+- **悬念指向** ✓(02-udp-dns);**实证方法论**: strace -f -e trace=epoll_create,epoll_create1,epoll_ctl,epoll_wait,socket,connect,accept,accept4,read,write,close(噪音过滤: 排除 read(3/ELF/TZif 与 CPU 计数);阻塞 connect 回环=0 直接成功 vs NIO EINPROGRESS 对照;epoll_ctl ADD fd0 EPOLLIN=唤醒管道注册)
+- 素材: 33-nio-strace.txt
+
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
@@ -1242,7 +1261,8 @@
 - [x] 33-jmx/01——✅ 完结(正文 73982eb,185 行,含大纲回填 ⚠️ 10 块/README 7a29d4b);**33 域 1/3**
 - [x] 33-jmx/02——✅ 完结(正文 236ea72,168 行/大纲回填 ⚠️ 12 块 8e4a2ed/README de710ad);**33 域 2/3**
 - [x] 33-jmx/03——✅ 完结(正文+大纲 621f389,161 行,含回填 ⚠️ 10 块/README 9be7e2f);**33 域完结,第 6 批 5/5 域收官**
-- [ ] **43-nio-net/01**——**下一篇**;大纲 `planning/outlines/43-nio-net/01-tcp-epoll.md`(TCP Socket — PlainSocketImpl + ServerSocket + epoll);第 6 批收官;33-03 悬念已指向 43
+- [x] 43-nio-net/01——✅ 完结(正文 634f710,108 行/大纲回填 ⚠️ 12 块 4047b2e/README 53780ec);**43 域 1/3**
+- [ ] **43-nio-net/02**——**下一篇**;大纲 `planning/outlines/43-nio-net/02-udp-dns.md`(UDP + DNS + NetworkInterface);43 域 2/3;01 篇悬念已指向 02
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
@@ -1269,7 +1289,8 @@
 | MH 源码(29 域已完结) | `share/prims/methodHandles.cpp`(1610 行: generate_adapters :75-90(启动 init.cpp:145)/init_MemberName :172/init_method_MemberName :219)+`methodHandles.hpp`(217 行)+`cpu/x86/methodHandles_x86.cpp`(643 行: jump_from_method_handle :120-155(interp_only 检查 :130-147)/jump_to_lambda_form :157-198(MH→form→vmentry→MemberName→ResolvedMethodName→Method*)/generate_method_handle_interpreter_entry :203-290/generate_method_handle_dispatch :292-489)+`cpu/x86/methodHandles_x86.hpp`(adapter_code_size :30 LP64=32000)+`codeBlob.hpp`(MethodHandlesAdapterBlob :452-454);JDK 侧 java/lang/invoke/(LambdaForm.java:123/prepare :827/compileToBytecode :857/InvokerBytecodeGenerator.java:688/299(MethodHandleImpl.java:250/makeGuardWithTest :768/LambdaFormEditor.java:45);29-01/02 正文即索引 |
 | 33-jmx 源码(33 域 1/3) | `share/services/memoryPool.hpp/cpp`(MemoryPool :45-140/get_memory_usage 纯虚 :133/类层次 :142-171/get_memory_pool_instance 懒创建 :77-138/record_peak :144-153)+`memoryService.hpp/cpp`(注册表 set_universe_heap :71-92/peaks+LowMemoryDetector track :147-166/create_MemoryUsage_obj :234-248/TraceMemoryManagerStats :250-296)+`memoryManager.hpp/cpp`(GCMemoryManager :136-183/gc_begin :211-236/gc_end :241-298 双缓冲交换 :284-292/get_last_gc_stat :300-312/GCStatInfo hpp:88-134)+`memoryUsage.hpp`(四元组 undefined_size :66/convert_to_jlong :68-78)+`share/gc/g1/g1MemoryPool.cpp`(G1 三池 :42-88)+`g1MonitoringSupport.cpp`(recalculate_sizes :190-206)+`g1CollectedHeap.cpp`(manager 构造 :1424-1425/pool 创建 :1738-1740/TraceMemoryManagerStats :2881/update_sizes 时序 :3096-3100/gc_epilogue track :2495)+`management.cpp`(jmm_GetMemoryPoolUsage :557-567/jmm_GetMemoryUsage :706-754/jmm_interface 数组 :2235)+JDK 侧 java.management(MemoryPoolImpl.c:44/ManagementFactoryHelper.java:571-574);01 正文即索引 |
 | JMM 接口源码(33 域 2/3) | `share/include/jmm.h`(349 行: 版本 :46-55/`struct jmmInterface_1_` :221-343 **38 槽**/jmmOptionalSupport :57-68/jmmGCStat :185-195)+`services/management.cpp`(2282 行: jmm_interface 数组 :2235-2273/get_jmm_interface :2276-2282 版本检查/jmm_GetMemoryPools :470/jmm_GetMemoryManagers :514/jmm_GetMemoryPoolUsage :557/jmm_GetMemoryUsage :706/jmm_SetPoolSensor :601/jmm_SetPoolThreshold :644/jmm_SetBoolAttribute :778/jmm_GetLastGCStat :1831/jmm_SetGCNotificationEnabled :1893)+`jvm.cpp`(JVM_GetManagement :3686)+JDK 侧 java.management/share/native/libmanagement(management.c JNI_OnLoad :38-55/MemoryImpl.c :35-48/VMManagementImpl.c :35-41)+jdk.management/share/native/libmanagement_ext(GcInfoBuilder.c :199-240 调用者填槽/DiagnosticCommandImpl.c :45/Flag.c :46/HotSpotDiagnostic.c :35)+ManagementFactory.java:1018-1020/PlatformMBeanProviderImpl.java:55-59;02 正文即索引 |
-| 33-jmx 通知源码(33 域已完结) | `share/services/lowMemoryDetector.hpp/cpp`(ThresholdSupport :67/SensorInfo 状态机 :116-212/gauge vs counter :206-239/:261-277/trigger :293-343 OOM 降级 :307-313/clear :345-374)+`gcNotifier.hpp/cpp`(GCNotificationRequest :33-54/pushNotification 深拷贝账本 :45-54/sendNotificationInternal :189-224/createGcInfo :99-163)+`writeableFlags.cpp`(set_flag :243-267 错误码/入口 jmm_SetVMGlobal management.cpp:1569-1580+attachListener.cpp:288+diagnosticCommand.cpp:282)+`memAllocator.cpp`(慢路径检测 :232-236)+JDK 侧(Sensor.java:128-136/MemoryPoolImpl.java:297-300 PoolSensor/GarbageCollectorExtImpl.java:93-114 createGCNotification+118-126 自动开启/MemoryImpl.java:138-161);03 正文即索引,下一篇 43-nio-net
+| 33-jmx 通知源码(33 域已完结) | `share/services/lowMemoryDetector.hpp/cpp`(ThresholdSupport :67/SensorInfo 状态机 :116-212/gauge vs counter :206-239/:261-277/trigger :293-343 OOM 降级 :307-313/clear :345-374)+`gcNotifier.hpp/cpp`(GCNotificationRequest :33-54/pushNotification 深拷贝账本 :45-54/sendNotificationInternal :189-224/createGcInfo :99-163)+`writeableFlags.cpp`(set_flag :243-267 错误码/入口 jmm_SetVMGlobal management.cpp:1569-1580+attachListener.cpp:288+diagnosticCommand.cpp:282)+`memAllocator.cpp`(慢路径检测 :232-236)+JDK 侧(Sensor.java:128-135/MemoryPoolImpl.java:297-303 PoolSensor/GarbageCollectorExtImpl.java:93-112 createGCNotification+118-128 自动开启/MemoryImpl.java:138-161);03 正文即索引 |
+| 43-nio-net 源码(43 域 1/3) | JDK 侧 java.base/unix/native/libnet/PlainSocketImpl.c(1038 行: socketConnect :227 带超时=poll(2)+EINPROGRESS :348/socketAccept :587 NET_Timeout :644-652/socketClose0 :769 deferred close marker_fd :73/:783-786/socketCreate SO_REUSEADDR :203-215)+SocketInputStream.c:91(NET_ReadWithTimeout :127)/SocketOutputStream.c:57+net_util_md.h:80-92(NET_* 工具)+libnio/ch/Net.c(814 行: connect0 :306-322 三态/handleSocketError :783-812)+linux/libnio/ch/EPoll.c(97 行: 布局三兄弟 :41-56/create :59/ctl :69/wait :83)+linux/classes/sun/nio/ch/(EPoll.java:58-67 常量+allocatePollArray :72-74/EPollSelectorImpl.java:50-93 构造+processUpdateQueue :143-170/EPollPort.java:178-180 EPOLLONESHOT);01 正文即索引,02 篇主题=UDP+DNS+NetworkInterface(PlainDatagramSocketImpl.c/Inet4AddressImpl.c/NetworkInterface.c)
 | JVMTI 源码(28 域已开工) | `share/prims/jvmtiEnvBase.hpp`(655 行: 状态成员 :94-105/JvmtiEnv_from_jvmti_env :157-159/JvmtiEnvIterator :318)+`jvmtiEnv.cpp`(3733 行: SetEventNotificationMode :521/AddCapabilities :603)+`jvmtiEventController.hpp/cpp`(三级 bitset: JvmtiEnvEventEnable hpp:151-171/重算 :571-657/INTERP_EVENT_BITS :96-97/VM_EnterInterpOnlyMode :194-245)+`jvmtiExport.cpp`(3001 行: post_method_entry :1508/wrapper 调用侧/load_agent_library :2638)+`jvmtiManageCapabilities.cpp`(四集合 :70-146/add :233/update :292)+`jvmtiImpl.hpp/cpp`(JvmtiDeferredEvent 只服务 4 类编译事件 :454-549)+`jvmtiHpp.xsl`/`jvmtiEnter.xsl`/`jvmti.xml`(14993 行,154 函数/34 事件/44 能力,构建期生成源);28-01 正文即索引 |
 | JDK 侧源码 | `/data/workspace/jdk11u/src/java.base/`、`/data/workspace/jdk11u/src/jdk.jfr/` |
 | 工具素材 | `docs/openjdk/planning/outlines/00-jvm-tools/materials/`(commands/ 150+ 文件) |
@@ -1291,21 +1312,20 @@
 ## 十、下一步(读完立即做)
 
 ```
-【43-nio-net/01 写作指引——第 6 批收官,TCP Socket 与 epoll】
-1. 读 planning/outlines/43-nio-net/01-tcp-epoll.md(注意 ⚠️ 块;33 域回填 10-12 块/篇,43-01 大概率同样漂移)。
-   43-01 主题=TCP Socket(PlainSocketImpl+ServerSocket+epoll),按大纲实际内容验证,预判要点(以实际 grep 为准):
-   - JDK 侧: java.base 的 sun/nio/ch/ 与 java.net(PlainSocketImpl/SocketInputStream)、
-     jdk.net 模块?;native 在 src/java.base/linux/native/libnet/(PlainSocketImpl.c/Net.c/epoll 相关)
-   - hotspot 侧: JVM_* 相关?socket 主要走 native(JNI)+JVM_GetManagement 无关;注意 os::socket 系列(os_linux.cpp)
-   - 前会话沉淀: 42-core-native 域(Process/File IO)已写 3 篇(42-core-native/),43 域与其相邻,避免重复
-2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;43 域是 JDK 侧为主,check.py 用 MAPPINGS/EXTERNAL
-   (SRC=java.base 可直接;PlainSocketImpl.java 等路径要 find 确认)
+【43-nio-net/02 写作指引——第 6 批收官,UDP + DNS + NetworkInterface】
+1. 读 planning/outlines/43-nio-net/02-udp-dns.md(注意 ⚠️ 块;01 篇回填 12 块,02 大概率同样漂移)。
+   43-02 主题=UDP(DatagramSocket send/receive/组播)+DNS(InetAddress.getByName)+NetworkInterface 枚举,预判要点(以实际 grep 为准):
+   - java.base/unix/native/libnet/: PlainDatagramSocketImpl.c(2221 行,socketCreate/send/peek/receive/joinGroup 组播)
+     Inet4AddressImpl.c(517 行,lookupAllHostAddr→getaddrinfo)/Inet6AddressImpl.c(728 行)/NetworkInterface.c(2172 行,getifaddrs)
+   - 01 篇已铺底: NET_* 工具(net_util_md.c:1068 NET_Wait 等)/handleSocketError 模式——02 篇复用
+   - 悬念指向 03-filesystem(NIO FileSystem)
+2. 验证大纲所有 file:line 与专有名词——高发漂移类型照旧;行号/函数名(如 socketCreate vs socketCreate0)以 grep 为准
 3. 实证优先用 /data/tmp/opencode/jdk11:
-   - strace 看 socket/connect/epoll_wait 系统调用(容器可用?之前 strace 用过)
-   - lsof / ss 看连接;nc/curl 做客户端
-   - -Xlog: 无直接标签,主要靠 strace/jstack
-4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 HS_MAP/EXTERNAL;ART 改回当前文件)→ 深审 2 轮 → 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.90
-5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68-6.89,含强化)**: ①新节内容先写成独立文本;②插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`,教训补充 2)——**禁止用 "## 七" 整行当 oldString**(6.82 曾吞标题;6.87 曾命中反引号内引用致双副本);③**立即 `grep -n "^### 6\.8\|^### 6\.9"` 校验连续递增 + `grep -n "^## 七"` 标题恰好 1 个 + `grep -n "^## 八"` 仍在**;④再做其他编辑
+   - strace 抓 sendto/recvfrom(DatagramSocket echo);组播 setsockopt(IP_ADD_MEMBERSHIP)可 strace
+   - InetAddress.getAllByName 查 DNS(nscd 不可用时直接 /etc/hosts/系统调用)
+   - NetworkInterface.getNetworkInterfaces 枚举(getifaddrs)
+4. 按第三节流程写 → 自查(脚本 /data/tmp/opencode/check.py,新引用文件先加 MAPPINGS;ART 改回当前文件)→ 深审 2 轮 → 回填大纲 ⚠️ 块 → 提交 → 更新 README → 更新本文件 §二/§五/§6.91
+5. **HANDOFF §6 追加新节的强制操作顺序(教训 6.68-6.90,含强化)**: ①新节内容先写成独立文本;②插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`,教训补充 2)——**禁止用 "## 七" 整行当 oldString**(6.82 曾吞标题;6.87 曾命中反引号内引用致双副本);③**立即 `grep -n "^### 6\.9"` 校验连续递增 + `grep -n "^## 七"` 标题恰好 1 个 + `grep -n "^## 八"` 仍在**;④再做其他编辑
 6. 43 域后 → 第 7 批 22/26/35/40/47
 ```
 **环境**: Linux 容器,无显示器(GUI 截图等用户在 Ubuntu 补);jdk11u 源码在本地;git 推送即部署(docsify 站点)。**上下文已满: 本文件写完后,新会话只读本文件即可继续,不要依赖旧会话的记忆。**
