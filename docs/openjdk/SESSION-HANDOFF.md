@@ -13,7 +13,7 @@
 
 **下一步(唯一,无选择)**: 33-jmx/01(内存服务,大纲 `planning/outlines/33-jmx-management/01-memory-service.md`,标题="JConsole 怎么知道 Eden 用了多少？— MemoryService + MemoryPool";第 6 批 4/5;29-02 悬念已指向 33)。
 
-**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,131 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(三次编造代码块被抓: 44-02 的 check_end_stack、11-01 的 is_loading_success、25-03 的 try_discover 签名);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
+**铁律**: ① 一篇一篇写,写完自查+深审 2 轮合格再下一篇;② 大纲/KP 的行号与机制描述是"线索不是事实",写作时必须重 grep——**实测每篇大纲有 2-15 处机制错误或行号漂移,139 篇无一例外**;③ 代码块贴真实源码(截取可,编造不可)——凭记忆写值必错,**"记忆中的代码"也要 grep 验证存在性**(三次编造代码块被抓: 44-02 的 check_end_stack、11-01 的 is_loading_success、25-03 的 try_discover 签名);④ 每篇写完整理后做深审,**必须 2 轮**(第 2 轮逐机制回源码质疑——第 2 轮才能抓到"顺理成章"的机制错误);⑤ 发现错误→修正文章→**回填大纲 ⚠️ 块**(防下次抄错)→提交;⑥ REVIEW 时正文与大纲的行号要一起过;⑦ 脚本语法错误要立即发现;⑧ 用户会追问"是不是 Kona 的问题"——实证 JDK 与源码版本要匹配,已下载 Temurin OpenJDK 11.0.32(见 §九)。
 
 ---
 
@@ -331,7 +331,7 @@
 2. **机制编造(最严重)**: socketAccept 设 SO_REUSEADDR(43-01,真实在 socketCreate 服务端分支)、socketClose0 linger→RST(43-01,真实 deferred close+marker_fd dup2)、readdir 返回 d_type(43-03,真实只返 d_name)、WatchKey 递归注册子目录(43-03,真实不递归)、Reason→Action 映射表(22-01)、populate_monitors 独立函数(22-02,真实 unpack_on_stack 内复制)、return entry 段(22-02,真实 unpack_frames 尾+解释器入口)——**机制描述全部回源码验证**
 3. **概念混淆**: trap_state vs trap_request(22-01,31 位 3+5+23 是 trap_request 的一次调用编码;trap_state 是 DataLayout::trap_bits 1+31 位格)、EPOLLET(43-01,JDK11 无此常量,Selector=level-triggered)、inotify_init1(43-03,真实 inotify_init 旧 API)、getifaddrs vs netlink(43-02,getifaddrs 是 glibc 内部走 netlink)——**同名不同物/版本演进要 grep 实证**
 4. **数字/配置臆测**: "~10 个 pool"(33-01,实证 8 个)、"~20 functions"(33-02,38 槽函数表)、PerBytecodeTrapLimit=100(22-01,真实 **4**;PerMethodTrapLimit=100/Cutoff 200/400)、readdir d_type 省 stat(43-03)——**数字一律实证**
-5. **行号漂移(每篇 2-15 处,131 篇无一例外)**: 本会话高发=函数实尾比标注短 1-3 行(如 writeableFlags set_flag 243-266 vs 标注 243-267)、read/sed 行号差 1(以 grep/awk 为准)、check.py 代码块标注起行错位(线性匹配掩盖,如 memoryManager.hpp:137-147→实为 138-147)——**每个 :数字 都 grep**
+5. **行号漂移(每篇 2-15 处,139 篇无一例外)**: 本会话高发=函数实尾比标注短 1-3 行(如 writeableFlags set_flag 243-266 vs 标注 243-267)、read/sed 行号差 1(以 grep/awk 为准)、check.py 代码块标注起行错位(线性匹配掩盖,如 memoryManager.hpp:137-147→实为 138-147)——**每个 :数字 都 grep**
 6. **悬念指向过期**: 33-03→域34 NMT、43-03→域44、22-02→域23 StubRoutines 全过期——**以 writing-order 实际批次为准(第 7 批 22→26→35→40→47)**
 
 **本会话新增教训(高优先级,6.82-6.94)**:
