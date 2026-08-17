@@ -1,7 +1,7 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-17 | 卷 2 写作中: **142/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 5) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 59 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(3,26 域 3/4)**;下一篇 26-g1-gc/04(分配,第 7 批 5/5)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
->**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26(3/4)→35→40→47)进行中,下篇 26-g1-gc/04**
+> **状态**: 2026-08-17 | 卷 2 写作中: **143/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 6) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 60 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(4,26 域完结)**;下一篇 35-dcmd/01(第 7 批 6/5→后续域)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+>**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26✅→35→40→47)进行中,下篇 35-dcmd/01**
 
 ---
 
@@ -47,7 +47,7 @@
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
 第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 ✅(3/3,28 域完结)** → **29 ✅(2/2,29 域完结)** → **33 ✅(3/3,33 域完结)** → **43 ✅(3/3,43 域完结,第 6 批收官)** — 第 6 批 32/32 全部完结
-第 7 批(上层): **22 ✅(2/2,22 域完结)** → **26 ✅(3/4)** → 35 → 40 → 47
+第 7 批(上层): **22 ✅(2/2,22 域完结)** → **26 ✅(4/4,26 域完结)** → 35 → 40 → 47
 ```
 
 **已完成 126 篇**(全部在 `docs/openjdk/vol-02/`):
@@ -98,7 +98,7 @@
 | **33-jmx** | 3 | `33-jmx/01-memory-service.md`(185)+`02-jmm-interface.md`(168)+`03-gc-notifier-flags.md`(161) | ✅ **33 域完结(本会话)** |
 | **43-nio-net** | 3 | `43-nio-net/01-tcp-epoll.md`(108)+`02-udp-dns.md`(122)+`03-filesystem.md`(167) | ✅ **43 域完结,第 6 批收官(本会话)** |
 | **22-deoptimization** | 2 | `22-deoptimization/01-deopt-decision.md`(149)+`02-unpack-frames.md`(119) | ✅ **22 域完结(本会话)** |
-| **26-g1-gc** | 3 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) / `26-g1-gc/03-rem-set.md`(436) | ✅ 26 域 3/4(本会话) |
+| **26-g1-gc** | 4 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) / `26-g1-gc/03-rem-set.md`(436) / `26-g1-gc/04-allocation.md`(473) | ✅ 26 域完结(本会话) |
 
 ### 本会话 57 篇的 commit 清单(按 git log 为准,2026-08-14/17)
 
@@ -943,6 +943,15 @@
 - **Pause 链路别漏 prepare/cleanup**: 真正 pause 入口不是只看 `update_rem_set`/`scan_rem_set`;开始前 `prepare_for_oops_into_collection_set_do` 先 `concatenate_logs()` 把各线程 partial dirty-card log 拼进 completed list 并 `_scan_state->reset()`(g1RemSet.cpp:511-516),结束后 `cleanup_after_oops_into_collection_set_do` 按 dirty-region buffer 并行清卡表(:518-524)
 - **写作期/REVIEW 收敛**: 初稿 16 cpp 块超 13 标准→删 3 个小块(`oops_into_collection_set_do`/`do_refinement_step`/HotCardCache 注释)改 prose;第 1 轮抓出 Update RS 语义不精确(它不只是补 RSet,目标在 CSet 时直接 `prefetch_and_push`)与并发精炼 closure 证据引用错(误引到 UpdateRS closure);第 2 轮逐块源码对齐通过;第 3 轮补 prepare/cleanup 尾巴;第 4 轮零问题收敛
 
+### 6.98 26-g1-gc/04(new Object() 在 G1 里走到哪？— 分配与晋升,26 域 4/4,大纲概念漂移 + 深审 3 轮,2026-08-17)
+
+- **大纲把分配层次画得太直线**: 真实普通对象路径不是"TLAB 满→新 Eden Region"这么简单,而是 TLAB refill → `G1CollectedHeap::attempt_allocation` → `G1Allocator::attempt_allocation` 先试 `attempt_retained_allocation` 再试当前 `mutator_alloc_region`。`MutatorAllocRegion` 额外维护 `_retained_alloc_region` 降低尾部碎片(g1AllocRegion.hpp:210-217/g1AllocRegion.cpp:275-287)
+- **G1AllocRegion 的关键不是 CAS 本身,而是发布顺序**: `attempt_allocation_locked` 先重试,失败后 `retire(true)` + `new_alloc_region_and_allocate`;新 region 必须先完成第一笔分配,再 `storestore` 后发布到 `_alloc_region`(g1AllocRegion.cpp:134-153)。所以 active alloc region 永远不为空
+- **slow path 别漏 GCLocker 分支**: 除了锁内重试+`do_collection_pause(_g1_inc_collection_pause)`,还有 `GCLocker::is_active_and_needs_gc()` 且 young 可扩时的 `_allocator->attempt_allocation_force(word_size)` 特判(g1CollectedHeap.cpp:438-447)。这轮 REVIEW 抓到并补进正文
+- **humongous 不是“找连续 Region 然后贴标签”那么简单**: `humongous_obj_allocate_initialize_regions` 必须先清零对象头,再设 starts/continues humongous 并 update remset tracker,`storestore` 之后才提 `top`,因为 concurrent refinement 可能正好扫到这些 region(g1CollectedHeap.cpp:204-210/:224-237/:255-290)
+- **humongous 分配也不是失败就 Full GC**: 先 `find_contiguous_only_empty`,再 `find_contiguous_empty_or_unavailable`,找到了就 `expand_at(..., workers())` 先扩堆/commit,最后才考虑更重整理(g1CollectedHeap.cpp:320-375)
+- **写作期/REVIEW 收敛**: 初稿 20 cpp 块超 13 标准→删 7 个小块改 prose;第 1 轮抓到 stray `n` 拼写错误与块数超标;第 2 轮抓到 slow path 漏 GCLocker force 分支、"大对象晋升很常见"表述过强需降级为“可能”;第 3 轮零问题收敛
+
 ## 七、用户偏好与纪律(重要,违背会被批评)` 整行作为 oldString、new 里不放该行**——直接删掉标题(6.82 编辑当场犯,立即 grep 修复);**修复方法**: 先 `grep -n "^## 七"` 确认消失→在 6.82 末尾与"## 八"之间把标题+§七 首条重新插回。任何 HANDOFF 编辑后必须 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验
 - **章节维护教训补充 2(6.87 事故,2026-08-16,REVIEW 时发现)**: 另一失败模式=**anchor 字符串匹配到教训文本里的反引号引用**——6.87/6.88 两节被插入到 6.68 教训段落中间("## 七、用户偏好与纪律(重要,违背会被批评)" 在 6.68 教训的反引号内出现,str.replace 命中第一个=教训内那句),导致 6.87/6.88 各出现两份副本+教训文本被劈开;修复=删除错位副本+拼回教训行+行号修正同步两份副本。**强化操作顺序**: ①插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`)或用 6.86 结尾的独有文本;②插入后必须 `grep -n "^### 6\.8"` 看**编号连续性**(6.68 后出现 6.87 就是事故信号);③任何编辑后 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验(标题数=1、编号严格递增)
 - 实证: 15-c2-loops-demo.txt
@@ -1395,7 +1404,8 @@
 - [x] 26-g1-gc/01——✅ 完结(正文+大纲 3149c88,341 行,含回填 ⚠️ 9 块/README 718c35d);**26 域 1/4,第 7 批 3/5**
 - [x] **26-g1-gc/02**——已完成;正文 `26-g1-gc/02-concurrent-marking.md`(422 行,13 代码块全逐字,素材 26-g1-gc-concurrent-mark-demo.txt 实测生成);26 域 2/4
 - [x] **26-g1-gc/03**——已完成;正文 `26-g1-gc/03-rem-set.md`(436 行,13 代码块全逐字);26 域 3/4
-- [ ] **26-g1-gc/04**——**下一篇**;大纲 `planning/outlines/26-g1-gc/04-allocation.md`(TLAB + humongous + promotion);26 域 4/4
+- [x] **26-g1-gc/04**——已完成;正文 `26-g1-gc/04-allocation.md`(473 行,13 代码块全逐字);**26 域完结**
+- [ ] **35-dcmd/01**——**下一篇**;按第 7 批顺序继续 35 → 40 → 47
 - [ ] 35-dcmd / 40-launcher / 47-instrumentation(第 7 批 5 域收官后全书 152/152)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
