@@ -1,7 +1,7 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-17 | 卷 2 写作中: **140/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 3) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 57 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc/01(1,26 域 1/4)**;下一篇 26-g1-gc/02(并发标记,第 7 批 3/5)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
-> **接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26(1/4)→35→40→47)进行中,下篇 26-g1-gc/02**
+> **状态**: 2026-08-17 | 卷 2 写作中: **141/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 4) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 58 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(2,26 域 2/4)**;下一篇 26-g1-gc/03(RSet,第 7 批 4/5)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+>**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26(2/4)→35→40→47)进行中,下篇 26-g1-gc/03**
 
 ---
 
@@ -47,7 +47,7 @@
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
 第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 ✅(3/3,28 域完结)** → **29 ✅(2/2,29 域完结)** → **33 ✅(3/3,33 域完结)** → **43 ✅(3/3,43 域完结,第 6 批收官)** — 第 6 批 32/32 全部完结
-第 7 批(上层): **22 ✅(2/2,22 域完结)** → **26 ✅(1/4)** → 35 → 40 → 47
+第 7 批(上层): **22 ✅(2/2,22 域完结)** → **26 ✅(2/4)** → 35 → 40 → 47
 ```
 
 **已完成 126 篇**(全部在 `docs/openjdk/vol-02/`):
@@ -98,7 +98,7 @@
 | **33-jmx** | 3 | `33-jmx/01-memory-service.md`(185)+`02-jmm-interface.md`(168)+`03-gc-notifier-flags.md`(161) | ✅ **33 域完结(本会话)** |
 | **43-nio-net** | 3 | `43-nio-net/01-tcp-epoll.md`(108)+`02-udp-dns.md`(122)+`03-filesystem.md`(167) | ✅ **43 域完结,第 6 批收官(本会话)** |
 | **22-deoptimization** | 2 | `22-deoptimization/01-deopt-decision.md`(149)+`02-unpack-frames.md`(119) | ✅ **22 域完结(本会话)** |
-| **26-g1-gc** | 1 | `26-g1-gc/01-heapregion.md`(341) | ✅ 26 域 1/4(本会话) |
+| **26-g1-gc** | 2 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) | ✅ 26 域 2/4(本会话) |
 
 ### 本会话 57 篇的 commit 清单(按 git log 为准,2026-08-14/17)
 
@@ -122,7 +122,7 @@
 
 **22-deoptimization/02(unpack 帧重建,22 域收官)**: 正文 46a39e5(119 行)→ 大纲回填 ⚠️ 8 块 86f553c→ README 2cf98dc(139/152,22 域完结)→ 素材 22-deopt-unpack-demo.txt
 
-**26-g1-gc/01(堆被切成 2048 块 — HeapRegion + G1CollectedHeap,26 域 1/4)**: 正文+大纲回填 3149c88(341 行,13 代码块全逐字)→ README 718c35d(140/152,26 域 1/4)
+**26-g1-gc/01(堆被切成 2048 块 — HeapRegion + G1CollectedHeap,26 域 1/4)**: 正文+大纲回填 3149c88(341 行,13 代码块全逐字)→ README 718c35d(140/152,26 域 1/4);REVIEW 第 3-4 轮 0dbea8c(6 处)/第 5 轮 9797ba6(2 处)/第 6 轮 460c1b6(1 处)/第 8 轮 2d55cfa(实证 4MB 数组跨 Region 数数学错误链: 素材(region 2MB)注释+25-02 引用+本文三处联动修正,32MB 堆→region 1MB,524290 words→5 个 Region)+25-02 同步/第 10 轮 3f9ccf1(initialize 范围 1533-1727→1533-1735)/第 11 轮 f70a449(前置依赖 09-01 描述失真);素材目录被 gitignore(素材本地修正不入库)
 
 **20-vm-operations/02(后台任务与启动序列,20 域收官)**: 正文 4e942c1(372 行)→ 回填 ⚠️ 14 组 → README 7aae8ba(84/152,20 域完结,第 5 批 11/13)→ 素材 20-background-init-demo.txt→ **第 3 轮** e1a7c49(01 篇后续链接文本与 02 实际标题对齐;02 关联域去 04-logging 改 39-runtime-mon;设计意图表述收窄到注释原意;VMThread 优先级表述精确化"必须低于 WatcherThread")→ **第 4 轮** 1bc3a42(①ServiceThread 行号与职责对齐——serviceThread.hpp:30 类注释+:84 entry 循环,:107-139 JVMTI/GCNotifier/DCmd 三事件;②Agent 启动时序——线程列表 :3804 才初始化,代理在调用者线程上;③sleep 重算循环 :1435-1446;④关键设计引注回 :1369-1371 原意;⑤stubGenerator 注释 :5974-5976;⑥AbortVMOnVMOperationTimeout 补默认 false globals.hpp:528;⑦静态数组块补 task.cpp:32-33 标注;⑧ServiceThread 'GC 低内存通知'→'GC 通知(GCNotifier)';验证 develop flag 在 PRODUCT 下是 const 常量→CleanChunkPoolAsync 恒 true)
 
@@ -1305,6 +1305,13 @@
 - **深审技巧**: 第 1 轮抓行号/编造,第 2 轮抓"顺理成章"——"1MB 堆+2MB 大页"应为"1MB **Region**+2MB 大页"、"-Xms2g commit 1024 个"补"4GB 堆配置(Region 2MB)"前提、"堆顶之外完全没映射"→"未 commit 部分是 PROT_NONE";第 2 轮 5 处全部是这种细节
 - 素材: 复用 25-gc-heap-alloc-demo.txt(4MB 数组→2 Region→`Pause Young (Concurrent Start) (G1 Humongous Allocation)`,25-02 已证,本篇引用)
 
+### 6.96 26-g1-gc/02(并发标记 + SATB — 应用还在跑,你怎么知道谁活着?,26 域 2/4,大纲 7 处漂移 + 写作期抓错 8 处,2026-08-17)
+
+- **大纲漂移 7 处(均回填 ⚠️)**: ①CMTask 继承 **TerminatorTerminator**(g1ConcurrentMark.hpp:622)非 AbstractGangTask——并发标记不依赖 AbstractWorkGang 的 GangTask 分发;②**cleanup 不算 liveness 不选 CSet**(cleanup() g1ConcurrentMark.cpp:1356-1417 只做 tracking 收尾)——per-region liveness 在 remark 内 Update Remembered Set Tracking Before Rebuild(update_marked_bytes)入账,CSet 选择是 05 篇主题;③**Rebuild RS 不是 remark 第 4 步**——是 remark 后并发阶段(Concurrent Rebuild Remembered Sets,run_service 序列);④双 bitmap 非"每个对象 2 bits 一个 bitmap"——两个独立 G1CMBitMap(`_mark_bitmap_1/_mark_bitmap_2`)+指针(`_prev_mark_bitmap/_next_mark_bitmap`,:304-310),成员名 `_prevMarkBitMap` 是错的;⑤pre-write barrier 行号 :40-80→实际 **:36-46**(g1BarrierSet.inline.hpp),enqueue 在 **g1BarrierSet.cpp:61-73** 非 inline;⑥remark 行号 1139-1200→**1139-1227**,补 finalize_marking :1858-1890/cleanup :1356-1417/G1CMRemarkTask::work :1828-1855(Threads::threads_do 扫线程根+do_marking_step 大超时,非"直接处理 SATB buffer");⑦"~15-20 cycles 开销" 是推断(无源码直证)——正文标注为推断,只用实证值(bitmap 1/64≈1.6%/个)
+- **写作期抓错 8 处**: ①cpp 块 14 个超 13 标准→删单行 swap_mark_bitmaps 块入正文;②代码块对齐失败 8 次(标注范围不含闭合行/log_info 与 verify_during_pause 被拆行/make_reference_grey 自创注释/溢出块行号 1217-1227 实为 1214-1220/编辑误吞 ```)全修复;③ParallelTaskTerminator :348→:327;④do_marking_step 定义 :2592(声明在 inline);⑤素材日志与正文逐字核对
+- **实证方法(新)**: 并发标记素材必须**实测生成**——合成日志会漏细节。ConcMarkDemo.java(512KB 数组×48≈24MB 存活,-Xms32m -Xmx64m -XX:InitiatingHeapOccupancyPercent=30 -Xlog:gc -Xlog:gc+marking=info): 34M 堆→region 1MB;512KB 数组(16B 头)超 region/2 阈值→**humongous→Concurrent Start**;完整 Cycle 2.541ms(Remark 0.168ms+Cleanup 0.021ms 两暂停共 0.189ms<8%);`-Xlog:gc+phases=debug` 得 remark 内部阶段,与 remark()/cleanup() 函数一一对应(Finalize Marking→Reference Processing→Weak Processing→Class Unloading→Flush Task Caches→Update RemSet Tracking Before/After Rebuild→Reclaim Empty Regions→Purge Metaspace→Report Object Count)
+- **技术要点**: run_service 阶段序列(g1ConcurrentMarkThread.cpp:247-385)是并发循环的骨架: Clear Claimed Marks→Scan Root Regions(root regions=initial-mark 暂停时存活的 survivor,G1CMRootRegions :241 注释 :228-240)→Mark From Roots(循环,可 Preclean 提前暂停)—**Pause Remark**→Concurrent Rebuild Remembered Sets—**Pause Cleanup**→Cleanup for Next Mark;make_reference_grey(g1ConcurrentMark.inline.hpp:213-254)is_below_finger 判断防重复入栈;par_mark(CAS,bitMap.inline.hpp:41-58);do_marking_step 默认 10ms 时间片(G1ConcMarkStepDurationMillis g1_globals.hpp:72)每步自检终止条件;add_to_marked_bytes→`_next_marked_bytes`(heapRegion.hpp:403-406)
+
 ## 七、用户偏好与纪律(重要,违背会被批评)
 
 1. **严格按规划,不做多余选择**: 拓扑定了顺序就逐项推进——不要问"还是写 X?"(曾因制造选择被批评)
@@ -1377,7 +1384,8 @@
 - [x] 22-deoptimization/01——✅ 完结(正文 b561914,149 行/大纲回填 ⚠️ 8 块 a4e0eda/README fa1353a);**22 域 1/2**
 - [x] 22-deoptimization/02——✅ 完结(正文 46a39e5,119 行/大纲回填 ⚠️ 8 块 86f553c/README 2cf98dc);**22 域完结,第 7 批 1/5 域**
 - [x] 26-g1-gc/01——✅ 完结(正文+大纲 3149c88,341 行,含回填 ⚠️ 9 块/README 718c35d);**26 域 1/4,第 7 批 3/5**
-- [ ] **26-g1-gc/02**——**下一篇**;大纲 `planning/outlines/26-g1-gc/02-concurrent-mark.md`(并发标记);26 域 2/4;26-01 悬念已指向它
+- [x] **26-g1-gc/02**——已完成;正文 `26-g1-gc/02-concurrent-marking.md`(422 行,13 代码块全逐字,素材 26-g1-gc-concurrent-mark-demo.txt 实测生成);26 域 2/4
+- [ ] **26-g1-gc/03**——**下一篇**;大纲 `planning/outlines/26-g1-gc/03-rem-set.md`(RSet + CardTable);26 域 3/4;26-02 悬念已指向它
 - [ ] 26-g1-gc/03(RSet)、26-g1-gc/04(分配)——26 域 4 篇
 - [ ] 35-dcmd / 40-launcher / 47-instrumentation(第 7 批 5 域收官后全书 152/152)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
