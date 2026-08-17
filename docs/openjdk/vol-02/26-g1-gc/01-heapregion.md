@@ -276,7 +276,7 @@ bool os::pd_uncommit_memory(char* addr, size_t size) {
   }
 ```
 
-对象 **> Region/2**(严格大于——TLAB 也封顶在阈值之下,正好一半的对象仍走普通分配)才走 `attempt_allocation_humongous`(g1CollectedHeap.cpp:320-384)——需要几个 Region 由 `humongous_obj_size_in_regions = align_up(word_size, GrainWords) / GrainWords`(实现 g1CollectedHeap.cpp:311-314)算,然后**找一段连续的 Free Region**(`find_contiguous_only_empty`,不行就 `find_contiguous_empty_or_unavailable` 并 expand_at 新 commit),第一个标 `StartsHumongous`、后面的标 `ContinuesHumongous`(:375 的 `humongous_obj_allocate_initialize_regions`)。*humongous 对象在 evacuation 时不搬——它太大,搬不动;回收靠"Eager Reclaim"(整段没人引用就整段释放)或 Full GC 压缩。这也是为什么对象在 Region 里"横躺"而不切割: 对象不可跨 Region 分片。*
+对象 **> Region/2**(严格大于——TLAB 也封顶在阈值之下,正好一半的对象仍走普通分配)才走 `attempt_allocation_humongous`(g1CollectedHeap.cpp:320-387)——需要几个 Region 由 `humongous_obj_size_in_regions = align_up(word_size, GrainWords) / GrainWords`(实现 g1CollectedHeap.cpp:311-314)算,然后**找一段连续的 Free Region**(`find_contiguous_only_empty`,不行就 `find_contiguous_empty_or_unavailable` 并 expand_at 新 commit),第一个标 `StartsHumongous`、后面的标 `ContinuesHumongous`(:375 的 `humongous_obj_allocate_initialize_regions`)。*humongous 对象在 evacuation 时不搬——它太大,搬不动;回收靠"Eager Reclaim"(整段没人引用就整段释放)或 Full GC 压缩。这也是为什么对象在 Region 里"横躺"而不切割: 对象不可跨 Region 分片。*
 
 **[实证](materials/commands/25-gc-heap-alloc-demo.txt)**: 4MB 数组在 2MB Region 的堆上正好 2 个 Region——`GC(0) Pause Young (Concurrent Start) (G1 Humongous Allocation)`;分配到 OOM 时 `Pause Full (G1 Humongous Allocation)`——cause 与流程一一对应(25-02 篇已证)。
 
@@ -311,7 +311,7 @@ G1CollectedHeap::do_collection_pause_at_safepoint(double target_pause_time_ms) {
         free_collection_set(&_collection_set, evacuation_info, surviving_young_words);
 ```
 
-骨架是: **① `finalize_collection_set` 按暂停目标选 Region 组队(候选按 `gc_efficiency` 排序——`reclaimable_bytes()/预测耗时` 的比值,由 §1.3 的 `_prev_marked_bytes` 存活测度推导,排序比较在 collectionSetChooser.cpp:52-53)→ ② `pre_evacuate_collection_set` → ③ `evacuate_collection_set`(GC worker 把存活对象拷到 GC alloc region,标记对象的新家)→ ④ `free_collection_set`(清空 Eden 整组 Region 还回 free list,变 Free 标签)→ ⑤ 收尾时按需 `expand`(:3022-3034)**。*Eden 一次性全清空、Survivor 存活者 `relabel_as_old` 贴 Old——这就是"Region 类型动态流转"的执行现场。shrink 不走 pause——只在 Full GC 之后由 `resize_if_necessary_after_full_collection`( :1219-1230)按 `MaxHeapFreeRatio` 判定容量超额时调用。*
+骨架是: **① `finalize_collection_set` 按暂停目标选 Region 组队(候选按 `gc_efficiency` 排序——`reclaimable_bytes()/预测耗时` 的比值,由 §1.3 的 `_prev_marked_bytes` 存活测度推导,排序比较在 collectionSetChooser.cpp:52-53)→ ② `pre_evacuate_collection_set` → ③ `evacuate_collection_set`(GC worker 把存活对象拷到 GC alloc region,标记对象的新家)→ ④ `free_collection_set`(清空 Eden 整组 Region 还回 free list,变 Free 标签)→ ⑤ 收尾时按需 `expand`(:3022-3034)**。*Eden 一次性全清空、Survivor 存活者 `relabel_as_old` 贴 Old——这就是"Region 类型动态流转"的执行现场。shrink 不走 pause——只在 Full GC 之后由 `resize_if_necessary_after_full_collection`( :1155-1231)按 `MaxHeapFreeRatio` 判定容量超额时调用(`shrink` 在 :1229)。*
 
 Full GC 走 `do_full_collection`( :1124)→ `G1FullCollector`(g1FullCollector.cpp:167-179,逐字):
 
