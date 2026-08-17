@@ -54,7 +54,7 @@ static char* anon_mmap(char* requested_addr, size_t bytes, bool fixed) {
 
 - [man 2 mmap]
 - [内核: overcommit 策略——`vm.overcommit_memory=0`(默认 heuristic):内核估算"有没有足够物理+swap",允许合理超量;`=1`(always):永远允许;`=2`(strict):严格限制。JVM 依赖 heuristic——reserve 16GB 在 8GB 机器上可能成功(视内核估算),strict 模式直接失败]
-- [man 5 proc](`/proc/sys/vm/overcommit_memory`)
+- man 5 proc: `/proc/sys/vm/overcommit_memory`
 
 **关键设计 (斜体)**: *为什么 reserve 要用 PROT_NONE 而不是可读写的空页?注释写得很直白:"fail early if we touch an uncommitted page"——未 commit 的页本来就不该碰,让它在第一时间以 SIGSEGV 暴露,而不是等到 swap 空间把错误"兜住"、程序带着坏数据跑下去。这是"失败要快"原则在内存管理上的体现。*
 

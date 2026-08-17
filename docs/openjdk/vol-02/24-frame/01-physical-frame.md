@@ -164,7 +164,7 @@ frame frame::sender_for_interpreter_frame(RegisterMap* map) const {
 }
 ```
 
-解释器帧在进入方法时就把 caller 的 sp 存进帧内(interpreter_frame_sender_sp,fp[-1],偏移定义在 frame_x86.hpp:69),caller 的 pc 取 [fp+1](return_addr_offset=1)。**解释器帧的"帧内布局"是约定死的偏移表**——frame_x86.hpp:60-73 的枚举一口气定义了 link=0/return=1/sender_sp=2,解释器侧 sender_sp=-1/method=-2/mdp=-3/cache=-4/locals=-5/bcp=-6/initial_sp=-7……负偏移在 fp 下方(表达式栈方向),正偏移在 fp 上方(参数/返回地址方向)。
+解释器帧在进入方法时就把 caller 的 sp 存进帧内(interpreter_frame_sender_sp,fp[-1],偏移定义在 frame_x86.hpp:69),caller 的 pc 取 `fp+1`（`return_addr_offset=1`）。**解释器帧的"帧内布局"是约定死的偏移表**——frame_x86.hpp:60-73 的枚举一口气定义了 link=0/return=1/sender_sp=2,解释器侧 sender_sp=-1/method=-2/mdp=-3/cache=-4/locals=-5/bcp=-6/initial_sp=-7……负偏移在 fp 下方(表达式栈方向),正偏移在 fp 上方(参数/返回地址方向)。
 
 ### 栈顶入口: JavaFrameAnchor
 

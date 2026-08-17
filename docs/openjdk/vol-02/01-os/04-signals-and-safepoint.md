@@ -28,7 +28,7 @@ handler 先检查 faulting address 是否落在**当前线程的栈保护区**�
 - 落在 **red zone**(:393 `in_stack_red_zone`)→ yellow 都用完了,连抛异常都不够 → "An irrecoverable stack overflow has occurred"(:397)→ fatal
 
 - [内核: siginfo_t 结构——si_signo(信号号,SIGSEGV=11)、si_code(SEGV_MAPERR=地址未映射/SEGV_ACCERR=权限错误)、si_addr(出错地址)。handler 第三个参数 ucontext_t 保存 fault 时完整 CPU 状态]
-- [man 2 sigaction](SA_SIGINFO flag)
+- man 2 sigaction: `SA_SIGINFO` flag
 
 ### 阶段 2:安全点轮询?(os_linux_x86.cpp:431)
 

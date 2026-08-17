@@ -194,7 +194,7 @@ copy_bytes_backward(stubGenerator_x86_64.cpp:1354-1451)与正向的宽度分级�
 
 C2 展开 System.arraycopy 时,只有两个偏移都是常量且 `src_off >= dst_off`(或两偏移相同)才敢声明 disjoint(basictype2arraycopy,macroArrayCopy.cpp:216-244,注释 "We can also treat a copy with a destination index less that the source index as disjoint since a low->high copy will work correctly in this case")——否则一律交给 conjoint 桩现场测。而普通手写循环里,C2 面对同一数组上可能重叠的读写,没有这个运行时判定,只能保守生成检查或退化。
 
-[实证:] 重叠语义正确性——bench 输出 `overlap forward: 0 1 2 3 0 1 2 3 4 5 6 7 12 13 14 15`(materials/commands/23-arraycopy-bench.txt): 把 ov[0..7] 拷到 ov[4..11](正方向重叠),结果与 memmove 一致——源中被覆盖的部分用的是已复制的值,而不是被破坏后的值。
+[实证:] 重叠语义正确性——bench 输出 `overlap forward: 0 1 2 3 0 1 2 3 4 5 6 7 12 13 14 15`(materials/commands/23-arraycopy-bench.txt): 把 `ov[0..7]` 拷到 `ov[4..11]`（正方向重叠）,结果与 memmove 一致——源中被覆盖的部分用的是已复制的值,而不是被破坏后的值。
 
 ## 4. 对象数组: 不能裸拷
 
