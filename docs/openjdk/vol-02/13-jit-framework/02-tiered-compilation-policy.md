@@ -94,7 +94,7 @@ bool TieredThresholdPolicy::call_predicate_helper(int i, int b, double scale, Me
 }
 ```
 
-判定是"**单计数达标 或 双计数协同达标**": `i >= TierXInvocationThreshold || (i >= TierXMinInvocationThreshold && i+b >= TierXCompileThreshold)`。一个容易被忽略的细节: **level 3→4 的判定看的是 MDO 的计数增量**(common 的 full_profile 分支: `mdo->invocation_count_delta()`/`backedge_count_delta()`,tieredThresholdPolicy.cpp:802-803——即 level 3 编译代码运行期间新增的计数,而非方法原始计数);`would_profile()` 返回 false(MDO 已收够数据)时更是直接升 4(:807-809)。默认值([实证:](planning/outlines/00-jvm-tools/materials/commands/13-jit-tiered-demo.txt) PrintFlagsFinal):
+判定是"**单计数达标 或 双计数协同达标**": `i >= TierXInvocationThreshold || (i >= TierXMinInvocationThreshold && i+b >= TierXCompileThreshold)`。一个容易被忽略的细节: **level 3→4 的判定看的是 MDO 的计数增量**(common 的 full_profile 分支: `mdo->invocation_count_delta()`/`backedge_count_delta()`,tieredThresholdPolicy.cpp:802-803——即 level 3 编译代码运行期间新增的计数,而非方法原始计数);`would_profile()` 返回 false(MDO 已收够数据)时更是直接升 4(:807-809)。默认值([实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/13-jit-tiered-demo.txt) PrintFlagsFinal):
 
 - **解释器→C1(Tier3 档)**: `Tier3InvocationThreshold=200`、`Tier3MinInvocationThreshold=100`、`Tier3CompileThreshold=2000`——调用 200 次,或 100 次后调用+回边共 2000;
 - **C1→C2(Tier4 档)**: `Tier4InvocationThreshold=5000`、`Tier4MinInvocationThreshold=600`、`Tier4CompileThreshold=15000`;
@@ -131,11 +131,11 @@ bool TieredThresholdPolicy::call_predicate_helper(int i, int b, double scale, Me
 
 **计数重置**: `handle_counter_overflow`(:273)把溢出计数**打上 carry 标志**(`set_carry_if_necessary`,:266-269,计数过半就置位)——防止刚编译完又立刻触发。
 
-[实证:](planning/outlines/00-jvm-tools/materials/commands/13-jit-tiered-demo.txt) `CiDemo::work` 的完整 tier 链(PrintCompilation): `%3`(OSR 到 tier3)→ `3`(普通 tier3)→ `%4`(OSR 到 tier4)→ `4`(普通 tier4),旧的 `%3`/`%4` 依次 `made not entrant`——与 08-03 的 CounterDemo 链(tier3→`%`tier4@4→tier4→made not entrant)同款。注意实证里先出现 `%3` 再出现 `3`——**循环热点先走 OSR**,普通入口随后补上,正是本篇两条事件路的实况。
+[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/13-jit-tiered-demo.txt) `CiDemo::work` 的完整 tier 链(PrintCompilation): `%3`(OSR 到 tier3)→ `3`(普通 tier3)→ `%4`(OSR 到 tier4)→ `4`(普通 tier4),旧的 `%3`/`%4` 依次 `made not entrant`——与 08-03 的 CounterDemo 链(tier3→`%`tier4@4→tier4→made not entrant)同款。注意实证里先出现 `%3` 再出现 `3`——**循环热点先走 OSR**,普通入口随后补上,正是本篇两条事件路的实况。
 
 ## 4. TieredStopAtLevel: 把阶梯砍短
 
-`TieredStopAtLevel`(默认 4)决定最高允许的级别——`common` 返回前 `MIN2(next_level, TieredStopAtLevel)`(:815)。[实证:](planning/outlines/00-jvm-tools/materials/commands/13-jit-tiered-demo.txt) `-XX:TieredStopAtLevel=1` 时 CiDemo::work 只编出 `%1`/`1`(纯 C1,无 profile,就是大纲设想的 L1 形态——但它不是"阶梯的一级",而是"砍到只剩一级");`=3` 时最高 `%3`/`3`(full profile 封顶,不碰 C2)。调试/对比编译器行为时这是最常用的旋钮。
+`TieredStopAtLevel`(默认 4)决定最高允许的级别——`common` 返回前 `MIN2(next_level, TieredStopAtLevel)`(:815)。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/13-jit-tiered-demo.txt) `-XX:TieredStopAtLevel=1` 时 CiDemo::work 只编出 `%1`/`1`(纯 C1,无 profile,就是大纲设想的 L1 形态——但它不是"阶梯的一级",而是"砍到只剩一级");`=3` 时最高 `%3`/`3`(full profile 封顶,不碰 C2)。调试/对比编译器行为时这是最常用的旋钮。
 
 ## 核心悬念
 

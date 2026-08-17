@@ -16,7 +16,7 @@
 - `-Xshare:auto` → true + RequireSharedSpaces=false(:2789-2793)——失败回退;
 - `-Xshare:off` → UseSharedSpaces=false(:2797-2801)。
 
-`RequireSharedSpaces` 是"必须成功"与"失败可回退"的全部区别,下面每一道校验的门都用它决定是退出还是关共享继续跑。另外两个前置约束: 压缩指针必须开(UseCompressedOops/UseCompressedClassPointers 都要求,arguments.cpp:3501-3503)——窄指针是 01 篇指针重定位的数学基础;归档路径缺省由 `os::jvm_path` 推导,拼上 `classes.jsa`(arguments.cpp:3510-3524)。[实证:](planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 无 `-XX:SharedArchiveFile` 时 dump 产物落在 **`lib/server/classes.jsa`**(jvm_path 解析到 lib/server 目录)。
+`RequireSharedSpaces` 是"必须成功"与"失败可回退"的全部区别,下面每一道校验的门都用它决定是退出还是关共享继续跑。另外两个前置约束: 压缩指针必须开(UseCompressedOops/UseCompressedClassPointers 都要求,arguments.cpp:3501-3503)——窄指针是 01 篇指针重定位的数学基础;归档路径缺省由 `os::jvm_path` 推导,拼上 `classes.jsa`(arguments.cpp:3510-3524)。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 无 `-XX:SharedArchiveFile` 时 dump 产物落在 **`lib/server/classes.jsa`**(jvm_path 解析到 lib/server 目录)。
 
 启动链走到内存子系统时,`Metaspace::global_initialize`(metaspace.cpp:1294)按 UseSharedSpaces 分流(:1300-1305)→ `MetaspaceShared::initialize_runtime_shared_and_meta_spaces`(metaspaceShared.cpp:216)。真正的动作在 :229 一行: `mapinfo->initialize() && map_shared_spaces(mapinfo)`——**先校验、后映射**,两步都不行就进 else 分支断言"归档未关且共享已关"。后面三节拆这两步。
 
@@ -37,7 +37,7 @@
   }
 ```
 
-[实证:](planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 把归档前 4 字节改成 0,启动即报 `_magic expected: 0xf00baba2 / actual: 0x00000000 / UseSharedSpaces: The shared archive file has a bad magic number.`——auto 模式下一行日志后继续启动(版本行少了 "sharing");`-Xshare:on` 则是另一个极端(素材里以"归档不存在"触发): `An error has occurred while processing the shared archive file. / Error occurred during initialization of VM / Unable to use shared archive.`,进程直接退出。
+[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 把归档前 4 字节改成 0,启动即报 `_magic expected: 0xf00baba2 / actual: 0x00000000 / UseSharedSpaces: The shared archive file has a bad magic number.`——auto 模式下一行日志后继续启动(版本行少了 "sharing");`-Xshare:on` 则是另一个极端(素材里以"归档不存在"触发): `An error has occurred while processing the shared archive file. / Error occurred during initialization of VM / Unable to use shared archive.`,进程直接退出。
 
 其余核对项: `_version` 与 CURRENT_CDS_ARCHIVE_VERSION(:545-550);`_jvm_ident` 字符串——**不同 build 的 libjvm.so 不共享**,否则常量池布局、符号表格式全对不上(:561-574);`VerifySharedSpaces` 开启时 `_header->compute_crc()` 校验头部 CRC(:576-584);最后按头里记录的最后一个 region 偏移检查文件是否被截断(:602-608)。
 
@@ -108,7 +108,7 @@ char* os::pd_map_memory(int fd, const char* file_name, size_t file_offset,
 
 **关键设计 (斜体)**: *为什么必须同址?01 篇的压实把所有内部指针从"绝对地址"改成了"距归档基址的偏移"——dump 时 `Universe::set_narrow_klass_base(_shared_rs.base())` 让窄指针与归档基址重合(metaspaceShared.cpp:305)。因此只要 load 端在同一地址映射,ro 区指针原样有效、零修正;rw 区仍有少量**加载期 patch**——方法入口 trampoline 与适配器槽在运行期才填(第 6 节),这正是 01 篇留给 02 篇的尾巴;代价是这段地址空间在启动时必须真空——被别的预留(堆、code cache)占了就映射失败,auto 模式回退,on 模式退出(:2088-2092)。*
 
-映射成功后还有两件收尾: ① 压缩类空间紧贴 CDS 之上分配(`Metaspace::allocate_metaspace_compressed_klass_ptrs(cds_end, cds_address)`,metaspaceShared.cpp:238,布局见 10-03 域)并设 `narrow_klass_range`(:243);② `map_heap_regions`(:241 → filemap.cpp:1096)——把字符串区(st0)和 open archive 区(oa0)映射进 **G1 堆**: `map_heap_data` 在堆里 `alloc_archive_regions` 划出归档区(filemap.cpp:1140)再 mmap 数据。JDK11 的堆区允许搬家: oop 编码不一致时按 `runtime_heap_end - dumptime_heap_end` 算 relocation delta(filemap.cpp:1042-1058),由 oopmap 在加载期修补(`patch_archived_heap_embedded_pointers`,filemap.cpp:1188);[实证:](planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 同配置启动打印 `relocation delta = 0 bytes`,`-Xmx1g` 启动打印 `incompatible oop encoding mode` + `delta = -28991029248 bytes`,归档照用。**压缩类指针(narrow klass)**编码不一致则整段堆数据弃用(filemap.cpp:1021-1025)。
+映射成功后还有两件收尾: ① 压缩类空间紧贴 CDS 之上分配(`Metaspace::allocate_metaspace_compressed_klass_ptrs(cds_end, cds_address)`,metaspaceShared.cpp:238,布局见 10-03 域)并设 `narrow_klass_range`(:243);② `map_heap_regions`(:241 → filemap.cpp:1096)——把字符串区(st0)和 open archive 区(oa0)映射进 **G1 堆**: `map_heap_data` 在堆里 `alloc_archive_regions` 划出归档区(filemap.cpp:1140)再 mmap 数据。JDK11 的堆区允许搬家: oop 编码不一致时按 `runtime_heap_end - dumptime_heap_end` 算 relocation delta(filemap.cpp:1042-1058),由 oopmap 在加载期修补(`patch_archived_heap_embedded_pointers`,filemap.cpp:1188);[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 同配置启动打印 `relocation delta = 0 bytes`,`-Xmx1g` 启动打印 `incompatible oop encoding mode` + `delta = -28991029248 bytes`,归档照用。**压缩类指针(narrow klass)**编码不一致则整段堆数据弃用(filemap.cpp:1021-1025)。
 
 ## 4. 第三道门: initialize_shared_spaces——装配"杂项数据"
 
@@ -257,7 +257,7 @@ InstanceKlass* SystemDictionaryShared::find_or_load_shared_class(
 
 [C++:] 归档类 `is_rewritten()` 为 true(dump 端重写 + nofast 化已完成,08-04 篇),所以**跳过 verify_code 与 rewrite_class**;走 else-if 分支调 `SystemDictionaryShared::check_verification_constraints`——这就是 44 域"验证约束延迟化"的兑现: dump 时 `ClassVerifier` 的 `is_reference_assignable_from` 遇到无法当场解析的类层级检查,`DumpSharedSpaces && SystemDictionaryShared::add_verification_constraint(...)` 把它记进字典条目并当场放行(verificationType.cpp:97-103);load 端 `check_verification_constraints`(systemDictionaryShared.cpp:911-941)逐条重跑 `VerificationType::resolve_and_check_assignability`,不满足就抛 **VerifyError**(:937)。**ClassFileParser 没有出现、Verifier 没有整体重跑、字节码没有重写**——01 篇说的"每次启动的重复劳动"就是被这三件事省掉的。
 
-收尾: `print_class_load_logging`(systemDictionary.cpp:1350)——实证里每行 `[class,load] java.lang.Object source: shared objects file` 就是它;[实证:](planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) AppCDS 归档下应用类 T 同样 `T source: shared objects file`。之后 `define_instance_class` 把它挂进加载器的字典、加入类层级。注意状态机并没有"从归档继承 loaded"——dump 时 `remove_unshareable_info` 把 `_init_state` 重置回 allocated(instanceKlass.cpp:2293-2297,注释明说 loaded 要在运行期由 `add_to_hierarchy` 设置);load 端 `restore_unshareable_info` 的断言也要求状态 < loaded(:2349)。所以加载状态机照走一遍,但每一步的重活都已被跳过——解析(没有 ClassFileParser)、验证(只剩约束)、重写(没有 Rewriter)。
+收尾: `print_class_load_logging`(systemDictionary.cpp:1350)——实证里每行 `[class,load] java.lang.Object source: shared objects file` 就是它;[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) AppCDS 归档下应用类 T 同样 `T source: shared objects file`。之后 `define_instance_class` 把它挂进加载器的字典、加入类层级。注意状态机并没有"从归档继承 loaded"——dump 时 `remove_unshareable_info` 把 `_init_state` 重置回 allocated(instanceKlass.cpp:2293-2297,注释明说 loaded 要在运行期由 `add_to_hierarchy` 设置);load 端 `restore_unshareable_info` 的断言也要求状态 < loaded(:2349)。所以加载状态机照走一遍,但每一步的重活都已被跳过——解析(没有 ClassFileParser)、验证(只剩约束)、重写(没有 Rewriter)。
 
 ## 7. 符号与字符串: CompactHashtable 的 O(1) 查找
 
@@ -308,7 +308,7 @@ inline T CompactHashtable<T,N>::lookup(const N* name, unsigned int hash, int len
 
 ## 8. 堆对象: 子图恢复与静态字段
 
-字符串之外,归档里还有一批**对象子图**——`IntegerCache`、`ImmutableCollections` 的 ListN/SetN/MapN、`Configuration`、`ArchivedModuleGraph` 等类的静态字段指向的对象(heapShared.cpp:728 `archive_static_fields` 归档)。load 端不在启动时一锅端: 各宿主类静态初始化时自己调 `VM.initializeFromArchive`(VM.java:426)→ `JVM_InitializeFromArchive`(jvm.cpp:3617-3620)→ `HeapShared::initialize_from_archived_subgraph`(heapShared.cpp:271): 按 klass 找记录(:283-285),把子图里所有对象的类 resolve 出来、**确认还是归档里的同一个类**(否则放弃,:294-311),再把记录里的归档对象 materialize 回 java_mirror 的对应字段(:324-336)。[实证:](planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 同配置启动日志 `Trying to map heap data: region[4] at 0x00000007bfe00000, size = 442368 bytes`(st0 字符串区)与 `region[6]`(oa0 开放归档区)就是这两块堆区落地。
+字符串之外,归档里还有一批**对象子图**——`IntegerCache`、`ImmutableCollections` 的 ListN/SetN/MapN、`Configuration`、`ArchivedModuleGraph` 等类的静态字段指向的对象(heapShared.cpp:728 `archive_static_fields` 归档)。load 端不在启动时一锅端: 各宿主类静态初始化时自己调 `VM.initializeFromArchive`(VM.java:426)→ `JVM_InitializeFromArchive`(jvm.cpp:3617-3620)→ `HeapShared::initialize_from_archived_subgraph`(heapShared.cpp:271): 按 klass 找记录(:283-285),把子图里所有对象的类 resolve 出来、**确认还是归档里的同一个类**(否则放弃,:294-311),再把记录里的归档对象 materialize 回 java_mirror 的对应字段(:324-336)。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 同配置启动日志 `Trying to map heap data: region[4] at 0x00000007bfe00000, size = 442368 bytes`(st0 字符串区)与 `region[6]`(oa0 开放归档区)就是这两块堆区落地。
 
 ## 核心悬念
 

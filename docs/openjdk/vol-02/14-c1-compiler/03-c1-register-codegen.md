@@ -24,7 +24,7 @@ HIR/LIR 里的操作数是**虚拟寄存器**(无数量限制);机器只有 16 �
 
 ## 3. x87 与实证边界
 
-`c1_LinearScan_x86.cpp` 有 FPU 栈分配器(`allocate_fpu_stack` :35)——**仅 x87 模式**(`use_fpu_stack_allocation`,JDK11 x86_64 默认 SSE 走普通寄存器分配),大纲的 "ST0-ST7 特化" 只在非 LP64 的 x87 路径生效。[实证](planning/outlines/00-jvm-tools/materials/commands/14-c1-register-codegen-demo.txt)与 02 篇一致: release 下 `TraceLinearScanLevel` 是 develop,LinearScan 的分配过程只能源码推演;PrintAssembly 无 hsdis 时给出 nmethod 布局(C1 sum 的 main code 352 字节,C2 224——C1 少优化的代价)。*关键设计: 线性扫描的"快"来自单趟扫描与启发式 spill,而 interval 分裂(register 段+spill 段交替)让溢出惩罚可控——这是 C1 在毫秒级编译预算里的核心权衡*。
+`c1_LinearScan_x86.cpp` 有 FPU 栈分配器(`allocate_fpu_stack` :35)——**仅 x87 模式**(`use_fpu_stack_allocation`,JDK11 x86_64 默认 SSE 走普通寄存器分配),大纲的 "ST0-ST7 特化" 只在非 LP64 的 x87 路径生效。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/14-c1-register-codegen-demo.txt)与 02 篇一致: release 下 `TraceLinearScanLevel` 是 develop,LinearScan 的分配过程只能源码推演;PrintAssembly 无 hsdis 时给出 nmethod 布局(C1 sum 的 main code 352 字节,C2 224——C1 少优化的代价)。*关键设计: 线性扫描的"快"来自单趟扫描与启发式 spill,而 interval 分裂(register 段+spill 段交替)让溢出惩罚可控——这是 C1 在毫秒级编译预算里的核心权衡*。
 
 ## 核心悬念
 

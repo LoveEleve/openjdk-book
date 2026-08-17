@@ -37,7 +37,7 @@ ciEnv::~ciEnv() {
 2. **CompileCommand 指定录**(实证)——`-XX:CompileCommand=option,CiDemo::work,DumpReplay` 让 CiDemo::work 每次编译都落一份 `replay_pid%p_compid%d.log`(compile.cpp:899-900: `directive->DumpReplayOption` → `env()->dump_replay_data(_compile_id)`);
 3. **SA 从 core 提取**(ciReplay.hpp:41-57)——只有 core 文件也能用 Serviceability Agent 挖出编译线程的 CI 状态。
 
-[实证:](planning/outlines/00-jvm-tools/materials/commands/12-ci-replay-demo.txt) 用 DumpReplay 跑 CiDemo,生成 3 个 replay 文件(compid76/77/78 = CiDemo::work 的三次编译)。文件结构(`dump_replay_data_unsafe`,ciEnv.cpp:1231): Jvmti 状态 3 行 → `# 123 ciObject found` → **每个 ciMetadata 的完整快照** → compile 行。快照行就是"编译输入全集":
+[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/12-ci-replay-demo.txt) 用 DumpReplay 跑 CiDemo,生成 3 个 replay 文件(compid76/77/78 = CiDemo::work 的三次编译)。文件结构(`dump_replay_data_unsafe`,ciEnv.cpp:1231): Jvmti 状态 3 行 → `# 123 ciObject found` → **每个 ciMetadata 的完整快照** → compile 行。快照行就是"编译输入全集":
 
 - `ciInstanceKlass java/util/Iterator 1 1 53 100 8 ...`——类的状态 + **常量池 tag 数组**(dump_replay_data,ciInstanceKlass.cpp:713: `is_linked`/`is_initialized`/cp 长度 + 逐项 tags——回放时校验哪些不变、按 tag 重新解析类);
 - `staticfield java/lang/System in Ljava/io/InputStream; java/io/BufferedInputStream`——**static final 字段的值**(ciInstanceKlass.cpp:740-744 只在 `is_initialized()` 时打印,注释明说 "in case the compilation relies on their value"——01 篇 ciField is_constant 折叠的原料);

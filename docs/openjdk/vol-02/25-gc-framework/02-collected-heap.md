@@ -74,7 +74,7 @@ inline size_t ThreadLocalAllocBuffer::compute_size(size_t obj_size) {
 
 TLAB 用尽后,**不是立刻丢弃**。`allocate_inside_tlab_slow`(memAllocator.cpp:297-360)先查 `tlab.free() > tlab.refill_waste_limit()`(:314)——剩余空间还多(超过 `desired/64`)就**保留旧 TLAB,对象去共享空间**,并调 `record_slow_allocation` 把 waste limit 抬高(threadLocalAllocBuffer.inline.hpp:82-97,注释 :83-85: "a thread that repeatedly allocates objects of one size will get stuck on this slow path")——防止"每次都差一点、每次都要 refill"的抖动。剩余空间小(≤limit)才丢弃 TLAB、`compute_size` 后向堆要一块新的(:319-332)。
 
-**[实证](materials/commands/25-gc-heap-alloc-demo.txt)**: `-Xlog:gc+tlab=trace` 直接看到 `compute_size(2) returns 36702`(32MB 堆 ≈286KB)与 `TLAB: fill ... desired_size: 286KB refill waste: 4584B`(4584=286KB/64)——**小堆下 TLAB 是 286KB 量级,不是"512KB-2MB"**(大纲臆测);`UseTLAB` 是 pd product 可开关,`-XX:-UseTLAB` 让 2 亿次分配从 ~1.35s 涨到 ~8s(**6 倍**,素材 C 段)——bump pointer 免锁的价值。
+**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/25-gc-heap-alloc-demo.txt)**: `-Xlog:gc+tlab=trace` 直接看到 `compute_size(2) returns 36702`(32MB 堆 ≈286KB)与 `TLAB: fill ... desired_size: 286KB refill waste: 4584B`(4584=286KB/64)——**小堆下 TLAB 是 286KB 量级,不是"512KB-2MB"**(大纲臆测);`UseTLAB` 是 pd product 可开关,`-XX:-UseTLAB` 让 2 亿次分配从 ~1.35s 涨到 ~8s(**6 倍**,素材 C 段)——bump pointer 免锁的价值。
 
 ## 2. CollectedHeap — 堆的统一门面
 
@@ -109,7 +109,7 @@ TLAB 用尽后,**不是立刻丢弃**。`allocate_inside_tlab_slow`(memAllocator
 
 GCCause 枚举(gcCause.hpp:43-92)约 30 个原因,按源码注释分三组: **public**(用户/工具显式触发:`_java_lang_system_gc`/`_jvmti_force_gc`/`_gc_locker`/`_heap_dump`/`_wb_young_gc`/`_dcmd_gc_run`…)、**implementation independent**(`_no_gc`/`_allocation_failure`)、**implementation specific**(`_metadata_GC_threshold`/CMS 家族/**G1 的两个**: `_g1_inc_collection_pause` 与 `_g1_humongous_allocation`/Z 家族)。它不只在日志里好看——`:97-124` 的 `is_*` 谓词(比如 `is_allocation_failure_gc`/`is_user_requested_gc`)驱动 GC 策略分支。
 
-**[实证](materials/commands/25-gc-heap-alloc-demo.txt)**: `-Xlog:gc` 的括号就是 cause——分配失败触发的 `Pause Young (Normal) (G1 Evacuation Pause)`;4MB 数组(32MB 堆 → region 1MB)触发 `(G1 Humongous Allocation)`;`jcmd GC.run` 触发 `(Diagnostic Command)`(= `_dcmd_gc_run`);OOM 前的 `Pause Full (G1 Humongous Allocation)`。大纲的 `_g1_evacuation_pause` 名字不存在,真实是 `_g1_inc_collection_pause`。
+**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/25-gc-heap-alloc-demo.txt)**: `-Xlog:gc` 的括号就是 cause——分配失败触发的 `Pause Young (Normal) (G1 Evacuation Pause)`;4MB 数组(32MB 堆 → region 1MB)触发 `(G1 Humongous Allocation)`;`jcmd GC.run` 触发 `(Diagnostic Command)`(= `_dcmd_gc_run`);OOM 前的 `Pause Full (G1 Humongous Allocation)`。大纲的 `_g1_evacuation_pause` 名字不存在,真实是 `_g1_inc_collection_pause`。
 
 ## 3. 慢路径 — refill、全局分配与 GC
 

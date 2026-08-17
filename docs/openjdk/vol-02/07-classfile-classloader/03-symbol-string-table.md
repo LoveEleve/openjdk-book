@@ -121,7 +121,7 @@ oop StringTable::do_intern(Handle string_or_null_h, jchar* name,
 
 ### 语义实证
 
-[实证](materials/commands/07-classfile-stringtable-log.txt)里 intern 的行为与上面的链路一一对应:
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/07-classfile-stringtable-log.txt)里 intern 的行为与上面的链路一一对应:
 
 ```
 new == new:       false          ← 两个 new String("abc") 是不同对象

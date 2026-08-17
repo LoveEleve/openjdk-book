@@ -30,13 +30,13 @@
             TraceTimerLogPrintFunc ttlpf);
 ```
 
-**输出走统一日志框架,不是 tty**: `_print` 是 `TraceTimerLogPrintFunc`(函数指针),`TRACETIME_LOG` 宏在 `log_is_enabled` 时取 `LogImpl::write` 的地址(:57-59)——所以 TraceTime 配合 `-Xlog:startuptime` 之类的标签使用;`_accum` 参数让同一计时器跨多次调用累计。**GC 的 phase 计时用的是另一套**: `GCTraceTimeImpl`(gcTraceTime.hpp:46-65,基于 **Ticks**/utilities/ticks.hpp,同样走日志框架)+ GCTraceCPUTime/GCTraceConcTimeImpl 变体——[实证](planning/outlines/00-jvm-tools/materials/commands/39-runtime-monitoring-timer-demo.txt)的 `-Xlog:gc+phases` 输出 "Phase 1: Mark live objects 3.412ms" 是它的产物,不是 TraceTime。
+**输出走统一日志框架,不是 tty**: `_print` 是 `TraceTimerLogPrintFunc`(函数指针),`TRACETIME_LOG` 宏在 `log_is_enabled` 时取 `LogImpl::write` 的地址(:57-59)——所以 TraceTime 配合 `-Xlog:startuptime` 之类的标签使用;`_accum` 参数让同一计时器跨多次调用累计。**GC 的 phase 计时用的是另一套**: `GCTraceTimeImpl`(gcTraceTime.hpp:46-65,基于 **Ticks**/utilities/ticks.hpp,同样走日志框架)+ GCTraceCPUTime/GCTraceConcTimeImpl 变体——[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/39-runtime-monitoring-timer-demo.txt)的 `-Xlog:gc+phases` 输出 "Phase 1: Mark live objects 3.412ms" 是它的产物,不是 TraceTime。
 
 ## 2. Monitoring Services: PerfData 的读口
 
 三个 Service 都是 AllStatic,**计数器全部是 PerfData 对象**(38-perfdata 域的 PerfCounter/PerfVariable),Service 只是提供读口与语义汇总:
 
-**ClassLoadingService**(classLoadingService.hpp): `loaded_class_count()` = `_classes_loaded_count` + `_shared_classes_loaded_count` 两个 PerfCounter 之和(:62-65)。**更新点不是"safepoint 数一遍",而是类加载/卸载事件钩子**: `notify_class_loaded`(classLoadingService.cpp:148-166,inc 计数 + 按 `compute_class_size` 累加字节)被 `classFileParser.cpp:5772`(普通类)与 `systemDictionary.cpp:1370`(共享类)调用;`notify_class_unloaded` 在 `instanceKlass.cpp:2428`(类卸载)。[实证](planning/outlines/00-jvm-tools/materials/commands/39-runtime-monitoring-timer-demo.txt)里 `jstat -class` 显示 "Loaded 1841 / Bytes 3798.0"——**jstat 直接读 hsperf 文件**(不需要 attach!),读数就是这对 PerfCounter。
+**ClassLoadingService**(classLoadingService.hpp): `loaded_class_count()` = `_classes_loaded_count` + `_shared_classes_loaded_count` 两个 PerfCounter 之和(:62-65)。**更新点不是"safepoint 数一遍",而是类加载/卸载事件钩子**: `notify_class_loaded`(classLoadingService.cpp:148-166,inc 计数 + 按 `compute_class_size` 累加字节)被 `classFileParser.cpp:5772`(普通类)与 `systemDictionary.cpp:1370`(共享类)调用;`notify_class_unloaded` 在 `instanceKlass.cpp:2428`(类卸载)。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/39-runtime-monitoring-timer-demo.txt)里 `jstat -class` 显示 "Loaded 1841 / Bytes 3798.0"——**jstat 直接读 hsperf 文件**(不需要 attach!),读数就是这对 PerfCounter。
 
 **RuntimeService**(runtimeService.hpp:34-51): PerfCounter `_total_safepoints`/`_safepoint_time_ticks`/`_application_time_ticks` + **TimeStamp** `_safepoint_timer`/`_app_timer`;`record_safepoint_begin/end`(runtimeService.cpp:87+)由 18 域的 safepoint 记录调用——`safepoint_count()`/`safepoint_sync_time_ms()`/`application_time_ms()` 就是 JMX 侧 `RuntimeMXBean` 的读口(比如 `getSafepointCount`)。
 
@@ -46,7 +46,7 @@
 
 ## 3. 组合起来: 一条监控管线
 
-把 01 篇与这篇拼起来: **数据**在 PerfData/事件钩子(38 域+本篇)→ **Service 提供读口**(本篇)→ **ServiceThread 串行消费** JVMTI/GC/DCmd 通知(01 篇)→ **JMX/JFR/jstat/jcmd 对外暴露**(36/37 域的命令通道)。计时家族负责给这条管线打时间戳: safepoint 的 begin/end 进 RuntimeService 的 PerfCounter,GC phase 进 GCTraceTimeImpl 的日志输出,VM 内部各处用 TraceTime/elapsedTimer 做微基准。[实证](planning/outlines/00-jvm-tools/materials/commands/39-runtime-monitoring-timer-demo.txt)里还有个环境修正: **jcmd attach 在容器可用**——之前的实验(JMC/VisualVM 自动 attach)已把 attach listener 拉起来,socket 文件在 /tmp/.java_pid<pid>,`jcmd <pid> GC.run` 直接成功("Command executed successfully")——36 域"jcmd 不可用"的结论再次修正(listener 启动后即可用)。
+把 01 篇与这篇拼起来: **数据**在 PerfData/事件钩子(38 域+本篇)→ **Service 提供读口**(本篇)→ **ServiceThread 串行消费** JVMTI/GC/DCmd 通知(01 篇)→ **JMX/JFR/jstat/jcmd 对外暴露**(36/37 域的命令通道)。计时家族负责给这条管线打时间戳: safepoint 的 begin/end 进 RuntimeService 的 PerfCounter,GC phase 进 GCTraceTimeImpl 的日志输出,VM 内部各处用 TraceTime/elapsedTimer 做微基准。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/39-runtime-monitoring-timer-demo.txt)里还有个环境修正: **jcmd attach 在容器可用**——之前的实验(JMC/VisualVM 自动 attach)已把 attach listener 拉起来,socket 文件在 /tmp/.java_pid<pid>,`jcmd <pid> GC.run` 直接成功("Command executed successfully")——36 域"jcmd 不可用"的结论再次修正(listener 启动后即可用)。
 
 ## 核心悬念
 

@@ -58,7 +58,7 @@ bool DirtyCardQueueSet::refine_completed_buffer_concurrently(uint worker_i, size
 
 ### 3.2 Update RS(GC 期间接力)
 
-年轻代 GC 时,剩余脏卡由 **Update RS 阶段**处理(g1RemSet.cpp:477-499): `iterate_dirty_card_closure`(:495)把每个 completed buffer 逐卡交给 `G1RefineCardClosure`(:444-475,`do_card_ptr` → `refine_card_during_gc`)——**扫描卡内对象,把指向 Collection Set 的引用登记进 RSet**,为随后的 Scan RS 做准备。**[实证](materials/commands/25-gc-cardqueue-demo.txt)**: gc+phases 里 Update RS 的 `Processed Buffers`(素材 B)就是这个消费过程的直接读数;`gc+refine=debug` 标签可看精炼线程启停(素材 A)。
+年轻代 GC 时,剩余脏卡由 **Update RS 阶段**处理(g1RemSet.cpp:477-499): `iterate_dirty_card_closure`(:495)把每个 completed buffer 逐卡交给 `G1RefineCardClosure`(:444-475,`do_card_ptr` → `refine_card_during_gc`)——**扫描卡内对象,把指向 Collection Set 的引用登记进 RSet**,为随后的 Scan RS 做准备。**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/25-gc-cardqueue-demo.txt)**: gc+phases 里 Update RS 的 `Processed Buffers`(素材 B)就是这个消费过程的直接读数;`gc+refine=debug` 标签可看精炼线程启停(素材 A)。
 
 ## 核心悬念
 

@@ -10,7 +10,7 @@
 
 ## 1. Runtime1: 编译代码的 C++ 逃生口
 
-Runtime1 的入口表由 **RUNTIME1_STUBS 宏**一次性生成(c1_Runtime1.hpp:40-65): `new_instance`/`fast_new_instance`/`new_type_array`/`new_object_array`/`new_multi_array`、`monitorenter`/`monitorexit`、`throw_range_check_failed`/`throw_div0_exception`/`throw_null_pointer_exception`、`handle_exception`、`slow_subtype_check`、`register_finalizer` 等。编译时 `generate_blob`(c1_Runtime1.cpp:194)把这些 stub 的**机器码编译进 CodeCache 的 blob**([实证](planning/outlines/00-jvm-tools/materials/commands/14-c1-runtime-frame-demo.txt)的 nmethod header 里 `stub code = 48` 就是内嵌 stub),运行时 `blob_for`(:279)取入口地址。
+Runtime1 的入口表由 **RUNTIME1_STUBS 宏**一次性生成(c1_Runtime1.hpp:40-65): `new_instance`/`fast_new_instance`/`new_type_array`/`new_object_array`/`new_multi_array`、`monitorenter`/`monitorexit`、`throw_range_check_failed`/`throw_div0_exception`/`throw_null_pointer_exception`、`handle_exception`、`slow_subtype_check`、`register_finalizer` 等。编译时 `generate_blob`(c1_Runtime1.cpp:194)把这些 stub 的**机器码编译进 CodeCache 的 blob**([实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/14-c1-runtime-frame-demo.txt)的 nmethod header 里 `stub code = 48` 就是内嵌 stub),运行时 `blob_for`(:279)取入口地址。
 
 runtime 函数用 **JRT_ENTRY 家族**(JNI 兼容入口,08-03 域的 IRT_ENTRY 是解释器侧的对应物):
 
@@ -35,13 +35,13 @@ JRT_END
 
 ## 2. FrameMap: 帧布局与寄存器约定
 
-`FrameMap` 的职责: 把"虚拟位置"(局部变量/栈槽/监视器)映射成**帧内偏移**。构造(:156)后 `_framesize` 由 monitor_base 偏移对齐算出(:190-191);x86 的寄存器编号约定在 `FrameMap::initialize`(c1_FrameMap_x86.cpp:160-206,如 `map_register(2, rbx)`/`map_register(3, rax)`,:166-167)与 **caller-save 数组**(`_caller_save_cpu_regs`,:203-206)——跨调用存活的值放 callee-save(如 rbx/r12-r15),调用点会死的放 caller-save(rax/rcx/rdx/rsi/rdi/r8-r11 等)。**OopMap 的真相**: 大纲说 "FrameMap::oop_map_slot 判断栈槽是否 OOP"——实际上 OopMap **在 LinearScan 阶段构建**(`init_compute_oop_maps` c1_LinearScan.cpp:2415 + `compute_oop_map` :2432-2442,按帧大小与参数槽数 `new OopMap`),FrameMap 只提供槽位偏移——GC 扫描编译帧时读的就是这个 OopMap([实证](planning/outlines/00-jvm-tools/materials/commands/14-c1-runtime-frame-demo.txt)的 nmethod header `oops = 8` 是 nmethod 的 oop 表)。
+`FrameMap` 的职责: 把"虚拟位置"(局部变量/栈槽/监视器)映射成**帧内偏移**。构造(:156)后 `_framesize` 由 monitor_base 偏移对齐算出(:190-191);x86 的寄存器编号约定在 `FrameMap::initialize`(c1_FrameMap_x86.cpp:160-206,如 `map_register(2, rbx)`/`map_register(3, rax)`,:166-167)与 **caller-save 数组**(`_caller_save_cpu_regs`,:203-206)——跨调用存活的值放 callee-save(如 rbx/r12-r15),调用点会死的放 caller-save(rax/rcx/rdx/rsi/rdi/r8-r11 等)。**OopMap 的真相**: 大纲说 "FrameMap::oop_map_slot 判断栈槽是否 OOP"——实际上 OopMap **在 LinearScan 阶段构建**(`init_compute_oop_maps` c1_LinearScan.cpp:2415 + `compute_oop_map` :2432-2442,按帧大小与参数槽数 `new OopMap`),FrameMap 只提供槽位偏移——GC 扫描编译帧时读的就是这个 OopMap([实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/14-c1-runtime-frame-demo.txt)的 nmethod header `oops = 8` 是 nmethod 的 oop 表)。
 
 *关键设计: 编译代码只负责快路径(内联 TLAB/内联锁),一切"罕见但必须正确"的路径(分配失败/类型检查失败/异常/首次链接)都跳 C++*——这让编译代码保持简单,编译保持在毫秒级;runtime 与解释器共享同一批底层(allocate_instance/SharedRuntime 锁助手),只是调用通道不同(JRT vs IRT)。
 
 ## 3. 与解释器的分工 + 实证边界
 
-解释器遇到同样的操作走 **InterpreterRuntime**(IRT_ENTRY,08-03 域),C1 编译代码走 **Runtime1**(JRT_ENTRY)——**底层共享**(都调 `InstanceKlass::allocate_instance`/`SharedRuntime` 助手),入口通道不同;Runtime1 的调用是编译代码里的直接 `call`(经 stub blob),[实证](planning/outlines/00-jvm-tools/materials/commands/14-c1-runtime-frame-demo.txt)的慢路径计数是 NOT_PRODUCT(release 不可观察),间接观察手段是 `-XX:-UseTLAB`(每次 new 都走 Runtime1::new_instance 慢路径,性能显著下降)。
+解释器遇到同样的操作走 **InterpreterRuntime**(IRT_ENTRY,08-03 域),C1 编译代码走 **Runtime1**(JRT_ENTRY)——**底层共享**(都调 `InstanceKlass::allocate_instance`/`SharedRuntime` 助手),入口通道不同;Runtime1 的调用是编译代码里的直接 `call`(经 stub blob),[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/14-c1-runtime-frame-demo.txt)的慢路径计数是 NOT_PRODUCT(release 不可观察),间接观察手段是 `-XX:-UseTLAB`(每次 new 都走 Runtime1::new_instance 慢路径,性能显著下降)。
 
 ## 核心悬念
 

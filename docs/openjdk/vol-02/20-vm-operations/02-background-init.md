@@ -1,7 +1,7 @@
 # 02. 谁在后台周期性干活?— PeriodicTask、WatcherThread 与启动序列
 
 > **前置依赖**:[20-vm-operations/01 — "帮我做 GC"——VM_Operation 从提交到执行](openjdk/vol-02/20-vm-operations/01-vm-operation.md):本篇的部分周期任务干的事就是提交 VM 操作(EnableBiasedLockingTask),async 模式派上用场;[17-threads/01 — JVM 里有多少种线程?— Thread 层次体系](openjdk/vol-02/17-threads/01-thread-hierarchy.md):WatcherThread 是 NonJavaThread 不是 JavaThread;[38-perfdata/02 — StatSampler — 谁在周期性刷新计数器](openjdk/vol-02/38-perfdata/02-stat-sampler.md):第一个 PeriodicTask 实例的采样细节
-> → **后续**:[27-jni/01 — jobject 在 JVM 内部怎么存的?— JNI Handle 系统](01-handle-system.md)
+> → **后续**:[27-jni/01 — jobject 在 JVM 内部怎么存的?— JNI Handle 系统](openjdk/vol-02/27-jni/01-handle-system.md)
 > 关联域: 16-code-cache(sweeper 线程)、32-jfr(采样器线程)、39-runtime-mon
 
 ## 显式请求之外,还有一堆定时家务
@@ -10,7 +10,7 @@
 
 ## 1. 一颗"模拟定时器中断"的线程: WatcherThread
 
-线程转储里有一个叫 **"VM Periodic Task Thread"** 的线程:[实证:](planning/outlines/00-jvm-tools/materials/commands/20-background-init-demo.txt) `"VM Periodic Task Thread" ... waiting on condition`——它的学名叫 **WatcherThread**(thread.hpp:902 起,`name()` 返回 "VM Periodic Task Thread",thread.hpp:930),是 NonJavaThread 家族的一员(17 域),整个 JVM 只有一个实例。它存在的理由写在源码注释里(thread.cpp:1369-1371):
+线程转储里有一个叫 **"VM Periodic Task Thread"** 的线程:[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/20-background-init-demo.txt) `"VM Periodic Task Thread" ... waiting on condition`——它的学名叫 **WatcherThread**(thread.hpp:902 起,`name()` 返回 "VM Periodic Task Thread",thread.hpp:930),是 NonJavaThread 家族的一员(17 域),整个 JVM 只有一个实例。它存在的理由写在源码注释里(thread.cpp:1369-1371):
 
 ```cpp
 // thread.cpp:1369-1371(逐字)
@@ -228,7 +228,7 @@ WatcherThread 之外,还有一批"周期性干活"的线程,它们**不是** Per
 - **JFR 采样器**: `JfrThreadSampler`(jfrThreadSampler.cpp:311)是独立 `NonJavaThread`,`os::create_thread(this, os::os_thread)` 创建(:425),主循环 `run()`(:452-500)用自己的 semaphore(`_sample`)与 `os::naked_short_sleep` 睡到下一个采样点,Java/native 两档间隔独立计时,到点用 `os::SuspendedThreadTask` 挂起目标线程抓栈(31-02 提过 AGCT 与它的对比)。间隔由 Java 侧 ExecutionSample 事件阈值注入(`set_java_sample_interval`,jfrThreadSampler.hpp:50)——采样线程是"按需创建"的([实证:] 20-background-init-demo.txt 里默认配置的 JFR 录制,线程转储只有 "JFR Recorder Thread",没有采样线程)。细节归 32-jfr 域。
 - **ServiceThread**: `JavaThread`,类注释自述职责 "A JavaThread for low memory detection support and JVMTI compiled-method-load events"(serviceThread.hpp:30),`service_thread_entry`(serviceThread.cpp:84)循环处理 JVMTI 延迟事件、GC 通知(GCNotifier)与 DCMD 通知(:107-139);create_vm :3960 启动,注释要求它"在编译器开始发事件之前启动"(thread.cpp:3957-3959)。
 - **CodeCacheSweeperThread**(thread.hpp:2108): 独立 JavaThread,`sweeper_loop`(sweeper.cpp:265-278)睡在 `CodeCache_lock` 上(超时 24 小时),被 `notify` 唤醒后增量清扫 nmethod——16-code-cache/03 已详,这里不展开。
-- **GC 线程族**(G1 Main Marker/Conc#/Refine#/Young RemSet Sampling...): [实证:](planning/outlines/00-jvm-tools/materials/commands/20-background-init-demo.txt) SIGQUIT 转储里的一排 runnable,各自有专门的唤醒协议,归 GC 域。
+- **GC 线程族**(G1 Main Marker/Conc#/Refine#/Young RemSet Sampling...): [实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/20-background-init-demo.txt) SIGQUIT 转储里的一排 runnable,各自有专门的唤醒协议,归 GC 域。
 
 **关键设计 (斜体)**: *分界线是"活的大小"——毫秒级、几十行以内的轻活挂到 WatcherThread 上共享一颗时钟(任务 ≤10、单线程顺序执行、不参与 safepoint);要持续长时间运行、或者有强实时性要求的活(采样、清扫、GC)开独立线程,自持睡眠与唤醒协议,互不拖累。这个定位回到最初的注释: 周期任务的设计目标就是**模拟一个"定时器中断"**(thread.cpp:1369-1371)——它只负责把时间分发给短小的任务,而不是做一个多线程调度器。*
 
@@ -369,4 +369,4 @@ init_globals 完成后,`VMThread::create()`(vmThread.cpp:242-275)才被调用。
 
 但 20-01 和本篇有一个反复出现的"提交者": GC 请求、偏向锁、Verify——它们通过 `VMThread::execute` 把工作交给 VM 线程,而 JNI 调用(`GetEnv`/`FindClass`/`NewGlobalRef`)走的是另一条完全不同的通道: **jobject 引用怎么在 Java 对象与 C 世界之间存活**?下一篇进入 JNI: Handle 系统。
 
-> → [27-jni/01 — jobject 在 JVM 内部怎么存的?— JNI Handle 系统](01-handle-system.md)
+> → [27-jni/01 — jobject 在 JVM 内部怎么存的?— JNI Handle 系统](openjdk/vol-02/27-jni/01-handle-system.md)

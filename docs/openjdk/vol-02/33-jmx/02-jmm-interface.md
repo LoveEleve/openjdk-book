@@ -6,7 +6,7 @@
 
 ## 一次查询,三次握手
 
-01 篇留了个尾巴: `jmm_interface->GetMemoryPoolUsage` 这条链的**函数表本身**是什么?[JMM 实证](planning/outlines/00-jvm-tools/materials/commands/33-jmx-jmm-demo.txt)先把这张表"摸"一遍——同一个 `ManagementFactory` 入口,四条互不相干的路径:
+01 篇留了个尾巴: `jmm_interface->GetMemoryPoolUsage` 这条链的**函数表本身**是什么?[JMM 实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/33-jmx-jmm-demo.txt)先把这张表"摸"一遍——同一个 `ManagementFactory` 入口,四条互不相干的路径:
 
 ```
 isVerbose before=false

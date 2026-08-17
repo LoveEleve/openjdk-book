@@ -175,7 +175,7 @@ jvmtiError JvmtiManageCapabilities::add_capabilities(const jvmtiCapabilities *cu
 
 ### 2.4 实证: 缺能力直接 99
 
-[实证](materials/commands/28-jvmti-agent-demo.txt)(素材 A): agent 在 AddCapabilities **之前**调 `SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_METHOD_ENTRY, NULL)` → 返回 **99 (MUST_POSSESS_CAPABILITY)**。这里有两级能力检查: ①**事件级**——**多数事件**(34 个中 21 个)在 jvmti.xml 里声明自己的 required 能力(MethodEntry 要求 `can_generate_method_entry_events`,jvmti.xml:12308;VMInit/VMStart/VMDeath 等无 required),生成成 `JvmtiUtil::has_event_capability`(jvmtiEnter.xsl:168-193 的事件→能力映射表),在 jvmtiEnv.cpp:536 检查——SetEventNotificationMode 的 99 正是这里;②**函数级**——带 `<required>` 的函数(如 SuspendThread 要求 can_suspend,jvmti.xml:1558)在 wrapper 里检查(jvmtiEnter.xsl:452-468 `get_capabilities()->xxx == 0`)。AddCapabilities 后重试 → 0。能力位本身在 `GetCapabilities` 里可见(`current.can_generate_method_entry_events=1`)。
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/28-jvmti-agent-demo.txt)(素材 A): agent 在 AddCapabilities **之前**调 `SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_METHOD_ENTRY, NULL)` → 返回 **99 (MUST_POSSESS_CAPABILITY)**。这里有两级能力检查: ①**事件级**——**多数事件**(34 个中 21 个)在 jvmti.xml 里声明自己的 required 能力(MethodEntry 要求 `can_generate_method_entry_events`,jvmti.xml:12308;VMInit/VMStart/VMDeath 等无 required),生成成 `JvmtiUtil::has_event_capability`(jvmtiEnter.xsl:168-193 的事件→能力映射表),在 jvmtiEnv.cpp:536 检查——SetEventNotificationMode 的 99 正是这里;②**函数级**——带 `<required>` 的函数(如 SuspendThread 要求 can_suspend,jvmti.xml:1558)在 wrapper 里检查(jvmtiEnter.xsl:452-468 `get_capabilities()->xxx == 0`)。AddCapabilities 后重试 → 0。能力位本身在 `GetCapabilities` 里可见(`current.can_generate_method_entry_events=1`)。
 
 ## 3. 事件系统 — bitset 与"真启用"重算
 
@@ -209,7 +209,7 @@ recompute_enabled()(jvmtiEventController.cpp:571-657):
 
 *关键设计: "user 开了"≠"会发"。回调没设、phase 不允许、能力缺失,任何一个不满足都不发。重算是"整体快照"式的——任何状态变化全量重算三级 bitset,而不是增量维护;代价是 O(env×thread),收益是结论永远一致、且发布路径只有一个布尔判断。*
 
-[实证](materials/commands/28-jvmti-agent-demo.txt)(素材 C): `-XX:TraceJVMTI=ec`(product flag,globals.hpp:1008;COMPILER2 构建的 release 也带 JVMTI_TRACE,jvmtiTrace.hpp:31-38)直接看到重算过程: `[*] # set event callbacks` → `[ALL] # user enabled event MethodEntry` → `[-] # Enabling event VMInit` + `recompute enabled - before 0 / after 2`(十六进制 bitset 0x2=VM_INIT_BIT——该 agent 启用的 4 个事件里只有 VMInit 属于 early 集,MethodEntry/MethodExit/Exception 在 ONLOAD 阶段被 phase 过滤)→ `[-] # VM live` → 每个线程 `# Enabling event ...` + `# Entering interpreter only mode`。
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/28-jvmti-agent-demo.txt)(素材 C): `-XX:TraceJVMTI=ec`(product flag,globals.hpp:1008;COMPILER2 构建的 release 也带 JVMTI_TRACE,jvmtiTrace.hpp:31-38)直接看到重算过程: `[*] # set event callbacks` → `[ALL] # user enabled event MethodEntry` → `[-] # Enabling event VMInit` + `recompute enabled - before 0 / after 2`(十六进制 bitset 0x2=VM_INIT_BIT——该 agent 启用的 4 个事件里只有 VMInit 属于 early 集,MethodEntry/MethodExit/Exception 在 ONLOAD 阶段被 phase 过滤)→ `[-] # VM live` → 每个线程 `# Enabling event ...` + `# Entering interpreter only mode`。
 
 ## 4. 事件发布 — MethodEntry 的真相: 同步回调,不是延迟队列
 
@@ -299,7 +299,7 @@ static const jlong  INTERP_EVENT_BITS =  SINGLE_STEP_BIT | METHOD_ENTRY_BIT | ME
 
 *关键设计: 以"线程降速"换"事件完备"。方法级事件只能在解释器里发,与其让编译代码到处留事件钩子(每个方法入口一条分支,所有线程都付钱),不如只让**想要的线程**回解释器——其他线程零成本。interp_only 是计数而非布尔,因为事件开关可以嵌套(多个 env/多类事件)。*
 
-[实证](materials/commands/28-jvmti-agent-demo.txt)(素材 B/D): ①`-XX:TraceJVMTI=MethodEntry+t` 看到触发点 `[main] Trg Method Entry triggered java/lang/System.getProperty`——EVT_TRIG_TRACE 在 jvmtiExport.cpp:1512-1515;②`ec` 跟踪看到 `[main]` 线程在 0.026s 先 `# Enabling event Exception/MethodEntry/MethodExit` 再 `# Entering interpreter only mode`(且**每个 JavaThread 都进**,全局启用→每线程都算);③编译对照: 带 agent 时 `Jvmtidemo::fib` **零编译事件**(无 agent 时 C1→C2 两级+OSR),总编译事件 4 vs 17——interp_only 线程不派发编译代码的直接证据。
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/28-jvmti-agent-demo.txt)(素材 B/D): ①`-XX:TraceJVMTI=MethodEntry+t` 看到触发点 `[main] Trg Method Entry triggered java/lang/System.getProperty`——EVT_TRIG_TRACE 在 jvmtiExport.cpp:1512-1515;②`ec` 跟踪看到 `[main]` 线程在 0.026s 先 `# Enabling event Exception/MethodEntry/MethodExit` 再 `# Entering interpreter only mode`(且**每个 JavaThread 都进**,全局启用→每线程都算);③编译对照: 带 agent 时 `Jvmtidemo::fib` **零编译事件**(无 agent 时 C1→C2 两级+OSR),总编译事件 4 vs 17——interp_only 线程不派发编译代码的直接证据。
 
 ## 5. 延迟事件 — 编译代码事件的"回头补发"
 

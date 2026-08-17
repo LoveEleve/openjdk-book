@@ -65,7 +65,7 @@ jobject JNIHandles::make_local(oop obj) {
 
 编译代码的 native wrapper 同样处理(sharedRuntime_x86_64.cpp:2652-2656,注释 "reset handle block";critical native 例外)。效果: 一次 native 调用里的所有本地引用整体失效——块里的旧值变成垃圾,GC 的 `oops_do`(jniHandles.cpp:453-478)只遍历 `_top` 以内的槽,所以旧值也不会被当成根。**JNI 规范"本地引用在 native 返回后无效"就是这样一行 movl 实现的**——比逐个释放快一个量级。
 
-**参数也是本地引用**: 实证里 `GetObjectRefType` 对"从 Java 传进来的 jobject"返回 `JNILocalRefType`([实证:](planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt));实现上共享的 native 调用代码把**参数帧里 oop 槽的地址**当作 handle 传给 native——编译代码的 native wrapper 走 `object_move`(sharedRuntime_x86_64.cpp:1157-1180,注释 "An oop arg. Must pass a handle not the oop itself"),解释器经签名处理器(`pass_object` 用 `lea` 取参数槽地址,interpreterRT_x86_64.cpp:214-260,templateInterpreterGenerator_x86.cpp:932-947 调用它,参数为 null 时传 NULL 与 null 规范化呼应)——GC 靠 oop map 更新那个槽(`is_frame_handle` 专门识别栈上的引用,jniHandles.cpp:270-278)——所以参数引用在调用结束、帧失效后自然作废,也解释了为什么不能把参数当 global handle 传回给 `DeleteGlobalRef`(那是另一套存储,会崩)。
+**参数也是本地引用**: 实证里 `GetObjectRefType` 对"从 Java 传进来的 jobject"返回 `JNILocalRefType`([实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt));实现上共享的 native 调用代码把**参数帧里 oop 槽的地址**当作 handle 传给 native——编译代码的 native wrapper 走 `object_move`(sharedRuntime_x86_64.cpp:1157-1180,注释 "An oop arg. Must pass a handle not the oop itself"),解释器经签名处理器(`pass_object` 用 `lea` 取参数槽地址,interpreterRT_x86_64.cpp:214-260,templateInterpreterGenerator_x86.cpp:932-947 调用它,参数为 null 时传 NULL 与 null 规范化呼应)——GC 靠 oop map 更新那个槽(`is_frame_handle` 专门识别栈上的引用,jniHandles.cpp:270-278)——所以参数引用在调用结束、帧失效后自然作废,也解释了为什么不能把参数当 global handle 传回给 `DeleteGlobalRef`(那是另一套存储,会崩)。
 
 ### Push/Pop: 显式的帧边界
 
@@ -131,7 +131,7 @@ jobject JNIHandles::make_global(Handle obj, AllocFailType alloc_failmode) {
     }
 ```
 
-`weak_tag_size = 1`、`weak_tag_alignment = 2`、`weak_tag_value = 1`(jniHandles.hpp:63-66): 仓库条目按 2 字节对齐、低位恒 0,最低位正好空出来做标记。于是 `is_jweak(handle)` 就是一次位测试(inline.hpp:34-38): `(uintptr_t)handle & 1`。[实证:](planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt) `NewWeakGlobalRef -> 0x7f99144bbf81, lsb=1`——真实地址低位就是 1;而 `GetObjectRefType` 返回 3(`JNIWeakGlobalRefType`)。**弱全局引用的"弱"不靠单独的数据结构,靠一个 tag 位 + phantom 读写通道**: GC 的 WeakProcessor 阶段(weakProcessor.cpp:37,`JNIHandles::weak_oops_do`)遍历仓库,`is_alive` 为 false 的条目直接写 NULL([实证:] 27-jni-handles-demo.txt: global 删除 + `System.gc()` 后 `NewLocalRef(weak)` 返回 null,对象被清)。
+`weak_tag_size = 1`、`weak_tag_alignment = 2`、`weak_tag_value = 1`(jniHandles.hpp:63-66): 仓库条目按 2 字节对齐、低位恒 0,最低位正好空出来做标记。于是 `is_jweak(handle)` 就是一次位测试(inline.hpp:34-38): `(uintptr_t)handle & 1`。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt) `NewWeakGlobalRef -> 0x7f99144bbf81, lsb=1`——真实地址低位就是 1;而 `GetObjectRefType` 返回 3(`JNIWeakGlobalRefType`)。**弱全局引用的"弱"不靠单独的数据结构,靠一个 tag 位 + phantom 读写通道**: GC 的 WeakProcessor 阶段(weakProcessor.cpp:37,`JNIHandles::weak_oops_do`)遍历仓库,`is_alive` 为 false 的条目直接写 NULL([实证:] 27-jni-handles-demo.txt: global 删除 + `System.gc()` 后 `NewLocalRef(weak)` 返回 null,对象被清)。
 
 ### 仓库本身: OopStorage
 
@@ -164,7 +164,7 @@ inline oop JNIHandles::resolve_impl(jobject handle) {
 
 ## 核心悬念
 
-三层引用拆完: 本地引用是线程行李里 32 槽一块的便签纸(`_top` 清零整体失效,参数引用是帧内 oop 槽的地址);全局引用是 OopStorage 仓库里持久条目(显式 delete);弱全局引用靠"地址 +1"的 tag 位与 phantom 读写,由 GC 的 WeakProcessor 清 NULL——[实证](planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt)里 `jweak` 地址低位为 1、删掉全局引用后弱引用自动清空,一清二楚。SIGQUIT 转储的 "JNI global refs: N, weak refs: M" 摘要行就是这两个仓库的当前水位(jniHandles.cpp:305-307)。
+三层引用拆完: 本地引用是线程行李里 32 槽一块的便签纸(`_top` 清零整体失效,参数引用是帧内 oop 槽的地址);全局引用是 OopStorage 仓库里持久条目(显式 delete);弱全局引用靠"地址 +1"的 tag 位与 phantom 读写,由 GC 的 WeakProcessor 清 NULL——[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt)里 `jweak` 地址低位为 1、删掉全局引用后弱引用自动清空,一清二楚。SIGQUIT 转储的 "JNI global refs: N, weak refs: M" 摘要行就是这两个仓库的当前水位(jniHandles.cpp:305-307)。
 
 但 Handle 系统只是 JNI 的"数据面"——每次 `GetIntField` 都走完整 JNI 调用(经 JNIEnv 函数表间接调用、状态转换、resolve),约 200 cycles;`GetIntField` 读一个整型字段本该是 10 cycles 的活。下一篇: 快路径怎么把 200 cycles 压到 30?
 

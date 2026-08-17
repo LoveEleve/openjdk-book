@@ -147,7 +147,7 @@ private:
 - `g1_can_remove_pre_barrier`(:86)/`g1_can_remove_post_barrier`(:306): 冗余 barrier 消除(比如 store 的值已知 NULL、或写向不可能被并发观察的位置);
 - **ReduceInitialCardMarks**(C2 product,默认 true): 写向**刚分配、未发布**的对象(`obj == kit->just_allocated_object(...)`)时跳过卡标记(:391-398,"We can skip marks on a freshly-allocated object in Eden")——对象还在 Eden 且无人可见,卡标记毫无意义;Eden 的卡本来就由 GC 统一处理。
 
-**[实证](materials/commands/25-gc-barrier-demo.txt)**: C1 与 C2 的同一方法 nmethod header 尺寸差一倍以上(C1 1248/1344 vs C2 576)——barrier 在 Ideal 图里的可优化性是 C2 代码更紧的原因之一;`ReduceInitialCardMarks`/`UseCondCardMark` 都是可开关的 product flag(素材 C 段)。
+**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/25-gc-barrier-demo.txt)**: C1 与 C2 的同一方法 nmethod header 尺寸差一倍以上(C1 1248/1344 vs C2 576)——barrier 在 Ideal 图里的可优化性是 C2 代码更紧的原因之一;`ReduceInitialCardMarks`/`UseCondCardMark` 都是可开关的 product flag(素材 C 段)。
 
 ## 3. CardTable — 512 字节一张卡
 
@@ -186,7 +186,7 @@ private:
 
 *关键设计: 卡标记是"地址右移 9 位 + 写 0"——没有函数调用、没有原子操作(卡字节的并发写是安全的,脏卡只需"至少标记一次")。`byte_map_base` 是 `_byte_map - (堆低地址 >> 9)`(:101-105 注释),把"堆地址→卡字节"变成一次位移寻址;64 位下若 base 超过 32 位立即数,退回数组寻址。`UseCondCardMark` 先读后写,避免反复标记同一张卡的写放大(默认关)。*
 
-G1 的卡表是子类 `G1CardTable`(g1CardTable.hpp:47),多一个 `g1_young_card_val()`(:65):写向 Eden 对象时卡值本来就是 young 专用值,post barrier 直接跳过(C2 侧 g1BarrierSetC2.cpp:418 的快速路径;06-oops/05 的 `write_ref_field_post` 同源)。被标脏的卡由 **DirtyCardQueue**(G1 专属,g1/dirtyCardQueue.hpp:46+)批量收集——`PtrQueue` 的线程本地缓冲(index/buf 字段,与 §2 汇编里 SATB 队列同构),满了整块转交 `DirtyCardQueueSet`,GC 时 "Update RS" 阶段消费——**[实证](materials/commands/25-gc-barrier-demo.txt)**: 2 亿次老对象引用写之后,`-Xlog:gc+phases=debug` 里 Update RS 阶段真实出现并处理卡片(素材 A 段),卡标记的工作量在 GC 侧可见。
+G1 的卡表是子类 `G1CardTable`(g1CardTable.hpp:47),多一个 `g1_young_card_val()`(:65):写向 Eden 对象时卡值本来就是 young 专用值,post barrier 直接跳过(C2 侧 g1BarrierSetC2.cpp:418 的快速路径;06-oops/05 的 `write_ref_field_post` 同源)。被标脏的卡由 **DirtyCardQueue**(G1 专属,g1/dirtyCardQueue.hpp:46+)批量收集——`PtrQueue` 的线程本地缓冲(index/buf 字段,与 §2 汇编里 SATB 队列同构),满了整块转交 `DirtyCardQueueSet`,GC 时 "Update RS" 阶段消费——**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/25-gc-barrier-demo.txt)**: 2 亿次老对象引用写之后,`-Xlog:gc+phases=debug` 里 Update RS 阶段真实出现并处理卡片(素材 A 段),卡标记的工作量在 GC 侧可见。
 
 ## 核心悬念
 

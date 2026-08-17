@@ -6,7 +6,7 @@
 
 ## 先纠正标题: 50x 是历史说法
 
-"invokeExact 比反射快 50 倍"是 JDK 7/8 时代的宣传口径——JDK 11 上反射自己也进化了(MethodAccessor 代码生成、消除大量检查),[实证](materials/commands/29-mh-invoke-demo.txt)(素材 A)的 2000 万次调用对照是: **直接调用 9ms / invokeExact(参数) 52ms / invokeExact(常量) 10ms / 反射 218ms**——invokeExact 比反射快 **~4-5 倍**,而**常量 MH 与直接调用几乎持平(1.11 倍)**。所以标题的问题应该这么答: 方法句柄的价值不是"比反射快多少",而是**让方法调用在编译期可达**——当 MethodHandle 是编译期常量时,C2 能把它折叠成一条直接调用,与 `foo.add(i)` 无异。本篇拆这条"可达"之路: 签名多态(§1)、两条调用路径(§2)、链接器汇编分派(§3)、LambdaForm(§4)、实证(§5)。
+"invokeExact 比反射快 50 倍"是 JDK 7/8 时代的宣传口径——JDK 11 上反射自己也进化了(MethodAccessor 代码生成、消除大量检查),[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/29-mh-invoke-demo.txt)(素材 A)的 2000 万次调用对照是: **直接调用 9ms / invokeExact(参数) 52ms / invokeExact(常量) 10ms / 反射 218ms**——invokeExact 比反射快 **~4-5 倍**,而**常量 MH 与直接调用几乎持平(1.11 倍)**。所以标题的问题应该这么答: 方法句柄的价值不是"比反射快多少",而是**让方法调用在编译期可达**——当 MethodHandle 是编译期常量时,C2 能把它折叠成一条直接调用,与 `foo.add(i)` 无异。本篇拆这条"可达"之路: 签名多态(§1)、两条调用路径(§2)、链接器汇编分派(§3)、LambdaForm(§4)、实证(§5)。
 
 ## 1. 签名多态 — invokeExact 为什么能在调用点"变型"
 
@@ -87,7 +87,7 @@ class LambdaForm {
 
 ## 5. 实证: 折叠成功与失败的对照
 
-[实证](materials/commands/29-mh-invoke-demo.txt): `MhDemo` 三种调用 2000 万次(素材 A):
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/29-mh-invoke-demo.txt): `MhDemo` 三种调用 2000 万次(素材 A):
 
 | 调用方式 | 耗时 | vs 直接调用 |
 |---|---|---|

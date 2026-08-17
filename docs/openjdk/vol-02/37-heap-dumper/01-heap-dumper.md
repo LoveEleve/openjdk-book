@@ -6,7 +6,7 @@
 
 ## 一坨 15MB 的二进制,怎么描述整个堆
 
-`jmap -dump:live,file=heap.hprof <pid>` 出来的文件不是 JSON 也不是 XML——是 JDK 专有的 **hprof binary 格式**,MAT/jhat/YourKit 都解析它。这份文件的头部只有 19 个字节("JAVA PROFILE 1.0.2\0"),其余全是**记录流**;堆里的每个对象最终对应一条 INSTANCE_DUMP 或数组 dump 记录。这篇拆三层: 触发与执行模型(VM 操作 + safepoint + 可选 GC)、hprof 格式(头部/记录/段/sub-record)、对象 ID 的真相(地址即 ID,不是序列号)。[实证](planning/outlines/00-jvm-tools/materials/commands/37-heap-dumper-demo.txt)里 15MB 的文件被逐字节解析,记录结构与源码逐行对上。
+`jmap -dump:live,file=heap.hprof <pid>` 出来的文件不是 JSON 也不是 XML——是 JDK 专有的 **hprof binary 格式**,MAT/jhat/YourKit 都解析它。这份文件的头部只有 19 个字节("JAVA PROFILE 1.0.2\0"),其余全是**记录流**;堆里的每个对象最终对应一条 INSTANCE_DUMP 或数组 dump 记录。这篇拆三层: 触发与执行模型(VM 操作 + safepoint + 可选 GC)、hprof 格式(头部/记录/段/sub-record)、对象 ID 的真相(地址即 ID,不是序列号)。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/37-heap-dumper-demo.txt)里 15MB 的文件被逐字节解析,记录结构与源码逐行对上。
 
 ## 1. 执行模型: 一个 VM 操作,可选 GC,并行写
 
@@ -37,7 +37,7 @@
 
 ## 2. hprof 格式: 记录、段与 sub-record
 
-文件头(注释从 `hprof_io.c` 复制,heapDumper.cpp:52-130): `"JAVA PROFILE 1.0.2\0"`(19 字节)+ `u4 id size` + `u8 时间戳(ms)`——[实证](planning/outlines/00-jvm-tools/materials/commands/37-heap-dumper-demo.txt)里 `id_size=8`(64 位)、时间戳与运行时刻吻合。**顶层记录**: `u1 tag + u4 time + u4 len + body`;**堆数据在 HEAP_DUMP_SEGMENT(0x1C)记录里**,1.0.2 格式允许把堆 dump 拆成多个段,以 HEAP_DUMP_END(0x2C)收尾(:307-342)。
+文件头(注释从 `hprof_io.c` 复制,heapDumper.cpp:52-130): `"JAVA PROFILE 1.0.2\0"`(19 字节)+ `u4 id size` + `u8 时间戳(ms)`——[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/37-heap-dumper-demo.txt)里 `id_size=8`(64 位)、时间戳与运行时刻吻合。**顶层记录**: `u1 tag + u4 time + u4 len + body`;**堆数据在 HEAP_DUMP_SEGMENT(0x1C)记录里**,1.0.2 格式允许把堆 dump 拆成多个段,以 HEAP_DUMP_END(0x2C)收尾(:307-342)。
 
 段由 `DumpWriter::start_sub_record` 管理(heapDumper.cpp:575-603): 段的第一个 sub-record 前写 `1C + u4(0) + u4(len)` 的 9 字节段头(HEAP_DUMP_SEGMENT 顶层记录头),len **动态回填**("Will be fixed up later if we add more sub-records");sub-record 放不下(超过 1MB 缓冲区)时 `finish_dump_segment` 结束当前段、开新段。**段内 sub-record 只有 `u1 tag` + body**(:602 的 `write_u1(tag)` 是 sub-record 的全部头部——没有 time/len 字段,长度由记录类型决定),9 字节头只属于段记录本身。
 
@@ -45,11 +45,11 @@ sub-record 种类与 JDK11 的实现形态(注意与标准 hprof spec 的差异)
 
 ## 3. 对象 ID 的真相: 地址即 ID
 
-hprof 里所有"引用"都是 **id 字段**——而 JDK11 的 id **就是对象地址**(write_objectID,heapDumper.cpp:526-533,`write_u8((u8)a)`);class id 用 **java mirror 的地址**(write_classID :553-555,注释 "We use java mirror as the class ID");符号 id 用 Symbol 指针(:535-542)。[实证](planning/outlines/00-jvm-tools/materials/commands/37-heap-dumper-demo.txt)里解析出的 CLASS_DUMP 的 class id 字段 `ff 53 b6 30...` 正是堆内地址形态。*关键设计: 地址作 id 让引用解析变成零成本指针,但 dump 文件不跨进程稳定*——**这也意味着转储必须在 safepoint 里做**: 遍历过程中对象不允许移动(GC 压缩),地址才是有效的。
+hprof 里所有"引用"都是 **id 字段**——而 JDK11 的 id **就是对象地址**(write_objectID,heapDumper.cpp:526-533,`write_u8((u8)a)`);class id 用 **java mirror 的地址**(write_classID :553-555,注释 "We use java mirror as the class ID");符号 id 用 Symbol 指针(:535-542)。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/37-heap-dumper-demo.txt)里解析出的 CLASS_DUMP 的 class id 字段 `ff 53 b6 30...` 正是堆内地址形态。*关键设计: 地址作 id 让引用解析变成零成本指针,但 dump 文件不跨进程稳定*——**这也意味着转储必须在 safepoint 里做**: 遍历过程中对象不允许移动(GC 压缩),地址才是有效的。
 
 ## 4. 实证对照: 结构与 live 语义
 
-[实证](planning/outlines/00-jvm-tools/materials/commands/37-heap-dumper-demo.txt)的两个 dump(同进程、同参数,只差 live):
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/37-heap-dumper-demo.txt)的两个 dump(同进程、同参数,只差 live):
 - **live=false**: 15.4MB、16 个段;顶层 UTF8 49109 / LOAD_CLASS 2211 / FRAME 30 / TRACE 8;段内 **INSTANCE_DUMP 104269 / PRIM_ARRAY 34837 / OBJ_ARRAY 23378 / CLASS_DUMP 2021 / ROOT_STICKY_CLASS 1601 / ROOT_JNI_GLOBAL 64 / ROOT_THREAD_OBJ 7**——CLASS_DUMP 数与 LOAD_CLASS 数同量级(数组类合并),STICKY_CLASS 1601 条印证"null 类加载器的类"的语义,THREAD_OBJ 7 条与运行线程数一致。
 - **live=true**(先 Full GC): 6.0MB、4 个段;**INSTANCE_DUMP 37782(减少 64%)**、数组同理——GC 清掉了不可达对象,文件显著变小,代价是转储时间里的 STW 多一段 Full GC。
 

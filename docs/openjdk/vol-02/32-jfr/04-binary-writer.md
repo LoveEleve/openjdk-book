@@ -6,7 +6,7 @@
 
 ## 二进制流怎么还原成事件
 
-32-01 的 xxd 证明了文件头("FLR"+版本+6 头槽),32-02/03 证明了 metadata 区与栈常量池——这篇补**中间层**: 事件/检查点/字符串在字节流里怎么编码(writer 管线),reader 怎么按同样的规则还原([实证:](planning/outlines/00-jvm-tools/materials/commands/32-jfr-binary-demo.txt) `jfr print --xml` 把 `jdk.CPULoad` 还原成 `jvmUser/machineTotal` 等字段值)。
+32-01 的 xxd 证明了文件头("FLR"+版本+6 头槽),32-02/03 证明了 metadata 区与栈常量池——这篇补**中间层**: 事件/检查点/字符串在字节流里怎么编码(writer 管线),reader 怎么按同样的规则还原([实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/32-jfr-binary-demo.txt) `jfr print --xml` 把 `jdk.CPULoad` 还原成 `jvmUser/machineTotal` 等字段值)。
 
 ## 1. Writer 管线: 一个模板,三副面孔
 
@@ -88,7 +88,7 @@ void WriterHost<BE, IE, WriterPolicyImpl>::write_utf8(const char* value) {
 
 ## 核心悬念
 
-二进制层拆完: 写出一套 `WriterHost` 模板(大端固定宽 + Varint128 变长 + 存储策略),压缩整数是默认格式(恒 true 不可关),字符串按编码标记(NULL/常量/UTF8/UTF16/LATIN1)+长度+数据写,事件体=u4 大小槽+type_id+时间戳+字段——reader 按同一规则还原([实证](planning/outlines/00-jvm-tools/materials/commands/32-jfr-binary-demo.txt) `jfr print --xml` 的字段值就是这么来的)。chunk 自包含使 .jfr 可流式消费、可随机访问。
+二进制层拆完: 写出一套 `WriterHost` 模板(大端固定宽 + Varint128 变长 + 存储策略),压缩整数是默认格式(恒 true 不可关),字符串按编码标记(NULL/常量/UTF8/UTF16/LATIN1)+长度+数据写,事件体=u4 大小槽+type_id+时间戳+字段——reader 按同一规则还原([实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/32-jfr-binary-demo.txt) `jfr print --xml` 的字段值就是这么来的)。chunk 自包含使 .jfr 可流式消费、可随机访问。
 
 但 JFR 还有一个重量级的附加子系统没拆: **泄漏剖析(Leak Profiler)**——它利用 JFR 的事件与栈信息定位"对象从哪泄漏"(老年代对象/路径追踪),有自己的采样与检查点通道。下一篇: 泄漏剖析。
 

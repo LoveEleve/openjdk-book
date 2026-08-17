@@ -34,7 +34,7 @@ Canonicalizer 的调用点就是 01 篇的 `append_with_bci`——构造它时**
 
 `Optimizer::eliminate_null_checks`(c1_Optimizer.cpp:1155-1161)跑 `NullCheckEliminator`(:553,ValueVisitor 遍历): 沿 def-use 传播"已验证非空"的集合,后续对同一对象的字段访问/null check 就省掉。`RangeCheckElimination::eliminate`(c1_RangeCheckElimination.cpp:46-52)是另一个文件:**只有方法里有 AccessIndexed 才做**(:47 `has_access_indexed`),内部 `RangeCheckEliminator` 用 predicate 传播数组边界信息。
 
-**flag 盘点决定实证手段**: `RangeCheckElimination` 是 **product**(globals.hpp:1369,release 可关),`UseLoopInvariantCodeMotion` 也是 product;而 **CanonicalizeNodes/UseC1Optimizations/UseLocalValueNumbering/UseGlobalValueNumbering/EliminateNullChecks 全是 develop**(c1_globals.hpp:165/:90/:105/:108/:146)——release 关不掉,优化趟次只能源码推演。[实证](planning/outlines/00-jvm-tools/materials/commands/14-c1-optimizations-demo.txt)里 PrintAssembly 因缺 hsdis 只输出 nmethod 布局(可见 C1 的 main code 352 字节 > C2 的 224——**未深度优化的代价**)。*关键设计: 大纲"C1 不做 escape analysis"是错的——C1 有浅层 escape 分析(bcEscapeAnalyzer,12-02 域),只是不做 loop unswitching/标量替换这类深度优化;profiling 数据留给 C2(13-02 域)*。
+**flag 盘点决定实证手段**: `RangeCheckElimination` 是 **product**(globals.hpp:1369,release 可关),`UseLoopInvariantCodeMotion` 也是 product;而 **CanonicalizeNodes/UseC1Optimizations/UseLocalValueNumbering/UseGlobalValueNumbering/EliminateNullChecks 全是 develop**(c1_globals.hpp:165/:90/:105/:108/:146)——release 关不掉,优化趟次只能源码推演。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/14-c1-optimizations-demo.txt)里 PrintAssembly 因缺 hsdis 只输出 nmethod 布局(可见 C1 的 main code 352 字节 > C2 的 224——**未深度优化的代价**)。*关键设计: 大纲"C1 不做 escape analysis"是错的——C1 有浅层 escape 分析(bcEscapeAnalyzer,12-02 域),只是不做 loop unswitching/标量替换这类深度优化;profiling 数据留给 C2(13-02 域)*。
 
 ## 核心悬念
 

@@ -10,7 +10,7 @@
 
 ## 1. 接口面: 入口的声明与实现
 
-`jvm.h`(1342 行,位于 hotspot 的 share/include/ 下,函数自 :59 起)声明了 **182 个 JNIEXPORT 函数**([实证:](planning/outlines/00-jvm-tools/materials/commands/30-jvm-entry-demo.txt)),头注释(jvm.h:38-55)自己说明了组织结构——**"three parts"**,不是按功能域分类:
+`jvm.h`(1342 行,位于 hotspot 的 share/include/ 下,函数自 :59 起)声明了 **182 个 JNIEXPORT 函数**([实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/30-jvm-entry-demo.txt)),头注释(jvm.h:38-55)自己说明了组织结构——**"three parts"**,不是按功能域分类:
 
 ```cpp
 // jvm.h:38-55(截取核心,逐字)
@@ -51,7 +51,7 @@ static JNINativeMethod methods[] = {
 
 `System.registerNatives` 的 C 实现(`Java_java_lang_System_registerNatives`,System.c:44-51)把这些方法 `RegisterNatives` 进 JVM——**`(void *)&JVM_CurrentTimeMillis` 是编译期取址**,不是字符串查找。注释 "Only register the performance-critical methods" 说明只有 3 个走这条捷径。
 
-**链接方式**: [实证:](planning/outlines/00-jvm-tools/materials/commands/30-jvm-entry-demo.txt) `nm -D lib/libjava.so` 显示 `U JVM_CurrentTimeMillis@SUNWprivate_1.1` 等 **131 个 UND 符号**——libjava.so 在链接期引用 libjvm.so 导出的 JVM_* 符号,运行时由 ELF 动态链接器解析(这是编译期符号引用,不是大纲想象的 `dlsym` 查找)。导出名单来自**版本脚本** `hotspot/jvm_sym.ver`:
+**链接方式**: [实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/30-jvm-entry-demo.txt) `nm -D lib/libjava.so` 显示 `U JVM_CurrentTimeMillis@SUNWprivate_1.1` 等 **131 个 UND 符号**——libjava.so 在链接期引用 libjvm.so 导出的 JVM_* 符号,运行时由 ELF 动态链接器解析(这是编译期符号引用,不是大纲想象的 `dlsym` 查找)。导出名单来自**版本脚本** `hotspot/jvm_sym.ver`:
 
 ```
 SUNWprivate_1.1 {
@@ -90,7 +90,7 @@ address NativeLookup::lookup(const methodHandle& method, bool& in_base_library, 
 }
 ```
 
-[实证:](planning/outlines/00-jvm-tools/materials/commands/30-jvm-entry-demo.txt) `-verbose:jni` 下完整链条摊开:
+[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/30-jvm-entry-demo.txt) `-verbose:jni` 下完整链条摊开:
 
 ```
 [Dynamic-linking native method java.lang.System.registerNatives ... JNI]

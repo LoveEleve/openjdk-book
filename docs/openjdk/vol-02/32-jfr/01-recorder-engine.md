@@ -100,7 +100,7 @@ BufferPtr JfrStorage::flush_regular(BufferPtr cur, const u1* const cur_pos, size
 
 消息种类: **START/SHUTDOWN/ROTATE/STOP/FULLBUFFER/DEADBUFFER**。满 buffer 来了 → `process_full_buffers`(把 buffer 数据解码写入当前 chunk);录制结束 → ROTATE → `rotate`;线程退出 → DEADBUFFER → `scavenge`(回收死 buffer)。这个线程与 JFR 生命周期绑定:`JfrRecorder::create`(jfrRecorder.cpp:234)创建组件(`create_components`,:256)+ 启动线程(`create_recorder_thread`→`JfrRecorderThread::start`,:399-401);录制启停只是往 post_box 投消息(`start_recording`/`stop_recording`,:417-429)。
 
-**JFR 的启动时机**(20-02 的 create_vm 序列): `JfrRecorder::on_create_vm_1`(:84,启用+JfrTime 初始化)、`on_create_vm_2`(:193,JfrOptionSet 配置+dcmd 注册)、`on_create_vm_3`(:223,启动命令行录制)——[实证:](planning/outlines/00-jvm-tools/materials/commands/32-jfr-recorder-demo.txt) 启动日志 "Started recording 1. No limit specified, using maxsize=250MB as default."
+**JFR 的启动时机**(20-02 的 create_vm 序列): `JfrRecorder::on_create_vm_1`(:84,启用+JfrTime 初始化)、`on_create_vm_2`(:193,JfrOptionSet 配置+dcmd 注册)、`on_create_vm_3`(:223,启动命令行录制)——[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/32-jfr-recorder-demo.txt) 启动日志 "Started recording 1. No limit specified, using maxsize=250MB as default."
 
 ## 3. 文件侧: chunk 格式与轮转
 
@@ -126,13 +126,13 @@ bool JfrChunkWriter::open() {
     ...
 ```
 
-**"FLR" + 版本 2.0 + 6 个 8 字节头槽**——头里的值(chunk 大小、checkpoint/metadata 偏移、时间戳)在 **chunk 关闭时回填**(`write_header`,:95-107)。[实证:](planning/outlines/00-jvm-tools/materials/commands/32-jfr-recorder-demo.txt) `xxd` 文件头 `464c 5200 0002 0000...`(FLR\0 + major 2 + minor 0),第一个头槽 `0x5068e`=329358 **正好等于文件大小**——回填的证据;`jfr summary` 读出 "Version: 2.0 / Chunks: 1",事件表里 `jdk.NativeMethodSample`(采样器)、`jdk.CheckPoint`(常量池检查点)都在。
+**"FLR" + 版本 2.0 + 6 个 8 字节头槽**——头里的值(chunk 大小、checkpoint/metadata 偏移、时间戳)在 **chunk 关闭时回填**(`write_header`,:95-107)。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/32-jfr-recorder-demo.txt) `xxd` 文件头 `464c 5200 0002 0000...`(FLR\0 + major 2 + minor 0),第一个头槽 `0x5068e`=329358 **正好等于文件大小**——回填的证据;`jfr summary` 读出 "Version: 2.0 / Chunks: 1",事件表里 `jdk.NativeMethodSample`(采样器)、`jdk.CheckPoint`(常量池检查点)都在。
 
 **chunk 轮转**: `JfrChunkRotation::evaluate`(jfrChunkRotation.cpp:62-66)——`writer.size_written() > threshold` 就置 rotate 标志并**通知 Java 侧**("chunk monitor",:64-66,`notify_all`)。threshold 由 **Java 侧 `setFileNotification(阈值)`** 设置(jfrJniMethod.cpp:116-118,`jfr_set_file_notification`)——不是大纲的"固定 size limit"。轮转的意义: **每个 chunk 自包含**(自己的文件头+checkpoint+metadata),读者可以边录边读已完成 chunk,不必等录制结束。
 
 ## 核心悬念
 
-采集引擎拆完: 写入侧是每线程两个 buffer(Java/native 分流,`_pos`/`_top` 双指针,8KB 默认)与四级刷写链(刷空→原地续→shelve→租大 buffer);调度侧是 JFR Recorder Thread 的消息循环(六种消息,process_full_buffers/scavenge/rotate);文件侧是 "FLR"+版本+6 头槽的 chunk(关闭回填头,阈值由 Java 侧 setFileNotification 决定,chunk 自包含可边录边读)。[实证](planning/outlines/00-jvm-tools/materials/commands/32-jfr-recorder-demo.txt)里文件头逐字节对上、summary 读出 130+ 事件类型。
+采集引擎拆完: 写入侧是每线程两个 buffer(Java/native 分流,`_pos`/`_top` 双指针,8KB 默认)与四级刷写链(刷空→原地续→shelve→租大 buffer);调度侧是 JFR Recorder Thread 的消息循环(六种消息,process_full_buffers/scavenge/rotate);文件侧是 "FLR"+版本+6 头槽的 chunk(关闭回填头,阈值由 Java 侧 setFileNotification 决定,chunk 自包含可边录边读)。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/32-jfr-recorder-demo.txt)里文件头逐字节对上、summary 读出 130+ 事件类型。
 
 但"130+ 事件类型"本身是**元数据描述**的——每个事件的名称、字段、阈值、如何序列化,记录在 `.jfr` 的 metadata 区;事件从哪来、描述结构长什么样,直接决定读取端怎么还原。下一篇: 事件类型与元数据。
 

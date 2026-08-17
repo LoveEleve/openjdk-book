@@ -29,7 +29,7 @@ GC 之后(并发阶段):     StringDedupThread 拉队列 → 查表 → 合并/�
 - **哈希表存"唯一 char[]"**: `StringDedupTable`(stringDedupTable.cpp:204 单例;add :246/lookup :280)是传统 hashtable + 条目缓存,**不是 OopStorage**(大纲"table 用 oopStorage 分配...4MB"编造);**表条目弱指向 char 数组**(hpp:35/:97)——表不延长 char[] 的生命;
 - **合并动作**: lookup 命中 → String 的 value 字段指向已存在的 char[](释放自己的引用);未命中 → 插入表。interned 字符串特殊: 插入 StringTable 前**立即 dedup**(stringDedup.hpp:65-73 注释,避免抵消 C2 对字符串字面量的优化)。
 
-**[实证](materials/commands/25-gc-aux-demo.txt)**: `-XX:+UseStringDeduplication`(**默认 false**,globals.hpp:2586)开启后,`-Xlog:gc+stringdedup=trace` 看到 **"Concurrent String Deduplication"**(并发阶段)与统计: 100 万重复 String 检查 31 万、4488B→2816B 共享 char[](素材 A)。注意 flag 名是 `UseStringDeduplication`(`-XX:+UseStringDedup` 直接报 Unrecognized)。
+**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/25-gc-aux-demo.txt)**: `-XX:+UseStringDeduplication`(**默认 false**,globals.hpp:2586)开启后,`-Xlog:gc+stringdedup=trace` 看到 **"Concurrent String Deduplication"**(并发阶段)与统计: 100 万重复 String 检查 31 万、4488B→2816B 共享 char[](素材 A)。注意 flag 名是 `UseStringDeduplication`(`-XX:+UseStringDedup` 直接报 Unrecognized)。
 
 ## 3. GC 统计 — "GC(33)" 背后的架子
 

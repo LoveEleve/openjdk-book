@@ -6,7 +6,7 @@
 
 ## 一次 connect,两条路
 
-[strace 实证](planning/outlines/00-jvm-tools/materials/commands/33-nio-strace.txt)跑同一个程序: 先用 `new Socket()` 做一次阻塞回环,再用 `SocketChannel` 走 NIO Selector。内核侧的两个世界泾渭分明:
+[strace 实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/33-nio-strace.txt)跑同一个程序: 先用 `new Socket()` 做一次阻塞回环,再用 `SocketChannel` 走 NIO Selector。内核侧的两个世界泾渭分明:
 
 ```
 # 阻塞 Socket: connect 直接完成(回环立即成功)

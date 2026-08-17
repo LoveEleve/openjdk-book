@@ -1,6 +1,6 @@
 # 02. jcmd 可以做什么？— 内置命令详解
 
-> **前置依赖**:[35-dcmd/01 — jcmd Thread.print 怎么走到 DCmd 执行？— DCmd Framework](01-dcmd-framework.md):命令如何进入 factory、parser 和 `execute()` 已经闭环;[36-attach/01 — jcmd 怎么连接到运行中的 JVM?— AttachListener + Socket IPC](openjdk/vol-02/36-attach/01-attach-listener.md):本地 attach 通道与 `jcmd` 请求入口;[33-jmx/01 — JMX 怎么把 JVM 暴露出去？](openjdk/vol-02/33-jmx/01-jmx-architecture.md):DCmd 的 MBean 导出面
+> **前置依赖**:[35-dcmd/01 — jcmd Thread.print 怎么走到 DCmd 执行？— DCmd Framework](01-dcmd-framework.md):命令如何进入 factory、parser 和 `execute()` 已经闭环;[36-attach/01 — jcmd 怎么连接到运行中的 JVM?— AttachListener + Socket IPC](openjdk/vol-02/36-attach/01-attach-listener.md):本地 attach 通道与 `jcmd` 请求入口;[33-jmx/01 — JMX 怎么把 JVM 暴露出去？](openjdk/vol-02/33-jmx/01-memory-service.md):DCmd 的 MBean 导出面
 > → **后续**:[36-attach/01 — jcmd 怎么连接到运行中的 JVM?— AttachListener + Socket IPC](openjdk/vol-02/36-attach/01-attach-listener.md)
 > 关联域: 26-g1-gc(GC 命令)、21-shared-runtime(线程与 VM 操作)、34-nmt(NMT 命令)
 

@@ -6,7 +6,7 @@
 
 ## 三种通知,一张脉络
 
-[JMX 通知实证](planning/outlines/00-jvm-tools/materials/commands/33-jmx-notify-demo.txt)在 G1 上设了两个 8MB 阈值、挂了一个 GC 监听器,然后分配 200MB:
+[JMX 通知实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/33-jmx-notify-demo.txt)在 G1 上设了两个 8MB 阈值、挂了一个 GC 监听器,然后分配 200MB:
 
 ```
 == MEM NOTIF type=java.management.memory.threshold.exceeded seq=1 pool=G1 Old Gen used=10170368 count=1
@@ -102,7 +102,7 @@
 
 ## 4. WriteableFlags: 运行时可改的 flag
 
-第三条线不是通知而是**反向控制**——运行时改 JVM 参数。`jcmd VM.set_flag` [实证](planning/outlines/00-jvm-tools/materials/commands/33-jmx-flag-demo.txt):
+第三条线不是通知而是**反向控制**——运行时改 JVM 参数。`jcmd VM.set_flag` [实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/33-jmx-flag-demo.txt):
 
 ```
 [HeapDumpBeforeFullGC true]

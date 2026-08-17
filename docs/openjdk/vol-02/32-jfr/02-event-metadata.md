@@ -6,7 +6,7 @@
 
 ## reader 怎么知道 130+ 种事件长什么样
 
-`.jfr` 文件里每个事件只存**值**(字段的二进制序列,外加事件类型 id),不存字段名/类型——那太浪费。字段的 schema 集中在 chunk 的 **metadata 区**: 每个事件的名称、字段、类型、单位(时间/百分比/地址)、标签,全部描述一次,reader(JMC/jfr 工具)按它解析每一条事件。[实证:](planning/outlines/00-jvm-tools/materials/commands/32-jfr-metadata-demo.txt) `jfr print --events 'jdk.ThreadStart'` 输出 `thread = "main" (javaThreadId = 1)`——**字段名从 metadata 来,值从事件体来**。这篇拆 metadata 的源头(metadata.xml)、生成链(构建期代码生成)、Java 侧管理,以及分类。
+`.jfr` 文件里每个事件只存**值**(字段的二进制序列,外加事件类型 id),不存字段名/类型——那太浪费。字段的 schema 集中在 chunk 的 **metadata 区**: 每个事件的名称、字段、类型、单位(时间/百分比/地址)、标签,全部描述一次,reader(JMC/jfr 工具)按它解析每一条事件。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/32-jfr-metadata-demo.txt) `jfr print --events 'jdk.ThreadStart'` 输出 `thread = "main" (javaThreadId = 1)`——**字段名从 metadata 来,值从事件体来**。这篇拆 metadata 的源头(metadata.xml)、生成链(构建期代码生成)、Java 侧管理,以及分类。
 
 ## 1. 定义源: metadata.xml
 
@@ -20,7 +20,7 @@
   </Event>
 ```
 
-**事件级属性**: `name`(类型名)、`category`(分类,逗号分隔的层级)、`label`(显示名)、`thread`(是否关联线程)、`startTime`(是否带起始时间)、`stackTrace`(是否默认采栈)。**字段级属性**: `type`(基础类型: long/ulong/boolean/string/Thread/Class...)、`name`、`label`、`contentType`(单位提示: millis/nanos/address/percentage——reader 据此显示单位)、`relation`(关联关系,如 `JavaMonitorAddress` 让 reader 把 wait/enter 事件的地址关联到同一监视器)。**分类不是大纲的简单五组**: [实证:](planning/outlines/00-jvm-tools/materials/commands/32-jfr-metadata-demo.txt) `category` 是层级值——"Java Virtual Machine, GC, Detailed"(23 个)、"Java Virtual Machine, Flag"(14)、"Java Application"(9)、"Java Virtual Machine, Runtime, Safepoint"(6)、"Operating System, Processor"(5)……
+**事件级属性**: `name`(类型名)、`category`(分类,逗号分隔的层级)、`label`(显示名)、`thread`(是否关联线程)、`startTime`(是否带起始时间)、`stackTrace`(是否默认采栈)。**字段级属性**: `type`(基础类型: long/ulong/boolean/string/Thread/Class...)、`name`、`label`、`contentType`(单位提示: millis/nanos/address/percentage——reader 据此显示单位)、`relation`(关联关系,如 `JavaMonitorAddress` 让 reader 把 wait/enter 事件的地址关联到同一监视器)。**分类不是大纲的简单五组**: [实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/32-jfr-metadata-demo.txt) `category` 是层级值——"Java Virtual Machine, GC, Detailed"(23 个)、"Java Virtual Machine, Flag"(14)、"Java Application"(9)、"Java Virtual Machine, Runtime, Safepoint"(6)、"Operating System, Processor"(5)……
 
 ## 2. 构建期生成: metadata.xml → C++ 事件类
 

@@ -6,7 +6,7 @@
 
 ## 三种数据,一条实证
 
-[strace 实证](planning/outlines/00-jvm-tools/materials/commands/33-nio-udp-strace.txt)一个程序同时跑 UDP echo、DNS 解析、网卡枚举:
+[strace 实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/33-nio-udp-strace.txt)一个程序同时跑 UDP echo、DNS 解析、网卡枚举:
 
 ```
 # UDP echo: sendto/recvfrom,无连接(每次 send 带目标地址)

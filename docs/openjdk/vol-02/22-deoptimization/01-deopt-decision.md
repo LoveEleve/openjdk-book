@@ -6,7 +6,7 @@
 
 ## 一次类型切换,两次回退
 
-[实证](planning/outlines/00-jvm-tools/materials/commands/22-deopt-type-demo.txt)让 `DeoptDemo` 先热调用 `Square.area()`(接口调用),切换成 `Circle`,再切回:
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/22-deopt-type-demo.txt)让 `DeoptDemo` 先热调用 `Square.area()`(接口调用),切换成 `Circle`,再切回:
 
 ```
 # 阶段 1: 热调用 Square——C2 内联 Square.area(compile_id 75, level 4)

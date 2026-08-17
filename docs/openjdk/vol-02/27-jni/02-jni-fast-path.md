@@ -6,7 +6,7 @@
 
 ## 读一个整型字段要花多少
 
-`GetIntField` 读一个 int 字段,逻辑上就是"解引用 + 读 4 字节"。但走普通 JNI 路径,每次调用要经过: 函数表间接调用(`env->GetIntField` 是函数指针)、线程状态转换(native→VM)、JVMTI 检查、handle 解析——大纲说 200 cycles,实测快路径关闭时约 **15 ns/次**(本机),快路径开启时约 **1.4 ns/次**([实证:](planning/outlines/00-jvm-tools/materials/commands/27-jni-fastpath-demo.txt),2000 万次循环,**约 10 倍差距**)。这篇拆: 普通路径慢在哪、快路径凭什么安全地绕开它。
+`GetIntField` 读一个 int 字段,逻辑上就是"解引用 + 读 4 字节"。但走普通 JNI 路径,每次调用要经过: 函数表间接调用(`env->GetIntField` 是函数指针)、线程状态转换(native→VM)、JVMTI 检查、handle 解析——大纲说 200 cycles,实测快路径关闭时约 **15 ns/次**(本机),快路径开启时约 **1.4 ns/次**([实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/27-jni-fastpath-demo.txt),2000 万次循环,**约 10 倍差距**)。这篇拆: 普通路径慢在哪、快路径凭什么安全地绕开它。
 
 ## 1. 普通路径: 为什么慢
 
@@ -180,7 +180,7 @@ stub 的机制注释在 jniFastGetField.hpp:31-55,先看它再对照汇编:
 
 ## 5. 边界: 为什么没有 Object 和 Static
 
-快路径的形态决定了边界: stub 返回**寄存器里的标量**(rax/xmm0)直接 `ret`,它无法创建新的本地引用——而 `GetObjectField` 的返回值要成为 jobject(`make_local`),`GetStatic*Field` 的 fieldID 是 `JNIid*` 而不是偏移(编码完全不同,jfieldIDWorkaround.hpp:30-37: instance=1 低位标记),都不符合"读一个偏移处的标量"这个模板。所以 8 个 Get 就是全部: [实证:](planning/outlines/00-jvm-tools/materials/commands/27-jni-fastpath-demo.txt) `UseFastJNIAccessors=false` 时每调用 ~15ns,开启时 ~1.4ns——**约 10 倍**,大纲的"30 vs 200 cycles"换成实测数字更直观。
+快路径的形态决定了边界: stub 返回**寄存器里的标量**(rax/xmm0)直接 `ret`,它无法创建新的本地引用——而 `GetObjectField` 的返回值要成为 jobject(`make_local`),`GetStatic*Field` 的 fieldID 是 `JNIid*` 而不是偏移(编码完全不同,jfieldIDWorkaround.hpp:30-37: instance=1 低位标记),都不符合"读一个偏移处的标量"这个模板。所以 8 个 Get 就是全部: [实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/27-jni-fastpath-demo.txt) `UseFastJNIAccessors=false` 时每调用 ~15ns,开启时 ~1.4ns——**约 10 倍**,大纲的"30 vs 200 cycles"换成实测数字更直观。
 
 ## 核心悬念
 

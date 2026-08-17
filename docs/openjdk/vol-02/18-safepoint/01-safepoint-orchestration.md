@@ -66,7 +66,7 @@ counter 只在 begin/end 各 +1,且两次递增间持着 Threads_lock,保证配�
 
 等不到 `_waiting_to_block` 归零时进入**阻塞等待**: `Safepoint_lock->wait(true)`(safepoint.cpp:423,非忙等;SafepointTimeout 时带时限)——**最后一个线程到达时 `Safepoint_lock->notify_all()` 唤醒 VM 线程**(safepoint.cpp:866-867)。然后: `_safepoint_counter++`(:450,变奇数)→ `_state = _synchronized`(:453)→ `OrderAccess::fence()`(:455)→ **`do_cleanup_tasks()`**(:481,第 4 节)——cleanup 是"同步完成后、VM op 执行前"的固定环节。
 
-[实证:](planning/outlines/00-jvm-tools/materials/commands/18-safepoint-demo.txt) `-Xlog:safepoint` 看得到完整过程: `Entering safepoint region: EnableBiasedLocking`(冒号后是**触发它的 VM 操作名**)→ `Leaving safepoint region` → `Total time for which application threads were stopped: 0.0001122 seconds, Stopping threads took: 0.0000389 seconds`(停摆总时长/停线程耗时)。`-XX:+PrintSafepointStatistics`(JDK11 已标 deprecated 但可用)给出统计表: `vmop [threads: total initially_running wait_to_block][time: spin block sync cleanup vmop] page_trap_count`——begin() 里收集的 `SafepointStats`(safepoint.hpp:92-104)的打印形态。
+[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/18-safepoint-demo.txt) `-Xlog:safepoint` 看得到完整过程: `Entering safepoint region: EnableBiasedLocking`(冒号后是**触发它的 VM 操作名**)→ `Leaving safepoint region` → `Total time for which application threads were stopped: 0.0001122 seconds, Stopping threads took: 0.0000389 seconds`(停摆总时长/停线程耗时)。`-XX:+PrintSafepointStatistics`(JDK11 已标 deprecated 但可用)给出统计表: `vmop [threads: total initially_running wait_to_block][time: spin block sync cleanup vmop] page_trap_count`——begin() 里收集的 `SafepointStats`(safepoint.hpp:92-104)的打印形态。
 
 ## 3. 响应端: 线程怎么"到达"
 
@@ -99,7 +99,7 @@ counter 只在 begin/end 各 +1,且两次递增间持着 Threads_lock,保证配�
 6. `CLD_PURGE`——清理死类加载器的 metadata;
 7. `SYSTEM_DICTIONARY_RESIZE`——类字典扩容。
 
-**关键设计 (斜体)**: *这些任务的共同点是"没有并发线程才能做": rehash 时若有线程正在查表,重排桶会导致 dangling pointer;CLD purge 遍历 ClassLoaderData 链表时不能有线程在加新类加载器。safepoint 恰好提供了"全世界静止"这个保证——所以它们被塞进停摆窗口。* 至于"这个 safepoint 值不值得做": **没有待办 VM 操作时,VM 线程会主动判断要不要发一次"空 safepoint"专门做 cleanup**——`no_op_safepoint_needed`(vmThread.cpp:440): `is_cleanup_needed()` 为真,或距上次 safepoint 超过 `GuaranteedSafepointInterval`(兜底,保证不会太久没停过)——[实证:](planning/outlines/00-jvm-tools/materials/commands/18-safepoint-demo.txt) 日志里 `Entering safepoint region: Cleanup` 就是这种空 safepoint;不值得就不做,避免每次 GC 都白付清理费。
+**关键设计 (斜体)**: *这些任务的共同点是"没有并发线程才能做": rehash 时若有线程正在查表,重排桶会导致 dangling pointer;CLD purge 遍历 ClassLoaderData 链表时不能有线程在加新类加载器。safepoint 恰好提供了"全世界静止"这个保证——所以它们被塞进停摆窗口。* 至于"这个 safepoint 值不值得做": **没有待办 VM 操作时,VM 线程会主动判断要不要发一次"空 safepoint"专门做 cleanup**——`no_op_safepoint_needed`(vmThread.cpp:440): `is_cleanup_needed()` 为真,或距上次 safepoint 超过 `GuaranteedSafepointInterval`(兜底,保证不会太久没停过)——[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/18-safepoint-demo.txt) 日志里 `Entering safepoint region: Cleanup` 就是这种空 safepoint;不值得就不做,避免每次 GC 都白付清理费。
 
 ## 5. end(): 撒开栓
 
@@ -110,7 +110,7 @@ counter 只在 begin/end 各 +1,且两次递增间持着 Threads_lock,保证配�
 3. 复位状态: 全局 poll 模式逐个 `restart()` 线程(:554-583,注释里那段"Solaris 重启线程被抢占"的历史教训挺有意思);thread-local 模式先 `_state = _not_synchronized` 再逐线程 restart+disarm(:544-553);
 4. **`Threads_lock->unlock()`**(:590)——被 block() 排队卡住的线程从这里全部放行。
 
-[实证:](planning/outlines/00-jvm-tools/materials/commands/18-safepoint-demo.txt) 日志里 `Leaving safepoint region` 就是 end() 完成的标记;两次 `jcmd GC.run` 触发的 `Entering safepoint region: GC_Collection` 之间,`Application time` 记录的是应用线程连续运行时长。
+[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/18-safepoint-demo.txt) 日志里 `Leaving safepoint region` 就是 end() 完成的标记;两次 `jcmd GC.run` 触发的 `Entering safepoint region: GC_Collection` 之间,`Application time` 记录的是应用线程连续运行时长。
 
 ## 核心悬念
 

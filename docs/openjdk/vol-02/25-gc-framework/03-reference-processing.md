@@ -128,7 +128,7 @@ GC 的引用处理主入口是 `process_discovered_references`(referenceProcesso
 
 *关键设计: **顺序是硬约束**。Finalizer 的"复活"必须发生在 Phantom 之前——Phantom 引用在对象真正回收时才有意义,若先处理 phantom 再复活对象,复活对象已被"判死"过,语义崩坏。Phase2 里 final 引用只清不 enqueue(:905),**入队推迟到 Phase3 的复活确认之后**(process_final_keep_alive_work :439)。每一轮 work 之后 `complete_gc->do_void()` 闭合可达集(:372/:445),让 keep-alive 的标记立即生效。*
 
-**[实证](materials/commands/25-gc-reference-demo.txt)**: 内存压力场景(32MB 堆 + 分配压力)下 `weak referent: null`、`soft referent alive: false`、`phantom enqueued: true`、同一 ReferenceQueue 收到 2 个条目(素材 A);无压力场景(默认策略,System.gc ×10)软引用保活对象、weak 同活(素材 B)——软引用的"软可达"语义。引用处理在 GC 阶段树里是固定成员(25-01 素材的 "Reference Processing" 阶段)。
+**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/25-gc-reference-demo.txt)**: 内存压力场景(32MB 堆 + 分配压力)下 `weak referent: null`、`soft referent alive: false`、`phantom enqueued: true`、同一 ReferenceQueue 收到 2 个条目(素材 A);无压力场景(默认策略,System.gc ×10)软引用保活对象、weak 同活(素材 B)——软引用的"软可达"语义。引用处理在 GC 阶段树里是固定成员(25-01 素材的 "Reference Processing" 阶段)。
 
 ## 3. 软引用的 LRU 天平与 G1 的接线
 

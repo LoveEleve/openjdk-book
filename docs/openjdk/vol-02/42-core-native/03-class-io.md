@@ -201,7 +201,7 @@ Linux 版的 `getPlatformTimeZoneID`(TimeZone_md.c:251-354)分两步:
 - **普通文件**(1999 年后的 timeconfig 直接拷文件,注释 :296-302): 只能**读整个文件内容,然后在 /usr/share/zoneinfo 里递归找一模一样的文件**——`findZoneinfoFile`(:123-195)跳过隐藏文件和 `ROC`/`posixrules`/`localtime`(:154-176),`isFileIdentical`(:203-243)先比文件大小再 `memcmp` 字节;扫描前先试 `UTC`/`GMT` 两个热门项(:132-147,"fast path for 1st iteration");
 - **两态都失败**: 返回 NULL → Java 侧退到 `GMT`。
 
-[实证](materials/commands/42-classio-tz.txt)恰好演示了这条链: 容器是 TencentOS,`/etc/timezone` 不存在、`/etc/localtime -> /usr/share/zoneinfo/Asia/Shanghai`(符号链接路径),于是 JDK 走 readlink 分支,`ZoneId.systemDefault()` 与 `user.timezone` 都是 Asia/Shanghai;而素材里 jcmd 的 `user.timezone=Asia/Shanghai`(materials/commands/jcmd-VM.system_properties.txt:9)则是 Java 侧缓存下来的结果。
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/42-classio-tz.txt)恰好演示了这条链: 容器是 TencentOS,`/etc/timezone` 不存在、`/etc/localtime -> /usr/share/zoneinfo/Asia/Shanghai`(符号链接路径),于是 JDK 走 readlink 分支,`ZoneId.systemDefault()` 与 `user.timezone` 都是 Asia/Shanghai;而素材里 jcmd 的 `user.timezone=Asia/Shanghai`(materials/commands/jcmd-VM.system_properties.txt:9)则是 Java 侧缓存下来的结果。
 
 ### 最后的兜底: getGMTOffsetID
 

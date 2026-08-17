@@ -138,7 +138,7 @@ GenericTaskQueue<E, F, N>::pop_local(volatile E& t, uint threshold) {
 
 *关键设计: **同步派发,两个信号量**。coordinator(`run_task` :288-302)信号 `num_workers` 次启动信号 → worker 被唤醒后原子计数拿自己的 `worker_id`(:174-177,`task->work(worker_id)` 就是每个 worker 的分片编号)→ 干完 `worker_done_with_task` 原子递减 `_not_finished` → **最后一个人发结束信号** → coordinator 的 `_end_semaphore->wait()` 返回。于是 `run_task` 是同步的: 返回 = 所有 worker 完成。另有 Monitor 版 `MutexGangTaskDispatcher`(:194+,为不需要信号量的平台/场景备选)。*
 
-**[实证](materials/commands/25-gc-workgang-demo.txt)**: `ParallelGCThreads=23` 是**上限**不是实际并发——`UseDynamicNumberOfGCThreads=true` 时小 GC 只用 2 个 worker(gc+phases 的 `Workers: 2`,素材 B);线程转储里 `GC Thread#0`/`G1 Conc#0` 懒创建(素材 C);`gc+task`/`gc+workgang` 标签可用。
+**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/25-gc-workgang-demo.txt)**: `ParallelGCThreads=23` 是**上限**不是实际并发——`UseDynamicNumberOfGCThreads=true` 时小 GC 只用 2 个 worker(gc+phases 的 `Workers: 2`,素材 B);线程转储里 `GC Thread#0`/`G1 Conc#0` 懒创建(素材 C);`gc+task`/`gc+workgang` 标签可用。
 
 ## 3. 谁在消费 — 引用处理与扫描任务
 

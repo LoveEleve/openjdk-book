@@ -8,7 +8,7 @@
 
 C2 编译 `CiDemo::work` 时,它需要知道: `String.length()` 的字节码有多大、`value` 字段在哪个偏移、`Square.area()` 是不是虚调用、有没有唯一实现者。这些信息都在 InstanceKlass/Method/fieldDescriptor 里——为什么编译器不直接读?
 
-[实证:](planning/outlines/00-jvm-tools/materials/commands/12-ci-inlining-demo.txt) `-XX:+PrintInlining` 展示了编译器真的拿到了这些信息: `java.lang.String::length (11 bytes)` 被内联,它的 `coder`、`isLatin1` 也被内联;接口调用 `ShapeHolder.shape()` → `Square.area()` 被内联,决策依据是 `\-> TypeProfile (87426/87426 counts) = CiDemo$Square`——调用点剖面显示 100% 是 Square,于是编译器把它当具体类型处理。这些"读元数据 + 做决策"的动作,都发生在一个叫 **ci(compiler interface)** 的镜像层上。为什么要有这层?三个理由:
+[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/12-ci-inlining-demo.txt) `-XX:+PrintInlining` 展示了编译器真的拿到了这些信息: `java.lang.String::length (11 bytes)` 被内联,它的 `coder`、`isLatin1` 也被内联;接口调用 `ShapeHolder.shape()` → `Square.area()` 被内联,决策依据是 `\-> TypeProfile (87426/87426 counts) = CiDemo$Square`——调用点剖面显示 100% 是 Square,于是编译器把它当具体类型处理。这些"读元数据 + 做决策"的动作,都发生在一个叫 **ci(compiler interface)** 的镜像层上。为什么要有这层?三个理由:
 
 1. **VM 侧对象太重**。`InstanceKlass` 是 C++ 类,内部是给 VM 用的: 锁、状态机(`_init_state`)、`ClassLoaderData` 关联、各种断言与检查。编译器热路径上的查询(这是接口吗?字段在哪个偏移?方法多大?)不该背着这些;
 2. **oop 会移动**。编译线程与 GC 是并发的: 编译在编译器线程上跑,GC 到 safepoint 时编译线程只是**阻塞**,编译状态要跨过 GC 存活。直接存 oop 指针,GC 一搬就悬空;
@@ -163,7 +163,7 @@ ci 层把 VM 的 oop 与 Klass 两条层级(oopHierarchy 与 Klass 体系)合并
 
 快照解决"读得干净",但还差最后一块: 快照会过期。编译基于 `Square` 是唯一实现者、`String` 的布局、某类没被重定义这些假设——假设失效时,已产出的 nmethod 必须被撤销(not entrant → deopt,22 域)。这就是 **Dependencies**: `ciEnv` 持有一个 `Dependencies* _dependencies`(ciEnv.hpp:57/313),编译过程中编译器把每个"决定性的假设"登记进去;nmethod 安装时与后续的类加载/重定义对照校验(`validate_compile_task_dependencies`,ciEnv.cpp:933)——违反则编译产物作废。
 
-[实证:](planning/outlines/00-jvm-tools/materials/commands/12-ci-inlining-demo.txt) PrintCompilation 里反复出现的 `made not entrant` 是这条链的常见形态: tier3 的 `CiDemo::work` 被 tier4 版本替换(:32/39/40 行的三个 made not entrant);替换不是"删代码",而是把旧 nmethod 标记为不可再进入,正在执行的栈帧继续跑完,新的调用走新版本(依赖失效是它的另一种触发: 假设被违反时 nmethod 同样被作废,22 域)。
+[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/12-ci-inlining-demo.txt) PrintCompilation 里反复出现的 `made not entrant` 是这条链的常见形态: tier3 的 `CiDemo::work` 被 tier4 版本替换(:32/39/40 行的三个 made not entrant);替换不是"删代码",而是把旧 nmethod 标记为不可再进入,正在执行的栈帧继续跑完,新的调用走新版本(依赖失效是它的另一种触发: 假设被违反时 nmethod 同样被作废,22 域)。
 
 ## 核心悬念
 

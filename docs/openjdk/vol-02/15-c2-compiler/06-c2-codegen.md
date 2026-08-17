@@ -95,7 +95,7 @@ adlc(Architecture Description Language Compiler)在**构建期**把这些规则�
 
 发码在 **`Compile::Output`**(output.cpp:57,大纲的"PhaseOutput"类在 JDK11 不存在): 入口 MachPrologNode 序言(:71-77),然后逐块逐指令 `n->emit(*cb, _regalloc)`(:1394)——每个 MachNode 的 `emit` 调宏汇编器把机器码写进 **CodeBuffer**,重定位信息(调用目标、常量池地址)由 MachNode 的 reloc 逻辑在 emit 时写入。大纲的"peephole: NOP 消除/冗余 mov 消除"是编造的——**C2 的 `MachNode::peephole` 默认返回 NULL**(machnode.cpp:415-417),x86 没有重写,`PhasePeephole` 框架(phaseX.cpp:2140-2159)存在但钩子全空;这与 14-c1/03 域发现的 C1 peephole 空实现(注释 "sparc uses this for delay slot filling")如出一辙——**两代编译器的 x86 peephole 都是空壳**,"消除冗余 mov"在 JDK11 x86 上不发生。
 
-**实证**([素材](planning/outlines/00-jvm-tools/materials/commands/15-c2-codegen-demo.txt)第 1 段): CITime 显示 Code_Gen 的完整阶段——`Matcher`/`Scheduler`/`Regalloc`/`Block Ordering`/`Peephole`/`Build OOP maps`/`Code Installation`(01 篇素材第 6 段同构)。`OptoPeephole` 是 develop_pd(c2_globals.hpp:150,x86_64 默认 true 但钩子空)、`PrintOptoPeephole` 是 notproduct(:162);`format %{}` 的文本用于 PrintOptoAssembly,而该 flag 的实现在 01 篇已证是 NOT_PRODUCT(release 不可见)——发码细节在 release 下既看不到也调不了,能观察的只有阶段计时与最终运行结果。
+**实证**([素材](openjdk/planning/outlines/00-jvm-tools/materials/commands/15-c2-codegen-demo.txt)第 1 段): CITime 显示 Code_Gen 的完整阶段——`Matcher`/`Scheduler`/`Regalloc`/`Block Ordering`/`Peephole`/`Build OOP maps`/`Code Installation`(01 篇素材第 6 段同构)。`OptoPeephole` 是 develop_pd(c2_globals.hpp:150,x86_64 默认 true 但钩子空)、`PrintOptoPeephole` 是 notproduct(:162);`format %{}` 的文本用于 PrintOptoAssembly,而该 flag 的实现在 01 篇已证是 NOT_PRODUCT(release 不可见)——发码细节在 release 下既看不到也调不了,能观察的只有阶段计时与最终运行结果。
 
 *关键设计: 指令选择(Matcher/ins_cost)+ 调度(GCM/频率)+ 分配(Chaitin)+ 发码(Output/CodeBuffer)是四段流水,每段消费前段的产物、喂给后段。.ad 文件是唯一的平台入口——规则的 match 决定指令形态,ins_cost 决定取舍,ins_encode 决定字节;改平台 = 改 .ad,这就是 36815 行描述文件的全部意义。*
 

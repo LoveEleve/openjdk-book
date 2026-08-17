@@ -48,7 +48,7 @@ traceid JfrStackTraceRepository::add_trace(const JfrStackTrace& stacktrace) {
     ...
 ```
 
-`add` 流程: 哈希 → 查表(`add_trace`);未命中 → **`resolve_linenos()`(解析行号)再查一次**(行号是后补的,补完可能命中已入库的栈);仍无则登记新 id。采样器每抓到一条栈,`add` 得到 `trace_id` 写进事件(`set_stackTrace(id)`,jfrThreadSampler.cpp:262)——**事件里只有 8 字节 id(`traceid`=u8,jfrTypes.hpp:30),完整栈只在 repository 里存一份**。reader 解析时从 chunk 的栈轨迹常量池按 id 取回完整栈([实证:](planning/outlines/00-jvm-tools/materials/commands/32-jfr-sampling-demo.txt) `jfr print` 能还原完整 `stackTrace`)。
+`add` 流程: 哈希 → 查表(`add_trace`);未命中 → **`resolve_linenos()`(解析行号)再查一次**(行号是后补的,补完可能命中已入库的栈);仍无则登记新 id。采样器每抓到一条栈,`add` 得到 `trace_id` 写进事件(`set_stackTrace(id)`,jfrThreadSampler.cpp:262)——**事件里只有 8 字节 id(`traceid`=u8,jfrTypes.hpp:30),完整栈只在 repository 里存一份**。reader 解析时从 chunk 的栈轨迹常量池按 id 取回完整栈([实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/32-jfr-sampling-demo.txt) `jfr print` 能还原完整 `stackTrace`)。
 
 ## 3. 周期事件: 45 个 requestXXX + Java 侧引擎
 
@@ -60,7 +60,7 @@ traceid JfrStackTraceRepository::add_trace(const JfrStackTrace& stacktrace) {
 
 ## 核心悬念
 
-周期机制拆完: 线程采样靠 Java 侧注入的间隔(无 JVM flag)+ semaphore 循环分摊采样,栈经 `JfrStackTraceRepository` 哈希去重(同栈同 id,事件只写 8 字节 id,栈数据经 repository::write 落进 chunk 的常量池,jfrStackTraceRepository.cpp:100);45 个周期事件由 Java 侧 `RequestEngine` 按 period 节拍驱动(native 只提供 requestXXX 实现,chunk 边界事件每 chunk 刷新)。[实证](planning/outlines/00-jvm-tools/materials/commands/32-jfr-sampling-demo.txt)里 `jfr print` 的 ExecutionSample 实例带着完整栈——repository 的 id 已被还原成可读形式。
+周期机制拆完: 线程采样靠 Java 侧注入的间隔(无 JVM flag)+ semaphore 循环分摊采样,栈经 `JfrStackTraceRepository` 哈希去重(同栈同 id,事件只写 8 字节 id,栈数据经 repository::write 落进 chunk 的常量池,jfrStackTraceRepository.cpp:100);45 个周期事件由 Java 侧 `RequestEngine` 按 period 节拍驱动(native 只提供 requestXXX 实现,chunk 边界事件每 chunk 刷新)。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/32-jfr-sampling-demo.txt)里 `jfr print` 的 ExecutionSample 实例带着完整栈——repository 的 id 已被还原成可读形式。
 
 但还原依赖"栈轨迹、常量、字符串在文件里怎么编码"——事件 id 指向 repository,repository 数据又怎么落到 `.jfr` 的二进制流?下一篇: 二进制写出与 chunk 格式。
 

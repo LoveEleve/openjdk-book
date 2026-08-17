@@ -1,7 +1,7 @@
 # 03. JNI 调用参数错了——JVM 怎么检测?— JNI Check + 平台层
 
 > **前置依赖**:[27-jni/01 — jobject 在 JVM 内部怎么存的?— JNI Handle 系统](openjdk/vol-02/27-jni/01-handle-system.md):JNIHandleBlock 的 `_planned_capacity` 字段在这里埋了伏笔;[27-jni/02 — JNI GetIntField 正常 200 cycles → 怎么做到 30 cycles?— JNI Fast Path](openjdk/vol-02/27-jni/02-jni-fast-path.md):函数表替换机制与 `CheckJNICalls` 条件;[20-vm-operations/02 — 谁在后台周期性干活?— PeriodicTask、WatcherThread 与启动序列](openjdk/vol-02/20-vm-operations/02-background-init.md):JniPeriodicCheckerTask 已在后台任务清单里讲过
-> → **后续**:[30-jvm-entry/01 — System.currentTimeMillis() 怎么进入 JVM?— JVM Entry Points](01-jvm-entry-points.md)
+> → **后续**:[30-jvm-entry/01 — System.currentTimeMillis() 怎么进入 JVM?— JVM Entry Points](openjdk/vol-02/30-jvm-entry/01-jvm-entry-points.md)
 > 关联域: 28-jvmti(工具接口用同一张函数表)、42-core-native(JNI 系统另一侧)、04-logging
 
 ## 传错参数是未定义行为——但可以"帮你看见"
@@ -64,7 +64,7 @@ JNI_END
 | 本地引用泄漏 | `functionExit`(:239-252) | 警告 "JNI local refs: N, exceeds capacity: M" |
 | Critical 区内调用 | `functionEnter`(:222-228) | 警告 "Calling other JNI functions in the scope of ..." |
 
-**本地引用泄漏检查**值得展开——它就是 01 篇 `JNIHandleBlock::_planned_capacity` 字段的用途: `PushLocalFrame(capacity)`/`EnsureLocalCapacity(capacity)` 的 checked 版本成功后调用 `add_planned_handle_capacity`(jniCheck.cpp:202-207),把容量记为 `capacity + 当前存活数 + 32`;`functionExit` 时数一遍 `active_handles()` 的存活引用,超过计划容量就警告"JNI local refs: N, exceeds capacity: M"并重置计数(只警告一轮)。[实证:](planning/outlines/00-jvm-tools/materials/commands/27-jni-check-demo.txt) 循环 2000 次 `NewLocalRef` 不删除,`-Xcheck:jni` 下每 32 个触发一次警告(33/66/99...);**同样的代码不带 `-Xcheck:jni`,输出 0 条警告**——release 完全静默。挂起异常检查同理: `FindClass` 失败后不查异常继续调 JNI,checked 版当场打出 "WARNING in native method: JNI call made with exception pending" + JNI 栈,无 flag 时照跑不误。
+**本地引用泄漏检查**值得展开——它就是 01 篇 `JNIHandleBlock::_planned_capacity` 字段的用途: `PushLocalFrame(capacity)`/`EnsureLocalCapacity(capacity)` 的 checked 版本成功后调用 `add_planned_handle_capacity`(jniCheck.cpp:202-207),把容量记为 `capacity + 当前存活数 + 32`;`functionExit` 时数一遍 `active_handles()` 的存活引用,超过计划容量就警告"JNI local refs: N, exceeds capacity: M"并重置计数(只警告一轮)。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/27-jni-check-demo.txt) 循环 2000 次 `NewLocalRef` 不删除,`-Xcheck:jni` 下每 32 个触发一次警告(33/66/99...);**同样的代码不带 `-Xcheck:jni`,输出 0 条警告**——release 完全静默。挂起异常检查同理: `FindClass` 失败后不查异常继续调 JNI,checked 版当场打出 "WARNING in native method: JNI call made with exception pending" + JNI 栈,无 flag 时照跑不误。
 
 ## 4. 平台层: 函数表在哪、谁声明的
 
@@ -76,4 +76,4 @@ JNI_END
 
 jniCheck 拆完: 它不碰任何 JNI 函数,靠一张**平行函数表**整体替换(`jni_functions_check` 保存原始表、断言结构一致);每个 wrapper 四段式——入口查线程/env、functionEnter 查挂起异常与 critical 区、IN_VM 参数校验(引用/methodID/数组/字段类型)、回调后 functionExit 数本地引用;fatal 直接 "FATAL ERROR in native method" + JNI 栈 + abort,警告类的问题(异常/泄漏)只打 WARNING 继续跑。`-Xcheck:jni` 一开,02 篇的快路径立刻让位——检查优先于优化。而"函数表可以整体换掉"这个能力还有更野的用法: 工具接口(JVMTI)不只查,还**改**——`copy_jni_function_table` 在 safepoint 里原子替换槽,挂钩子、拦字段访问(02 篇的 `can_post_field_access` 条件就是它)。下一域换主角: 不是 C 调 Java,是 Java 自己调 JVM——`System.currentTimeMillis()` 这类入口怎么走。
 
-> → [30-jvm-entry/01 — System.currentTimeMillis() 怎么进入 JVM?— JVM Entry Points](01-jvm-entry-points.md)
+> → [30-jvm-entry/01 — System.currentTimeMillis() 怎么进入 JVM?— JVM Entry Points](openjdk/vol-02/30-jvm-entry/01-jvm-entry-points.md)

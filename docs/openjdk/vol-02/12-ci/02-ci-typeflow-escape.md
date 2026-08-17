@@ -153,7 +153,7 @@ ciType* ciTypeFlow::StateVector::type_meet_internal(ciType* t1, ciType* t2, ciTy
 
 对象不逃逸,优化能到什么程度?**标量替换**: 把 `new Point` 拆成 `x`、`y` 两个寄存器/局部变量,堆上不分配。注意大纲说的 `ciMethod::scalar_replacement_possible()` **不存在**——决定权在 C2: `ConnectionGraph::scalar_replaceable()`(escape.cpp:256/273)+ `find_scalar_replaceable_allocs`(:268)找出可替换的分配点,替换本身在 `PhaseMacroExpand`(macro.cpp)把 Allocate 节点展开成标量。逃逸分析的层次术语(NoEscape/ArgEscape/GlobalEscape)属于 C2 的 ConnectionGraph,不是 bcEscapeAnalyzer 的三档(后者是 local/stack/returned 的位图)。
 
-[实证:](planning/outlines/00-jvm-tools/materials/commands/12-ci-typeflow-escape-demo.txt) EscDemo 的两个方法: `noEscape` 循环 400 万次 `new Point`(对象只在方法内用),`escape` 循环 40 万次 `new Point` 后塞进 `ArrayList`。默认配置下 `noEscape: 1ms` vs `escape: 18ms`——分配被消除的痕迹;关闭 `-XX:-EliminateAllocations` 后 `noEscape: 5ms`、`escape: 9ms`——差异消失,两个方法都回到"真分配"的同一水平。PrintCompilation 确认 `noEscape` 被 C2 以 OSR(`%`)形式编译(tier3 `%`→tier4 `%`)。开关对照把"1ms 的功劳归于标量替换"钉死了: 同一份字节码、同一个 C2,唯一变量是分配消除开关。
+[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/12-ci-typeflow-escape-demo.txt) EscDemo 的两个方法: `noEscape` 循环 400 万次 `new Point`(对象只在方法内用),`escape` 循环 40 万次 `new Point` 后塞进 `ArrayList`。默认配置下 `noEscape: 1ms` vs `escape: 18ms`——分配被消除的痕迹;关闭 `-XX:-EliminateAllocations` 后 `noEscape: 5ms`、`escape: 9ms`——差异消失,两个方法都回到"真分配"的同一水平。PrintCompilation 确认 `noEscape` 被 C2 以 OSR(`%`)形式编译(tier3 `%`→tier4 `%`)。开关对照把"1ms 的功劳归于标量替换"钉死了: 同一份字节码、同一个 C2,唯一变量是分配消除开关。
 
 ## 核心悬念
 

@@ -64,7 +64,7 @@ void PhaseCCP::analyze() {
 
 *关键设计: IGVN 是"悲观"的——每个节点用自己的当前输入类型重算,类型只会变窄;CCP 是"乐观"的——先假设全部 TOP,能证明多少是多少,类型只会变宽。两者互补: 乐观假设让 CCP 能沿"尚未证明不可达"的路径推进,一旦证明常量就消除分支;而类型只增不减保证了终止。代价是 CCP 需要整图扫描(analyze 的 worklist 从 root 播遍全图),所以它只在优化中期跑一次,不像 IGVN 那样处处收敛。*
 
-**实证边界**: CCP 的常量分支在 **javac 层就被折叠**了——`if (1==1)` 编译后只剩 `bipush 10`([实证](planning/outlines/00-jvm-tools/materials/commands/15-c2-optimizations-demo.txt)第 4 段),连 `static final int MODE=3` 这种"运行期常量"也是编译期常量(javac 折叠 `mode()` 成 `x*2`)。CCP 真正处理的是**图中才出现**的常量: 内联后值恒定的参数、类型窄化后的比较、Phi 合并出的单例。release 构建没有 flag 能直接打印 CCP 的行为(`TracePhaseCCP` 是 notproduct,c2_globals.hpp:632),能看到的只有 CITime 阶段树里的 "Cond Const Prop"(01 篇素材第 6 段)。
+**实证边界**: CCP 的常量分支在 **javac 层就被折叠**了——`if (1==1)` 编译后只剩 `bipush 10`([实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/15-c2-optimizations-demo.txt)第 4 段),连 `static final int MODE=3` 这种"运行期常量"也是编译期常量(javac 折叠 `mode()` 成 `x*2`)。CCP 真正处理的是**图中才出现**的常量: 内联后值恒定的参数、类型窄化后的比较、Phi 合并出的单例。release 构建没有 flag 能直接打印 CCP 的行为(`TracePhaseCCP` 是 notproduct,c2_globals.hpp:632),能看到的只有 CITime 阶段树里的 "Cond Const Prop"(01 篇素材第 6 段)。
 
 ## 3. Escape Analysis — 证明"可以不分配"
 
@@ -95,7 +95,7 @@ void PhaseCCP::analyze() {
 
 **最后一刀在 PhaseMacroExpand**: EA 只是"证明",消除分配发生在 `eliminate_macro_nodes`(macro.cpp:2567)——先做锁消除(`eliminate_locking_node`,:2593-2595),再对 `Allocate`/`AllocateArray` 调 `eliminate_allocate_node`(:2610-2613)。后者有**四道门**: `EliminateAllocations` 开关、JVMTI pop frame 不可用、`_is_non_escaping`(EA 打的标记)、`can_eliminate_allocation` 检查安全点引用(macro.cpp:1091-1116);通过后 `scalar_replacement`(:759,在 :1128 调用)把分配拆成字段级定义,随后 `process_users_of_allocation`(:946)处理字段访问——**Store 被直接删除**(值留在 def-use 图里,store 的 memory 边直通,`replace_node(n, n->in(MemNode::Memory))`,:959-961),**Load 经由 IGVN 的类型传播解析为字段的唯一定义值**,GC 屏障一并消除(eliminate_gc_barrier)——堆分配、屏障、内存加载一起消失。Compile::Optimize 里的编排(compile.cpp:2307-2337): `ConnectionGraph::do_analysis(this, &igvn)`(:2316)→ `igvn.optimize()`(:2321)→ `PhaseMacroExpand::eliminate_macro_nodes`(:2328-2333)。循环优化之后还有一次 `expand_macro_nodes`(:2432-2440)——把**剩余**的宏节点(真正的分配/锁/数组拷贝)展开成机器级节点,那是"必须发生的分配"。
 
-**实证**([素材](planning/outlines/00-jvm-tools/materials/commands/15-c2-optimizations-demo.txt)第 1/2 段): 2 亿次循环内 `new Point(i, i+1)` 且不逃逸——**EA 开(默认)**: 0 次 GC,70ms;`-XX:-EliminateAllocations` 关闭后: **6 次 GC Pause、每次 570MB 分配、459ms(6.5 倍)**。同一个方法、同样的字节码,只差一个 flag——这就是标量替换的量级。`DoEscapeAnalysis`/`EliminateAllocations` 都是 product flag(c2_globals.hpp:527/:540)所以能开关对照;`PrintEliminateAllocations` 是 notproduct(:543),release 无法打印"++++ Eliminated: N Allocate"(macro.cpp:1147-1152 的打印段)。
+**实证**([素材](openjdk/planning/outlines/00-jvm-tools/materials/commands/15-c2-optimizations-demo.txt)第 1/2 段): 2 亿次循环内 `new Point(i, i+1)` 且不逃逸——**EA 开(默认)**: 0 次 GC,70ms;`-XX:-EliminateAllocations` 关闭后: **6 次 GC Pause、每次 570MB 分配、459ms(6.5 倍)**。同一个方法、同样的字节码,只差一个 flag——这就是标量替换的量级。`DoEscapeAnalysis`/`EliminateAllocations` 都是 product flag(c2_globals.hpp:527/:540)所以能开关对照;`PrintEliminateAllocations` 是 notproduct(:543),release 无法打印"++++ Eliminated: N Allocate"(macro.cpp:1147-1152 的打印段)。
 
 *关键设计: EA 把"对象会不会逃逸"变成一张可传播的图——每个理想节点只有一次映射(JavaObject/LocalVar/Field),逃逸状态沿边单调上升(NoEscape→ArgEscape→GlobalEscape),所以传播必然收敛。精确性来自两个地方: 逐字段的 `Field` 节点让"字段逃逸"与"对象逃逸"分开计数;`scalar_replaceable` 与 `escape` 两个维度分开判定——不逃逸是必要条件,可拆性是充分条件。这比 12-02 域 C1 的 bcEscapeAnalyzer(字节码级、保守)深一个量级,也因此只在 C2 的优化中期跑一次。*
 

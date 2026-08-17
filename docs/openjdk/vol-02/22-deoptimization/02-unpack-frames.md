@@ -6,7 +6,7 @@
 
 ## deopt 之后,栈上发生了什么
 
-[22-01 的实证](planning/outlines/00-jvm-tools/materials/commands/22-deopt-type-demo.txt)展示了决策侧: 类型切换 → 旧 nmethod made not entrant → 双路重编译。执行侧的**计时对照**(33 域以来的惯例,本次直接测):
+[22-01 的实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/22-deopt-type-demo.txt)展示了决策侧: 类型切换 → 旧 nmethod made not entrant → 双路重编译。执行侧的**计时对照**(33 域以来的惯例,本次直接测):
 
 ```
 compiled 10M: 0ms      # 热调用 Square: C2 内联后 1000 万次接口调用 ≈ 0ms

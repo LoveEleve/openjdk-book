@@ -97,7 +97,7 @@ while + sleep: 平时睡在 CGC_lock 上。年轻代 GC 检查后发现占用超
 
 ### 实测: 完整 Concurrent Cycle
 
-**[实证](materials/commands/26-g1-gc-concurrent-mark-demo.txt)**: 512KB 数组在 1MB region 下含 16B 头共 512KB+16B → humongous 分配触发 Concurrent Start。-Xms32m -Xmx64m -XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=30,-Xlog:gc -Xlog:gc+marking=info:
+**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/26-g1-gc-concurrent-mark-demo.txt)**: 512KB 数组在 1MB region 下含 16B 头共 512KB+16B → humongous 分配触发 Concurrent Start。-Xms32m -Xmx64m -XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=30,-Xlog:gc -Xlog:gc+marking=info:
 
 ```
 GC(0) Pause Young (Concurrent Start) (G1 Humongous Allocation) 9M->8M(34M) 2.188ms
@@ -344,7 +344,7 @@ G1CMRemarkTask::work(g1ConcurrentMark.cpp:1828-1855)在 STW 内并行做两件�
 
 ### remark 内部阶段
 
-**[实证](materials/commands/26-g1-gc-concurrent-mark-demo.txt)**: 同一程序,-Xlog:gc+phases=debug:
+**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/26-g1-gc-concurrent-mark-demo.txt)**: 同一程序,-Xlog:gc+phases=debug:
 
 ```
 GC(1) Finalize Marking 0.032ms

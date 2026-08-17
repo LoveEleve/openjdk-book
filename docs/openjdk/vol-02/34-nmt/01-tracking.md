@@ -43,7 +43,7 @@ enum NMT_TrackingLevel {
 
 JVM 侧在**第一次任何 NMT 动作时**读这个环境变量(memTracker.cpp:58-96):`getenv("NMT_LEVEL_<pid>")`,按值设级别,然后**立即 unsetenv**(:84,"Remove the environment variable to avoid leaking to child processes")。`tracking_level()`(memTracker.hpp:119-127)是懒初始化入口——单线程期首次调用就定死级别。参数解析阶段(arguments.cpp:3685-3701)再做双保险: `check_launcher_nmt_support` 验证环境变量与参数一致(否则 "using wrong launcher?"),`verify_nmt_option` 拒绝非法值("Syntax error, expecting -XX:NativeMemoryTracking=[off|summary|detail]")。
 
-*关键设计: 级别一经确定,只能降不能升*——`transition_to`(memTracker.cpp:164-184)注释说得很直白: "Upgrading tracking level is not supported and has never been supported",因为升降级要增删跟踪结构,不是线程安全的;`shutdown`(jcmd 的 `VM.native_memory shutdown`)也只能降到 minimal(:157-162)。这也解释了 [实证:](planning/outlines/00-jvm-tools/materials/commands/jcmd-VM.native_memory.txt) 里第一次 `jcmd VM.native_memory` 的失败输出 "Native memory tracking is not enabled"——**运行期补不开**,只能重启加参数。
+*关键设计: 级别一经确定,只能降不能升*——`transition_to`(memTracker.cpp:164-184)注释说得很直白: "Upgrading tracking level is not supported and has never been supported",因为升降级要增删跟踪结构,不是线程安全的;`shutdown`(jcmd 的 `VM.native_memory shutdown`)也只能降到 minimal(:157-162)。这也解释了 [实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/jcmd-VM.native_memory.txt) 里第一次 `jcmd VM.native_memory` 的失败输出 "Native memory tracking is not enabled"——**运行期补不开**,只能重启加参数。
 
 ## 2. 每次 malloc 的记账: MallocHeader
 
@@ -144,7 +144,7 @@ call-site 的键是 `NativeCallStack`——**编译期定死的 4 帧**(nmtCommo
                     NativeCallStack(1, true) : NativeCallStack::empty_stack())
 ```
 
-`os::malloc(size, flags)` 默认参数就是 `CALLER_PC`(os.cpp:681-683)。**只有 detail 级别才真正抓栈**——summary 级别传空栈,连抓栈的开销都没有;这也解释了为什么 [实证:](planning/outlines/00-jvm-tools/materials/commands/34-nmt-tracking-demo.txt) 里 detail 报告的 malloc 归属段总是**恰好 4 帧调用栈**。`NMT_stack_walkable` 是平台标志(memTracker.cpp:43-47): Linux 恒 true,仅 Solaris 置 false。*关键设计: 抓栈动作是分配路径的一部分,但只在 detail 付这个钱,而且深度封顶 4*——栈深度直接决定表内存: 511 桶、桶内位置索引封顶 `right_n_bits(16)`(MAX_BUCKET_LENGTH,即 2^16-1),全部静态规划。
+`os::malloc(size, flags)` 默认参数就是 `CALLER_PC`(os.cpp:681-683)。**只有 detail 级别才真正抓栈**——summary 级别传空栈,连抓栈的开销都没有;这也解释了为什么 [实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/34-nmt-tracking-demo.txt) 里 detail 报告的 malloc 归属段总是**恰好 4 帧调用栈**。`NMT_stack_walkable` 是平台标志(memTracker.cpp:43-47): Linux 恒 true,仅 Solaris 置 false。*关键设计: 抓栈动作是分配路径的一部分,但只在 detail 付这个钱,而且深度封顶 4*——栈深度直接决定表内存: 511 桶、桶内位置索引封顶 `right_n_bits(16)`(MAX_BUCKET_LENGTH,即 2^16-1),全部静态规划。
 
 ## 6. 虚拟内存: 按地址区间记账
 
@@ -152,11 +152,11 @@ malloc 用哈希表,虚拟内存却**不用哈希**——reserve/commit/uncommit
 
 入口链与 malloc 平行: `os::reserve_memory`(os.cpp:1759-1790)成功后调 `MemTracker::record_virtual_memory_reserve` → `VirtualMemoryTracker::add_reserved_region`(virtualMemoryTracker.cpp:332-392);commit 同理走 `add_committed_region`(:409-422)。add 时在排序链表里按地址定位,能**合并相邻且调用栈相同的区域**(try_merge_with,:84-95;committed 子区域的合并逻辑 :106-157);release 时整段删或**从中间切割**成两段(remove_released_region :437-488,split 时高半段新建 region 并把原 committed 子链表搬过去,:472-485)。虚拟内存数据结构受 **ThreadCritical 保护**(memTracker.hpp:214)——不是哈希表那种细粒度 CAS,因为区域操作天然低频。
 
-线程栈是特例: `record_thread_stack`(memTracker.hpp:256-263)除了记区域还**借用 mtThreadStack 的 malloc 计数器记账线程数**(`record_malloc(0, mtThreadStack)`,size 0 只加 count)——所以报告里 "Thread (thread #18)" 的线程数来自这里,stack 的 committed 部分在每次快照时用 `os::committed_in_range` 现测(RegionIterator,snapshot_thread_stacks, virtualMemoryTracker.cpp:566-569)。[实证](planning/outlines/00-jvm-tools/materials/commands/34-nmt-tracking-demo.txt)里每线程栈都是 "reserved 1048576 ... from thread_native_entry" + 一个 "committed 8192"(栈底守卫页,`thread_stack_uncommitted_bottom` 跳过它们,:296-314)。
+线程栈是特例: `record_thread_stack`(memTracker.hpp:256-263)除了记区域还**借用 mtThreadStack 的 malloc 计数器记账线程数**(`record_malloc(0, mtThreadStack)`,size 0 只加 count)——所以报告里 "Thread (thread #18)" 的线程数来自这里,stack 的 committed 部分在每次快照时用 `os::committed_in_range` 现测(RegionIterator,snapshot_thread_stacks, virtualMemoryTracker.cpp:566-569)。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/34-nmt-tracking-demo.txt)里每线程栈都是 "reserved 1048576 ... from thread_native_entry" + 一个 "committed 8192"(栈底守卫页,`thread_stack_uncommitted_bottom` 跳过它们,:296-314)。
 
 ## 核心悬念
 
-追踪系统拆完: 开关由 launcher 在 JVM 启动前经环境变量 `NMT_LEVEL_<pid>` 送达(只降不升,四级状态);每次 `os::malloc` 在用户数据前嵌一个 16 字节 MallocHeader(位域: 大小/类别/表索引),`os::free` 回溯 header 归还基址;summary 级别只做按类别的原子计数,malloc 与 arena 分账、报告前对账 chunk;detail 级别才在 511 桶的静态哈希表里按"调用栈+类别"聚合(链尾 CAS、排他锁、OOM 自动降级),栈固定 4 帧;虚拟内存按地址区间在排序链表里记账(合并/切割/子 committed 段)。[实证](planning/outlines/00-jvm-tools/materials/commands/34-nmt-tracking-demo.txt)的 summary 报告里 "Total: reserved=18058807559, committed=1165695239" 按 20 类摊开,detail 报告里 malloc 归属段 4 帧栈逐字对上 `PerfStringConstant::PerfStringConstant`→`StatSampler::create_misc_perfdata` 这类调用点,虚拟内存段对上 `G1FromCardCache::initialize` 这类分配链。
+追踪系统拆完: 开关由 launcher 在 JVM 启动前经环境变量 `NMT_LEVEL_<pid>` 送达(只降不升,四级状态);每次 `os::malloc` 在用户数据前嵌一个 16 字节 MallocHeader(位域: 大小/类别/表索引),`os::free` 回溯 header 归还基址;summary 级别只做按类别的原子计数,malloc 与 arena 分账、报告前对账 chunk;detail 级别才在 511 桶的静态哈希表里按"调用栈+类别"聚合(链尾 CAS、排他锁、OOM 自动降级),栈固定 4 帧;虚拟内存按地址区间在排序链表里记账(合并/切割/子 committed 段)。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/34-nmt-tracking-demo.txt)的 summary 报告里 "Total: reserved=18058807559, committed=1165695239" 按 20 类摊开,detail 报告里 malloc 归属段 4 帧栈逐字对上 `PerfStringConstant::PerfStringConstant`→`StatSampler::create_misc_perfdata` 这类调用点,虚拟内存段对上 `G1FromCardCache::initialize` 这类分配链。
 
 但报告本身还没出现——"reserved/committed/type" 这些原始记账怎么变成 `jcmd VM.native_memory summary` 那棵格式化输出树?快照(基线)、diff(泄漏定位)又建立在什么数据结构上?下一篇: NMT 报告。
 

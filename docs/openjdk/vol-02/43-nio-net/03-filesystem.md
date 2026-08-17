@@ -6,7 +6,7 @@
 
 ## 文件系统的三件事
 
-[strace 实证](planning/outlines/00-jvm-tools/materials/commands/33-nio-fs-strace.txt)把 `Files.readAttributes`、`Files.list`、`WatchService` 各跑一遍:
+[strace 实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/33-nio-fs-strace.txt)把 `Files.readAttributes`、`Files.list`、`WatchService` 各跑一遍:
 
 ```
 # readAttributes -> stat(元数据,不读内容)

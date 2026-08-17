@@ -6,7 +6,7 @@
 
 ## 谁在 JVMTI 事件与 GC 通知之间穿梭
 
-[实证](planning/outlines/00-jvm-tools/materials/commands/20-background-init-demo.txt)的线程转储里有一行不起眼的 `"Service Thread" #5 daemon prio=9 ... runnable`。它不跑周期任务(WatcherThread 的活),而是**事件驱动**——有人往队列里放东西才醒。它管五件事: JVMTI 的延迟事件(deferred events)、GC 结束的 JMX 通知、StringTable 的并发清理、内存压力传感器的回调、DCmd 的 JMX 通知。这篇拆两层: 主循环的"等-处理"机制(锁内检测、锁外干活),以及五类任务各自的触发源——顺带纠正大纲的两个想象: ServiceThread 是 **NearMaxPriority 高优先级**(不是低优先级),而且它**只有五类任务**,没有 JFR periodic、没有 OopStorage cleanup。
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/20-background-init-demo.txt)的线程转储里有一行不起眼的 `"Service Thread" #5 daemon prio=9 ... runnable`。它不跑周期任务(WatcherThread 的活),而是**事件驱动**——有人往队列里放东西才醒。它管五件事: JVMTI 的延迟事件(deferred events)、GC 结束的 JMX 通知、StringTable 的并发清理、内存压力传感器的回调、DCmd 的 JMX 通知。这篇拆两层: 主循环的"等-处理"机制(锁内检测、锁外干活),以及五类任务各自的触发源——顺带纠正大纲的两个想象: ServiceThread 是 **NearMaxPriority 高优先级**(不是低优先级),而且它**只有五类任务**,没有 JFR periodic、没有 OopStorage cleanup。
 
 ## 1. 主循环: 锁内检测,锁外干活
 
@@ -54,7 +54,7 @@
 
 ## 3. 与 WatcherThread 的分工
 
-20-02 域拆过 WatcherThread(名字 "VM Periodic Task Thread"): 算 `time_to_wait()` 睡到**最近任务到期点**,周期执行 PeriodicTask 表里的任务(StatSampler 50ms 采样 PerfData、ChunkPoolCleaner 5s 等)。ServiceThread 完全相反: 没有周期,永远阻塞在 `Service_lock->wait`,被 **notify 唤醒**(enqueue_deferred_event/trigger_concurrent_work/gc 结束 pushNotification 都会 notify)。两个线程一个是"闹钟",一个是"门铃"——[实证](planning/outlines/00-jvm-tools/materials/commands/20-background-init-demo.txt)的转储里两者并存,`"Service Thread" #5 daemon prio=9` 与 `"VM Periodic Task Thread"` 各司其职。
+20-02 域拆过 WatcherThread(名字 "VM Periodic Task Thread"): 算 `time_to_wait()` 睡到**最近任务到期点**,周期执行 PeriodicTask 表里的任务(StatSampler 50ms 采样 PerfData、ChunkPoolCleaner 5s 等)。ServiceThread 完全相反: 没有周期,永远阻塞在 `Service_lock->wait`,被 **notify 唤醒**(enqueue_deferred_event/trigger_concurrent_work/gc 结束 pushNotification 都会 notify)。两个线程一个是"闹钟",一个是"门铃"——[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/20-background-init-demo.txt)的转储里两者并存,`"Service Thread" #5 daemon prio=9` 与 `"VM Periodic Task Thread"` 各司其职。
 
 ## 核心悬念
 

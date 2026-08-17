@@ -33,7 +33,7 @@
 - **`SafepointPriority`**(safepoint 操作,最高)——GC/Deopt/偏向锁撤销/握手;
 - **`MediumPriority`**(非 safepoint 操作)——PrintThreads/JFR checkpoint 等。
 
-**queue_peek 是刻意 lock-free 的**(vmThread.hpp:67-68,注释 "may return the wrong answer but must not break"): 裸读 `_queue_length[prio] > 0`——链表已由锁保护,计数只是"通知信号",peek 错过一次就再等一轮,不会出错。**关键动作是 `drain_at_safepoint_priority()`**(:77): 取出 safepoint 优先级的**整条操作链**——于是**一次 begin/end 里可以执行多个操作**(coalescing): GC 操作来的时候,把排队的 deopt、偏向锁撤销、握手一起办了,而不是每个操作一个 safepoint(loop 注释 :568-576 说明还会再排干一次,防止 safepoint 期间新入队的漏掉)。[实证:](planning/outlines/00-jvm-tools/materials/commands/20-vmops-demo.txt) 日志里多次成对出现的 `Adding VM operation: RevokeBias` / `Evaluating safepoint VM operation: RevokeBias` 就是频繁的偏向锁撤销操作。
+**queue_peek 是刻意 lock-free 的**(vmThread.hpp:67-68,注释 "may return the wrong answer but must not break"): 裸读 `_queue_length[prio] > 0`——链表已由锁保护,计数只是"通知信号",peek 错过一次就再等一轮,不会出错。**关键动作是 `drain_at_safepoint_priority()`**(:77): 取出 safepoint 优先级的**整条操作链**——于是**一次 begin/end 里可以执行多个操作**(coalescing): GC 操作来的时候,把排队的 deopt、偏向锁撤销、握手一起办了,而不是每个操作一个 safepoint(loop 注释 :568-576 说明还会再排干一次,防止 safepoint 期间新入队的漏掉)。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/20-vmops-demo.txt) 日志里多次成对出现的 `Adding VM operation: RevokeBias` / `Evaluating safepoint VM operation: RevokeBias` 就是频繁的偏向锁撤销操作。
 
 ## 3. 提交协议: 从请求到结果
 
@@ -92,7 +92,7 @@
 
 ## 4. 实证: 一条请求的日志轨迹
 
-[实证:](planning/outlines/00-jvm-tools/materials/commands/20-vmops-demo.txt) `-Xlog:vmthread=debug` 把整条链摊开: `Adding VM operation: G1CollectFull`(jcmd GC.run 的提交)→ `Evaluating safepoint VM operation: G1CollectFull`(VM 线程执行,伴随 begin/end);`-Xlog:safepoint` 的触发原因统计则展示了"谁在请求特权": 一次运行里 `RevokeBias` 10 次(偏向锁撤销最频繁)、`PrintThreads`/`FindDeadlocks`(Thread.print 的两次 jcmd)、`G1CollectFull`、`EnableBiasedLocking`、`Deoptimize`——**每个原因都是一个 VM_Operation 的名字**,18-01 日志里 `Entering safepoint region:` 后面跟的就是它。
+[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/20-vmops-demo.txt) `-Xlog:vmthread=debug` 把整条链摊开: `Adding VM operation: G1CollectFull`(jcmd GC.run 的提交)→ `Evaluating safepoint VM operation: G1CollectFull`(VM 线程执行,伴随 begin/end);`-Xlog:safepoint` 的触发原因统计则展示了"谁在请求特权": 一次运行里 `RevokeBias` 10 次(偏向锁撤销最频繁)、`PrintThreads`/`FindDeadlocks`(Thread.print 的两次 jcmd)、`G1CollectFull`、`EnableBiasedLocking`、`Deoptimize`——**每个原因都是一个 VM_Operation 的名字**,18-01 日志里 `Entering safepoint region:` 后面跟的就是它。
 
 ## 核心悬念
 

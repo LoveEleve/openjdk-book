@@ -81,7 +81,7 @@ void PathToGcRootsOperation::doit() {
 
 ## 核心悬念
 
-泄漏剖析拆完: 采样侧是 TLAB refill 钩子(AllocTracer→LeakProfiler→ObjectSampler,JfrTryLock 非阻塞)+ span 优先级队列(quick reject 保 top-256);追踪侧是 safepoint 里的 `PathToGcRootsOperation`(BitSet 防循环、EdgeQueue 按堆 5%/32M 预留、BFS 优先满时 DFS 兜底、5000 深度上限、失败降级 flat);序列化侧把 chain 写进 `OldObjectSample` 事件(root 的 system/type 两维)。[实证](planning/outlines/00-jvm-tools/materials/commands/32-jfr-leakprofiler-demo.txt)里源码链逐段对上。
+泄漏剖析拆完: 采样侧是 TLAB refill 钩子(AllocTracer→LeakProfiler→ObjectSampler,JfrTryLock 非阻塞)+ span 优先级队列(quick reject 保 top-256);追踪侧是 safepoint 里的 `PathToGcRootsOperation`(BitSet 防循环、EdgeQueue 按堆 5%/32M 预留、BFS 优先满时 DFS 兜底、5000 深度上限、失败降级 flat);序列化侧把 chain 写进 `OldObjectSample` 事件(root 的 system/type 两维)。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/32-jfr-leakprofiler-demo.txt)里源码链逐段对上。
 
 32 域的核心引擎、元数据、采样、二进制、泄漏剖析都拆完了——还剩**入口层**: JFR 的 JNI 接口(Java 侧 jdk.jfr.internal.JVM 的 native 方法)与字节码插桩(用户事件类的 instrumentation,EventClassBuilder 的兄弟)。下一篇: JNI 接口与字节码插桩。
 

@@ -118,7 +118,7 @@ Java 线程栈顶往下依次是 **shadow/reserved/yellow/red** 四区(thread.hp
 
 这些 throw 桩都是 `generate_throw_exception`(stubGenerator_x86_64.cpp:5758-5832)生成的统一骨架: enter 建栈帧 → `set_last_Java_frame` → 调 runtime(如 `SharedRuntime::throw_NullPointerException`)→ OopMap → 尾部 jump `forward_exception_entry`(:5830-5832)——这个桩(同文件 :494-550)把返回地址当 throwing pc,`call_VM_leaf exception_handler_for_return_address`(raw 实现的 JRT_LEAF 包装,sharedRuntime.cpp:518-520)寻路,取回 pending exception 后 jmp 到 handler。同骨架的还有 AbstractMethodError/IncompatibleClassChangeError/NullPointerException at call(stubGenerator_x86_64.cpp:5977-5993)。
 
-**[实证](materials/commands/21-exception-handling-demo.txt)**: `-Xlog:exceptions=info`(LogTarget 真实存在于 sharedRuntime.cpp:1287)直接看见整条链——NPE 由 `sharedRuntime.cpp:606`(throw_and_post_jvmti_exception → Exceptions::_throw)构造,标注 "thrown in C1 compiled method" + 固定 throwing PC;随后 "continuing at PC ... for exception thrown at PC ..." 就是 continuation 落地。除零同构(SIGFPE 路径),栈溢出场景的 "N [Exception (...)" 是 handle_exception_C 的 trace——素材 E 段 24395 条 = SOE 穿过的 C2 编译递归帧数(与 C1 帧的 "thrown in C1" 并存,§2 详解)。
+**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/21-exception-handling-demo.txt)**: `-Xlog:exceptions=info`(LogTarget 真实存在于 sharedRuntime.cpp:1287)直接看见整条链——NPE 由 `sharedRuntime.cpp:606`(throw_and_post_jvmti_exception → Exceptions::_throw)构造,标注 "thrown in C1 compiled method" + 固定 throwing PC;随后 "continuing at PC ... for exception thrown at PC ..." 就是 continuation 落地。除零同构(SIGFPE 路径),栈溢出场景的 "N [Exception (...)" 是 handle_exception_C 的 trace——素材 E 段 24395 条 = SOE 穿过的 C2 编译递归帧数(与 C1 帧的 "thrown in C1" 并存,§2 详解)。
 
 ## 2. 显式异常 — handler 查找链
 
@@ -193,7 +193,7 @@ C1 的 `exception_begin` 不是 jump exception_blob,而是直接 `call Runtime1:
 
 异常逃出编译帧后,若 caller 是解释器帧,由解释器的统一入口接: `throw_exception_entry`(templateInterpreterGenerator_x86.cpp:1519-1539)清空表达式栈 → `call_VM InterpreterRuntime::exception_handler_for_exception`(interpreterRuntime.cpp:470+)→ 返回 handler 地址或 `remove_activation_entry`(本帧无 handler,pop 帧并 rethrow,注释 :1541-1543)。`raw_exception_handler_for_return_address`(sharedRuntime.cpp:454-515)的另两个调用点——C2 的 RethrowNode 尾部 `rethrow_C`(opto/runtime.cpp:1447-1466)与 deopt 重建(vframeArray.cpp:268);汇编侧 `forward_exception_entry`(§1)也调它——异常穿越三层代码形态只靠这一个函数。
 
-**[实证](materials/commands/21-exception-handling-demo.txt)**: C1 路径(素材 A/B/C,`-Xcomp` 或 level 3)——"thrown in C1 compiled method" + "continuing at PC"(c1_Runtime1.cpp:522-529/:608-611),throwing PC 恒定、handler PC 与抛点仅 16 字节;C2 逃逸路径(素材 D 与 C2EscapeDemo)——异常从编译的 escape 逃逸,**没有 "thrown in" 记录**(内联 catch+rethrow 路径不打 trace),解释器 escapeMain 在 invoke 处 bci 8 重新分派并接住;素材 E(SOE)两类日志并存——"thrown in C1 compiled method"+continuing 是 C1 帧走 c1_Runtime1,"N [Exception (...)" 是 **handle_exception_C 的 trace**(opto/runtime.cpp:1672-1691)且每条 = 异常穿过一个 **C2 编译帧**的 exception_blob——24395 条 = 递归栈上 C2 帧数(递归栈是 C1/C2 帧混合,升级时序不同两类日志比例不同)。
+**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/21-exception-handling-demo.txt)**: C1 路径(素材 A/B/C,`-Xcomp` 或 level 3)——"thrown in C1 compiled method" + "continuing at PC"(c1_Runtime1.cpp:522-529/:608-611),throwing PC 恒定、handler PC 与抛点仅 16 字节;C2 逃逸路径(素材 D 与 C2EscapeDemo)——异常从编译的 escape 逃逸,**没有 "thrown in" 记录**(内联 catch+rethrow 路径不打 trace),解释器 escapeMain 在 invoke 处 bci 8 重新分派并接住;素材 E(SOE)两类日志并存——"thrown in C1 compiled method"+continuing 是 C1 帧走 c1_Runtime1,"N [Exception (...)" 是 **handle_exception_C 的 trace**(opto/runtime.cpp:1672-1691)且每条 = 异常穿过一个 **C2 编译帧**的 exception_blob——24395 条 = 递归栈上 C2 帧数(递归栈是 C1/C2 帧混合,升级时序不同两类日志比例不同)。
 
 ## 3. 辅助设施 — monitor 慢路径与数学库
 

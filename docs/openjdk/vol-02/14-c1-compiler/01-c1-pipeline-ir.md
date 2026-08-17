@@ -6,7 +6,7 @@
 
 ## 字节码怎么变成一张图
 
-C1 的第一步是把字节码(隐式操作栈)翻译成一张**显式的数据流图**——HIR(High-level Intermediate Representation): 局部变量和操作栈变成图节点之间的引用,`push`/`pop` 消失,`iadd` 的两个操作数直接指向产出它们的指令。这张图之后一路下降: LIR(机器相关中间表示)→ 寄存器分配 → x86 机器码。这篇拆三层: **管线的真实结构**(不是六步,是三大步)、**GraphBuilder 怎么逐字节码建图**、**HIR 的节点层次**。[实证](planning/outlines/00-jvm-tools/materials/commands/14-c1-pipeline-demo.txt)用 PrintCompilation 看到 C1 编译事件,而 PrintIR/PrintLIR 是 debug-only——HIR 图只能靠源码推演。
+C1 的第一步是把字节码(隐式操作栈)翻译成一张**显式的数据流图**——HIR(High-level Intermediate Representation): 局部变量和操作栈变成图节点之间的引用,`push`/`pop` 消失,`iadd` 的两个操作数直接指向产出它们的指令。这张图之后一路下降: LIR(机器相关中间表示)→ 寄存器分配 → x86 机器码。这篇拆三层: **管线的真实结构**(不是六步,是三大步)、**GraphBuilder 怎么逐字节码建图**、**HIR 的节点层次**。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/14-c1-pipeline-demo.txt)用 PrintCompilation 看到 C1 编译事件,而 PrintIR/PrintLIR 是 debug-only——HIR 图只能靠源码推演。
 
 ## 1. 管线真相: 三大步,不是六步
 
@@ -73,6 +73,6 @@ GraphBuilder 的输入是 ciMethod(12 域镜像),输出是 `IR`(含 BlockBegin �
 
 ## 核心悬念
 
-C1 前端拆完: 管线是三大步(build_hir 内含 GraphBuilder+三趟优化+bailout 机制 / emit_lir 的 LIRGenerator+LinearScan / emit_code_body+install_code),Canonicalizer 是 append 时的即时动作而非独立阶段;GraphBuilder 预扫描建块、逐字节码 append(Canonicalizer+LVN 即时消除)、局部变量与操作栈是 Value 引用(iload 零成本)、块合并插 Phi;HIR 节点用 LEAF/BRANCH 宏组织,BlockBegin(StateSplit)连接 BlockEnd(Goto/If/Return/Throw)。[实证](planning/outlines/00-jvm-tools/materials/commands/14-c1-pipeline-demo.txt)的 PrintCompilation 记录 `230 b 3 C1Demo::sum` 就是这条管线的产物。但"快"还不够——**append 时已经顺手做了常量折叠,正式的优化趟次**(optimize_blocks/GVN/RangeCheckElimination/空检查消除,共四趟)在下一篇展开。下一篇: Canonicalizer 与优化趟次。
+C1 前端拆完: 管线是三大步(build_hir 内含 GraphBuilder+三趟优化+bailout 机制 / emit_lir 的 LIRGenerator+LinearScan / emit_code_body+install_code),Canonicalizer 是 append 时的即时动作而非独立阶段;GraphBuilder 预扫描建块、逐字节码 append(Canonicalizer+LVN 即时消除)、局部变量与操作栈是 Value 引用(iload 零成本)、块合并插 Phi;HIR 节点用 LEAF/BRANCH 宏组织,BlockBegin(StateSplit)连接 BlockEnd(Goto/If/Return/Throw)。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/14-c1-pipeline-demo.txt)的 PrintCompilation 记录 `230 b 3 C1Demo::sum` 就是这条管线的产物。但"快"还不够——**append 时已经顺手做了常量折叠,正式的优化趟次**(optimize_blocks/GVN/RangeCheckElimination/空检查消除,共四趟)在下一篇展开。下一篇: Canonicalizer 与优化趟次。
 
 > → [14-c1-compiler/02 — C1 优化: Canonicalizer + ValueMap + Optimizer](02-c1-optimizations.md)

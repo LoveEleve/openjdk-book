@@ -224,4 +224,4 @@ Unix 平台的 `GetJREPath`(java_md_solinux.c:512-550)并不只支持 `/proc/sel
 
 **参数展开和平台加载都发生在 JVM 创建之前:** `main.c`/`args.c` 先处理 `JDK_JAVA_OPTIONS`、`@argfile` 和 classpath wildcard;平台层再用 JRE home + `jvm.cfg` 选 `jvmtype`,构造 `libjvm` 路径,必要时调整 `LD_LIBRARY_PATH` 并 re-exec,最后才回到 `dlopen`/`JNI_CreateJavaVM`。**下一篇进入域41 ZIP & JIMAGE:** launcher 找到的模块/类路径最终如何落到 ZIP 与 JIMAGE 读取。
 
-> → [41-zip-jimage/01-zip-jimage.md](openjdk/vol-02/41-zip-jimage/01-zip-jimage.md)
+> → [41-zip-jimage/01-zip-jimage.md](openjdk/vol-02/41-zip-jimage/01-zip.md)

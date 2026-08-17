@@ -72,7 +72,7 @@ JvmtiEnv::RedefineClasses(jint class_count, const jvmtiClassDefinition* class_de
 
 `compare_and_normalize_class_versions` 强制"新类与旧类的**方法集合完全一致**"——同 name+同 signature 一一对应,多余或缺失都拒绝:
 
-[实证](materials/commands/28-jvmti-redefine-demo.txt)(素材 E): v2 少了 `<clinit>`(static 块)与 native 声明 → **67 (UNSUPPORTED_REDEFINITION_METHOD_DELETED)**;v3 加了 `brandNew()` → **63 (UNSUPPORTED_REDEFINITION_METHOD_ADDED)**(jvmti.h:365/:369)。方法**体**可以随便改(→obsolete,§4/§5),但**方法集**(以及字段/修饰符/继承结构)在 JDK11 一律冻结——这是 HotSwap 语义的核心约束: 所有现有引用(jmethodID、vtable 槽、编译代码里的调用点)都能一一对应到新方法。
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/28-jvmti-redefine-demo.txt)(素材 E): v2 少了 `<clinit>`(static 块)与 native 声明 → **67 (UNSUPPORTED_REDEFINITION_METHOD_DELETED)**;v3 加了 `brandNew()` → **63 (UNSUPPORTED_REDEFINITION_METHOD_ADDED)**(jvmti.h:365/:369)。方法**体**可以随便改(→obsolete,§4/§5),但**方法集**(以及字段/修饰符/继承结构)在 JDK11 一律冻结——这是 HotSwap 语义的核心约束: 所有现有引用(jmethodID、vtable 槽、编译代码里的调用点)都能一一对应到新方法。
 
 *关键设计: 为什么只能改方法体?因为"位置不变"是热替换可行性的基础。jmethodID 在 27-jni/03 拆过——它指向 Method;vtable 槽位、编译代码里的直接调用都假设方法集合稳定。加/删方法会让所有现存引用错位,所以宁可拒绝。*
 
@@ -121,7 +121,7 @@ Double-indirect(双重): JVM_CONSTANT_{Fieldref,Methodref,InterfaceMethodref} �
 
 `rewrite_cp_refs`(:1708-1799)重写范围: nest 属性、**方法字节码**(`rewrite_cp_refs_in_methods` :1816→`rewrite_cp_refs_in_method` :1853)、类/字段/方法的注解(含类型注解)、stack map、source_file_name/generic_signature 索引。方法字节码的重写=大纲里"relocator"的职责,但主角不是它: **CP 索引重写是 `rewrite_cp_refs_in_method` 逐字节码扫描完成的**(凡带 CP 索引的指令(ldc/ldc_w/field/invoke 系)把索引换成合并池里的新索引,代码注释 "This code was adapted from Rewriter::rewrite_method()");**只有索引超过 255 需要把 2 字节的 `ldc` 换成 3 字节的 `ldc_w` 时,才调用 `Relocator` 插入字节空间**(runtime/relocator.hpp:45 `insert_space_at` :48,注释 "ldc is 2 bytes and ldc_w is 3 bytes",构造 :1916/调用 :1922)——relocator.cpp(780 行)在 share/runtime/ 不在 prims,且只是字节码空间调整工具。
 
-[实证](materials/commands/28-jvmti-redefine-demo.txt)(素材 B): 用 v1 的**原字节**重定义自己 → `merge_cp_len=143, index_map_len=0`——新旧池完全等价,零映射,跳过重写。
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/28-jvmti-redefine-demo.txt)(素材 B): 用 v1 的**原字节**重定义自己 → `merge_cp_len=143, index_map_len=0`——新旧池完全等价,零映射,跳过重写。
 
 ## 4. MethodComparator — 方法"变没变"的判定
 
@@ -223,7 +223,7 @@ void VM_RedefineClasses::flush_dependent_code(InstanceKlass* ik, TRAPS) {
 
 两条路: **依赖已记录**(can_redefine_classes 在 ONLOAD 声明过 → 编译器从启动就登记依赖,jvmtiManageCapabilities.cpp:323-328)→ `flush_evol_dependents_on`(codeCache.cpp:1292)只失效**依赖该类进化**的 nmethod(mark_for_evol_deoptimization → deoptimize_dependents → make_marked_nmethods_not_entrant);否则首次退化为全量失效并从此记录依赖。
 
-[实证](materials/commands/28-jvmti-redefine-demo.txt)(素材 C): main 热循环 1.5s 让 `sayHello` 被 C1 level 1 编译、`main` level 3 编译;redefine 时刻两个 nmethod **同刻 made not entrant**——且只有这两个(启动期编译的 `Object::<init>` 等不受影响),**精确失效**的证据。此后调用重新走解释器/重新编译,新字节码生效。
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/28-jvmti-redefine-demo.txt)(素材 C): main 热循环 1.5s 让 `sayHello` 被 C1 level 1 编译、`main` level 3 编译;redefine 时刻两个 nmethod **同刻 made not entrant**——且只有这两个(启动期编译的 `Object::<init>` 等不受影响),**精确失效**的证据。此后调用重新走解释器/重新编译,新字节码生效。
 
 ### 5.3 旧版本追踪: previous versions 链
 
@@ -251,7 +251,7 @@ void InstanceKlass::add_previous_version(InstanceKlass* scratch_class,
 
 `on_stack` 是 ConstantPool 的一个位(constantPool.hpp:198),由 redefine 时的 **metadata 标记**(`MetadataOnStackMark`,jvmtiRedefineClasses.cpp:204)统一设置——safepoint 里把**栈上执行中的方法、CodeCache 里的 nmethod、编译队列、断点引用的方法**全部标 on_stack(metadataOnStackMark.cpp:48-73,类头注释 "so that it can't be deleted during class redefinition")。每次 redefine 先 `purge_previous_version_list`(instanceKlass.cpp:3747): 遍历链,**池不在栈上的版本 → 解链 + 清 jmethodID + 进 ClassLoaderData 的 deallocate 列表**(类卸载时真正释放)。
 
-[实证](materials/commands/28-jvmti-redefine-demo.txt)(素材 D): 连续 redefine 两次——第二次时 `previous version ... is alive`(v2 版本: v2 的 main 正在跑);程序退出前 GC 后 `previous version ... is dead.`(某版本池不在栈上)→ 解链+deallocate。
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/28-jvmti-redefine-demo.txt)(素材 D): 连续 redefine 两次——第二次时 `previous version ... is alive`(v2 版本: v2 的 main 正在跑);程序退出前 GC 后 `previous version ... is dead.`(某版本池不在栈上)→ 解链+deallocate。
 
 ### 5.4 全堆调整与 jmethodID
 
@@ -261,7 +261,7 @@ jmethodID 的语义(27-jni/03 的 8 维度校验还记着): **matching 方法的
 
 ## 6. 实证: 一次完整热替换
 
-[实证](materials/commands/28-jvmti-redefine-demo.txt): 自写 agent + Java 侧 native 方法调 `RedefineClasses`(素材 A),三个观察窗: ①`-Xlog:redefine+class+obsolete+mark=trace`——改 `sayHello`/`extra`/`main` 方法体后 `mark ... as obsolete` ×3 + `EMCP_cnt=4, obsolete_cnt=3`(redefine/isModifiable/<clinit>/<init> 4 个方法字节码未变);②`-Xlog:redefine+class+load=info`——`redefined name=HotSwapDemo, count=1`;③`-Xlog:redefine+class+timer=info`——`vm_op: all=1 prologue=0 doit=1`,`redefine_single_class: phase1=1 phase2=0`(本机 safepoint 内安装 1ms)。重定义后 `sayHello()="hello-v2-CHANGED"`、`extra()=42` 立即生效;ClassFileLoadHook 回调在 redefine 的解析路径也触发(`redefining=YES`,§2.1 的 `class_being_redefined` 机制)。
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/28-jvmti-redefine-demo.txt): 自写 agent + Java 侧 native 方法调 `RedefineClasses`(素材 A),三个观察窗: ①`-Xlog:redefine+class+obsolete+mark=trace`——改 `sayHello`/`extra`/`main` 方法体后 `mark ... as obsolete` ×3 + `EMCP_cnt=4, obsolete_cnt=3`(redefine/isModifiable/<clinit>/<init> 4 个方法字节码未变);②`-Xlog:redefine+class+load=info`——`redefined name=HotSwapDemo, count=1`;③`-Xlog:redefine+class+timer=info`——`vm_op: all=1 prologue=0 doit=1`,`redefine_single_class: phase1=1 phase2=0`(本机 safepoint 内安装 1ms)。重定义后 `sayHello()="hello-v2-CHANGED"`、`extra()=42` 立即生效;ClassFileLoadHook 回调在 redefine 的解析路径也触发(`redefining=YES`,§2.1 的 `class_being_redefined` 机制)。
 
 ## 核心悬念
 

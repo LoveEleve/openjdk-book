@@ -78,7 +78,7 @@ tag 的对象死了怎么办?**tag map 的清理挂在 GC 的弱处理阶段**�
 
 *关键设计: "弱"的落点。tag map 不参与可达性——`is_alive` 判死、死条目即删,天然与 GC 结果一致(发布瞬时有一次 `keep_alive` 防 SATB 竞态,create_entry :499);对象移动由 `do_oop` 更新+re-hash 跟上。这与 27-jni/01 的 JNI weak 同处 WeakProcessor 的弱处理阶段(weakProcessor.cpp:36-41 同一调用链,`JNIHandles::weak_oops_do` 与 `JvmtiExport::weak_oops_do` 相邻),但 tag map 更进一步——对象死后还发 ObjectFree 事件,agent 得以知道"那个被标记的对象没了"。*
 
-[实证](materials/commands/28-jvmti-tagmap-demo.txt)(素材 A/B): SetTag 3 个对象→GetObjectsWithTags 精确返回→丢弃强引用+`ForceGarbageCollection`(jvmtiEnv.cpp:1954,`GCCause::_jvmti_force_gc`)→ **ObjectFree 回调 3 次,tag=1002/2002/3003 精确匹配**;`-Xlog:jvmti+objecttagging=trace` 看到 `do_weak_oops` 的日志 **`(3->0, 3 freed, 0 total moves)`**(:3427-3428,entry_count 3→0/清除 3/无移动);之后 GetObjectsWithTags 返回 0。
+[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/28-jvmti-tagmap-demo.txt)(素材 A/B): SetTag 3 个对象→GetObjectsWithTags 精确返回→丢弃强引用+`ForceGarbageCollection`(jvmtiEnv.cpp:1954,`GCCause::_jvmti_force_gc`)→ **ObjectFree 回调 3 次,tag=1002/2002/3003 精确匹配**;`-Xlog:jvmti+objecttagging=trace` 看到 `do_weak_oops` 的日志 **`(3->0, 3 freed, 0 total moves)`**(:3427-3428,entry_count 3→0/清除 3/无移动);之后 GetObjectsWithTags 返回 0。
 
 ### 1.4 堆遍历: 借用 mark 位的标记
 

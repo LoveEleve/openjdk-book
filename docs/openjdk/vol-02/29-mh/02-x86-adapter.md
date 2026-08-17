@@ -6,7 +6,7 @@
 
 ## 标题问的是 JDK8 的问题
 
-"ricochet frame 怎么传参数"是 JDK 8 时代的问法——JDK 11 的答案是 **"不需要传"**。[实证](materials/commands/29-mh-adapter-demo.txt)(素材 A): 在 jdk11u 源码里 `grep -c ricochet` **hotspot 侧 methodHandles.cpp/hpp 与 x86 汇编全部零命中**,Java 侧 java.lang.invoke 也零命中。大纲描述的"ricochet frame 结构 + argument shuffling(methodHandles_x86.cpp:40-500)"是 JDK8 的手写汇编 adapter,JDK11 已整体移除。本篇拆 JDK11 的真实答案: **链接器层零搬运**(§1: 调用约定共享,参数根本不用重排)、**Java 层 LF 变换**(§2: asType/permute 等用 LambdaFormEditor 编辑生成的小方法)、**设计演进**(§3: 为什么汇编 adapter 被字节码取代)。
+"ricochet frame 怎么传参数"是 JDK 8 时代的问法——JDK 11 的答案是 **"不需要传"**。[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/29-mh-adapter-demo.txt)(素材 A): 在 jdk11u 源码里 `grep -c ricochet` **hotspot 侧 methodHandles.cpp/hpp 与 x86 汇编全部零命中**,Java 侧 java.lang.invoke 也零命中。大纲描述的"ricochet frame 结构 + argument shuffling(methodHandles_x86.cpp:40-500)"是 JDK8 的手写汇编 adapter,JDK11 已整体移除。本篇拆 JDK11 的真实答案: **链接器层零搬运**(§1: 调用约定共享,参数根本不用重排)、**Java 层 LF 变换**(§2: asType/permute 等用 LambdaFormEditor 编辑生成的小方法)、**设计演进**(§3: 为什么汇编 adapter 被字节码取代)。
 
 ## 1. 链接器层 — 参数零搬运,只有一次跳转
 

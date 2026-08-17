@@ -6,7 +6,7 @@
 
 ## JConsole 的 Heap 曲线,数据在哪
 
-[JMX 实证](planning/outlines/00-jvm-tools/materials/commands/33-jmx-pool-demo.txt)用 `ManagementFactory.getMemoryPoolMXBeans()` 列一遍:
+[JMX 实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/33-jmx-pool-demo.txt)用 `ManagementFactory.getMemoryPoolMXBeans()` 列一遍:
 
 ```
 == memory pools: 8

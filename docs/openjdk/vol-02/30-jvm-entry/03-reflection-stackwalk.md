@@ -1,12 +1,12 @@
 # 03. Method.invoke() 在 JVM 里怎么实现?— Reflection + StackWalk
 
 > **前置依赖**:[30-jvm-entry/02 — C++ 怎么调用 Java 方法?— JavaCalls + NativeLookup](openjdk/vol-02/30-jvm-entry/02-java-calls.md):反射的调用就是 JavaCalls;[30-jvm-entry/01 — System.currentTimeMillis() 怎么进入 JVM?— JVM Entry Points](openjdk/vol-02/30-jvm-entry/01-jvm-entry-points.md):JVM_InvokeMethod 是入口之一;[24-frame/02 — 编译代码内联了 3 层——怎么看到源级方法?— Virtual Frame](openjdk/vol-02/24-frame/02-virtual-frame.md):栈遍历的流;[08-interpreter/04 — 符号引用怎么变成直接引用?— LinkResolver + Rewriter](openjdk/vol-02/08-interpreter/04-linkresolver-rewriter.md):invoke 里的方法解析
-> → **后续**:[32-jfr/01 — JFR 怎么在每个线程上采集事件?— Recorder Engine](openjdk/planning/outlines/32-jfr/01-recorder-engine.md)
+> → **后续**:[32-jfr/01 — JFR 怎么在每个线程上采集事件?— Recorder Engine](openjdk/vol-02/32-jfr/01-recorder-engine.md)
 > 关联域: 31-unsafe(反射字段访问走 Unsafe)、29-method-handles(invoke 的另一族)、16-code-cache
 
 ## 反射调用的链路长什么样
 
-`Method.invoke(obj, args)` 是 Java 侧最常见的"动态调用"。它的完整链路[实证](planning/outlines/00-jvm-tools/materials/commands/30-reflection-stackwalk-demo.txt)里一镜到底(用 `StackWalker` 的 `SHOW_HIDDEN_FRAMES` 选项把反射帧全亮出来):
+`Method.invoke(obj, args)` 是 Java 侧最常见的"动态调用"。它的完整链路[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/30-reflection-stackwalk-demo.txt)里一镜到底(用 `StackWalker` 的 `SHOW_HIDDEN_FRAMES` 选项把反射帧全亮出来):
 
 ```
 ReflectionDemo.target
@@ -80,7 +80,7 @@ oop Reflection::invoke_method(oop method_mirror, Handle receiver, objArrayHandle
 
 `StackWalker.walk` 的 native 面是 `JVM_CallStackWalk`(jvm.cpp:552-578)→ `StackWalk::walk`(stackwalk.cpp:332-360): 按 mode 选流——**`JavaFrameStream`**(默认,内部是 `vframeStream _vfst`,stackwalk.hpp:76-90,24 域)或 `LiveFrameStream`(JIT 栈寄存器映射)。`fetchFirstBatch`(:363)先**跳过 StackWalker 自身帧**(`StackWalker_klass`/`AbstractStackWalker_klass`,:378-384),然后 `fill_in_frames`(:108-145)逐帧填充。
 
-**隐藏帧的过滤在两层,分工不同**([实证:](planning/outlines/00-jvm-tools/materials/commands/30-reflection-stackwalk-demo.txt) 用 `-Xlog:stackwalk=debug` 对照):
+**隐藏帧的过滤在两层,分工不同**([实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/30-reflection-stackwalk-demo.txt) 用 `-Xlog:stackwalk=debug` 对照):
 
 ```cpp
 // stackwalk.cpp:123-137(截取核心,逐字)
@@ -108,4 +108,4 @@ oop Reflection::invoke_method(oop method_mirror, Handle receiver, objArrayHandle
 
 反射是"主动查"——还有一套"被动采样"的观测通道: JFR 在**每个线程上**采集事件(方法采样/线程转储/分配剖面),它的采集引擎怎么运转?下一篇: 32 域 JFR Recorder Engine。
 
-> → [32-jfr/01 — JFR 怎么在每个线程上采集事件?— Recorder Engine](01-recorder-engine.md)
+> → [32-jfr/01 — JFR 怎么在每个线程上采集事件?— Recorder Engine](openjdk/vol-02/32-jfr/01-recorder-engine.md)
