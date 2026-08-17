@@ -59,3 +59,16 @@ full_collection   → G1FullCollector(serial parallel compaction)
 **"G1 将堆切成 ~2048 个 Region——每 Region 独立標記类型(Eden/Survivor/Old/Humongous)，在 GC 间动态重指定。prev/next TAMS 双边界让并发标记只追踪标记开始时的对象。"** — 下一篇: 并发标记。
 
 > → [02-concurrent-mark.md](02-concurrent-mark.md)
+
+---
+
+> ⚠️ 写作期修正(2026-08-17, vol-02/26-g1-gc/01 已按真实源码成文,本大纲为规划期产物,机制描述以文章为准):
+> - **"RegionType 6 种" 错(重要)**: 实际 **8 种**(多出 OpenArchive/ClosedArchive=CDS 归档,heapRegionType.hpp:64-91 enum);编码是**位掩码组合**非顺序 tag——Free=0/Eden=2/Surv=3/StartsHumongous=12/ContinuesHumongous=13/Old=16/OpenArchive=56/ClosedArchive=57(注释表 :47-62);`is_young() = (get() & YoungMask) != 0`(:125)非 `type==Eden||type==Survivor`;行号 :30-80 应为注释 :47-62/enum :64-91/谓词 :123-143
+> - **"heapRegion.hpp:38-170 HeapRegion 完整定义" 错**: :97-189 是父类 G1ContiguousSpace,HeapRegion 类从 :191 起(至 :701);字段**分层继承**: `_bottom/_end` 在 space.hpp:66-67(Space 基类)、`_top` 在 heapRegion.hpp:99(G1ContiguousSpace volatile 字段)、`_bot_part`(G1BlockOffsetTablePart) :101;HeapRegion 自身字段 :196-264(_rem_set HeapRegionRemSet* :201、_hrm_index :228、_type :230、_humongous_start_region :233、_evacuation_failed :236、_next/_prev :239-240、_prev/_next_marked_bytes :247-248、prev/next TAMS :263-264)
+> - **"G1BlockOffsetTable _block_offset" 错**: 每 Region 持 `G1BlockOffsetTablePart _bot_part`;实体是**全堆共享一张** G1BlockOffsetTable(单层 u_char 数组,每 512 字节一个 entry,blockOffsetTable.hpp:50-55 LogN=9);大纲"sparse(128-byte)+per-card 两层表"是 8u 时代旧设计,**jdk11u 无两层**
+> - **"G1EvacuationPause" 类不存在**: 真实流程 pre_evacuate_collection_set(:4039)→evacuate_collection_set(:4063)→post_evacuate_collection_set(:4099);入口 collect(GCCause)(g1CollectedHeap.cpp:2005)按 cause 分流 VM_G1CollectForAllocation/VM_G1CollectFull;暂停本体 do_collection_pause_at_safepoint(:2794);g1CollectedHeap.hpp:100-400 应为类 :130 起/关键成员 :209-213
+> - **"g1CollectedHeap.cpp:200-500 initialize" 错**: initialize 在 :1533-1727(建六张 G1RegionToSpaceMapper :1588-1624 + _hrm.initialize :1626 + expand(init_byte_size) :1670-1674)
+> - **"创建所有 HeapRegion 对象(~2048 个)+hashtable" 错(重要)**: HeapRegion **按需创建**(commit 时才 new_heap_region,uncommit 保留复用,heapRegionManager.hpp:56-59 注释);索引是 `G1BiasedMappedArray<HeapRegion*>`(g1BiasedArray.hpp:99——地址右移 Region 大小直接寻址,**非 hashtable**,get_by_address :125-127)
+> - **"release 用 MADV_DONTNEED" 错**: Linux commit=mmap PROT_READ|WRITE MAP_FIXED(os_linux.cpp:3209-3218),uncommit=mmap PROT_NONE MAP_FIXED :3641-3645,无 MADV_DONTNEED;shrink 不走 pause,仅在 Full GC 后 resize_if_necessary_after_full_collection(:1219-1230)
+> - **"默认 Heap/2048" 精确化**: 默认时 region_size=(initial+max)/2/2048(HeapRegionBounds::TARGET_REGION_NUMBER,heapRegionBounds.hpp:46)取 2 的幂,夹 [1MB,32MB](:35/:42);4GB 堆→2MB ✓
+> - **继承链补正**: HeapRegion→G1ContiguousSpace→CompactibleSpace→Space(ContiguousSpace=space.hpp:501 是 CMS/Serial 线,不在 G1 链)
