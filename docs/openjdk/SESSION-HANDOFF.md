@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-17 | 卷 2 写作中: **151/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 14) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 68 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(6,26 域 6/7) + 47-instrumentation(2,47 域完结)**;下一篇 26-g1-gc/07(26 域 7/7)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-17 | 卷 2 写作中: **152/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 15) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 69 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(7,26 域完结) + 47-instrumentation(2,47 域完结)**;**卷 2 全部 152 篇完成** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 >**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26✅→35→40→47)进行中,下篇 47-instrumentation/02**
 
 ---
@@ -47,7 +47,7 @@
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
 第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 ✅(3/3,28 域完结)** → **29 ✅(2/2,29 域完结)** → **33 ✅(3/3,33 域完结)** → **43 ✅(3/3,43 域完结,第 6 批收官)** — 第 6 批 32/32 全部完结
-第 7 批(上层): **22 ✅(2/2,22 域完结)** → **26 ✅(4/7)** → 35 ✅ → 40 ✅ → 47 ✅(2/2,47 域完结)
+第 7 批(上层): **22 ✅(2/2,22 域完结)** → **26 ✅(7/7,26 域完结)** → 35 ✅ → 40 ✅ → 47 ✅(2/2,47 域完结)
 ```
 
 **已完成 126 篇**(全部在 `docs/openjdk/vol-02/`):
@@ -98,7 +98,7 @@
 | **33-jmx** | 3 | `33-jmx/01-memory-service.md`(185)+`02-jmm-interface.md`(168)+`03-gc-notifier-flags.md`(161) | ✅ **33 域完结(本会话)** |
 | **43-nio-net** | 3 | `43-nio-net/01-tcp-epoll.md`(108)+`02-udp-dns.md`(122)+`03-filesystem.md`(167) | ✅ **43 域完结,第 6 批收官(本会话)** |
 | **22-deoptimization** | 2 | `22-deoptimization/01-deopt-decision.md`(149)+`02-unpack-frames.md`(119) | ✅ **22 域完结(本会话)** |
-| **26-g1-gc** | 6 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) / `26-g1-gc/03-rem-set.md`(436) / `26-g1-gc/04-allocation.md`(473) / `26-g1-gc/05-mixed-gc-policy.md`(318) / `26-g1-gc/06-g1-barrier.md`(216) | ✅ 26 域 6/7(本会话,07 待写) |
+| **26-g1-gc** | 7 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) / `26-g1-gc/03-rem-set.md`(436) / `26-g1-gc/04-allocation.md`(473) / `26-g1-gc/05-mixed-gc-policy.md`(318) / `26-g1-gc/06-g1-barrier.md`(216) / `26-g1-gc/07-full-gc-roots.md`(230) | ✅ 26 域完结(本会话) |
 | **47-instrumentation** | 2 | `47-instrumentation/01-jplis-agent.md`(325) / `47-instrumentation/02-agent-entry.md`(321) | ✅ 47 域完结(本会话) |
 | **35-dcmd** | 2 | `35-dcmd/01-dcmd-framework.md`(481) / `35-dcmd/02-builtin-commands.md`(319) | ✅ 35 域完结(本会话) |
 | **40-launcher** | 2 | `40-launcher/01-launch-flow.md`(341) / `40-launcher/02-args-platform.md`(227) | ✅ 40 域完结(本会话) |
@@ -1019,6 +1019,13 @@
 - **C1/C2/Assembler 纠偏**: C1 在 LIR 层生成 active/card/跨 Region 判断和 barrier stub;C2 的 `g1_can_remove_pre_barrier`(:86-172)基于新分配对象字段初始化证明可删 pre,`g1_can_remove_post_barrier`(:306-335)处理初始对象;assembler 真正发射 x86 慢路径(g1BarrierSetAssembler_x86.cpp:142-245)
 - **写作期/REVIEW 收敛**: 初稿 5 个 cpp 代码块;第 1 轮抓大纲伪代码与成本编造并回填;第 2 轮代码块逐字/行号与机制复核通过
 
+### 7.7 26-g1-gc/07(Full GC + 根处理,26 域 7/7,大纲触发条件/根处理/StringDedup 数字漂移 + 深审 2 轮,2026-08-17)
+
+- **Full GC 要按 `G1FullCollector` 执行链讲,别先下结论讲触发条件**: `prepare_collection` 先 abort concurrent cycle/verify/prologue/prepare heap,`collect` 再 Phase1 mark → Phase2 prepare compaction → Phase3 adjust → Phase4 compact,`complete_collection` 恢复 marks/CodeCache/JVMTI/mutators
+- **根处理入口是 `G1FullGCMarkTask::work`**: 它用 `G1RootProcessor::process_strong_roots` 或 `process_all_roots_no_string_table`,再 `complete_marking` drain stacks;大纲列的 root 家族要挂到这个入口上讲
+- **大纲里“连续两次 evacuation 失败”“慢 10-50x”“StringDedup 省 15-30% char[]”都无本篇源码直证**: 已删除固定触发条件/固定倍数/固定收益数字,只保留 Full GC 执行链与 cleanup 分支中的 StringDedup 位置
+- **卷 2 进度纠正收官**: 26-g1-gc 实际规划 7 篇(不是早先误判的 4 篇),补写完 05/06/07 后全书正篇数回到规划总数 152/152
+
 ## 七、用户偏好与纪律(重要,违背会被批评)` 整行作为 oldString、new 里不放该行**——直接删掉标题(6.82 编辑当场犯,立即 grep 修复);**修复方法**: 先 `grep -n "^## 七"` 确认消失→在 6.82 末尾与"## 八"之间把标题+§七 首条重新插回。任何 HANDOFF 编辑后必须 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验
 - **章节维护教训补充 2(6.87 事故,2026-08-16,REVIEW 时发现)**: 另一失败模式=**anchor 字符串匹配到教训文本里的反引号引用**——6.87/6.88 两节被插入到 6.68 教训段落中间("## 七、用户偏好与纪律(重要,违背会被批评)" 在 6.68 教训的反引号内出现,str.replace 命中第一个=教训内那句),导致 6.87/6.88 各出现两份副本+教训文本被劈开;修复=删除错位副本+拼回教训行+行号修正同步两份副本。**强化操作顺序**: ①插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`)或用 6.86 结尾的独有文本;②插入后必须 `grep -n "^### 6\.8"` 看**编号连续性**(6.68 后出现 6.87 就是事故信号);③任何编辑后 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验(标题数=1、编号严格递增)
 - 实证: 15-c2-loops-demo.txt
@@ -1474,7 +1481,7 @@
 - [x] **26-g1-gc/04**——已完成;正文 `26-g1-gc/04-allocation.md`(473 行,13 代码块全逐字);26 域 4/7
 - [x] **26-g1-gc/05**——已完成;正文 `26-g1-gc/05-mixed-gc-policy.md`(318 行,9 代码块全逐字);26 域 5/7
 - [x] **26-g1-gc/06**——已完成;正文 `26-g1-gc/06-g1-barrier.md`(216 行,5 代码块全逐字);26 域 6/7
-- [ ] **26-g1-gc/07**——**下一篇**;大纲 `planning/outlines/26-g1-gc/07-full-gc-roots.md`(Full GC + 根处理);26 域 7/7
+- [x] **26-g1-gc/07**——已完成;正文 `26-g1-gc/07-full-gc-roots.md`(230 行,5 代码块全逐字);**26 域完结**
 - [x] **35-dcmd/01**——已完成;正文 `35-dcmd/01-dcmd-framework.md`(481 行,13 代码块全逐字);35 域 1/2
 - [x] **35-dcmd/02**——已完成;正文 `35-dcmd/02-builtin-commands.md`(319 行,10 代码块全逐字);**35 域完结**
 - [x] **40-launcher/01**——已完成;正文 `40-launcher/01-launch-flow.md`(341 行,6 个 C 代码块);40 域 1/2

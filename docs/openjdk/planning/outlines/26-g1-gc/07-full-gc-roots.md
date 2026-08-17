@@ -16,9 +16,8 @@ G1FullGC:
   Phase 4: compact — move objects to destination + update cards
 ```
 - 源码: `g1FullCollector.cpp:100-500` + `g1FullGCCompactTask.cpp:40-200`
-- 关键设计: Full GC 是 serial/parallel compaction——不是 evacuation。所有 Region 作为连续 block 处理——无 per-Region RS scan——直接遍历。compact 后所有 Region 连续→Humongous 被 compacted→碎片被清除
-- 关键设计: 两次连续 evacuation 失败→说明 heap fragmentation 严重(even short-lived objects can't be evacuated)→trigger Full GC 做 defrag。Full GC 比 evacuation 慢 10-50x but ensures completion
-- [C++: compaction 用 `G1FullGCCompactionPoint`——每个 compaction point 处理一组 Region。Parallel workers process compaction points independently→global destination heap address 用 Atomic::add offset 确保 non-overlapping]
+- 关键设计: Full GC 是 parallel mark-compact——不是 evacuation。`G1FullCollector::collect` 依次执行 Phase 1 mark、Phase 2 prepare、Phase 3 adjust pointers、Phase 4 compact(g1FullCollector.cpp:167-179);正常由 WorkGang 并行,空间极紧时各阶段保留 serial fallback
+- ⚠️ 漂移修正: ①Full GC 不应概括成固定"两次 evacuation failure"触发;触发来源分散在 VM operation/分配/GCLocker/explicit GC 等路径,本文以 `G1FullCollector` 执行链为准;②不存在源码直证的"比 evacuation 慢 10-50x"数字,删除固定倍数;③压缩前还有 reference processing、weak cleanup、class unloading/String/Symbol cleanup,不是只有 mark/compact 四步
 
 **Full GC 触发条件** (`g1Policy.cpp:1400-1600`):
 ```
@@ -46,7 +45,8 @@ parallel root scan phases:
   StringTable:   interned Strings
 ```
 - 源码: `g1RootProcessor.hpp:40-120` + `g1RootProcessor.cpp:80-300`
-- 关键设计: root scan 用 WorkGang parallel——每 worker 独立处理部分 roots。Java roots 最耗时(per-thread stack walk)→每 thread 分配不同 worker→均匀分配。JNI global refs 从 `global_jni_handles` 遍历
+- 关键设计: Full GC mark task 用 `G1RootProcessor` 处理 Java/VM/JNI/CLD/CodeCache 等 roots,再由各 worker 的 marker drain mark stacks(g1FullGCMarkTask.cpp:44-69)。`process_strong_roots` 与 `process_all_roots_no_string_table` 受 `ClassUnloading` 分支影响,不能简单列成固定 root 清单
+- ⚠️ 漂移修正: 大纲 `g1RootProcessor.hpp:40-120 + g1RootProcessor.cpp:80-300` 的 root 家族概括过宽;Full GC 具体入口是 `G1FullGCMarkTask::work`(:44-69)→`G1RootProcessor::process_strong_roots` 或 `process_all_roots_no_string_table`,StringTable 是否处理取决于分支
 
 ### 3. "StringDedup + GC Phase Times (G1侧)"
 
@@ -58,8 +58,8 @@ parallel root scan phases:
   → save 24-48 bytes per dedup'd String
 ```
 - 源码: `g1StringDedup.cpp:40-250` + `stringDedupStat.cpp:30-80`
-- 关键设计: 只在 survivor→old promotion 时处理(Young Objects rapidly die→不值得做 dedup)。dedup 率 ~15-30% char[] savings in typical server apps(~4-8% total heap)
-- [C++: String dedup 用 `G1StringDedupQueue` 存 candidate Strings——push during GC→`G1StringDedupTable` hash table 存 dedup'd strings。table resize 用 rehash(doubling)。每个 entry 通过 `oopStorage` 存 oop(域25基础)]
+- 关键设计: StringDedup 是 Full GC cleanup 分支的协作者,不是 Full GC 四阶段之一。本文只保留 `partial_cleaning(..., G1StringDedup::is_enabled())` 在 Full GC mark 后 cleanup 中的位置,不复述 25-06 已拆过的队列/table 细节
+- ⚠️ 漂移修正: 大纲里的 "15-30% char[] savings/~4-8% heap" 没有在本篇源码中得到直接证明,删除固定收益数字
 
 **G1GCPhaseTimes** (`g1GCPhaseTimes.hpp/cpp`):
 ```
