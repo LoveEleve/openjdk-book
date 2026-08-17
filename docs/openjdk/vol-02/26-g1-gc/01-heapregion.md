@@ -338,4 +338,4 @@ void G1FullCollector::collect() {
 
 G1 的堆地图画完了: **Region 尺寸**(`(Xms+Xmx)/2/2048` 取 2 的幂夹在 1MB~32MB)、**类型标签**(8 种、位掩码编码、GC 间动态重贴)、**HeapRegion 分层结构**(bottom/end 在 Space、top/bot_part 在 G1ContiguousSpace、TAMS 双指针在 HeapRegion)、**引擎**(G1CollectedHeap = 一个 `_hrm` + 子管理器;initialize 保留整块地址、六张 mapper 按需 commit;Linux 用 mmap 覆盖实现 commit/uncommit;分配先判 humongous 阈值 Region/2;pause 走 finalize CSet → evacuate → free,full 走四阶段压缩)。但留下一根引线: TAMS 说"并发标记只标记标记开始前就存在的对象"——**标记线程怎么跟分配线程抢进度、怎么知道"上一轮标记了多少"、bitmap 和 TAMS 怎么配合**,下一篇: 并发标记。
 
-> → [26-g1-gc/02 — 并发标记](openjdk/vol-02/26-g1-gc/02-concurrent-mark.md)
+> → [26-g1-gc/02 — 应用还在跑——你怎么知道谁活着？— 并发标记 + SATB](openjdk/vol-02/26-g1-gc/02-concurrent-mark.md)
