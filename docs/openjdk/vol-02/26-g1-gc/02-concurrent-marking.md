@@ -18,7 +18,7 @@
 
 ### pre-write barrier
 
-`write_ref_field_pre`(g1BarrierSet.inline.hpp:36-45):
+`write_ref_field_pre`(g1BarrierSet.inline.hpp:36-46):
 
 ```cpp
 // g1BarrierSet.inline.hpp:36-46(截取核心,逐字)
