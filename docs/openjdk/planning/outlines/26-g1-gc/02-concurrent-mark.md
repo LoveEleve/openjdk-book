@@ -71,7 +71,7 @@ remark:
 ```
 - 源码: `g1ConcurrentMark.cpp:remark`(:1139-1227)+ `finalize_marking`(:1858-1890)+ `cleanup`(:1356-1417)
 - ⚠️ 漂移修正: ①Remark 的第 1 步不是直接处理 SATB buffer——G1CMRemarkTask::work(:1828-1855)先 Threads::threads_do 扫线程根,再 do_marking_step(第一步 drain_satb_buffers 才消费 SATB);②"Rebuild RS" 不在 remark 内——是 remark 后的并发阶段(Concurrent Rebuild Remembered Sets);③per-region liveness 的"计算"在 remark 的 Update Remembered Set Tracking Before Rebuild(update_marked_bytes),不是 cleanup;④实测 phases 日志(:-Xlog:gc+phases=debug)与函数一一对应: Finalize Marking→Reference Processing→Weak Processing→ClassLoaderData→ProtectionDomainCacheTable→Class Unloading→Flush Task Caches→Update Remembered Set Tracking Before Rebuild→Reclaim Empty Regions→Purge Metaspace→Report Object Count;cleanup 里是 Update Remembered Set Tracking After Rebuild + Finalize Concurrent Mark Cleanup
-- 关键设计: Remark 是 STW(唯一需要全局停止的阶段)——但 remark 时间很短(~1-5ms)compared to concurrent mark(~10-100ms)。Remark 后→cleanup(rebuild liveness)→collection set ready for Mixed GC
+- ⚠️ 漂移修正(补充): 大纲原写 "Remark 是唯一需要全局停止的阶段" 错——整个 cycle 有 **两次 STW 暂停**: Pause Remark + Pause Cleanup(素材实测 0.168ms+0.021ms);remark 很短(~1-5ms 量级)compared to concurrent mark(~10-100ms 量级,均无直证,量级推断)
 
 ---
 
