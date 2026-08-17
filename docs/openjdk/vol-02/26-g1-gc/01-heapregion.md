@@ -188,7 +188,7 @@ class HeapRegion: public G1ContiguousSpace {
 
 ### 2.2 initialize — 保留地址 + 六张"对账单"
 
-`initialize`(g1CollectedHeap.cpp:1533-1727)分三步:
+`initialize`(g1CollectedHeap.cpp:1533-1735)分三步:
 
 1. **保留整块地址空间**( :1547-1572): `Universe::reserve_heap(max_byte_size, heap_alignment)` 按**最大堆** mmap 保留(不 commit,纯虚拟),然后 `g1_rs = heap_rs.first_part(max_byte_size)` 切出 G1 用的部分(:1587);
 2. **建六个 G1RegionToSpaceMapper**( :1588-1624): 堆本体 + BOT + CardTable + CardCounts + 两个并发标记 bitmap(堆本体直接 `G1RegionToSpaceMapper::create_mapper` :1588-1595,其余五个辅助区经 `create_aux_memory_mapper` :1605-1624,内部同样落到 create_mapper)——每个 mapper 都是"把虚拟地址空间切成 Region 粒度、按需 commit 小块"的按揭中介(§2.3);
