@@ -1,7 +1,7 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-17 | 卷 2 写作中: **141/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 4) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 58 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(2,26 域 2/4)**;下一篇 26-g1-gc/03(RSet,第 7 批 4/5)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
->**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26(2/4)→35→40→47)进行中,下篇 26-g1-gc/03**
+> **状态**: 2026-08-17 | 卷 2 写作中: **142/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 5) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 59 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(3,26 域 3/4)**;下一篇 26-g1-gc/04(分配,第 7 批 5/5)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+>**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26(3/4)→35→40→47)进行中,下篇 26-g1-gc/04**
 
 ---
 
@@ -47,7 +47,7 @@
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
 第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 ✅(3/3,28 域完结)** → **29 ✅(2/2,29 域完结)** → **33 ✅(3/3,33 域完结)** → **43 ✅(3/3,43 域完结,第 6 批收官)** — 第 6 批 32/32 全部完结
-第 7 批(上层): **22 ✅(2/2,22 域完结)** → **26 ✅(2/4)** → 35 → 40 → 47
+第 7 批(上层): **22 ✅(2/2,22 域完结)** → **26 ✅(3/4)** → 35 → 40 → 47
 ```
 
 **已完成 126 篇**(全部在 `docs/openjdk/vol-02/`):
@@ -98,7 +98,7 @@
 | **33-jmx** | 3 | `33-jmx/01-memory-service.md`(185)+`02-jmm-interface.md`(168)+`03-gc-notifier-flags.md`(161) | ✅ **33 域完结(本会话)** |
 | **43-nio-net** | 3 | `43-nio-net/01-tcp-epoll.md`(108)+`02-udp-dns.md`(122)+`03-filesystem.md`(167) | ✅ **43 域完结,第 6 批收官(本会话)** |
 | **22-deoptimization** | 2 | `22-deoptimization/01-deopt-decision.md`(149)+`02-unpack-frames.md`(119) | ✅ **22 域完结(本会话)** |
-| **26-g1-gc** | 2 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) | ✅ 26 域 2/4(本会话) |
+| **26-g1-gc** | 3 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) / `26-g1-gc/03-rem-set.md`(436) | ✅ 26 域 3/4(本会话) |
 
 ### 本会话 57 篇的 commit 清单(按 git log 为准,2026-08-14/17)
 
@@ -934,7 +934,16 @@
 - **缺机制(重要)**: ①is_counted_loop 判定(loopnode.cpp:372-500): Region 3 输入(Self/Entry/LoopBack)/IfTrue-IfFalse 回边/Bool(CmpI 禁指针浮点)/limit 循环不变量/incr 循环变量/Phi 结构/AddI 增量/**stride 常量**;②SLP 门控链(superword.cpp:100 架构宽度/:125 slp_max_unroll==0/:153-164 main loop 需 pre-loop end/:149-151 已向量化跳过);③SLP_extract 流水线(construct_bb :2793→dependence_graph→compute_max_depth→combine_packs :1552→output :2282+align_initial_loop_index :2298+insert_extracts);④do_unroll limit/init/stride 重算(:1942-1984)+update_main_loop_skeleton_predicates(:1972)+zero-trip guard opaq(:1957-1959);⑤循环后清理 remove_range_check_casts/remove_opaque4_nodes(compile.cpp:2421-2425/:2452-2455)
 - **实证方法论(重要)**: ①**容器性能对照噪声 ±20%**——短运行不可靠,需 -Xbatch+超长运行(reps=2000000)才稳定;②C1 vs C2 对照最稳(C2 循环体系整体效果: level 3 慢 3.7 倍);③flag 拆分: -XX:-UseSuperWord +59%/-XX:LoopUnrollLimit=1 +70%(展开贡献>向量化,因 pack 依赖展开后的相邻指令);④OSR 事件(1 % 3 run @ 6)=回边触发编译的存在性证据;⑤CITime IdealLoop 阶段计时=循环优化耗时的直接读数;⑥TraceSuperWord notproduct(:348)/TraceLoopOpts develop(:228) 不可用——循环变换本身无法直接打印
 - **章节维护教训(连续 9 次犯,6.74 时违反的具体细节已确认——new2 末尾带了旧节标题)**: 错误模式=`new=新节内容+"### 6.xx 旧节标题"` 替换 `old="### 6.xx 旧节标题"`——**new 末尾带旧节标题导致新节插到标题前**;已 9 次(6.65-6.74 每次,含 6.73 教训明示后的 6.74);**强制操作顺序(违反即事故,立即交换修复+更新教训)**: ①先把新节内容写成独立文本,插入点为 `## 七、` 前一行(文件末尾追加,不碰任何旧节内容);②**立即 `grep -n "### 6.6"` 校验连续递增**;③若顺序颠倒,交换块并记录本次违规细节。禁止"new 含旧节标题"模式
-- **章节维护教训补充(6.82 新失败模式,2026-08-16)**: 另一吞标题模式=**用 `## 七、用户偏好与纪律(重要,违背会被批评)` 整行作为 oldString、new 里不放该行**——直接删掉标题(6.82 编辑当场犯,立即 grep 修复);**修复方法**: 先 `grep -n "^## 七"` 确认消失→在 6.82 末尾与"## 八"之间把标题+§七 首条重新插回。任何 HANDOFF 编辑后必须 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验
+- **章节维护教训补充(6.82 新失败模式,2026-08-16)**: 另一吞标题模式=**用 `
+### 6.97 26-g1-gc/03(RSet + CardTable 并发细化,26 域 3/4,大纲概念漂移 + 深审 4 轮,2026-08-17)
+
+- **大纲最大漂移是把 RSet 三层结构写成三选一状态机**: 真实 `OtherRegionsTable` 同时持有 `_sparse_table` + `_fine_grain_regions` + `_coarse_map`(heapRegionRemSet.hpp:82-87/:103-104);coarsen 不是 Sparse→Fine→Coarse 单条升级链,而是 fine 表满时驱逐一个 `PerRegionTable`,把对应来源 Region 位置到 coarse bitmap(heapRegionRemSet.cpp:383-417/:443-497)
+- **Sparse 阈值不是固定 128**: `SparsePRTEntry::cards_num()` 直接取 `G1RSetSparseRegionEntries`(sparsePRT.hpp:69-73);默认值还会按 region 大小放大——`setup_remset_size()` 里 `Base * (region_size_log_mb + 1)`(heapRegionRemSet.cpp:630-641)。大纲里"<128 entries/Fine=32 bytes"都是失真
+- **RSet 更新方向必须抓准**: 不是把 card 挂回来源 Region,而是扫描来源 card 时,若 field 指向别的 Region,就去 **target region 的 remset** 里 `add_reference(p, worker)`。并发精炼走 `G1ConcurrentRefineOopClosure::do_oop_work`(g1OopClosures.inline.hpp:131-156,`to_rem_set->is_tracked()`→`add_reference`),Update RS 走 `G1ScanObjsDuringUpdateRSClosure`(:159-183,若目标在 CSet 则 `prefetch_and_push`,否则 `to->rem_set()->add_reference`)
+- **Pause 链路别漏 prepare/cleanup**: 真正 pause 入口不是只看 `update_rem_set`/`scan_rem_set`;开始前 `prepare_for_oops_into_collection_set_do` 先 `concatenate_logs()` 把各线程 partial dirty-card log 拼进 completed list 并 `_scan_state->reset()`(g1RemSet.cpp:511-516),结束后 `cleanup_after_oops_into_collection_set_do` 按 dirty-region buffer 并行清卡表(:518-524)
+- **写作期/REVIEW 收敛**: 初稿 16 cpp 块超 13 标准→删 3 个小块(`oops_into_collection_set_do`/`do_refinement_step`/HotCardCache 注释)改 prose;第 1 轮抓出 Update RS 语义不精确(它不只是补 RSet,目标在 CSet 时直接 `prefetch_and_push`)与并发精炼 closure 证据引用错(误引到 UpdateRS closure);第 2 轮逐块源码对齐通过;第 3 轮补 prepare/cleanup 尾巴;第 4 轮零问题收敛
+
+## 七、用户偏好与纪律(重要,违背会被批评)` 整行作为 oldString、new 里不放该行**——直接删掉标题(6.82 编辑当场犯,立即 grep 修复);**修复方法**: 先 `grep -n "^## 七"` 确认消失→在 6.82 末尾与"## 八"之间把标题+§七 首条重新插回。任何 HANDOFF 编辑后必须 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验
 - **章节维护教训补充 2(6.87 事故,2026-08-16,REVIEW 时发现)**: 另一失败模式=**anchor 字符串匹配到教训文本里的反引号引用**——6.87/6.88 两节被插入到 6.68 教训段落中间("## 七、用户偏好与纪律(重要,违背会被批评)" 在 6.68 教训的反引号内出现,str.replace 命中第一个=教训内那句),导致 6.87/6.88 各出现两份副本+教训文本被劈开;修复=删除错位副本+拼回教训行+行号修正同步两份副本。**强化操作顺序**: ①插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`)或用 6.86 结尾的独有文本;②插入后必须 `grep -n "^### 6\.8"` 看**编号连续性**(6.68 后出现 6.87 就是事故信号);③任何编辑后 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验(标题数=1、编号严格递增)
 - 实证: 15-c2-loops-demo.txt
 
@@ -1385,8 +1394,8 @@
 - [x] 22-deoptimization/02——✅ 完结(正文 46a39e5,119 行/大纲回填 ⚠️ 8 块 86f553c/README 2cf98dc);**22 域完结,第 7 批 1/5 域**
 - [x] 26-g1-gc/01——✅ 完结(正文+大纲 3149c88,341 行,含回填 ⚠️ 9 块/README 718c35d);**26 域 1/4,第 7 批 3/5**
 - [x] **26-g1-gc/02**——已完成;正文 `26-g1-gc/02-concurrent-marking.md`(422 行,13 代码块全逐字,素材 26-g1-gc-concurrent-mark-demo.txt 实测生成);26 域 2/4
-- [ ] **26-g1-gc/03**——**下一篇**;大纲 `planning/outlines/26-g1-gc/03-rem-set.md`(RSet + CardTable);26 域 3/4;26-02 悬念已指向它
-- [ ] 26-g1-gc/03(RSet)、26-g1-gc/04(分配)——26 域 4 篇
+- [x] **26-g1-gc/03**——已完成;正文 `26-g1-gc/03-rem-set.md`(436 行,13 代码块全逐字);26 域 3/4
+- [ ] **26-g1-gc/04**——**下一篇**;大纲 `planning/outlines/26-g1-gc/04-allocation.md`(TLAB + humongous + promotion);26 域 4/4
 - [ ] 35-dcmd / 40-launcher / 47-instrumentation(第 7 批 5 域收官后全书 152/152)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
