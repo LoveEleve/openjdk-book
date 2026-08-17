@@ -21,7 +21,7 @@ inline void G1BarrierSet::write_ref_field_pre(T* field) {
   }
 }
 ```
-- 源码: `g1BarrierSet.inline.hpp:36-46` + `g1BarrierSet.cpp:61-73` enqueue(is_active 门控;Java 线程→线程本地 satb_mark_queue,非 Java→共享队列 Shared_SATB_Q_lock)+ `satbMarkQueue.hpp:36-53` SATBMarkQueue 继承 PtrQueue
+- 源码: `g1BarrierSet.inline.hpp:36-46` + `g1BarrierSet.cpp:61-73` enqueue(is_active 门控;Java 线程→线程本地 satb_mark_queue,非 Java→共享队列 Shared_SATB_Q_lock)+ `satbMarkQueue.hpp:45-88` SATBMarkQueue 继承 PtrQueue
 - 关键设计: SATB = Snapshot-At-The-Beginning——整个并发标记看到的 heap 是"标记开始时的快照"。任何标记开始后的指针更新→通过 pre-barrier 保存旧值→标记线程找到旧值→递归标记→不丢对象。overhead: pre-barrier~15-20 cycles(仅当 SATB active 时)
 - ⚠️ 漂移修正: 大纲原写 ":40-80" → 实际 :36-46;enqueue 逻辑在 g1BarrierSet.cpp:61-73 而非 inline(模板里只有调用);"每线程一个 SATB buffer,写满整块交 completed buffer 列表" — 队列属于每个 Java 线程(不限于标记 worker),标记 worker 消费的是 completed 列表
 

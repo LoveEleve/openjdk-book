@@ -12,7 +12,7 @@
 
 ### 丢失的场景
 
-假设不做任何记录。标记线程扫 A 的字段,读到 A 指向 B,把 B 放进待扫队列。这之后应用把 A.b 从 B 改成 C,而 B 只有 A 这一条入边。标记线程没机会扫 B 了——B 在对象图里消失了。但 B 在标记开始那一刻是活的。回收一个活对象 = 崩溃。
+假设不做任何记录。应用先把 A.b 从 B 改成 C——然后标记线程才扫到 A,它读到的是 C,B 永远没机会被扫描。而 B 只有 A 这一条入边,在标记开始那一刻是活的。B 在对象图里消失了。回收一个活对象 = 崩溃。
 
 **解决: 在写引用之前,把旧值先保存下来。** 标记线程拿到"标记开始时所有引用的快照",旧的引用指向的对象一定被补扫,绝不会丢。
 
@@ -57,11 +57,11 @@ void G1BarrierSet::enqueue(oop pre_val) {
 两个要点:
 
 1. **`is_active()` 门控** — 队列只在并发标记进行中打开。标记没在跑时 pre-barrier 等于不存在,0 开销。
-2. **线程本地** — Java 线程写自己的 `satb_mark_queue`(per-thread buffer),bump 指针+1 就完事,无锁。buffer 写满才整块交给 completed buffer 列表——常规开销 ~15-20 cycles,仅 SATB active 期间。非 Java 线程(编译器线程)进共享队列(Shared_SATB_Q_lock)。
+2. **线程本地** — Java 线程写自己的 `satb_mark_queue`(per-thread buffer),从 buffer 尾部递减写 `_index`(25-gc-framework/05 的 PtrQueue 语义),无锁。buffer 写满才整块交给 completed buffer 列表——常规开销 ~15-20 cycles(推断值,无源码直证),仅 SATB active 期间。非 Java 线程(编译器线程)进共享队列(Shared_SATB_Q_lock)。
 
 ### queue 的设计
 
-SATBMarkQueue(satbMarkQueue.hpp:36-53) 继承 PtrQueue: 每线程一个 buffer,buffer 里的 oop 是"标记开始时存活的引用"——它们可能已经过期(对象已死),但标记时按存活处理。多的标记无害,漏的标记致命。
+SATBMarkQueue(satbMarkQueue.hpp:45-88) 继承 PtrQueue: 每线程一个 buffer,buffer 里的 oop 是"标记开始时存活的引用"——它们可能已经过期(对象已死),但标记时按存活处理。多的标记无害,漏的标记致命。
 
 ---
 
@@ -104,6 +104,7 @@ GC(0) Pause Young (Concurrent Start) (G1 Humongous Allocation) 9M->8M(34M) 2.188
 GC(1) Concurrent Cycle
 GC(1) Concurrent Clear Claimed Marks 0.004ms
 GC(1) Concurrent Scan Root Regions 0.301ms
+GC(1) Concurrent Mark (0.027s)
 GC(1) Concurrent Mark From Roots 1.094ms
 GC(1) Concurrent Preclean 0.076ms
 GC(1) Concurrent Mark (0.027s, 0.028s) 1.181ms
@@ -141,7 +142,7 @@ G1CMRootRegions 的注释(g1ConcurrentMark.hpp:228-240):
 
 ### mark_from_roots: 并发 gang 主入口
 
-`mark_from_roots`(g1ConcurrentMark.cpp:973-990):
+`mark_from_roots`(g1ConcurrentMark.cpp:973-992):
 
 ```cpp
 // g1ConcurrentMark.cpp:973-992(截取核心,逐字)
@@ -175,14 +176,14 @@ G1CMTask::do_marking_step(g1ConcurrentMark.cpp:2592 起):
 4. **claim_region()** — 当前 region 扫完,通过 CAS 全局 `_finger` 认领下一个 region。
 5. **do_stealing** — 本地没工作时偷别人的队列(work stealing)。
 
-do_marking_step 是可中断的(G1ConcMarkStepDurationMillis 默认 10ms): 到时间就 abort,线程检查 has_aborted() 退出循环 → 一轮完成 → 再进下一轮 mark_from_roots 直到 SATB buffer 为空且栈为空。
+do_marking_step 是可中断的(G1ConcMarkStepDurationMillis 默认 10ms): 到时间就置本 task 的 abort 标志让出 CPU;worker 循环(task->has_aborted() 且标记未中止)接着再来一个时间片。SATB buffer 与灰队列在每次调用内被逐步清空,全部清空后各 worker 经终止协议同步退出,一轮 mark_from_roots 完成。
 
 ### make_reference_grey: 对象标记入口
 
 `make_reference_grey`(g1ConcurrentMark.inline.hpp:213-253):
 
 ```cpp
-// g1ConcurrentMark.inline.hpp:213-254(截取核心,逐字)
+// g1ConcurrentMark.inline.hpp:213-253(截取核心,逐字)
 inline bool G1CMTask::make_reference_grey(oop obj) {
   if (!_cm->mark_in_next_bitmap(_worker_id, obj)) {
     return false;
@@ -220,7 +221,7 @@ G1CMTask 的 _task_queue 由 G1CMTaskQueueSet 管理。每个 worker 有自己�
 
 ### G1ConcurrentMark 成员
 
-G1ConcurrentMark 的 bitmap 相关字段(g1ConcurrentMark.hpp:288-310):
+G1ConcurrentMark 的 bitmap 相关字段(g1ConcurrentMark.hpp:304-310):
 
 ```cpp
 // g1ConcurrentMark.hpp:304-310(截取核心,逐字)
@@ -310,7 +311,7 @@ void G1ConcurrentMark::remark() {
 
 ### finalize_marking
 
-finalize_marking(g1ConcurrentMark.cpp:1858-1888):
+finalize_marking(g1ConcurrentMark.cpp:1858-1890):
 
 ```cpp
 // g1ConcurrentMark.cpp:1858-1890(截取核心,逐字)
@@ -339,7 +340,7 @@ void G1ConcurrentMark::finalize_marking() {
 }
 ```
 
-G1CMRemarkTask::work(g1ConcurrentMark.cpp:1828-1855)在 STW 内并行做两件事: 先 `Threads::threads_do` 把全部 Java 线程的根(栈/寄存器里的引用)扫进标记——这是并发阶段不碰的根(并发循环只扫 root regions);再以极大超时(`1000000000.0`)调 do_marking_step,其第一步 `drain_satb_buffers()` 把剩余 SATB buffer 全部消费,然后反复走到本地与全局队列清空。全部完成才能返回;若标记栈溢出则中止 remark、`_restart_for_overflow` 走溢出重启。`completed_buffers_num() == 0` 确认没有残留。
+G1CMRemarkTask::work(g1ConcurrentMark.cpp:1828-1855)在 STW 内并行做两件事: 先 `Threads::threads_do` 把全部 Java 线程的根(栈/寄存器/nmethod 常量池里的引用)扫进标记——线程根在 Concurrent Start 暂停里已被扫过一遍,但并发期间栈引用一直在变,SATB 只记录被覆盖的旧值,remark 在 STW 下重扫当前值才能保证不漏;并发循环本身只扫 root regions,不碰线程根;再以极大超时(`1000000000.0`)调 do_marking_step,其第一步 `drain_satb_buffers()` 把剩余 SATB buffer 全部消费,然后反复走到本地与全局队列清空。全部完成才能返回;若标记栈溢出则中止 remark、`_restart_for_overflow` 走溢出重启。`completed_buffers_num() == 0` 确认没有残留。
 
 ### remark 内部阶段
 

@@ -1,7 +1,7 @@
 # 01. 堆被切成 2048 块 — HeapRegion + G1CollectedHeap
 
 > **前置依赖**:[25-gc-framework/02 — new Object() 走到了哪？— CollectedHeap + 分配路径](openjdk/vol-02/25-gc-framework/02-collected-heap.md):CollectedHeap 门面、分配三级路径与 `_g1_humongous_allocation` cause;[25-gc-framework/01 — GC 怎么在每次 oop 访问时悄悄插入 barrier？— BarrierSet + Access API](openjdk/vol-02/25-gc-framework/01-barrier-access.md):G1 的写 barrier 与 card 记账;[09-memory-core/01 — Universe + CollectedHeap — JVM 的"宇宙大爆炸"](openjdk/vol-02/09-memory-core/01-universe-heap.md):建堆时序与 `initialize` 里的 `Reserve the maximum`(reserve/commit 分离机制在 09-02 VirtualSpace)
-> → **后续**:[26-g1-gc/02 — 应用还在跑——你怎么知道谁活着？— 并发标记 + SATB](openjdk/vol-02/26-g1-gc/02-concurrent-mark.md)
+> → **后续**:[26-g1-gc/02 — 应用还在跑——你怎么知道谁活着？— 并发标记 + SATB](openjdk/vol-02/26-g1-gc/02-concurrent-marking.md)
 > 关联域: 25-gc-framework(堆门面与 barrier、card 表)、09-memory-core(保留区)
 
 ## 一张"网格纸"上的堆
@@ -338,4 +338,4 @@ void G1FullCollector::collect() {
 
 G1 的堆地图画完了: **Region 尺寸**(`(Xms+Xmx)/2/2048` 取 2 的幂夹在 1MB~32MB)、**类型标签**(8 种、位掩码编码、GC 间动态重贴)、**HeapRegion 分层结构**(bottom/end 在 Space、top/bot_part 在 G1ContiguousSpace、TAMS 双指针在 HeapRegion)、**引擎**(G1CollectedHeap = 一个 `_hrm` + 子管理器;initialize 保留整块地址、六张 mapper 按需 commit;Linux 用 mmap 覆盖实现 commit/uncommit;分配先判 humongous 阈值 Region/2;pause 走 finalize CSet → evacuate → free,full 走四阶段压缩)。但留下一根引线: TAMS 说"并发标记只标记标记开始前就存在的对象"——**标记线程怎么跟分配线程抢进度、怎么知道"上一轮标记了多少"、bitmap 和 TAMS 怎么配合**,下一篇: 并发标记。
 
-> → [26-g1-gc/02 — 应用还在跑——你怎么知道谁活着？— 并发标记 + SATB](openjdk/vol-02/26-g1-gc/02-concurrent-mark.md)
+> → [26-g1-gc/02 — 应用还在跑——你怎么知道谁活着？— 并发标记 + SATB](openjdk/vol-02/26-g1-gc/02-concurrent-marking.md)
