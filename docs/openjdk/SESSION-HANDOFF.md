@@ -1,7 +1,7 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-17 | 卷 2 写作中: **147/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 10) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 64 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(4,26 域完结)**;下一篇 47-instrumentation/01(第 7 批收官域)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
->**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26✅→35→40→47)进行中,下篇 47-instrumentation/01**
+> **状态**: 2026-08-17 | 卷 2 写作中: **148/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 11) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 65 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(4,26 域完结)**;下一篇 47-instrumentation/02(47 域 2/2)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+>**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26✅→35→40→47)进行中,下篇 47-instrumentation/02**
 
 ---
 
@@ -101,6 +101,7 @@
 | **26-g1-gc** | 4 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) / `26-g1-gc/03-rem-set.md`(436) / `26-g1-gc/04-allocation.md`(473) | ✅ 26 域完结(本会话) |
 | **35-dcmd** | 2 | `35-dcmd/01-dcmd-framework.md`(481) / `35-dcmd/02-builtin-commands.md`(319) | ✅ 35 域完结(本会话) |
 | **40-launcher** | 2 | `40-launcher/01-launch-flow.md`(341) / `40-launcher/02-args-platform.md`(227) | ✅ 40 域完结(本会话) |
+| **47-instrumentation** | 1 | `47-instrumentation/01-jplis-agent.md`(325) | ✅ 47 域 1/2(本会话) |
 
 ### 本会话 57 篇的 commit 清单(按 git log 为准,2026-08-14/17)
 
@@ -987,6 +988,15 @@
 - **`LD_LIBRARY_PATH` 处理不能归因于 RPATH**: `RequiresSetenv` 决定是否补路径;需要时 `putenv` 后必须 `execv/execve` 重启,因为 Unix 通常只在进程启动时读取动态库搜索路径(java_md_solinux.c:355-482)
 - **写作期/REVIEW 收敛**: 第 1 轮核对 argfile/wildcard/jvm.cfg/re-exec 逻辑;第 2 轮抓到后续链接错误(`41-zip-jimage/01-zip-jimage.md`→`01-zip.md`)并修正;随后行号越界、代码块和链接检查全部通过
 
+### 7.3 47-instrumentation/01(JPLIS Agent → JVMTI ClassFileLoadHook,47 域 1/2,大纲两阶段漂移 + 深审 2 轮,2026-08-17)
+
+- **大纲最大的机制漂移是"OnLoad 直接启用 ClassFileLoadHook"**: JDK 11 实际分两阶段——`initializeJPLISAgent` 在 ONLOAD phase 只装 `VMInit` callback(JPLISAgent.c:302-323),`eventHandlerVMInit` 里才把 agent JAR 追加到 system class path 并 `processJavaStart`(InvocationAdapter.c:586-623);live phase 才由 `setLivePhaseEventHandlers` 装 ClassFileLoadHook
+- **`createNewJPLISAgent` 从 `JavaVM::GetEnv(..., JVMTI_VERSION_1_1)` 取 environment**,不是自己构造函数表(JPLISAgent.c:204-223);大纲的 `JVMTI_VERSION` 写法不准确
+- **manifest 能力不是简单 boolean**: `Can-Retransform-Classes` 会走 `retransformableEnvironment(agent)` 建独立 retransform environment;`convertCapabilityAttributes` 映射 Can-Redefine-Classes / Can-Retransform-Classes / Can-Set-Native-Method-Prefix / Can-Maintain-Original-Method-Order(InvocationAdapter.c:104-129)
+- **`Premain-Class` 缺失是 OnLoad 失败**: `getAttribute(attributes, "Premain-Class")` 返回 NULL 直接 JNI_ERR,不是"agent 不生效但应用继续"(InvocationAdapter.c:183-191)
+- **Java 侧 transformer 分两套 manager**: `addTransformer(transformer, canRetransform)` 里普通 transformer 进 `mTransformerManager`,可重转换进 `mRetransfomableTransformerManager`,首个加入时通知 native 启用 hook(InstrumentationImpl.java:82-109)
+- **写作期/REVIEW 收敛**: 初稿 8 个代码块行号区间普遍偏宽,第 1 轮全部按源码逐字回填并修正(131-149/204-223/158-186/280-310/382-421/82-105),同时补回 eventHandlerClassFileLoadHook 漏掉的 640 行注释;第 2 轮零问题
+
 ## 七、用户偏好与纪律(重要,违背会被批评)` 整行作为 oldString、new 里不放该行**——直接删掉标题(6.82 编辑当场犯,立即 grep 修复);**修复方法**: 先 `grep -n "^## 七"` 确认消失→在 6.82 末尾与"## 八"之间把标题+§七 首条重新插回。任何 HANDOFF 编辑后必须 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验
 - **章节维护教训补充 2(6.87 事故,2026-08-16,REVIEW 时发现)**: 另一失败模式=**anchor 字符串匹配到教训文本里的反引号引用**——6.87/6.88 两节被插入到 6.68 教训段落中间("## 七、用户偏好与纪律(重要,违背会被批评)" 在 6.68 教训的反引号内出现,str.replace 命中第一个=教训内那句),导致 6.87/6.88 各出现两份副本+教训文本被劈开;修复=删除错位副本+拼回教训行+行号修正同步两份副本。**强化操作顺序**: ①插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`)或用 6.86 结尾的独有文本;②插入后必须 `grep -n "^### 6\.8"` 看**编号连续性**(6.68 后出现 6.87 就是事故信号);③任何编辑后 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验(标题数=1、编号严格递增)
 - 实证: 15-c2-loops-demo.txt
@@ -1444,7 +1454,8 @@
 - [x] **35-dcmd/02**——已完成;正文 `35-dcmd/02-builtin-commands.md`(319 行,10 代码块全逐字);**35 域完结**
 - [x] **40-launcher/01**——已完成;正文 `40-launcher/01-launch-flow.md`(341 行,6 个 C 代码块);40 域 1/2
 - [x] **40-launcher/02**——已完成;正文 `40-launcher/02-args-platform.md`(227 行,3 个 C 代码块);**40 域完结**
-- [ ] **47-instrumentation/01**——**下一篇**;第 7 批收官域
+- [x] **47-instrumentation/01**——已完成;正文 `47-instrumentation/01-jplis-agent.md`(325 行,7 个 C + 1 个 Java 代码块);47 域 1/2
+- [ ] **47-instrumentation/02**——**下一篇**;大纲 `planning/outlines/47-instrumentation/02-agent-entry.md`;47 域 2/2(第 7 批收官)
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
