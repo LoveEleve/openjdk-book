@@ -1,7 +1,7 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-17 | 卷 2 写作中: **144/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 7) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 61 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(4,26 域完结)**;下一篇 35-dcmd/02(第 7 批 7/5→后续域)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
->**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26✅→35→40→47)进行中,下篇 35-dcmd/02**
+> **状态**: 2026-08-17 | 卷 2 写作中: **145/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 8) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 62 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(4,26 域完结)**;下一篇 40-launcher/01(第 7 批后续域)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+>**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26✅→35→40→47)进行中,下篇 40-launcher/01**
 
 ---
 
@@ -99,7 +99,7 @@
 | **43-nio-net** | 3 | `43-nio-net/01-tcp-epoll.md`(108)+`02-udp-dns.md`(122)+`03-filesystem.md`(167) | ✅ **43 域完结,第 6 批收官(本会话)** |
 | **22-deoptimization** | 2 | `22-deoptimization/01-deopt-decision.md`(149)+`02-unpack-frames.md`(119) | ✅ **22 域完结(本会话)** |
 | **26-g1-gc** | 4 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) / `26-g1-gc/03-rem-set.md`(436) / `26-g1-gc/04-allocation.md`(473) | ✅ 26 域完结(本会话) |
-| **35-dcmd** | 1 | `35-dcmd/01-dcmd-framework.md`(481) | ✅ 35 域 1/2(本会话) |
+| **35-dcmd** | 2 | `35-dcmd/01-dcmd-framework.md`(481) / `35-dcmd/02-builtin-commands.md`(319) | ✅ 35 域完结(本会话) |
 
 ### 本会话 57 篇的 commit 清单(按 git log 为准,2026-08-14/17)
 
@@ -961,6 +961,15 @@
 - **命令对象生命周期别漏 `DCmdMark`**: `parse_and_execute` 里 `create_local_DCmd` 之后立刻绑 `DCmdMark`;析构时统一 `cleanup()` 和必要时 `delete`。这保证了异常路径下的资源回收,大纲完全漏掉
 - **写作期/REVIEW 收敛**: 初稿 14 cpp 块超 13 标准→删掉 `DCmdSource` 小块改 prose;第 1 轮抓到前置依赖路径写错(`36-attach/01-attach-start.md` 应为 `01-attach-listener.md`);第 2 轮零问题收敛
 
+### 7.0 35-dcmd/02(jcmd 可以做什么？— 内置命令详解,35 域 2/2,大纲概念漂移 + 深审 2 轮,2026-08-17)
+
+- **大纲的命令清单过度概括**: JDK 11 HotSpot 注册的是条件编译下的一批 DCmd,JFR 还有独立 dcmd 实现,不能硬说固定“VM/Thread/GC/NMT/JFR 五类约 30 个”;正文改为按源码挑代表命令
+- **`VM.flags` 默认不是所有 flags**: `PrintVMFlagsDCmd::execute` 默认 `JVMFlag::printSetFlags()`,只有 `-all` 才 `printFlags(output(), true)`(diagnosticCommand.cpp:247-253)
+- **`GC.run` 不等于固定 Full GC**: execute 只有 `Universe::heap()->collect(GCCause::_dcmd_gc_run)`(diagnosticCommand.cpp:444-446),具体收集类型由当前 GC/policy 决定
+- **`GC.class_histogram` 和 `Thread.print` 都会进入 VMThread**: 前者构造 `VM_GC_HeapInspection`并根据 `-all`决定是否请求 full GC(:556-567),后者连续执行 `VM_PrintThreads`、`VM_PrintJNI`、`VM_FindDeadlocks`(:641-653)
+- **`GC.heap_info` 不是无锁查询**: execute 先持 `Heap_lock` 再 `Universe::heap()->print_on`(:457-460);`GC.heap_dump` 的 `-all`、`-gz`、`-overwrite`也由 parser 与 `HeapDumper`共同完成
+- **写作期/REVIEW 收敛**: 初稿 10 cpp 块;第 1 轮抓 `GC.heap_dump` 的 `-gz` 源码注释截取不完整并补齐;第 2 轮零问题收敛
+
 ## 七、用户偏好与纪律(重要,违背会被批评)` 整行作为 oldString、new 里不放该行**——直接删掉标题(6.82 编辑当场犯,立即 grep 修复);**修复方法**: 先 `grep -n "^## 七"` 确认消失→在 6.82 末尾与"## 八"之间把标题+§七 首条重新插回。任何 HANDOFF 编辑后必须 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验
 - **章节维护教训补充 2(6.87 事故,2026-08-16,REVIEW 时发现)**: 另一失败模式=**anchor 字符串匹配到教训文本里的反引号引用**——6.87/6.88 两节被插入到 6.68 教训段落中间("## 七、用户偏好与纪律(重要,违背会被批评)" 在 6.68 教训的反引号内出现,str.replace 命中第一个=教训内那句),导致 6.87/6.88 各出现两份副本+教训文本被劈开;修复=删除错位副本+拼回教训行+行号修正同步两份副本。**强化操作顺序**: ①插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`)或用 6.86 结尾的独有文本;②插入后必须 `grep -n "^### 6\.8"` 看**编号连续性**(6.68 后出现 6.87 就是事故信号);③任何编辑后 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验(标题数=1、编号严格递增)
 - 实证: 15-c2-loops-demo.txt
@@ -1415,8 +1424,8 @@
 - [x] **26-g1-gc/03**——已完成;正文 `26-g1-gc/03-rem-set.md`(436 行,13 代码块全逐字);26 域 3/4
 - [x] **26-g1-gc/04**——已完成;正文 `26-g1-gc/04-allocation.md`(473 行,13 代码块全逐字);**26 域完结**
 - [x] **35-dcmd/01**——已完成;正文 `35-dcmd/01-dcmd-framework.md`(481 行,13 代码块全逐字);35 域 1/2
-- [ ] **35-dcmd/02**——**下一篇**;大纲 `planning/outlines/35-dcmd/02-builtin-commands.md`;35 域 2/2
-- [ ] 35-dcmd / 40-launcher / 47-instrumentation(第 7 批 5 域收官后全书 152/152)
+- [x] **35-dcmd/02**——已完成;正文 `35-dcmd/02-builtin-commands.md`(319 行,10 代码块全逐字);**35 域完结**
+- [ ] **40-launcher/01**——**下一篇**;继续第 7 批 40 → 47
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
