@@ -19,8 +19,8 @@ void G1BarrierSet::write_ref_field_pre(T* field, oop new_val) {
 }
 ```
 - 源码: `g1BarrierSet.inline.hpp:40-80` + `satbMarkQueue.hpp:40-120` enqueue
-- 关键设计: full barrier cost~15-20 cycles——C2 可优化。若连续写同一 field→C2 eliminates redundant pre-barrier(第一次保存→第二次 field 还没变→pre-barrier 被 skip)。如果 SATB 不活跃→barrier 是 single cmp+jump→~2 cycles
-- [x86: C2 内联: `cmpl [SATB_active],0; je skip; mov rdi,[field_addr]; test rdi,rdi; jz skip; mov [queue_buffer+rsi*8],rdi; add rsi,1; test rsi,63; jz slow_path`——全 inline ~12-15 instructions]
+- 关键设计: pre barrier 先检查 SATB active,再读取旧值;旧值非 null 才进入线程本地 SATB queue,buffer 满才走 runtime slow path。具体成本取决于 active/旧值/index 状态,不使用无源码依据的固定 cycles 数字
+- ⚠️ 漂移修正: 大纲伪代码不存在;真实 C++ 入口是 `g1BarrierSet.inline.hpp:36-46`(decorator→RawAccess load→CompressedOops null filter→`enqueue`),`enqueue` 分 JavaThread 本地 queue/非 Java shared queue(g1BarrierSet.cpp:61-73);x86 快路径真实在 `g1BarrierSetAssembler_x86.cpp:142-203`(active/null/index 检查,非固定"12-15 instructions")
 
 ### 2. "post-write barrier — 标记脏卡片"
 
@@ -37,18 +37,18 @@ void G1BarrierSet::write_ref_field_post(T* field) {
 }
 ```
 - 源码: `g1BarrierSet.inline.hpp:100-150` + `g1CardTable.hpp:40-80`
-- 关键设计: check-then-dirty 避免 repeated enqueue(for same card)——card 已在 queue 中→refinement thread processing→2nd write to same card→check sees dirty→skip enqueue。cost~25-30 cycles for clean card, ~10 cycles for already dirty card
-- [x86: post-barrier inline: `shr field,9; add field,card_table_base; cmpb [field],0; je skip; mov byte[field],0; call enqueue_card`——7-8 instructions]
+- 关键设计: post barrier 先过滤 young card,slow path 用 check-then-dirty 避免同一 card 重复入队;clean card 才写 dirty 并进入 JavaThread 本地 DirtyCardQueue/非 Java shared queue。具体成本取决于 card 状态与队列路径,不使用无源码依据的固定 cycles 数字
+- ⚠️ 漂移修正: 大纲伪代码不存在;真实 inline 入口是 `g1BarrierSet.inline.hpp:48-55`(young card filter),slow path 是 `g1BarrierSet.cpp:99-114`(storeload→dirty check→enqueue);x86/C2 还会做同 Region/null/初始对象等优化,不能简化成固定 7-8 条指令
 
 ### 3. "C1/C2/Assembler 三层实现"
 
 场景: 三种编译器为 G1 barrier 生成不同优化 level——C1(简单 copy), C2(aggressive eliminate redundant barriers), Assembler(手写汇编桩 for slow paths)。
 
 **G1BarrierSetC1** (`gc/g1/c1/g1BarrierSetC1.cpp:40-200`):
-- C1 generates `LIR_OpG1Barrier` custom LIR nodes→codegen→x86 instructions。C1 不做 barrier optimization(简单直接 copy pre+post)
+- C1 在 LIR 层生成 active flag 检查、跨 Region/card 判断与 `G1PreBarrierStub`/`G1PostBarrierStub`(g1BarrierSetC1.cpp:51-176),runtime stub 最终由 `G1BarrierSetAssembler` 发射;不能概括成"简单直接 copy"
 **G1BarrierSetC2** (`gc/g1/c2/g1BarrierSetC2.cpp:40-300`):
-- C2 IDEAL graph: `G1PreBarrierStub + G1PostBarrierStub` nodes→full C2 optimization can eliminate redundant barriers。Late-inline expansion 结合 register allocation→minimal instruction count
-**G1BarrierSetAssembler** (`cpu/x86/gc/g1/g1BarrierSetAssembler_x86.cpp:40-250`):
+- C2 在 Ideal Graph 中生成 pre/post barrier,并可通过 `g1_can_remove_pre_barrier`(:86-172)证明新分配对象字段为 null来删除 pre,通过 `g1_can_remove_post_barrier`(:306-335)删除初始对象的 post;post 快路径还处理 null/young/same-region/card 状态
+**G1BarrierSetAssembler** (`cpu/x86/gc/g1/g1BarrierSetAssembler_x86.cpp:142-245`):
 - Slow paths(SATB buffer full / card already dirty / refinement needed)→hand-written assembly stub。入口: `generate_g1_pre_barrier_slow_path` + `generate_g1_post_barrier_slow_path`——仅当 buffer 满/card 原已 dirty 时调用
 
 ---
