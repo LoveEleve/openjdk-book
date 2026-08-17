@@ -25,7 +25,8 @@ ClassFileLoadHook callback:
 ```
 - 源码: `InvocationAdapter.c:149-200` (createNewJPLISAgent→JVMTI env) + `JPLISAgent.c:306-320` (setEventCallbacks→ClassFileLoadHook)
 
-- 关键设计: **JVMTI ClassFileLoadHook 是 JVMTI 事件 62** — 在 ClassLoader.defineClass 的 `JVM_DefineClass` 中触发——时机在字节码解析**之前**——agent 收到的 `class_data` 是原始 .class 字节。**返回 NULL 表示"不修改"** — agent 可以 skip transform→null→JVM 用原始字节。**Can-Retransform-Classes MANIFEST attribute** — agent 声明此能力→JVM 用 `retransformableEnvironment`(有 retransform capability) 绑定到 agent。
+- 关键设计: **JVMTI ClassFileLoadHook 是 JVMTI 事件 54**(不是 62;VMInit=50/VMDeath=51) — 在 ClassLoader.defineClass 的 `JVM_DefineClass` 中触发——时机在字节码解析**之前**——agent 收到的 `class_data` 是原始 .class 字节。**返回 NULL 表示"不修改"** — agent 可以 skip transform→null→JVM 用原始字节。**Can-Retransform-Classes MANIFEST attribute** — agent 声明此能力→JVM 用 `retransformableEnvironment`(有 retransform capability) 绑定到 agent。
+- ⚠️ 漂移修正: ①`createNewJPLISAgent` 定义在 **JPLISAgent.c:205**,InvocationAdapter.c:149 只是 `DEF_Agent_OnLoad` 里的调用点;②大纲"OnLoad 直接 setEventCallbacks(VMInit/VMDeath/ClassFileLoadHook)"**错**——`initializeJPLISAgent` 在 ONLOAD phase 只 `SetEventCallbacks` 一个 `VMInit`(JPLISAgent.c:302-310),`GetEnv` 用 **JVMTI_VERSION_1_1**(JPLISAgent.c:213)非 `JVMTI_VERSION`;③ClassFileLoadHook 是在 VMInit 之后由 `setLivePhaseEventHandlers` 才安装,`eventHandlerVMInit`(InvocationAdapter.c:586-623)先把 agent JAR `appendClassPath` 到 system class path 再 `processJavaStart`;④`processJavaStart`(JPLISAgent.c:382-423)顺序 = createInstrumentationImpl → setLivePhaseEventHandlers → startJavaAgent;大纲的 `addCapabilities` 与 `loadAgentAndCallPremain` 函数名并不存在于当前源码
 
 ### 2. "premain → Java agent class"
 
@@ -45,6 +46,7 @@ loadAgentAndCallPremain(agent, jarfile):
 - 源码: `InvocationAdapter.c:155-200` (loadAgent→MANIFEST parse) + `InvocationAdapter.c:200-230` (premain → JNI call)
 
 - 关键设计: **agent JAR 也在 system class loader 的搜索路径** — `addToSystemClassLoaderSearch`(agent jar)→agent 类和 app class 使用同一个 ClassLoader→agent 可以访问 app 的类(反之不行——app 不能依赖 agent)。**premain 在 main 之前** — `JPLISAgent_OnLoad` 在 JVM 的 `LoadMainClass` 之前执行→agent 可以在任何 app class 加载前注册 transformer。
+- ⚠️ 漂移修正: ①真正读 manifest 调 premain 的不是 `loadAgentAndCallPremain`,而是 `DEF_Agent_OnLoad` 里 `readAttributes`/`getAttribute("Premain-Class")`(InvocationAdapter.c:175-186),premain 的调用在 VMInit 阶段由 `processJavaStart` → `startJavaAgent`(JPLISAgent.c:419);②`Premain-Class` 缺失是 `JNI_ERR` 启动失败,不是"agent 不生效但应用继续";③`Can-Retransform-Classes` 映射到 `retransformableEnvironment(agent)` 建独立 retransform environment(InvocationAdapter.c:125-128);④Java 侧 `addTransformer` 分两套 manager:普通进 `mTransformerManager`,可重转换进 `mRetransfomableTransformerManager`(InstrumentationImpl.java:82-109)
 
 ---
 
