@@ -31,6 +31,7 @@ retransformClasses(classes[]):
 - 源码: `InstrumentationImplNativeMethods.c:50-100` (redefineClasses native) + `InstrumentationImplNativeMethods.c:100-160` (retransformClasses native)
 
 - 关键设计: **redefine vs retransform 的根本区别** — redefine 直接用新的 bytecode(不经过 transformer)——适合热修复(已知新 bytecode 内容)。retransform 从原始 bytecode 重新触发所有 transformer——适合"applicator" agent(如 APM 每次 class load 自动插入方法计时)——用户不需要提供新 bytecode——agent 的 transformer 产生。**redefine 的限制** — 不能改类结构(字段/超类/接口)——只能改变方法体——因为 JVM 在 safepoint 中 redefine 没有时间重新计算 object layout。
+- ⚠️ 漂移修正: ①native 实现**不在** InstrumentationImplNativeMethods.c(那只是 189 行的 JNI 转发壳),真正的 redefineClasses 在 **JPLISAgent.c:1209**(`(*jvmtienv)->RedefineClasses` 调用在 :1329),retransformClasses 在 **JPLISAgent.c:1120**(`(*retransformerEnv)->RetransformClasses` 在 :1183);②retransform 用独立 environment `retransformableEnvironment(agent)`(JPLISAgent.c:1010-1062,AddCapabilities can_retransform_classes + ClassFileLoadHook callback,mIsRetransformer=TRUE),不是普通 `jvmti(agent)`
 
 ### 2. "premain vs agentmain — 两种入口"
 
@@ -50,6 +51,7 @@ agentmain load:
 - 源码: `InvocationAdapter.c:250-350` (agentmain entry → MANIFEST Agent-Class) + `InvocationAdapter.c:350-400` (agentmain → JNI call)
 
 - 关键设计: **agentmain 可以操作已加载类** — premain 时还没有 app class→只能注册 transformer 等未来类。agentmain 时所有 app class 已加载→可以 `retransformClasses` 所有已加载类→重新触发 transform→用调用 `redefineClasses` 热修复。
+- ⚠️ 漂移修正: ①`Agent_OnAttach`(InvocationAdapter.c:303)读 **Agent-Class**(:344),不是 Premain-Class;且它直接 createInstrumentationImpl + setLivePhaseEventHandlers + startJavaAgent(mAgentmainCaller)(:420-440),不走 OnLoad 的 VMInit 两阶段;②manifest 还有第三类属性 **Launcher-Agent-Class**(InvocationAdapter.c:504),是 loadAgent 的 Java 侧(`InstrumentationImpl.loadAgent0`)走的路,大纲没提
 
 ### 3. "Reentrancy — 防止递归"
 
@@ -74,12 +76,13 @@ releaseReentrancy(jvmtiEnv, thread):
 ```
 - 源码: `Reentrancy.c:50-100` (tryToAcquireReentrancyToken) + `Reentrancy.c:100-150` (releaseReentrancyToken)
 
-- 关键设计: **per-thread TLS(不是全局锁)** — 每个线程在自己的 JVMTI thread-local storage 中存一个 bit: 0=在 agent 外, 1=在 agent 内(处理中)。同一 agent 的不同线程可并行(各自 TLS 独立)——只有同一线程的递归调用被阻止。`confirmingTLSSet` 在 set 后 re-fetch 验证(针对 JVMTI TLS set-to-0 的已知 bug——某些 JVMTI 实现 failed to set NULL)。**重入→return NULL(skip transform)** — 不是 crash 或 throw——agent 的 transformer 在重入时无声跳过——不干扰 class loading。
+- 关键设计: **per-thread TLS(不是全局锁)** — 每个线程在自己的 JVMTI thread-local storage 中存一个 token。同一 agent 的不同线程可并行(各自 TLS 独立)——只有同一线程的递归调用被阻止。`confirmingTLSSet` 在 set 后 re-fetch 验证(针对 JVMTI TLS set-to-0 的已知 bug——某些 JVMTI 实现 failed to set NULL)。**重入→整段跳过 transform** — 不是 crash 或 throw——agent 的 transformer 在重入时无声跳过——不干扰 class loading。
+- ⚠️ 漂移修正: ①函数名是 **tryToAcquireReentrancyToken**(Reentrancy.c:105-144)/**releaseReentrancyToken**(Reentrancy.c:147-165),不是大纲的 checkReentrancy/releaseReentrancy;②token 不是"0/1 bit",而是两个 sentinel: **JPLIS_CURRENTLY_INSIDE_TOKEN = 0x7EFFC0BB** / **JPLIS_CURRENTLY_OUTSIDE_TOKEN = 0**(Reentrancy.c:63-64);③重入时 `transformClassFile`(JPLISAgent.c:798-927)是 void 函数,`tryToAcquireReentrancyToken` 返回 false → `shouldRun=false` → 整段 marshal/Java transform/unmarshal 都不执行,不写 `new_class_data`,等价于告诉 VM"不修改",不是"return NULL";④后续"域48 Utilities"已完结(第 1 批),正确是回 **26-g1-gc/05 补写**
 
 ---
 
 ### 核心悬念
 
-**"redefineClasses(JVMTI RedefineClasses→直接替换bytecode不经过transformer)→retransformClasses(原始bytecode→all transformers chain→final bytecode)。premain(-javaagent before main)→agentmain(VirtualMachine.loadAgent runtime→可操作已加载类)。Reentrancy: per-agent token→递归检测→跳过transform。"** — 下一篇: 域48 Utilities。
+**"redefineClasses(JVMTI RedefineClasses→直接替换bytecode不经过transformer)→retransformClasses(原始bytecode→all transformers chain→final bytecode)。premain(-javaagent before main)→agentmain(VirtualMachine.loadAgent runtime→可操作已加载类)。Reentrancy: per-thread JVMTI TLS sentinel→递归检测→整段跳过 transform。"** — 下一篇: 回 26-g1-gc/05 补写 Mixed GC + 策略预测。
 
-> → 域48 Utilities
+> → [26-g1-gc/05-mixed-gc-policy.md](26-g1-gc/05-mixed-gc-policy.md)

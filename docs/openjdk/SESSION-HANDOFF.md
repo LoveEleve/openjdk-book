@@ -1,6 +1,6 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-17 | 卷 2 写作中: **148/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 11) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 65 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(4,26 域完结)**;下一篇 47-instrumentation/02(47 域 2/2)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+> **状态**: 2026-08-17 | 卷 2 写作中: **149/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 12) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 66 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(4,26 域 4/7) + 47-instrumentation(2,47 域完结)**;下一篇 26-g1-gc/05(26 域 5/7)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
 >**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26✅→35→40→47)进行中,下篇 47-instrumentation/02**
 
 ---
@@ -47,7 +47,7 @@
 第 4 批(执行/帧): 10(3) → 19(4) → 23(3) → 24(3) → 08(4) → 31(2) → 44(2)   ✅ 完结 21/21
 第 5 批(VM 核心): **11 ✅ → 12 ✅ → 13 ✅ → 18 ✅ → 20 ✅(2/2) → 27 ✅(3/3) → 30 ✅(3/3) → 32 ✅(6/6) → 34 ✅(2/2) → 36 ✅(2/2) → 37 ✅(2/2) → 39 ✅(2/2) → 46 ✅(1/1)** ✅ **第 5 批 13/13 收官**
 第 6 批(JIT/GC): 14 ✅ → 15 ✅(8/8) → 21 ✅(3/3) → **25 ✅(6/6,25 域完结)** → **28 ✅(3/3,28 域完结)** → **29 ✅(2/2,29 域完结)** → **33 ✅(3/3,33 域完结)** → **43 ✅(3/3,43 域完结,第 6 批收官)** — 第 6 批 32/32 全部完结
-第 7 批(上层): **22 ✅(2/2,22 域完结)** → **26 ✅(4/4,26 域完结)** → 35 → 40 → 47
+第 7 批(上层): **22 ✅(2/2,22 域完结)** → **26 ✅(4/7)** → 35 ✅ → 40 ✅ → 47 ✅(2/2,47 域完结)
 ```
 
 **已完成 126 篇**(全部在 `docs/openjdk/vol-02/`):
@@ -98,7 +98,8 @@
 | **33-jmx** | 3 | `33-jmx/01-memory-service.md`(185)+`02-jmm-interface.md`(168)+`03-gc-notifier-flags.md`(161) | ✅ **33 域完结(本会话)** |
 | **43-nio-net** | 3 | `43-nio-net/01-tcp-epoll.md`(108)+`02-udp-dns.md`(122)+`03-filesystem.md`(167) | ✅ **43 域完结,第 6 批收官(本会话)** |
 | **22-deoptimization** | 2 | `22-deoptimization/01-deopt-decision.md`(149)+`02-unpack-frames.md`(119) | ✅ **22 域完结(本会话)** |
-| **26-g1-gc** | 4 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) / `26-g1-gc/03-rem-set.md`(436) / `26-g1-gc/04-allocation.md`(473) | ✅ 26 域完结(本会话) |
+| **26-g1-gc** | 4 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) / `26-g1-gc/03-rem-set.md`(436) / `26-g1-gc/04-allocation.md`(473) | ✅ 26 域 4/7(本会话,05/06/07 待写) |
+| **47-instrumentation** | 2 | `47-instrumentation/01-jplis-agent.md`(325) / `47-instrumentation/02-agent-entry.md`(321) | ✅ 47 域完结(本会话) |
 | **35-dcmd** | 2 | `35-dcmd/01-dcmd-framework.md`(481) / `35-dcmd/02-builtin-commands.md`(319) | ✅ 35 域完结(本会话) |
 | **40-launcher** | 2 | `40-launcher/01-launch-flow.md`(341) / `40-launcher/02-args-platform.md`(227) | ✅ 40 域完结(本会话) |
 | **47-instrumentation** | 1 | `47-instrumentation/01-jplis-agent.md`(325) | ✅ 47 域 1/2(本会话) |
@@ -946,7 +947,7 @@
 - **Pause 链路别漏 prepare/cleanup**: 真正 pause 入口不是只看 `update_rem_set`/`scan_rem_set`;开始前 `prepare_for_oops_into_collection_set_do` 先 `concatenate_logs()` 把各线程 partial dirty-card log 拼进 completed list 并 `_scan_state->reset()`(g1RemSet.cpp:511-516),结束后 `cleanup_after_oops_into_collection_set_do` 按 dirty-region buffer 并行清卡表(:518-524)
 - **写作期/REVIEW 收敛**: 初稿 16 cpp 块超 13 标准→删 3 个小块(`oops_into_collection_set_do`/`do_refinement_step`/HotCardCache 注释)改 prose;第 1 轮抓出 Update RS 语义不精确(它不只是补 RSet,目标在 CSet 时直接 `prefetch_and_push`)与并发精炼 closure 证据引用错(误引到 UpdateRS closure);第 2 轮逐块源码对齐通过;第 3 轮补 prepare/cleanup 尾巴;第 4 轮零问题收敛
 
-### 6.98 26-g1-gc/04(new Object() 在 G1 里走到哪？— 分配与晋升,26 域 4/4,大纲概念漂移 + 深审 3 轮,2026-08-17)
+### 6.98 26-g1-gc/04(new Object() 在 G1 里走到哪？— 分配与晋升,26 域 4/7,大纲概念漂移 + 深审 3 轮,2026-08-17)
 
 - **大纲把分配层次画得太直线**: 真实普通对象路径不是"TLAB 满→新 Eden Region"这么简单,而是 TLAB refill → `G1CollectedHeap::attempt_allocation` → `G1Allocator::attempt_allocation` 先试 `attempt_retained_allocation` 再试当前 `mutator_alloc_region`。`MutatorAllocRegion` 额外维护 `_retained_alloc_region` 降低尾部碎片(g1AllocRegion.hpp:210-217/g1AllocRegion.cpp:275-287)
 - **G1AllocRegion 的关键不是 CAS 本身,而是发布顺序**: `attempt_allocation_locked` 先重试,失败后 `retire(true)` + `new_alloc_region_and_allocate`;新 region 必须先完成第一笔分配,再 `storestore` 后发布到 `_alloc_region`(g1AllocRegion.cpp:134-153)。所以 active alloc region 永远不为空
@@ -996,6 +997,13 @@
 - **`Premain-Class` 缺失是 OnLoad 失败**: `getAttribute(attributes, "Premain-Class")` 返回 NULL 直接 JNI_ERR,不是"agent 不生效但应用继续"(InvocationAdapter.c:183-191)
 - **Java 侧 transformer 分两套 manager**: `addTransformer(transformer, canRetransform)` 里普通 transformer 进 `mTransformerManager`,可重转换进 `mRetransfomableTransformerManager`,首个加入时通知 native 启用 hook(InstrumentationImpl.java:82-109)
 - **写作期/REVIEW 收敛**: 初稿 8 个代码块行号区间普遍偏宽,第 1 轮全部按源码逐字回填并修正(131-149/204-223/158-186/280-310/382-421/82-105),同时补回 eventHandlerClassFileLoadHook 漏掉的 640 行注释;第 2 轮零问题
+
+### 7.4 47-instrumentation/02(redefine + retransform + 重入保护,47 域 2/2,大纲函数名/token/native 位置漂移 + 深审 2 轮 + 26 域漏篇纠正,2026-08-17)
+
+- **native 实现不在 InstrumentationImplNativeMethods.c**: 那是 189 行的 JNI 转发壳;redefineClasses 在 JPLISAgent.c:1209(`RedefineClasses` 调用 :1329),retransformClasses 在 JPLISAgent.c:1120(`RetransformClasses` 调用 :1183);retransform 走独立 `retransformableEnvironment`(:1010-1062,can_retransform_classes)
+- **重入函数名/token 纠正**: tryToAcquireReentrancyToken(:105-144)/releaseReentrancyToken(:147-165),token 是 sentinel 0x7EFFC0BB / 0 非 0/1;transformClassFile 是 void,重入时整段跳过不写 new_class_data
+- **agentmain 读 Agent-Class**(InvocationAdapter.c:344),还有第三类 Launcher-Agent-Class(:504)
+- **重大进度纠正**: 26-g1-gc 规划 **7 篇**非 4 篇(知识规划 26-g1-gc.md:74),之前误标"26 域完结";已改 README/HANDOFF 为"26 域 4/7",还差 05-mixed-gc-policy/06-g1-barrier/07-full-gc-roots 三篇;47-02 后续链接已从过期的"域48 Utilities"改回 26-05
 
 ## 七、用户偏好与纪律(重要,违背会被批评)` 整行作为 oldString、new 里不放该行**——直接删掉标题(6.82 编辑当场犯,立即 grep 修复);**修复方法**: 先 `grep -n "^## 七"` 确认消失→在 6.82 末尾与"## 八"之间把标题+§七 首条重新插回。任何 HANDOFF 编辑后必须 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验
 - **章节维护教训补充 2(6.87 事故,2026-08-16,REVIEW 时发现)**: 另一失败模式=**anchor 字符串匹配到教训文本里的反引号引用**——6.87/6.88 两节被插入到 6.68 教训段落中间("## 七、用户偏好与纪律(重要,违背会被批评)" 在 6.68 教训的反引号内出现,str.replace 命中第一个=教训内那句),导致 6.87/6.88 各出现两份副本+教训文本被劈开;修复=删除错位副本+拼回教训行+行号修正同步两份副本。**强化操作顺序**: ①插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`)或用 6.86 结尾的独有文本;②插入后必须 `grep -n "^### 6\.8"` 看**编号连续性**(6.68 后出现 6.87 就是事故信号);③任何编辑后 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验(标题数=1、编号严格递增)
@@ -1449,13 +1457,13 @@
 - [x] 26-g1-gc/01——✅ 完结(正文+大纲 3149c88,341 行,含回填 ⚠️ 9 块/README 718c35d);**26 域 1/4,第 7 批 3/5**
 - [x] **26-g1-gc/02**——已完成;正文 `26-g1-gc/02-concurrent-marking.md`(422 行,13 代码块全逐字,素材 26-g1-gc-concurrent-mark-demo.txt 实测生成);26 域 2/4
 - [x] **26-g1-gc/03**——已完成;正文 `26-g1-gc/03-rem-set.md`(436 行,13 代码块全逐字);26 域 3/4
-- [x] **26-g1-gc/04**——已完成;正文 `26-g1-gc/04-allocation.md`(473 行,13 代码块全逐字);**26 域完结**
+- [x] **26-g1-gc/04**——已完成;正文 `26-g1-gc/04-allocation.md`(473 行,13 代码块全逐字);26 域 4/7
+- [ ] **26-g1-gc/05**——**下一篇**;大纲 `planning/outlines/26-g1-gc/05-mixed-gc-policy.md`(Mixed GC + 策略预测);26 域 5/7
 - [x] **35-dcmd/01**——已完成;正文 `35-dcmd/01-dcmd-framework.md`(481 行,13 代码块全逐字);35 域 1/2
 - [x] **35-dcmd/02**——已完成;正文 `35-dcmd/02-builtin-commands.md`(319 行,10 代码块全逐字);**35 域完结**
 - [x] **40-launcher/01**——已完成;正文 `40-launcher/01-launch-flow.md`(341 行,6 个 C 代码块);40 域 1/2
 - [x] **40-launcher/02**——已完成;正文 `40-launcher/02-args-platform.md`(227 行,3 个 C 代码块);**40 域完结**
-- [x] **47-instrumentation/01**——已完成;正文 `47-instrumentation/01-jplis-agent.md`(325 行,7 个 C + 1 个 Java 代码块);47 域 1/2
-- [ ] **47-instrumentation/02**——**下一篇**;大纲 `planning/outlines/47-instrumentation/02-agent-entry.md`;47 域 2/2(第 7 批收官)
+- [x] **47-instrumentation/02**——已完成;正文 `47-instrumentation/02-agent-entry.md`(321 行,8 代码块全逐字);**47 域完结**
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度
