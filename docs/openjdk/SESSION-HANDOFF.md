@@ -1,7 +1,7 @@
 # SESSION-HANDOFF — 主交接文档(唯一入口,非常详细版)
 
-> **状态**: 2026-08-17 | 卷 2 写作中: **145/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 8) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 62 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(4,26 域完结)**;下一篇 40-launcher/01(第 7 批后续域)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
->**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26✅→35→40→47)进行中,下篇 40-launcher/01**
+> **状态**: 2026-08-17 | 卷 2 写作中: **146/152 篇完成**(第 1 批 12 + 第 2 批 26 + 第 3 批 14 + 第 4 批 21 + 第 5 批 32 + 第 6 批 32 + 第 7 批 9) | 第 1-6 批**全部完结**;第 7 批(上层)进行中,**本会话 63 篇: 20-02 + 27-jni(3) + 30-jvm-entry(3) + 32-jfr(6) + 34-nmt(2) + 36-attach(2) + 37-heap-dumper(2) + 39-runtime-monitoring(2) + 46-sa(1) + 14-c1(4,14 域完结) + 15-c2(8,15 域完结) + 21-shared-runtime(3,21 域完结) + 25-gc-framework(6,25 域完结) + 28-jvmti(3,28 域完结) + 29-mh(2,29 域完结) + 33-jmx(3,33 域完结) + 43-nio-net(3,43 域完结) + 22-deopt(2,22 域完结) + 26-g1-gc(4,26 域完结)**;下一篇 40-launcher/02(40 域 2/2)** | **上下文已满,本文件为非常详细交接版**——新 AI 只读本文件即可继续,不要依赖旧会话记忆
+>**接收者: 新 AI —— 只读本文件,按"十、下一步"执行;第 7 批(22✅→26✅→35→40→47)进行中,下篇 40-launcher/02**
 
 ---
 
@@ -100,6 +100,7 @@
 | **22-deoptimization** | 2 | `22-deoptimization/01-deopt-decision.md`(149)+`02-unpack-frames.md`(119) | ✅ **22 域完结(本会话)** |
 | **26-g1-gc** | 4 | `26-g1-gc/01-heapregion.md`(341) / `26-g1-gc/02-concurrent-marking.md`(422) / `26-g1-gc/03-rem-set.md`(436) / `26-g1-gc/04-allocation.md`(473) | ✅ 26 域完结(本会话) |
 | **35-dcmd** | 2 | `35-dcmd/01-dcmd-framework.md`(481) / `35-dcmd/02-builtin-commands.md`(319) | ✅ 35 域完结(本会话) |
+| **40-launcher** | 1 | `40-launcher/01-launch-flow.md`(341) | ✅ 40 域 1/2(本会话) |
 
 ### 本会话 57 篇的 commit 清单(按 git log 为准,2026-08-14/17)
 
@@ -970,6 +971,14 @@
 - **`GC.heap_info` 不是无锁查询**: execute 先持 `Heap_lock` 再 `Universe::heap()->print_on`(:457-460);`GC.heap_dump` 的 `-all`、`-gz`、`-overwrite`也由 parser 与 `HeapDumper`共同完成
 - **写作期/REVIEW 收敛**: 初稿 10 cpp 块;第 1 轮抓 `GC.heap_dump` 的 `-gz` 源码注释截取不完整并补齐;第 2 轮零问题收敛
 
+### 7.1 40-launcher/01(java MyApp 在命令行后发生了什么事？— 启动流程,40 域 1/2,大纲路径漂移 + 深审 2 轮,2026-08-17)
+
+- **源码路径漂移是本篇第一风险**: 大纲把主流程写成 `java.c`,但当前 JDK 11 树实际是 `src/java.base/share/native/libjli/java.c`;最外层是 `src/java.base/share/native/launcher/main.c`,Unix 平台实现是 `src/java.base/unix/native/libjli/java_md_solinux.c`。正文按当前源码路径重写,并保留 `main.c` 中 JDK_JAVA_OPTIONS/@argfile 预处理事实
+- **JLI 顺序不是 parse→load→invoke**: `JLI_Launch` 的实际顺序是 `SelectVersion`→`CreateExecutionEnvironment`→`LoadJavaVM`→`ParseArguments`→`JVMInit`(java.c:285-362);先找到 JVM 并 `dlopen`/`dlsym` JNI 入口,再解析应用 mode
+- **平台层才负责 jvm.cfg 与 libjvm 路径**: `CreateExecutionEnvironment` 读 `$JRE/lib/jvm.cfg` 并 `CheckJvmType`/`GetJVMPath`(java_md_solinux.c:304-363);`LoadJavaVM` 用 `dlopen` + `dlsym` 填 `InvocationFunctions`(:553-627)
+- **JavaMain 不自己解析 manifest**: C launcher 的 `LoadMainClass` 实际调用 `LauncherHelper.checkAndLoadMain(boolean, int, String)`(java.c:1622-1649);C 层传 mode/what,Java helper 完成 class/jar/module 主类加载
+- **写作期/REVIEW 收敛**: 第 1 轮抓出两个前置依赖路径错误(30-jvm-entry/01-main-to-jvm.md→01-jvm-entry-points.md,并核对 attach/heap 路径);第 2 轮核对 main.c 调试段、JLI 顺序、JNI 入口函数、LoadMainClass 边界后零问题
+
 ## 七、用户偏好与纪律(重要,违背会被批评)` 整行作为 oldString、new 里不放该行**——直接删掉标题(6.82 编辑当场犯,立即 grep 修复);**修复方法**: 先 `grep -n "^## 七"` 确认消失→在 6.82 末尾与"## 八"之间把标题+§七 首条重新插回。任何 HANDOFF 编辑后必须 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验
 - **章节维护教训补充 2(6.87 事故,2026-08-16,REVIEW 时发现)**: 另一失败模式=**anchor 字符串匹配到教训文本里的反引号引用**——6.87/6.88 两节被插入到 6.68 教训段落中间("## 七、用户偏好与纪律(重要,违背会被批评)" 在 6.68 教训的反引号内出现,str.replace 命中第一个=教训内那句),导致 6.87/6.88 各出现两份副本+教训文本被劈开;修复=删除错位副本+拼回教训行+行号修正同步两份副本。**强化操作顺序**: ①插入 anchor 必须用**最后出现**的标题(`src.rfind("## 七、")`)或用 6.86 结尾的独有文本;②插入后必须 `grep -n "^### 6\.8"` 看**编号连续性**(6.68 后出现 6.87 就是事故信号);③任何编辑后 `grep -n "^## 七\|^## 八\|^### 6\.8"` 三连校验(标题数=1、编号严格递增)
 - 实证: 15-c2-loops-demo.txt
@@ -1425,7 +1434,8 @@
 - [x] **26-g1-gc/04**——已完成;正文 `26-g1-gc/04-allocation.md`(473 行,13 代码块全逐字);**26 域完结**
 - [x] **35-dcmd/01**——已完成;正文 `35-dcmd/01-dcmd-framework.md`(481 行,13 代码块全逐字);35 域 1/2
 - [x] **35-dcmd/02**——已完成;正文 `35-dcmd/02-builtin-commands.md`(319 行,10 代码块全逐字);**35 域完结**
-- [ ] **40-launcher/01**——**下一篇**;继续第 7 批 40 → 47
+- [x] **40-launcher/01**——已完成;正文 `40-launcher/01-launch-flow.md`(341 行,6 个 C 代码块);40 域 1/2
+- [ ] **40-launcher/02**——**下一篇**;大纲 `planning/outlines/40-launcher/02-args-platform.md`;40 域 2/2
 - [ ] 用户 Ubuntu GUI 截图(8 项 14 张,手册 `planning/outlines/00-jvm-tools/GUI-manual.md`): 用户完成后补进对应文章
 - [ ] Obsidian 知识图谱(`planning/IDEAS-OBSIDIAN.md`,远期)
 - [ ] 每域完成后在 `vol-02/README.md` 勾选进度

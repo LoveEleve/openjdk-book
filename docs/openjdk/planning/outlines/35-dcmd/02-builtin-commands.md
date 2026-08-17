@@ -29,9 +29,9 @@ NMT:
 JFR:
   JFR.start/stop/dump/check → JFR recording 控制
 ```
-- 源码: `services/diagnosticCommand.hpp:40-300` + `diagnosticCommand.cpp:50-800`
-- 关键设计: 大部分 DCmd 是 thin wrapper on existing VM functions——`GC.run` → `Universe::heap()->collect(GCCause::_dcmd_gc_run)`。`VM.flags` → iterate Flag::flags table→print each
-- [C++: `DCmdWithParser` 是带参数的 DCmd 子类(out+help)。`VM.set_flag` 通过 `WriteableFlags::set_flag(name, value)`(域33)实现——修改 JVM 内标志 at runtime]
+- 源码: `services/diagnosticCommand.hpp:43-306` + `diagnosticCommand.cpp:71-653` + JFR 独立 dcmd 实现
+- 关键设计: 大部分 DCmd 是 thin wrapper on existing VM functions,但执行重量不同——`GC.run` → `Universe::heap()->collect(GCCause::_dcmd_gc_run)`(不等于固定 Full GC);`VM.flags` 默认只 `JVMFlag::printSetFlags()`,`-all` 才打印全部;`GC.class_histogram` 默认通过 `VM_GC_HeapInspection` 请求 full GC,`-all` 才不主动请求
+- ⚠️ 漂移修正: ①命令清单不是固定"VM/Thread/GC/NMT/JFR 五类约 30 个",HotSpot 注册表由 `DCmdRegistrant::register_dcmds()` 按编译条件注册,同时 JFR 有独立 dcmd 实现;②`Thread.print` 不是只 dump Java 栈——execute 顺序是 `VM_PrintThreads`→`VM_PrintJNI`→`VM_FindDeadlocks`(diagnosticCommand.cpp:641-653);③`GC.heap_info` 会持 `Heap_lock`;④`GC.heap_dump` 默认请求 GC,`-all`/`-gz`/`-overwrite`由 parser+HeapDumper 协作;⑤`DCmdWithParser` 的 option 按名字、argument 按位置,`VM.set_flag` 通过 `WriteableFlags::set_flag(name, value, JVMFlag::MANAGEMENT, err_msg)`(域33)实现——修改 JVM 内可写标志 at runtime
 
 ### 2. "jcmd 与 JMX 的区别"
 
