@@ -159,7 +159,7 @@ Mixed GC 不是"标记完就连续做"。它有两个门槛:
 
 ### 候选 Region 从哪来
 
-标记完成后,`G1Policy` 把可回收的 Old Region 放进 `CollectionSetChooser`(cset_chooser)。`G1MixedGCLiveThresholdPercent`(默认 **85**)决定一个 Region 存活比例低于多少才算"值得回收"的候选。
+Cleanup 阶段结束时,`G1Policy::record_concurrent_mark_cleanup_end()`(g1Policy.cpp:987-993)先调 `cset_chooser()->rebuild()`(g1Policy.cpp:988)填充候选,再用 `next_gc_should_be_mixed` 决定是否进入 mixed 序列;若否,`clear_collection_set_candidates()`(g1Policy.cpp:992)清空候选。`G1MixedGCLiveThresholdPercent`(默认 **85**)决定阈值:`mixed_gc_live_threshold_bytes = GrainBytes * 85 / 100`,存活字节低于它的 Region 才进候选(collectionSetChooser.hpp:104-105, collectionSetChooser.cpp:280)。
 
 ---
 
