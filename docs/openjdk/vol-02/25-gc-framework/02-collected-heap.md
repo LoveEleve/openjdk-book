@@ -109,7 +109,7 @@ TLAB 用尽后,**不是立刻丢弃**。`allocate_inside_tlab_slow`(memAllocator
 
 GCCause 枚举(gcCause.hpp:43-92)约 30 个原因,按源码注释分三组: **public**(用户/工具显式触发:`_java_lang_system_gc`/`_jvmti_force_gc`/`_gc_locker`/`_heap_dump`/`_wb_young_gc`/`_dcmd_gc_run`…)、**implementation independent**(`_no_gc`/`_allocation_failure`)、**implementation specific**(`_metadata_GC_threshold`/CMS 家族/**G1 的两个**: `_g1_inc_collection_pause` 与 `_g1_humongous_allocation`/Z 家族)。它不只在日志里好看——`:97-124` 的 `is_*` 谓词(比如 `is_allocation_failure_gc`/`is_user_requested_gc`)驱动 GC 策略分支。
 
-**[实证](materials/commands/25-gc-heap-alloc-demo.txt)**: `-Xlog:gc` 的括号就是 cause——分配失败触发的 `Pause Young (Normal) (G1 Evacuation Pause)`;4MB 数组(region 2MB)触发 `(G1 Humongous Allocation)`;`jcmd GC.run` 触发 `(Diagnostic Command)`(= `_dcmd_gc_run`);OOM 前的 `Pause Full (G1 Humongous Allocation)`。大纲的 `_g1_evacuation_pause` 名字不存在,真实是 `_g1_inc_collection_pause`。
+**[实证](materials/commands/25-gc-heap-alloc-demo.txt)**: `-Xlog:gc` 的括号就是 cause——分配失败触发的 `Pause Young (Normal) (G1 Evacuation Pause)`;4MB 数组(32MB 堆 → region 1MB)触发 `(G1 Humongous Allocation)`;`jcmd GC.run` 触发 `(Diagnostic Command)`(= `_dcmd_gc_run`);OOM 前的 `Pause Full (G1 Humongous Allocation)`。大纲的 `_g1_evacuation_pause` 名字不存在,真实是 `_g1_inc_collection_pause`。
 
 ## 3. 慢路径 — refill、全局分配与 GC
 

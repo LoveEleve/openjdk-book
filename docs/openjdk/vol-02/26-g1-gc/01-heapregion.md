@@ -278,7 +278,7 @@ bool os::pd_uncommit_memory(char* addr, size_t size) {
 
 对象 **> Region/2**(严格大于——TLAB 也封顶在阈值之下,正好一半的对象仍走普通分配)才走 `attempt_allocation_humongous`(g1CollectedHeap.cpp:320-387)——需要几个 Region 由 `humongous_obj_size_in_regions = align_up(word_size, GrainWords) / GrainWords`(实现 g1CollectedHeap.cpp:311-314)算,然后**找一段连续的 Free Region**(`find_contiguous_only_empty`,不行就 `find_contiguous_empty_or_unavailable` 并 expand_at 新 commit),第一个标 `StartsHumongous`、后面的标 `ContinuesHumongous`(:375 的 `humongous_obj_allocate_initialize_regions`)。*humongous 对象在 evacuation 时不搬——它太大,搬不动;回收靠"Eager Reclaim"(整段没人引用就整段释放)或 Full GC 压缩。这也是为什么对象在 Region 里"横躺"而不切割: 对象不可跨 Region 分片。*
 
-**[实证](materials/commands/25-gc-heap-alloc-demo.txt)**: 4MB 数组在 2MB Region 的堆上正好 2 个 Region——`GC(0) Pause Young (Concurrent Start) (G1 Humongous Allocation)`;分配到 OOM 时 `Pause Full (G1 Humongous Allocation)`——cause 与流程一一对应(25-02 篇已证)。
+**[实证](materials/commands/25-gc-heap-alloc-demo.txt)**: 32MB 堆上 region 按 §1.1 公式收敛到 **1MB**(`(32M+32M)/2/2048=16KB` 取幂后夹到下限),4MB 数组含 16B 头共 524290 words,`align_up(524290, GrainWords)/GrainWords = 5` 个 Region——`GC(0) Pause Young (Concurrent Start) (G1 Humongous Allocation)`;分配到 OOM 时 `Pause Full (G1 Humongous Allocation)`——cause 与流程一一对应(25-02 篇已证)。
 
 ### 2.5 GC 入口: pause 与 Full 两条路
 
