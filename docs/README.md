@@ -32,12 +32,11 @@
 * [第六章 — JMX 与火焰图](openjdk/vol-tools/ch06.md) — jconsole MBean 树 + perf 内核采样 + 栈折叠
 * [第七章 — 翻开 JDK 的箱子](openjdk/vol-tools/ch07.md) — jimage 镜像 + jlink 最小运行时 + jdeps 依赖图
 
-## 卷 2 · 运行时深处（已完成，152/152）
+## 卷 2 · 运行时深处
 
-> 48 个域、152 篇正文；按依赖拓扑从底层基础一路写到 G1、诊断、启动器与 Instrumentation。
-> [完整篇目与收官记录](openjdk/vol-02/README.md) · [方法论与交接记录](openjdk/SESSION-HANDOFF.md)
+> 从 JVM 的底层原语、对象模型与类加载，到编译器、GC、诊断和启动器，按依赖关系逐步深入 HotSpot 内部实现。
 
-### 第 1 批 — 地基
+### 基础层
 
 #### 01-os
 * [01. JVM 怎么知道自己跑在容器里？— 平台探测](openjdk/vol-02/01-os/01-platform-detection.md)
@@ -59,7 +58,7 @@
 * [03. 输出流与异常上报 — tty 到 fdStream,assert 到 gdb](openjdk/vol-02/48-utilities/03-stream-exception.md)
 * [04. 三种格式工具 — modified UTF-8、JSON 解析、ELF 符号](openjdk/vol-02/48-utilities/04-utf8-json-decoder.md)
 
-### 第 2 批 — 原语
+### 原语与底层结构
 
 #### 02-assembler
 * [01. CodeBuffer 与 AbstractAssembler — JIT 的"草稿纸"和"笔"](openjdk/vol-02/02-assembler/01-codebuffer-abstract-assembler.md)
@@ -103,7 +102,7 @@
 * [02. 进程管理 — Runtime.exec 的 fork+exec 与进程查询](openjdk/vol-02/42-core-native/02-process.md)
 * [03. ClassLoader + I/O + TimeZone — libjava 的剩下三件事](openjdk/vol-02/42-core-native/03-class-io.md)
 
-### 第 3 批 — 对象与类
+### 对象与类
 
 #### 07-classfile-classloader
 * [01. ClassFile 解析 — .class 字节怎么变成 InstanceKlass](openjdk/vol-02/07-classfile-classloader/01-classfile-parser.md)
@@ -125,7 +124,7 @@
 * [03. 线程退出了,别人怎么不 crash?— Thread-SMR 与 Handshake](openjdk/vol-02/17-threads/03-thread-smr-handshake.md)
 * [04. 线程从 Java 进入 VM——这一瞬间怎么保证安全?— interfaceSupport](openjdk/vol-02/17-threads/04-interface-support.md)
 
-### 第 4 批 — 执行与帧
+### 执行与帧
 
 #### 10-metaspace
 * [01. Metaspace 全景 — PermGen 的继任者](openjdk/vol-02/10-metaspace/01-metaspace-overview.md)
@@ -162,7 +161,7 @@
 * [01. 恶意字节码怎么被拦下？— ClassVerifier 类型检查引擎](openjdk/vol-02/44-class-verification/01-verifier.md)
 * [02. 验证器的类型宇宙 — VerificationType 类型系统](openjdk/vol-02/44-class-verification/02-verification-type.md)
 
-### 第 5 批 — VM 核心
+### VM 核心
 
 #### 11-cds
 * [01. 启动时怎么让核心类秒加载？— CDS 全景与 Dump](openjdk/vol-02/11-cds/01-cds-overview-dump.md)
@@ -222,7 +221,7 @@
 #### 46-sa-postmortem
 * [01. SA Postmortem — core dump + ptrace + ELF symbols](openjdk/vol-02/46-sa-postmortem/01-sa-postmortem.md)
 
-### 第 6 批 — JIT 与 GC
+### 编译器与 GC
 
 #### 14-c1-compiler
 * [01. C1 管线 + HIR — 字节码→编译图](openjdk/vol-02/14-c1-compiler/01-c1-pipeline-ir.md)
@@ -272,7 +271,7 @@
 * [02. UDP + DNS + NetworkInterface — Datagram + InetAddress](openjdk/vol-02/43-nio-net/02-udp-dns.md)
 * [03. NIO FileSystem — stat/readdir/inotify](openjdk/vol-02/43-nio-net/03-filesystem.md)
 
-### 第 7 批 — 上层收官
+### 诊断、启动与 Instrumentation
 
 #### 22-deoptimization
 * [01. 编译代码什么时候回退？— Deopt 决策表](openjdk/vol-02/22-deoptimization/01-deopt-decision.md)
