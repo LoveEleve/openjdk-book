@@ -1,6 +1,6 @@
 # 01. 堆被切成 2048 块 — HeapRegion + G1CollectedHeap
 
-> **前置依赖**:[25-gc-framework/02 — new Object() 走到了哪？— CollectedHeap + 分配路径](openjdk/vol-02/25-gc-framework/02-collected-heap.md):CollectedHeap 门面、分配三级路径与 `_g1_humongous_allocation` cause;[25-gc-framework/01 — GC 怎么在每次 oop 访问时悄悄插入 barrier？— BarrierSet + Access API](openjdk/vol-02/25-gc-framework/01-barrier-access.md):G1 的写 barrier 与 card 记账;[09-memory-core/01 — Universe + CollectedHeap — JVM 的"宇宙大爆炸"](openjdk/vol-02/09-memory-core/01-universe-heap.md):保留区与 `Universe::reserve_heap`
+> **前置依赖**:[25-gc-framework/02 — new Object() 走到了哪？— CollectedHeap + 分配路径](openjdk/vol-02/25-gc-framework/02-collected-heap.md):CollectedHeap 门面、分配三级路径与 `_g1_humongous_allocation` cause;[25-gc-framework/01 — GC 怎么在每次 oop 访问时悄悄插入 barrier？— BarrierSet + Access API](openjdk/vol-02/25-gc-framework/01-barrier-access.md):G1 的写 barrier 与 card 记账;[09-memory-core/01 — Universe + CollectedHeap — JVM 的"宇宙大爆炸"](openjdk/vol-02/09-memory-core/01-universe-heap.md):建堆时序与 `initialize` 里的 `Reserve the maximum`(reserve/commit 分离机制在 09-02 VirtualSpace)
 > → **后续**:[26-g1-gc/02 — 应用还在跑——你怎么知道谁活着？— 并发标记 + SATB](openjdk/vol-02/26-g1-gc/02-concurrent-mark.md)
 > 关联域: 25-gc-framework(堆门面与 barrier、card 表)、09-memory-core(保留区)
 
