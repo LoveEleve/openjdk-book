@@ -299,6 +299,10 @@
 * [02. redefine + retransform + 重入保护 — 运行时字节码修改](openjdk/vol-02/47-instrumentation/02-agent-entry.md)
 
 
+## 卷 Java · JDK 11 Java 层源码
+
+* [Java 层源码正文入口](openjdk/vol-java/README.md) — 并发集合、线程池、异步编程、IO、时间日期、JMX、JFR、Unsafe 与诊断工具
+
 ## 卷 1-bak · 启动（已归档）
 
 * [启动链旧版 14 章](openjdk/vol-01-bak/ch01) — Launcher→JavaMain→JNI_CreateJavaVM→init_globals→G1 初始化；按启动链叙事组织，新写作不再沿用此结构，归档备查
