@@ -1,112 +1,247 @@
-# 01. ConcurrentHashMap 存储与读写 — CAS 三操作、putVal、无锁读
+# ConcurrentHashMap 存储与读写：为什么它不能只靠一把锁
 
-> **前置依赖**: [09-map-hash/01 — HashMap 结构](../09-map-hash/01-hashmap-structure.md)(桶数组与链表/树)、[13-atomic/01 — 原子与 CAS](../13-atomic/01-atomicinteger-cas.md)(CAS 基础)
-> → **后续**: [02-resize-count.md](02-resize-count.md)
-> 关联: [12-lock-sync/01 — synchronized](../12-lock-sync/01-synchronized.md)(桶级锁)
+> 本文基于 JDK 11 `java.util.concurrent.ConcurrentHashMap`。讨论范围聚焦桶数组、普通节点、特殊节点、`tabAt`/`casTabAt`/`setTabAt`、`putVal` 与 `get` 主路径。`helpTransfer`、`sizeCtl`、`CounterCell` 和完整树化细节属于下一篇。本文说的“读基本无锁”是 JDK 11 Java 层实现路径，不等于全局强一致快照语义。
+> **前置依赖**：[HashMap 的存储与哈希](../09-map-hash/01-hashmap-storage-hash.md)、[AtomicInteger 与 CAS 封装](../13-atomic/01-atomicinteger-cas.md)
+> **后续**：[ConcurrentHashMap 扩容与计数](02-resize-count.md)
 
-## CHM 怎么并发
+## 先看一个最容易把缓存拖死的朴素方案
 
-这一域进入并发集合。第一篇先看必考题: `ConcurrentHashMap` 为什么能做到**读基本无锁、写部分无锁、冲突时再锁桶**。
+业务里要做一个并发缓存，第一反应往往是两种：要么直接拿 `HashMap` 硬上，然后在多线程下赌自己不会撞上结构损坏；要么外面包一把大锁，谁来访问都先排队。前者的问题很直白：同一时间多个线程改桶链，结构可能直接失真。后者的问题没那么显眼，但在读多写少的场景里同样致命：明明绝大多数线程只是查一个 key，却也得等前面的写线程把整张表的锁还回来。
 
-## 1. "CHM 的结构" — 与 HashMap 的差异
+这正是 `ConcurrentHashMap` 要解决的主问题：**既不能像普通 `HashMap` 那样把并发写暴露给调用者，也不能像“全局锁 map”那样把所有访问都拖进同一个临界区。**
 
-### 1.1 三个关键改动
+如果把这个问题压成一句话，就是：读线程最好别互相挡路，写线程最好只在真正发生桶内冲突时才同步。围绕这个目标，JDK 11 的 `ConcurrentHashMap` 不是给整张表准备一把锁，而是把访问路径拆成三档：
 
-- `ConcurrentHashMap.java:778` — `transient volatile Node<K,V>[] table` —— **volatile 桶数组**
-- `TREEIFY_THRESHOLD = 8`(`:545`)——和 HashMap 一样,链表过长时转树
-- 三种特殊节点: `MOVED = -1`(`:591`)/`TREEBIN = -2`(`:592`)/`RESERVED = -3`(`:593`)
-
-### 1.2 Node 的并发字段
-
-```java
-// ConcurrentHashMap.java:625-629(截取,逐字)
-    static class Node<K,V> implements Map.Entry<K,V> {
-        final int hash;
-        final K key;
-        volatile V val;
-        volatile Node<K,V> next;
+```text
+读路径：先直接看桶，尽量不加锁
+空桶写：没人占坑时，用 CAS 抢下桶位
+冲突写：桶里已有节点时，只锁这个桶的首节点
 ```
 
-这里和大纲容易看错的地方有两个:
+整篇文章只回答这三档路径为什么成立。先建立角色图，再看它们各自依赖什么字段、什么原子操作、什么状态分支。
 
-- `key`/`hash` 是 `final`
-- `val`/`next` 是 **volatile**,不是 `final`
+## 一、CHM 的本体不是“一张表”，而是桶数组加多状态桶入口
 
-这意味着 CHM 读路径的安全性不是"全部 final 发布",而是 **final + volatile 组合**。
+### 先把“底层长什么样”这件事说完整
 
-关键设计(斜体):*"volatile table + 特殊节点"是 CHM 的骨架——volatile 让桶引用与链路可见;MOVED/TREEBIN/RESERVED 三个负 hash 标记驱动扩容/树/占位。面试"CHM 结构": Node[] + 三种特殊节点。*
+如果对 `ConcurrentHashMap` 的印象只停在“线程安全版 HashMap”，后面的并发策略会很难理解。因为它真正保护的不是抽象的 map 语义，而是一个具体的数据结构：一层桶数组，外加桶里可能出现的几种不同入口状态。
 
-## 2. "CAS 三操作" — 桶的原子访问
+JDK 11 里最外层容器是一个 `volatile` 桶数组：
 
-### 2.1 三个原子原语
+```java
+// ConcurrentHashMap.java:778
+transient volatile Node<K,V>[] table;
+```
 
-| 方法 | 锚点 | 作用 |
-|------|------|------|
-| `tabAt(tab, i)` | `:759` | acquire 读桶 |
-| `casTabAt(tab, i, c, v)` | `:763` | CAS 换桶 |
-| `setTabAt(tab, i, v)` | `:768` | release 写桶 |
+`volatile` 放在这里，不是为了让整个 map magically 变成线程安全，而是为了让读线程和写线程至少能看到同一份桶数组引用，以及扩容后替换出来的新表入口。
 
-### 2.2 三级并发策略
+桶里平时放的是普通节点：
 
-- **读**: `tabAt` 直接 acquire 读
-- **空桶写**: `casTabAt` 直接 CAS 插入
-- **非空桶写**: 进入 `synchronized (f)` 桶级锁区
+```java
+// ConcurrentHashMap.java:625-629
+static class Node<K,V> implements Map.Entry<K,V> {
+    final int hash;
+    final K key;
+    volatile V val;
+    volatile Node<K,V> next;
+```
 
-面试"CHM 无锁在哪": 读(volatile) + 空桶插入(CAS),非空桶才加锁。
+这几个修饰符先记住，后面会反复回钩：`hash` 和 `key` 用 `final` 固定住节点身份；`val` 和 `next` 用 `volatile` 让并发读者看到值变化和链路变化。CHM 的无锁读能成立，不是因为“节点不会变”，而是因为它只让该变的部分以可见方式变化。
 
-关键设计(斜体):*"读用 acquire、空桶写用 CAS、非空桶写在锁内"——桶级并发的三级策略。面试"CHM 无锁在哪": 读(acquire)+ 空桶插入(CAS),非空桶才加锁。*
+但桶里并不总是普通 `Node`。JDK 11 还定义了三种负 hash 特殊状态：
 
-## 3. "putVal 的完整流程" — 空桶 CAS、满桶锁
+- `MOVED = -1`（`ConcurrentHashMap.java:591`）：这个桶正在迁移，当前入口是转发表节点
+- `TREEBIN = -2`（`ConcurrentHashMap.java:592`）：这个桶已经进入树桶容器
+- `RESERVED = -3`（`ConcurrentHashMap.java:593`）：这个桶被保留占位，供某些复合计算路径使用
 
-### 3.1 初始化与三分支
+再加上树化阈值：
 
-`putVal` 在 `ConcurrentHashMap.java:1010` 起。核心流程:
+- `TREEIFY_THRESHOLD = 8`（`ConcurrentHashMap.java:545`）
 
-1. table 为空 → `initTable()`(`:2283`)初始化
-2. 空桶 → `casTabAt(tab, i, null, new Node(...))`(`:1019`)——**无锁插入**
-3. `f.hash == MOVED` → `helpTransfer(tab, f)`(`:1023`)——协助扩容
-4. 非空普通桶 → `synchronized (f)`(`:1031`)——桶级锁,链表遍历/尾插
-5. 树桶 → `putTreeVal`(`:1055`)
-6. 链长达到阈值 → `treeifyBin`(`:1068`)
-7. 最后 `addCount`(`:1075`)
+于是 CHM 的桶入口不能只理解成“链表头结点”。更准确的图应该是：
 
-### 3.2 为什么锁首节点
+```text
+table[i]
+  ├── null：空桶
+  ├── Node：普通链表桶
+  ├── TreeBin：树桶入口
+  ├── ForwardingNode(MOVED)：这个桶正在迁移
+  └── ReservationNode(RESERVED)：保留占位状态
+```
 
-锁对象不是整个 map,也不是 segment,而是**当前桶首节点 `f`**。这就是 JDK8 CHM 相比 JDK7 分段锁更细的粒度。
+这一层先别急着抠每个特殊节点内部细节。主线只要记住一点：**CHM 读写时面对的不是统一桶形态，而是一组“桶当前处在什么状态”的分支。** 后面看到 `get()` 和 `putVal()` 为什么走不同路径，本质上都是在对这组桶状态做决策。
 
-面试"JDK7 分段锁 vs JDK8 桶锁": 8 用 CAS + 桶锁,粒度更细、无锁路径更长。
+## 二、为什么读敢不加锁：靠的不是运气，而是 `final + volatile` 发布协议
 
-关键设计(斜体):*"空桶 CAS、满桶锁"是 CHM 的并发精髓——锁粒度=桶,且只锁非空桶。面试"CHM 锁粒度": 桶级(JDK8,替代 JDK7 分段锁)。*
+### 先排除一个危险误解
 
-## 4. "get 为什么无锁?" — volatile 读链
+很多人听到“CHM 读基本无锁”，会立刻担心：那读线程会不会正好撞上写线程改链表，看到一个只改了一半的节点？这个担心是对的，而且正好指向问题核心。CHM 如果不能保证读线程至少看到一个合法结构，它就不配把 `get()` 做成无锁路径。
 
-### 4.1 get 路径
+它没有靠“希望线程切换别那么巧”来赌，而是把可见性责任拆到几个具体位置上。
 
-`get` 在 `ConcurrentHashMap.java:934`:
+第一层是桶数组引用本身：`table` 是 `volatile`，保证读线程能看见当前生效的表入口，而不是永远抱着旧表引用不放。
 
-- `spread(key.hashCode())`(`:936`)扩散 hash
-- `tabAt(tab, (n - 1) & h)`(`:938`)取桶
-- 命中普通节点就遍历 `next`
-- 命中负 hash 节点(`eh < 0`)则走 `find`(`:944`)——包括 `ForwardingNode` 转发到新表
+第二层是桶位读写方式。CHM 不直接把 `tab[i]` 当普通数组元素去拿，而是统一走三个原子入口：
 
-整个 `get` **没有加锁**。
+```java
+// ConcurrentHashMap.java:759-768
+static final <K,V> Node<K,V> tabAt(Node<K,V>[] tab, int i) {
+static final <K,V> boolean casTabAt(Node<K,V>[] tab, int i,
+static final <K,V> void setTabAt(Node<K,V>[] tab, int i, Node<K,V> v) {
+```
 
-### 4.2 为什么安全
+这三个方法分别对应 acquire 读桶、CAS 抢桶位、release 写桶。也就是说，CHM 不是在语言层面口头说“这里应该安全”，而是明确把桶入口访问做成了受控原子操作。
 
-安全性来自三层:
+第三层才是节点字段自身的语义分工。`key` 和 `hash` 一旦节点构造完成就不再变化，所以用 `final` 固定；`val` 和 `next` 可能被后来写线程更新，所以用 `volatile`。这套组合回答的正是读者最关心的问题：**一个线程无锁遍历桶链时，至少不会读到“节点身份还没定住、链指针又看不见”的半发布状态。**
 
-- `table` 是 volatile(`:778`)——桶数组引用可见
-- `tabAt`/`setTabAt`/`casTabAt` 通过 Unsafe 进行 acquire/release/CAS 访问(`getObjectAcquire`/`putObjectRelease`/`compareAndSetObject`——`:760/:769/:765`)
-- `Node` 的 `key`/`hash` 是 final,`val`/`next` 是 volatile(`:627-629`)——已发布节点对读者可见
+这里给一个路标：这一节并不是在证明 CHM 提供线性一致读。它证明的是更基础的一层——读线程看到的是某个时刻合法的桶结构，而不是写到一半的碎片。至于“是不是一定读到全局最新值”，那是另一层语义，CHM 并没有承诺这件事。
 
-所以 CHM 的读不是"强一致",而是**弱一致但内存安全**: 可能读不到刚写入的最新值,但不会读到破坏结构的中间态。
+## 三、三档并发路径：为什么不是全锁，也不是全 CAS
 
-面试"CHM get 要锁吗": 不要;面试"CHM 读一致性": 弱一致。
+### 先回答“为什么不能只选一种同步手段”
 
-关键设计(斜体):*"final 发布 + volatile 链路"让读路径完全无锁——读者看到的是某个时刻合法的桶状态,而不是加锁后的全局一致快照。面试"CHM get 要锁吗": 不要(弱一致但安全)。*
+如果你只允许 CHM 用一种策略，最容易想到的两种极端都不合适。
 
-## 核心悬念
+第一种极端是全部加锁。问题是，读一个已经存在的 key，其实只需要沿着当前桶结构走一遍；让这种路径也去抢锁，会把读多写少场景的吞吐量一起打下来。
 
-put 时会遇到 `MOVED`——**扩容怎么并发**?`sizeCtl` 怎么当"指挥旗"?`transfer` 怎么让其他线程"搭把手"?`CounterCell` 怎么统计百万并发写入?——下一篇: 扩容与计数。
+第二种极端是全部 CAS。问题是，往空桶里塞一个首节点，确实很适合用 CAS 做“占坑”；但一旦桶里已经有链表或树，更新动作就不再是“改一个槽位”这么简单了。你可能要遍历、比较 key、更新旧值、尾插新节点，甚至触发树化。这是一组复合结构修改，只靠单个 CAS 解决不了。
 
-> → [02-resize-count.md](02-resize-count.md)
+所以 CHM 选择的是三档路径并存：
+
+| 路径 | 典型场景 | 主要手段 |
+|------|----------|----------|
+| 读路径 | 查找 key | `tabAt` + 桶内遍历 |
+| 空桶写 | 第一次占用某桶 | `casTabAt` |
+| 冲突写 | 桶里已有节点 | `synchronized (f)` |
+
+这三档路径不是优化补丁，而是数据结构决定的结果：没有冲突时，最贵的同步没必要发生；真正发生冲突时，又必须允许一个线程独占地修改桶内结构。
+
+### 空桶写为什么最适合 CAS
+
+当目标桶还是 `null` 时，写线程要做的事情其实很简单：判断这个坑是否还空着，如果还空着，就把自己新建的节点放进去。这个动作天然适合 CAS——抢到了就成功，没抢到说明别的线程先一步占了这个桶，再重新读桶并进入下一轮判断即可。
+
+这种路径的价值很大，因为大量 key 分散得足够开时，线程争用的不是整个 map，而只是各自要落的那几个桶位。CHM 把“最常见的第一次插入”压缩成一次 CAS，就是在尽量延后真正的锁竞争。
+
+### 冲突写为什么必须回到锁
+
+一旦桶里已经有节点，情况就变了。线程不再只是“把桶从 null 改成某个节点”，而是要在桶内部做结构判断：这个 key 是不是已存在？如果存在，是覆盖旧值还是保留旧值？如果不存在，是挂到链尾还是进树桶？链太长了要不要树化？
+
+这些都不是一个 CAS 可以原子表达的操作，所以 JDK 11 在 `putVal` 里明确写出了转折点：
+
+```java
+// ConcurrentHashMap.java:1031
+synchronized (f) {
+```
+
+锁对象不是整个 map，也不是早期 JDK 7 的 segment，而是**当前桶的首节点 `f`**。这正是 JDK 8+ CHM 相对 JDK 7 的关键变化：同步粒度继续往下压，只在发生桶内冲突时锁这个桶本身。
+
+到这里主线已经很清楚了：CHM 不是“无锁 map”，而是“尽量把锁延迟到桶内结构真的需要独占修改时再出现”。
+
+## 四、`putVal` 不是背步骤，而是一次写入线程的决策路径
+
+### 写线程真正经历了哪些分支
+
+把 `putVal` 当成“7 个知识点列表”很容易记完就忘，因为那样看不出它是在解决什么冲突。更好的方式是跟着一个写线程走一遍：我现在要把某个 key/value 放进去，这张表会怎样判断我该走哪条路？
+
+`putVal` 入口在 `ConcurrentHashMap.java:1010`。主路径可以压成下面这张图：
+
+```text
+putVal(key, value)
+  ├── table 还没初始化？→ initTable()
+  ├── 目标桶为空？→ CAS 抢桶位
+  ├── 桶是 MOVED？→ 先帮忙扩容
+  ├── 桶是普通节点？→ 锁首节点，遍历链表
+  ├── 桶是 TreeBin？→ 走树插入
+  ├── 链长太长？→ treeifyBin()
+  └── 最后 addCount()
+```
+
+源码里的几个关键分支分别是：
+
+- 空桶 CAS：`ConcurrentHashMap.java:1019`
+- 迁移协助：`ConcurrentHashMap.java:1023`
+- 桶首节点加锁：`ConcurrentHashMap.java:1031`
+- 树桶插入：`ConcurrentHashMap.java:1055`
+- 树化检查：`ConcurrentHashMap.java:1068`
+
+### 为什么 `MOVED` 会突然插进写路径
+
+最容易打断读者理解的一点，是 `putVal` 中间突然出现了 `helpTransfer(tab, f)`。这不是“写入逻辑跑偏了”，而是 CHM 在告诉当前线程：你想写的这个桶，已经不属于一张稳定不动的旧表了，它正在迁移。此时继续只盯着旧桶做本地修改，会和扩容线程打架，所以更合理的选择是先参与迁移，让表结构往新状态推进。
+
+这一篇不展开 `helpTransfer` 如何协作，也不展开 `sizeCtl` 如何调度。这里只先立一个路标：**CHM 允许写线程在发现桶已进入迁移态时转身去帮扩容，这也是它把扩容成本分摊给并发线程的一部分。** 下一篇会专门把这条线拆开。
+
+### 为什么链长阈值出现在第一篇，但红黑树不在第一篇讲完
+
+同样地，`treeifyBin` 这一跳也先别急着深入。第一篇出现它，只是为了让读者建立正确预期：CHM 遇到严重桶冲突时，不会永远把链表拖下去，它有把桶结构升级为树桶的能力。
+
+但“什么时候真的树化”“容量太小时为什么可能先扩容而不是树化”“树桶内部如何并发插入”这些都属于下一层复杂度。第一篇只需要把路标立住，不需要把整棵树连根拔出来讲完。
+
+## 五、`get` 为什么不加锁，却还能穿过链表、树桶和迁移态
+
+### 先看无锁读的主路径
+
+`get` 入口在 `ConcurrentHashMap.java:934`。它先 spread hash，然后定位桶位：
+
+- `spread(key.hashCode())`（`ConcurrentHashMap.java:936`）
+- `tabAt(tab, (n - 1) & h)`（`ConcurrentHashMap.java:938`）
+
+拿到桶入口后，`get` 先尝试命中首节点；如果首节点不是目标 key，再根据桶入口类型决定后续动作。
+
+普通情况下，它只是沿着 `next` 往下找。真正值得停一下的是这行：
+
+- `return (p = e.find(h, key)) != null ? p.val : null;`（`ConcurrentHashMap.java:944`）
+
+这说明 CHM 并没有把所有桶都当普通链表处理。只要桶入口的 hash 是负值，也就是特殊节点，它就把“后续该怎么找”交给这个节点自己的 `find` 实现。
+
+### 多态 `find` 才是无锁读能跟上结构变化的关键
+
+普通节点有自己的 `find`（`ConcurrentHashMap.java:664`）；树桶、转发节点等特殊状态也有各自的 `find` 实现（例如 `ConcurrentHashMap.java:2230+`、`2265+` 附近）。这意味着读线程不必先抢一把全局锁，把整张表冻结后再查。它只需要看当前桶入口是什么角色：
+
+- 普通节点：按链表规则找
+- 树桶入口：按树桶规则找
+- 迁移态入口：转去新表继续找
+
+这正是前面那张“多状态桶入口”图的实际意义。特殊节点不是为了让源码显得花哨，而是为了让读线程在不加锁的前提下，仍然能根据桶的当前状态走到正确的查找路径。
+
+### 无锁读的边界到底在哪里
+
+这里必须把边界说清楚，不然“CHM 读基本无锁”很容易被误读成“CHM 读永远强一致”。不是这样。
+
+CHM 的读路径保证的是：
+
+- 不必在 `get()` 上显式进入 `synchronized`
+- 借助 `volatile`、acquire/release 和受控节点发布，读到合法结构状态
+- 能根据桶入口状态继续追到链表、树桶或新表
+
+它没有承诺：
+
+- 每个读线程一定看到所有线程刚刚写下的全局最新快照
+- 读路径与写路径之间永远像串行执行一样可线性化理解
+
+所以更准确的说法是：**CHM 的 `get()` 是无锁的、弱一致的，但它努力保证结构安全和查找可继续。** 这才是工程上真正有价值的地方。
+
+## 收网：CHM 真正分开的不是“线程”，而是三种冲突等级
+
+回到开头那个问题：为什么它不能只靠一把锁？答案已经很明确了，因为一把锁把“读一个已存在 key”“第一次占用空桶”“修改一个已经冲突的桶”这三种代价完全不同的操作，粗暴地压成了同一种同步成本。
+
+JDK 11 的 `ConcurrentHashMap` 做的事正相反：
+
+```text
+冲突最低：读桶 → 不加锁，直接查
+冲突中等：空桶写 → CAS 抢占桶位
+冲突最高：桶内结构修改 → 锁住桶首节点
+```
+
+再把这三档路径和前面的结构图合在一起，就能得到本文真正要留下的心智图：
+
+```text
+volatile table
+  → 桶入口可能是普通节点，也可能是特殊状态节点
+  → 读路径按桶状态选择 find 规则
+  → 空桶写先 CAS 占坑
+  → 冲突写只锁当前桶，不锁整张表
+```
+
+第一，CHM 不是“完全无锁 map”，而是把锁严格压缩到桶内冲突发生处；第二，`final + volatile` 不是字段细节，而是无锁读能看到合法结构的前提；第三，`MOVED`、`TREEBIN`、`RESERVED` 不是魔法常量，而是桶处在不同生命周期时对读写线程发出的状态信号。
+
+下一篇继续接这几个路标：既然写线程会在 `putVal` 里撞上 `MOVED`，那扩容到底怎么协作？为什么不能只靠一个 `size` 字段统计并发写入？`sizeCtl`、`transferIndex` 和 `CounterCell` 又分别在解决什么问题？这些才是 CHM 从“能并发读写”走向“能在高并发下持续扩容和计数”的下半场。

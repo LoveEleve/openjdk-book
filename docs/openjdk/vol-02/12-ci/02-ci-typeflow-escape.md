@@ -1,164 +1,222 @@
-# 02. 编译器怎么知道"类型"与"逃逸"？— ciTypeFlow + bcEscapeAnalyzer
+# 02. 编译器怎么知道“类型”与“逃逸”？— `ciTypeFlow + BCEscapeAnalyzer`
 
-> **前置依赖**:[12-ci/01 — JIT 怎么看到 Java 类？— ciObject 镜像体系](01-ci-overview-mirror.md):ciMethod 的懒字段 `_flow`/`_method_blocks` 在这里被填上;[08-interpreter/01 — 一条字节码的"档案"在哪？— Bytecode 定义表](openjdk/vol-02/08-interpreter/01-bytecodes-definition.md):类型流要逐条模拟字节码的栈效果;[44-class-verification/01 — 恶意字节码怎么被拦下？— ClassVerifier 类型检查引擎](openjdk/vol-02/44-class-verification/01-verifier.md):类型流的 meet 规则与验证器的类型系统同源;[09-memory-core/03 — Arena + ResourceArea — VM 自己的 C++ 内存分配器](openjdk/vol-02/09-memory-core/03-arena-resourcearea-allocation.md):分析结果全部活在 ciEnv 的 Arena 里
-> → **后续**:[12-ci/03 — ciObjectFactory + ciReplay — ciObject 生命周期与编译回放](03-ci-factory-runtime.md):工厂的 GC 安全、编译重放与 MDO
-> 关联域: 22-deopt(类型流陷阱导致 deopt)、25-gc(标量替换消除分配)、13-jit(C2 消费分析结果)
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64`。这里讨论的是 C2 使用的两台字节码级保守分析器：`ciTypeFlow` 与 `BCEscapeAnalyzer`。它们都运行在 `COMPILER2` 路径上，服务于 IR 构建和后续优化。最终的全局逃逸分析与标量替换兑现，发生在 C2 的 `ConnectionGraph` / `escape.cpp` / `macro.cpp`，本文只讲它们如何消费字节码级分析结果。
+>
+> **前置依赖**：[12-ci/01 — JIT 怎么看到 Java 类？— `ciObject` 镜像体系](01-ci-overview-mirror.md)、[08-interpreter/01 — 一条字节码的“档案”在哪？— Bytecode 定义表](../08-interpreter/01-bytecodes-definition.md)、[44-class-verification/01 — 恶意字节码怎么被拦下？— `ClassVerifier` 类型检查引擎](../44-class-verification/01-verifier.md)
+> → **后续**：[12-ci/03 — `ciObjectFactory + ciReplay` — `ciObject` 生命周期与编译回放](03-ci-factory-runtime.md)
 
-## 编译器还缺一张"类型地图"
+上一篇我们已经把 `ci` 镜像层拆开了：JIT 并不直接抱着 `InstanceKlass`、`Method`、`oop` 这些 VM 活对象跑，而是先把它们降成一份编译期稳定视图。那一篇解决的是“编译器如何安全地看见对象与元数据”。
 
-01 篇的实证里,`@ 29 CiDemo$Square::area` 被内联,依据是 `TypeProfile (87426/87426) = CiDemo$Square`——那是**运行时收集**的剖面(解释器/低 tier 记下来的)。但剖面只覆盖调用点;编译器还需要回答更普遍的问题: **每个字节码位置,栈和局部变量的类型是什么?** 比如 `String.length()` 的 bci=5 是 invokevirtual,receiver 一定非空吗?`getfield` 的对象是数组吗?这些不能只靠 profile——方法体还没跑过几遍,但字节码就在那里,可以**静态推导**。ciTypeFlow 就是 C2 的推导器: 一个在字节码层面做**抽象解释**(abstract interpretation)的数据流分析。它是 C2 构建 IR 的前序: `parse1.cpp:427` 里 `_flow = method()->get_flow_analysis()`——类型流的结果决定解析器怎么处理每条字节码。
+但只看到这些对象，离真正做优化还差得很远。
 
-另一张地图是**对象去向**: `Point p = new Point(...); return p.area();` 这个对象会不会被存进字段、被返回、被传给别人?不会的话,C2 可以不真分配它(标量替换)。bcEscapeAnalyzer 在字节码层面做"快速、保守"的逃逸分析。这一篇拆这两台"推导机器"。
+编译器真正要回答的问题不是“这个方法是谁”，而是更细的两类问题：
 
-## 1. ciTypeFlow: 把方法体当"虚拟机"跑一遍
+- **执行到某个 bci 时，局部变量表和操作数栈里现在是什么类型？**
+- **某个参数或新建对象，最后会不会跑出当前方法或当前调用链？**
 
-`ciTypeFlow`(ciTypeFlow.hpp:35)的输入: `ciMethod` + `ciMethodBlocks`(基本块,ciMethod 的另一个懒字段,`get_method_blocks` ciMethod.cpp:1317)+ 一个可选的 `osr_bci`(ciTypeFlow.hpp:57)——**支持从循环内任意 bci 开始的 OSR 分析**(构造时 `is_osr_flow()` 区分,:63)。创建入口是 `ciMethod::get_flow_analysis()`(ciMethod.cpp:352): 懒建 + 缓存(`if (_flow == NULL)`,ciMethod 构造时 `_flow = NULL`,01 篇的懒字段体系);OSR 版本 `get_osr_flow_analysis(osr_bci)`(:369)每次新分析。消费端是 C2 的解析器 `Parse`(parse1.cpp:427): 拿到 flow 后先查两件事——`failing()`(分析失败/中途放弃)就直接 `record_method_not_compilable`(:428-429),`has_irreducible_entry()`(不可归约循环)也特殊对待(:433);然后解析以 **flow 的块图为骨架**(`rpo_at`/`successors`/`exceptions`,parse1.cpp:1250/1274-1275)逐块生成 IR,OSR 场景还要用块类型(`local_type_at`/`monitor_count`,parse1.cpp:223/346)。
+这两张地图，`ciMethod`、`ciField`、`ciKlass` 并不会直接给。它们给的是“对象视图”，不是“程序点状态视图”。
 
-分析的核心数据结构是 **StateVector**——"某个程序点的类型信息汇总"(ciTypeFlow.hpp:158-160):
+于是 HotSpot 还得再做两次推导：
 
-```cpp
-// ciTypeFlow.hpp:175-187(截取核心,逐字)
-    // Special elements in our type lattice.
-    enum {
-      T_TOP     = T_VOID,      // why not?
-      T_BOTTOM  = T_CONFLICT,
-      T_LONG2   = T_SHORT,     // 2nd word of T_LONG
-      T_DOUBLE2 = T_CHAR,      // 2nd word of T_DOUBLE
-      T_NULL    = T_BYTE       // for now.
-    };
-    static ciType* top_type()    { return ciType::make((BasicType)T_TOP); }
-    static ciType* bottom_type() { return ciType::make((BasicType)T_BOTTOM); }
-    static ciType* long2_type()  { return ciType::make((BasicType)T_LONG2); }
-    static ciType* double2_type(){ return ciType::make((BasicType)T_DOUBLE2); }
-    static ciType* null_type()   { return ciType::make((BasicType)T_NULL); }
-```
+- `ciTypeFlow` 在字节码层面做一次抽象解释，算每个程序点的类型状态；
+- `BCEscapeAnalyzer` 在字节码层面做一次快速、保守的逃逸估计，算对象与参数可能跑到哪里去。
 
-内部是一个**类型格(lattice)**: `top`(未知,T_VOID 占位)、`bottom`(矛盾,T_CONFLICT)、以及 long/double 的"第二字"类型。`StateVector` 本体: `ciType** _types` 数组 + `_stack_size` + `_monitor_count`(ciTypeFlow.hpp:162-164)——**局部变量与栈共用一条数组**,`local(i)` 就是下标 i,`stack(s)` 是 `max_locals + s`(:221-229)。每个 StateVector 就是这份类型地图的一行。
+也就是说，**编译器之所以还得在字节码层把方法自己“再跑一遍”，不是因为它没看见类和方法，而是因为它还没拿到“方法执行到每个点时可能是什么状态”这张地图。**
 
-**模拟字节码**: `apply_one_bytecode`(ciTypeFlow.cpp:868)是一个覆盖全字节码集的大 switch——`aload` → `load_local_object`、`monitorenter` → pop + monitor_count+1(:922-925)、`anewarray` → pop_int + `push_object(ciObjArrayKlass::make(...))`(:901-916,元素类没解析就 `trap`)。细节可见 44 域验证器同款的处理: **boolean/char/byte/short 统一压成 int**(`push_translate`,ciTypeFlow.cpp:540-552);**long/double 占两个槽**(`push_long` push 主类型+`long2_type`,ciTypeFlow.hpp:316-325)。模拟发现"这条路走不通"(如类未解析)就 `trap`(:464-465)——分析在此停止,编译路径依赖 trap 记录做 deopt 处理。
+先把这句记住。后面无论是 `StateVector`、`meet`、`trap`，还是参数位图、乐观初始化、保守降级，都是在为这件事服务。
 
-## 2. meet: 两条路径汇合时,类型怎么合并
+## 先试三个最自然的办法，看看为什么都不够
 
-控制流分支(if/else、循环)汇合时,两条路径的类型必须合并成一个——**meet 操作**,定义在 `StateVector::meet`(ciTypeFlow.cpp:438): 逐格比较,不同就 `type_meet(t1, t2)` 取新类型(:470-482);**返回是否发生变化**——这是迭代算法的"变化信号"。单格规则在 `type_meet_internal`(ciTypeFlow.cpp:272):
+### 朴素方案一：只靠运行时 profile 不就行了吗？
 
-```cpp
-// ciTypeFlow.cpp:272-310(截取核心,逐字)
-ciType* ciTypeFlow::StateVector::type_meet_internal(ciType* t1, ciType* t2, ciTypeFlow* analyzer) {
-  assert(t1 != t2, "checked in caller");
-  if (t1->equals(top_type())) {
-    return t2;
-  } else if (t2->equals(top_type())) {
-    return t1;
-  } else if (t1->is_primitive_type() || t2->is_primitive_type()) {
-    // Special case null_type.  null_type meet any reference type T
-    // is T.  null_type meet null_type is null_type.
-    if (t1->equals(null_type())) {
-      if (!t2->is_primitive_type() || t2->equals(null_type())) {
-        return t2;
-      }
-    } else if (t2->equals(null_type())) {
-      if (!t1->is_primitive_type()) {
-        return t1;
-      }
-    }
+很多人第一次接触内联、去虚拟化时，最先看到的是 profile：比如某个调用点 100% 都看见 `Square`，那就把它当成 `Square` 来优化。这个直觉没错，但它只覆盖了编译器真正想知道的一小部分。
 
-    // At least one of the two types is a non-top primitive type.
-    // The other type is not equal to it.  Fall to bottom.
-    return bottom_type();
-  } else {
-    // Both types are non-top non-primitive types.  That is,
-    // both types are either instanceKlasses or arrayKlasses.
-    ciKlass* object_klass = analyzer->env()->Object_klass();
-    ciKlass* k1 = t1->as_klass();
-    ciKlass* k2 = t2->as_klass();
-    if (k1->equals(object_klass) || k2->equals(object_klass)) {
-      return object_klass;
-    } else if (!k1->is_loaded() || !k2->is_loaded()) {
-      // Unloaded classes fall to java.lang.Object at a merge.
-      return object_klass;
-    } else if (k1->is_interface() != k2->is_interface()) {
-      // When an interface meets a non-interface, we get Object;
-      // This is what the verifier does.
-      return object_klass;
-```
+profile 擅长回答“这个调用点过去常见什么接收者”“这条分支过去常走哪边”，却不直接回答“当前 bci 的整个局部变量表和操作数栈长什么样”。一个方法里可能有几十上百个字节码位置，而大多数位置都没有独立的 profile 条目。编译器不能因为 `invokevirtual` 有类型剖面，就顺便知道前一个 `getfield` 压栈的对象是什么、异常边进 handler 时 locals 该长什么样、某个 `aaload` 之后栈顶是不是一个已加载的对象数组元素类型。
 
-规则一目了然: **top 是吸收元**(meet 掉任何类型);**null 是恒等元**(null meet 引用 = 引用);原语类型互不相遇 → **bottom**;两个引用: 一方是 Object → Object、未加载类 → Object、**接口与非接口相遇 → Object(源码注释明说 "This is what the verifier does"——44 域规则同源)**;数组 meet 数组要递归元素规则(ciTypeFlow.cpp:310-330,objArray meet objArray 逐元素 meet 再组数组);两个普通实例类 → `least_common_ancestor`(ciTypeFlow.cpp:334,ciKlass 侧找最近公共父类)。
+更关键的是，很多方法并没有充分热到能积累完整 profile，但编译器照样需要对它们做基本推导。字节码已经摆在那里，编译器不能等“再跑热一点”才知道某个类型状态。
 
-**关键设计 (斜体)**: *meet 的语义是"精度的单调下降"——从精确类型往公共父类走,最后可能退到 Object。类型越精确,C2 能做的优化越多(devirtualize、精确字段类型);牺牲精度换安全: 编译器从不在类型上赌命,`trap` 与 meet 保证分析结果只可能"不够精确",不可能"错"。*
+所以 profile 是很有价值的补充信息，但它不是程序点类型地图本身。
 
-## 3. 主循环: 从入口跑到 fixpoint
+### 朴素方案二：那 verifier 和 `ciMethod` 快照里不已经有类型信息了吗？
 
-`flow_types()`(ciTypeFlow.cpp:2727)是主流程: 入口块喂入初始状态(`get_start_state`,:363: 方法参数类型;OSR 时取非 OSR 分析在 osr_bci 处的块状态作起点)→ 深度优先把块逐个 `flow_block` → 有循环时先 `clone_loop_heads`(循环头克隆,让回边有独立的类型状态;**仅限 tier2+**,`comp_level >= CompLevel_full_optimization` 才做,:2747-2762)——然后进入 work list 迭代:
+第二个想法也很自然：类验证器本来就在看类型兼容性，`ciMethod` 也已经把方法的签名、参数、字段、常量池这些都镜像出来了，为什么还要再做一层类型流？
 
-```cpp
-// ciTypeFlow.cpp:2770-2782(截取核心,逐字)
-  // Continue flow analysis until fixed point reached
+因为 verifier 和 `ci` 镜像回答的其实是两种完全不同的问题。
 
-  debug_only(int max_block = _next_pre_order;)
+verifier 的目标是“这段字节码是否合法、会不会破坏 JVM 安全模型”。它当然也会碰类型格、meet、控制流汇合，但它的核心使命是拒绝非法字节码，而不是给优化器产出一张可消费的程序点状态地图。
 
-  while (!work_list_empty()) {
-    Block* blk = work_list_next();
-    assert (blk->has_post_order(), "post order assigned above");
+`ciMethod` 和 `ciField` 这类镜像则更偏“元数据问答”：方法有多大、字段偏移是多少、某个常量池项是否能链接、某个类是不是接口。它们告诉编译器“方法和类是什么”，但并不告诉编译器“方法执行到 bci=29 时，栈里第 0 个槽和 locals[3] 当前是什么抽象类型”。
 
-    flow_block(blk, temp_vector, temp_set);
+所以 verifier、`ci` 镜像、类型流三者不是重复关系，而是逐层加码的关系：
 
-    assert (max_block == _next_pre_order, "no new blocks");
-    assert (!failing(), "no more bailouts");
-  }
-```
+- verifier 解决合法性；
+- `ci` 镜像解决对象可见性；
+- `ciTypeFlow` 解决程序点状态。
 
-`flow_block`(ciTypeFlow.cpp:2326)对块内字节码逐条模拟: 指令可能抛异常的(`can_trap`)先把异常边流出去(`flow_exceptions`,:2359-2362),再 `apply_one_bytecode`(:2364),块尾算后继(`flow_successors`,:2426)——后继块把本块状态 `meet` 进自己的进入状态,发生变化就重新入队。**循环因此会迭代多轮直到稳定**——这就是 fixpoint: 循环头的类型从第一次进入的"窄"逐渐 meet 到稳定的"宽",之后不再变化。
+把这三者混成一层，是理解这篇最常见的误区。
 
-**异常处理器的状态**单独构造: `Block::compute_exceptions`(ciTypeFlow.cpp:1790)用 `ciExceptionHandlerStream` 遍历异常表,每个 handler bci 建一个块,记录捕获类型(catch-all → `Throwable_klass`,:1819-1823);`meet_exception`(ciTypeFlow.cpp:492)处理"沿异常边进来的状态": **局部变量照常 meet,但栈被重置——异常发生时栈上只有一个异常对象**(`set_stack_size(1)`,:499-501,栈顶与异常类型 meet,:527-535)。这就是大纲说的"handler 局部变量=try 块 locals + 栈深 1"——实现细节比大纲描述的更明确。
+### 朴素方案三：那编译器干脆把方法真的执行一遍，拿最精确状态不就行了？
 
-## 4. 逃逸分析: 对象到底出不出方法
+第三个想法听起来最“精确”：如果想知道某个程序点的栈状态、某个对象会不会逃逸，那就真执行一遍方法，观察真正发生了什么。
 
-类型地图解决了"是什么类型";bcEscapeAnalyzer 解决"对象去哪"。类注释自我定位(ciTypeFlow.cpp 同目录的 bcEscapeAnalyzer.hpp:38-40): *"a fast, conservative analysis of effect of methods on the escape state of their arguments. The analysis is at the bytecode level."*——**快速、保守、字节码级**。它不建 01 篇那套复杂图,而是把"哪些栈/局部变量槽里坐着参数"用位图追着走。
+这条路的问题更根本：编译器做的是**静态推导**，不是一次具体运行的观测。真执行一遍，你看到的只是某一组输入、某一路控制流、某一次对象分配行为。可编译器需要的是“对所有可能执行路径都安全”的结论。
 
-输入与 ciTypeFlow 无关(`do_analysis`,bcEscapeAnalyzer.cpp:1201: `_methodBlocks = _method->get_method_blocks()` 后 `iterate_blocks` 自己扫字节码)——大纲说"输入含 ciTypeFlow 结果"是错的。状态是几组 **VectorSet 位图**(bcEscapeAnalyzer.hpp:54-64): `_arg_local`(参数不逃逸当前方法)、`_arg_stack`(参数逃逸到调用链但不全局)、`_arg_returned`(可能被返回)、`_return_local`(返回值只含输入参数)、`_return_allocated`(返回值只含新分配的未逃逸对象)、`_allocated_escapes`(方法内分配有逃逸)。对外接口:
+例如某个 `if` 的一条分支从来没在这次运行中走到，编译器也不能就当那条分支不存在。某个对象这次没逃逸，不代表下一次输入不同它还不逃逸。优化器需要的是保守覆盖所有可能路径的抽象结果，而不是一次具体运行的精确日志。
 
-```cpp
-// bcEscapeAnalyzer.hpp:124-147(截取核心,逐字)
-  // The given argument does not escape the callee.
-  bool is_arg_local(int i) const {
-    return !_conservative && _arg_local.test(i);
-  }
+所以它真正该做的，不是执行方法，而是 **用一套抽象状态在字节码层模拟执行方法**。这就是 `ciTypeFlow` 和 `BCEscapeAnalyzer` 的出发点。
 
-  // The given argument escapes the callee, but does not become globally
-  // reachable.
-  bool is_arg_stack(int i) const {
-    return !_conservative && _arg_stack.test(i);
-  }
+到这里先立一个路标：这一篇真正要回答的是“为什么编译器还得自己在字节码层再跑一遍方法”，而不是“这两个类都有哪些字段”。
 
-  // The given argument does not escape globally, and may be returned.
-  bool is_arg_returned(int i) const {
-    return !_conservative && _arg_returned.test(i); }
+## `ciTypeFlow` 的本质：搭一台不会真的执行代码的“抽象 JVM”
 
-  // True iff only input arguments are returned.
-  bool is_return_local() const {
-    return !_conservative && _return_local;
-  }
+`ciTypeFlow` 的输入不复杂：一个 `ciMethod`、一份 `ciMethodBlocks` 基本块图，以及一个可选的 `osr_bci`。它既能做普通入口分析，也能做从循环内部某个 bci 开始的 OSR 分析。`share/ci/ciTypeFlow.hpp:35`、`share/ci/ciTypeFlow.hpp:37`、`share/ci/ciTypeFlow.hpp:38`、`share/ci/ciTypeFlow.hpp:39`、`share/ci/ciTypeFlow.hpp:57`、`share/ci/ciTypeFlow.hpp:63`、`share/ci/ciTypeFlow.hpp:64`
 
-  // True iff only newly allocated unescaped objects are returned.
-  bool is_return_allocated() const {
-    return !_conservative && _return_allocated && !_allocated_escapes;
-  }
-```
+这已经说明它不是“看一眼方法签名”的辅助器，而是一台真正要沿着字节码基本块跑起来的分析器。构造函数里第一件事也是抓住 method blocks、`max_locals`、`max_stack`、`code_size`，为后续构造抽象 frame 做准备。`share/ci/ciTypeFlow.cpp:1979`、`share/ci/ciTypeFlow.cpp:1982`、`share/ci/ciTypeFlow.cpp:1983`、`share/ci/ciTypeFlow.cpp:1984`、`share/ci/ciTypeFlow.cpp:1985`
 
-算法是"乐观 + 降级"(`initialize`,bcEscapeAnalyzer.cpp:1233): 起点把所有引用参数都标成 `_arg_local + _arg_stack`(:1242-1254,乐观: 假设它们不逃逸),然后逐字节码追踪——降级点各不相同: **putfield/putstatic 写引用值时,被写的值对象 → `set_global_escape`(可能被任何人读到,:876-878);putfield 的 receiver 本身 → `set_method_escape` + 记录被改偏移(:884-888)**;`aaload` 数组读 → 数组 `set_method_escape` + `set_dirty`(:488-492);调用点 `invoke`(:249)把被调方法的分析结果并进来——被调方说参数"栈逃逸但没返回" → `set_method_escape` 并**记录依赖**;否则 → `set_global_escape`(:336-339);**被调方法不是单形态**(有多个可能实现) → 所有实参直接 `set_global_escape` + `_unknown_modified`(:355-363)。`set_global_escape`(:167)清 local+stack 位,含分配对象时置 `_allocated_escapes`。**入口还有一串"直接不分析"的跳过条件**(do_analysis,:1302-1316): 抽象方法、native、持有者未初始化、**分析深度超 `MaxBCEAEstimateLevel`**、方法超 `MaxBCEAEstimateSize`——跳过=保持全保守。**递归有自己的防线**: `_parent` 指针串起"当前分析链",`is_recursive_call`(:206)沿这条链查 callee 是否已在栈上——递归调用不套娃分析(:316),直接按保守处理。保守模式 `_conservative` 下所有访问器返回 false(:49-50,什么都优化不了,但一定安全)。
+这台“抽象 JVM”的核心数据结构是 `StateVector`。它表示某个程序点的抽象状态：局部变量表长什么样、操作数栈长什么样、当前监视器计数是多少。底层是 `ciType** _types` 数组、`_stack_size`、`_monitor_count`。更关键的是，locals 和 stack 共用这一条数组：前半段是 locals，后半段是当前栈。`share/ci/ciTypeFlow.hpp:158`、`share/ci/ciTypeFlow.hpp:160`、`share/ci/ciTypeFlow.hpp:162`、`share/ci/ciTypeFlow.hpp:163`、`share/ci/ciTypeFlow.hpp:164`
 
-**关键设计 (斜体)**: *这份分析刻意不精确——不追踪对象图,只追踪"参数/新分配"两类身份,任何看不懂的操作一律降级。它产出的是 C2 的**输入**,不是 C2 的结论: 真正的全局逃逸分析在 C2 的 `ConnectionGraph`(escape.cpp),后者把字节码级结论放进 IR 节点图里做全程序判断;bcea 的结论主要服务**调用点参数**——`meth->get_bcea()` 在 escape.cpp:970/:1154 被取用,判断"这个实参能不能安全优化"。*
+也就是说，`StateVector` 就是一张“当前抽象 frame 快照”。`ciTypeFlow` 并不真的在跑解释器，而是在维护一套 “如果控制流走到这里，局部变量和栈上可能有哪些抽象类型” 的数据结构。
 
-## 5. 标量替换: 逃逸分析的兑现
+为了让这套状态能合并、能收敛，`ciTypeFlow` 还预先定义了一套类型格。最重要的几个特殊点是：
 
-对象不逃逸,优化能到什么程度?**标量替换**: 把 `new Point` 拆成 `x`、`y` 两个寄存器/局部变量,堆上不分配。注意大纲说的 `ciMethod::scalar_replacement_possible()` **不存在**——决定权在 C2: `ConnectionGraph::scalar_replaceable()`(escape.cpp:256/273)+ `find_scalar_replaceable_allocs`(:268)找出可替换的分配点,替换本身在 `PhaseMacroExpand`(macro.cpp)把 Allocate 节点展开成标量。逃逸分析的层次术语(NoEscape/ArgEscape/GlobalEscape)属于 C2 的 ConnectionGraph,不是 bcEscapeAnalyzer 的三档(后者是 local/stack/returned 的位图)。
+- `T_TOP`：还什么都不知道；
+- `T_BOTTOM`：冲突或矛盾；
+- `T_NULL`：显式的 null 引用；
+- `T_LONG2` / `T_DOUBLE2`：long/double 的第二个槽位。 `share/ci/ciTypeFlow.hpp:175`、`share/ci/ciTypeFlow.hpp:177`、`share/ci/ciTypeFlow.hpp:178`、`share/ci/ciTypeFlow.hpp:179`、`share/ci/ciTypeFlow.hpp:180`、`share/ci/ciTypeFlow.hpp:181`
 
-[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/12-ci-typeflow-escape-demo.txt) EscDemo 的两个方法: `noEscape` 循环 400 万次 `new Point`(对象只在方法内用),`escape` 循环 40 万次 `new Point` 后塞进 `ArrayList`。默认配置下 `noEscape: 1ms` vs `escape: 18ms`——分配被消除的痕迹;关闭 `-XX:-EliminateAllocations` 后 `noEscape: 5ms`、`escape: 9ms`——差异消失,两个方法都回到"真分配"的同一水平。PrintCompilation 确认 `noEscape` 被 C2 以 OSR(`%`)形式编译(tier3 `%`→tier4 `%`)。开关对照把"1ms 的功劳归于标量替换"钉死了: 同一份字节码、同一个 C2,唯一变量是分配消除开关。
+这套类型格不是装饰。没有它，控制流一汇合，你根本不知道该怎么把两条路径的状态合成一份安全结果。
 
-## 核心悬念
+## 编译器为什么一定要做 meet：因为分支和循环不会替你保持“类型一致”
 
-两台推导机器拆完了: ciTypeFlow 用**类型格 + meet + work list fixpoint** 给每个程序点算出类型地图(异常边栈重置为单个异常对象、循环头克隆、OSR 入口特例);bcEscapeAnalyzer 用**乐观位图 + 降级**判断参数与方法内分配的去向,输出给 C2 的 ConnectionGraph,由 `scalar_replaceable` + PhaseMacroExpand 兑现为标量替换。一句话: **类型与逃逸,一个算"是什么",一个算"去哪",都是字节码层面的保守推导——精度可以降,安全不能丢。**
+一旦方法里有 `if`、`switch`、异常边、循环回边，你就不再面对一条直线字节码，而是面对“多个状态可能在同一个块入口相遇”。这时编译器必须回答：我该拿哪一种类型状态继续往下分析？
 
-但这两台机器每次编译都要跑,ci 对象的创建与缓存、编译的可复现性(ciReplay)、剖面数据(ciMethodData)怎么管理?下一篇收束 ci 域: ciObjectFactory + ciReplay。
+答案就是 meet。
 
-> → [12-ci/03 — ciObjectFactory + ciReplay — ciObject 生命周期与编译回放](03-ci-factory-runtime.md)
+`StateVector::meet` 会把当前状态和 incoming 状态逐槽合并；只要有某个槽位不同，就交给 `type_meet` 去求一个更保守但仍然安全的结果。返回值还是一个很关键的信号：状态有没有变化。因为只要变化了，后继块就得重新分析。`share/ci/ciTypeFlow.cpp:433`、`share/ci/ciTypeFlow.cpp:438`、`share/ci/ciTypeFlow.cpp:470`、`share/ci/ciTypeFlow.cpp:472`、`share/ci/ciTypeFlow.cpp:476`、`share/ci/ciTypeFlow.cpp:483`
+
+单槽的合并规则全写在 `type_meet_internal` 里，这段源码几乎就是整个类型流的语义中心。
+
+- `top` 遇见任何类型，就让给对方；
+- `null` 遇见引用类型，结果是那个引用类型；
+- 非 top 的原语类型互相不兼容，直接掉到底部 `bottom`；
+- 两个引用类型相遇，一方是 `Object` 就直接退成 `Object`；
+- 只要有未加载类，也先退成 `Object`；
+- 接口和非接口相遇，也退成 `Object`；
+- 两个对象数组会递归合并元素类型；
+- 两个普通实例类，则取最近公共父类。 `share/ci/ciTypeFlow.cpp:272`、`share/ci/ciTypeFlow.cpp:274`、`share/ci/ciTypeFlow.cpp:278`、`share/ci/ciTypeFlow.cpp:281`、`share/ci/ciTypeFlow.cpp:292`、`share/ci/ciTypeFlow.cpp:297`、`share/ci/ciTypeFlow.cpp:302`、`share/ci/ciTypeFlow.cpp:305`、`share/ci/ciTypeFlow.cpp:309`、`share/ci/ciTypeFlow.cpp:314`、`share/ci/ciTypeFlow.cpp:336`
+
+这套规则和 verifier 同源，但用途完全不同。verifier 是靠它保证字节码合法；这里则是靠它保证 **优化器接下来看到的状态是安全收敛的**。
+
+这一步最该记住的，不是哪条规则细节，而是这句话：**meet 的本质是“精度往下掉，安全往上升”。**
+
+编译器永远宁可把某个很精确的类型退成 `Object`，也不会为了多拿一点优化空间去猜一个更窄但可能错的类型。类型流允许自己“不够精确”，但绝不允许自己“精确错了”。
+
+## 为什么 `ciTypeFlow` 不是算一遍就完，而是要反复迭代到 fixpoint
+
+如果方法没有分支也没有循环，按字节码线性扫一遍当然够了。但现实里的方法几乎总有控制流汇合，尤其是循环回边。只要有回边，某个块入口的状态就可能先窄后宽，分析必须不断重算直到不再变化。
+
+入口状态怎么来？普通编译下，`get_start_state()` 会把方法签名压进最前面的 locals：非静态方法先把 `this` 放到 local 0，再按签名把参数类型翻译进 locals，剩余 locals 初始化成 `bottom`，同步方法还会把 monitor count 置成 1。`share/ci/ciTypeFlow.cpp:363`、`share/ci/ciTypeFlow.cpp:396`、`share/ci/ciTypeFlow.cpp:398`、`share/ci/ciTypeFlow.cpp:402`、`share/ci/ciTypeFlow.cpp:407`、`share/ci/ciTypeFlow.cpp:415`
+
+OSR 入口更有意思：它不是凭空起步，而是先找普通分析在该 `osr_bci` 处已有的块状态，把那一刻的抽象 frame 复制过来。如果普通分析都到不了那个点，OSR 也直接失败。`share/ci/ciTypeFlow.cpp:368`、`share/ci/ciTypeFlow.cpp:369`、`share/ci/ciTypeFlow.cpp:375`、`share/ci/ciTypeFlow.cpp:377`、`share/ci/ciTypeFlow.cpp:381`
+
+真正的主循环在 `flow_types()`：
+
+1. 建入口块；
+2. 把入口状态 `meet` 进去；
+3. 深度优先先走一遍块图；
+4. 如果发现循环，而且编译层级够高，还可能 clone loop heads；
+5. 然后进入 worklist，不断拿块出来重跑 `flow_block()`，直到 worklist 为空。 `share/ci/ciTypeFlow.cpp:2727`、`share/ci/ciTypeFlow.cpp:2733`、`share/ci/ciTypeFlow.cpp:2736`、`share/ci/ciTypeFlow.cpp:2738`、`share/ci/ciTypeFlow.cpp:2741`、`share/ci/ciTypeFlow.cpp:2747`、`share/ci/ciTypeFlow.cpp:2751`、`share/ci/ciTypeFlow.cpp:2774`、`share/ci/ciTypeFlow.cpp:2778`
+
+`flow_block()` 自己就是一台块内小解释器：
+
+- 先把块入口状态复制到临时 `state`；
+- 对块内每条字节码，如果它可能抛异常，先把当前状态沿异常边流给 handlers；
+- 再调用 `apply_one_bytecode()` 更新当前状态；
+- 如果字节码分析触发 trap，就记录 trap 并停在这里；
+- 否则继续扫到块尾；
+- 最后把状态 meet 给所有正常后继。 `share/ci/ciTypeFlow.cpp:2326`、`share/ci/ciTypeFlow.cpp:2343`、`share/ci/ciTypeFlow.cpp:2359`、`share/ci/ciTypeFlow.cpp:2364`、`share/ci/ciTypeFlow.cpp:2375`、`share/ci/ciTypeFlow.cpp:2396`、`share/ci/ciTypeFlow.cpp:2426`
+
+所以 fixpoint 的必要性其实很朴素：**循环头第一次看到的是“刚进循环”的状态，第二次看到的是“绕了一圈回来”的状态。只有把这两者反复 meet 到不再变化，编译器才真正拿到一个对整个循环都成立的类型地图。**
+
+## 异常边和 `trap` 说明它不是在“执行方法”，而是在构造一张保守状态图
+
+如果把 `ciTypeFlow` 误解成“在编译期跑解释器”，有两处实现会立刻把这种理解打破。
+
+第一处是异常边处理。`flow_block()` 在真正应用一条可能抛异常的字节码之前，就先把当前状态沿异常边送出去。handler 侧不会继承原来的整个栈，而是通过 `meet_exception()` 把 locals 正常合并，同时把栈重置成“只有一个异常对象”。这和真实解释器的语义一致，但它的目的不是去抛异常，而是给 handler 块建立一份抽象入口状态。`share/ci/ciTypeFlow.cpp:2120`、`share/ci/ciTypeFlow.cpp:2135`、`share/ci/ciTypeFlow.cpp:487`、`share/ci/ciTypeFlow.cpp:499`、`share/ci/ciTypeFlow.cpp:503`、`share/ci/ciTypeFlow.cpp:521`
+
+第二处是 `trap`。`StateVector` 明确提供了 `trap(ciBytecodeStream*, ciKlass*, int)`，而 `apply_one_bytecode()` 会在很多“不能安全继续信”的场景下触发它。比如 `anewarray` 的元素类如果不能链接，就 trap；`aaload` 发现元素类没加载，也 trap；`invoke*` 找不到可链接的方法，同样 trap。`share/ci/ciTypeFlow.hpp:464`、`share/ci/ciTypeFlow.hpp:480`、`share/ci/ciTypeFlow.cpp:868`、`share/ci/ciTypeFlow.cpp:898`、`share/ci/ciTypeFlow.cpp:903`、`share/ci/ciTypeFlow.cpp:565`、`share/ci/ciTypeFlow.cpp:567`、`share/ci/ciTypeFlow.cpp:651`、`share/ci/ciTypeFlow.cpp:655`、`share/ci/ciTypeFlow.cpp:663`
+
+有一处 `getstatic/getfield` 的处理特别能看出它的保守味道。字段本身若能链接，但字段类型还没加载，`ciTypeFlow` 并不会立刻 trap；源码注释解释得很细：字段值可能一直是 null，只要没看到非 null，就未必需要把那个类加载起来。因此这里走的是 `do_null_assert`，让后续分析保守继续，而不是武断宣布这条路一定走不通。`share/ci/ciTypeFlow.cpp:613`、`share/ci/ciTypeFlow.cpp:616`、`share/ci/ciTypeFlow.cpp:621`、`share/ci/ciTypeFlow.cpp:626`、`share/ci/ciTypeFlow.cpp:640`
+
+这正好说明 `ciTypeFlow` 的身份：它不是在“证明这条路径一定能执行完”，而是在说“就编译器当前掌握的信息，我还能不能继续安全推导”。一旦不敢继续信，它就 trap 或降级，而不是瞎猜。
+
+## `BCEscapeAnalyzer` 的本质：它不是对象图分析器，而是“对象去向估算器”
+
+`ciTypeFlow` 解决的是“每个程序点此刻栈和 locals 里是什么类型”。但仅有类型还不够，编译器还想知道一件和分配优化直接相关的事：**这个参数或这个新对象，会不会跑出当前方法、当前调用链、甚至全局可见范围？**
+
+`BCEscapeAnalyzer` 就是为这个问题存在的。类注释一上来就把定位写死了：它是 “fast, conservative” 的分析，而且分析层级是 bytecode level。翻译成人话就是：它追求快，追求保守，不追求把所有对象关系都建成一张完美图。`share/ci/bcEscapeAnalyzer.hpp:38`、`share/ci/bcEscapeAnalyzer.hpp:39`
+
+这也是为什么它和 `ciTypeFlow` 不是同一类工具。后者维护的是一个程序点的抽象 frame；前者维护的是几组“参数/返回值/新分配对象的去向位图”。字段定义就能看出来：`_arg_local`、`_arg_stack`、`_arg_returned`、`_return_local`、`_return_allocated`、`_allocated_escapes`、`_unknown_modified`。`share/ci/bcEscapeAnalyzer.hpp:49`、`share/ci/bcEscapeAnalyzer.hpp:54`、`share/ci/bcEscapeAnalyzer.hpp:55`、`share/ci/bcEscapeAnalyzer.hpp:56`、`share/ci/bcEscapeAnalyzer.hpp:61`、`share/ci/bcEscapeAnalyzer.hpp:62`、`share/ci/bcEscapeAnalyzer.hpp:63`、`share/ci/bcEscapeAnalyzer.hpp:64`
+
+对外接口也都是这种“去向判定口味”：
+
+- 参数是否只在 callee 内部；
+- 参数是否只逃到栈上游调用者但不全局；
+- 参数是否可能被返回；
+- 返回值是否只由输入参数组成；
+- 返回值是否只由新分配且未逃逸对象组成。 `share/ci/bcEscapeAnalyzer.hpp:124`、`share/ci/bcEscapeAnalyzer.hpp:131`、`share/ci/bcEscapeAnalyzer.hpp:136`、`share/ci/bcEscapeAnalyzer.hpp:139`、`share/ci/bcEscapeAnalyzer.hpp:144`
+
+一个很关键的边界是：**它并不依赖 `ciTypeFlow` 结果。** `do_analysis()` 自己先拿 `_method->get_method_blocks()`，然后 `iterate_blocks()` 直接扫字节码块图。也就是说，类型地图和逃逸地图是两张独立生成的地图，各自服务不同优化问题。`share/ci/bcEscapeAnalyzer.cpp:1201`、`share/ci/bcEscapeAnalyzer.cpp:1204`、`share/ci/bcEscapeAnalyzer.cpp:1206`
+
+## 为什么逃逸分析必须先乐观，再不停降级
+
+`BCEscapeAnalyzer` 最值得记住的不是某一条 bytecode 规则，而是它的整体工作哲学：**乐观起步，遇到不放心的地方就降级，必要时整次分析退回最大保守值。**
+
+`initialize()` 里它会先把所有引用参数都标成 `_arg_local` 和 `_arg_stack`，也就是“先假设这些参数不全局逃逸”。如果方法有引用返回值，还先假设 `_return_local` 和 `_return_allocated` 成立。`share/ci/bcEscapeAnalyzer.cpp:1233`、`share/ci/bcEscapeAnalyzer.cpp:1239`、`share/ci/bcEscapeAnalyzer.cpp:1242`、`share/ci/bcEscapeAnalyzer.cpp:1249`、`share/ci/bcEscapeAnalyzer.cpp:1257`、`share/ci/bcEscapeAnalyzer.cpp:1263`、`share/ci/bcEscapeAnalyzer.cpp:1264`
+
+这个起点看起来很激进，但它只是分析算法的初始假设，不是最终结论。后面只要看到更危险的操作，就会一点点把这些位图清掉、把结果往“更逃逸、更保守”那边推。
+
+如果方法天生就不适合分析，HotSpot 连“乐观后再降级”都不做，直接跳到全保守。比如：
+
+- 抽象方法；
+- native 方法；
+- holder 还没初始化；
+- 递归层级超过 `MaxBCEAEstimateLevel`；
+- 方法体大小超过 `MaxBCEAEstimateSize`。 `share/ci/bcEscapeAnalyzer.cpp:1298`、`share/ci/bcEscapeAnalyzer.cpp:1300`、`share/ci/bcEscapeAnalyzer.cpp:1301`、`share/ci/bcEscapeAnalyzer.cpp:1302`、`share/ci/bcEscapeAnalyzer.cpp:1303`、`share/ci/bcEscapeAnalyzer.cpp:1321`
+
+这一步特别说明它的立场：看不懂，不猜；太深，别硬算；太大，别冒险。宁可失去优化，也不让错误逃逸结论流进 C2。
+
+而即便进入了正常分析，结果也不一定会被写回 `MethodData`。如果分析过程中引入了跨方法依赖，或者方法数据本身是空的，HotSpot 干脆不存这份 interprocedural escape info。这又是一层“有价值才留，代价太高就放弃”的克制。`share/ci/bcEscapeAnalyzer.cpp:1354`、`share/ci/bcEscapeAnalyzer.cpp:1357`
+
+所以 `BCEscapeAnalyzer` 的风格和 `ciTypeFlow` 很像：它不是一台想方设法求最精确答案的机器，而是一台不停问“我现在还能安全相信多少”的机器。
+
+## 它最后怎么影响优化：不是直接做标量替换，而是把保守结论喂给 C2
+
+最后还得把一个经常被讲混的边界说清：`BCEscapeAnalyzer` 不是 C2 最终的逃逸分析，也不是它直接把 `new Point` 改写成寄存器标量。
+
+真正的对象图级逃逸分析与标量替换兑现，发生在 C2 的 `ConnectionGraph` 和后续 `escape.cpp` / `macro.cpp` 里。`BCEscapeAnalyzer` 负责的是“把字节码级、跨调用的保守去向估计”先交给 C2 参考。`share/opto/escape.cpp:970`、`share/opto/escape.cpp:971`
+
+例如在 `ConnectionGraph::process_call_result` / `process_call_arguments` 这类地方，C2 会拿 `meth->get_bcea()` 的结果来看：
+
+- 如果 callee `is_return_allocated()`，那返回值可以被当成新分配且未逃逸的对象看待；
+- 如果某个参数 `is_arg_returned()`，那调用结果和那个参数之间要连边；
+- 如果某个参数不是 `is_arg_stack()`，就把它提升到 `GlobalEscape`；
+- 如果它虽然不全局逃逸但也不是 `is_arg_local()`，那它字段里的对象还得进一步视为更容易逃逸。 `share/opto/escape.cpp:972`、`share/opto/escape.cpp:980`、`share/opto/escape.cpp:985`、`share/opto/escape.cpp:990`、`share/opto/escape.cpp:1154`、`share/opto/escape.cpp:1165`、`share/opto/escape.cpp:1175`、`share/opto/escape.cpp:1180`
+
+也就是说，`BCEscapeAnalyzer` 的结果更像“喂给全局 EA 的先验条件”或“跨调用点的摘要信息”，而不是最终裁决。
+
+把它和最终 `ConnectionGraph` 混成一层，就会把 HotSpot 的优化管线讲扁。字节码级 bcea 负责快而保守地给摘要；IR 级 EA 负责在图上做更完整的全局推理；标量替换则是在更后面的阶段真正兑现。
+
+## 收网：`ci` 镜像解决“看见对象”，类型流和逃逸分析解决“看见程序状态”
+
+现在可以把全篇收成一张总图了。
+
+`ci` 镜像层让编译器安全持有类、方法、字段和对象，但它并不会直接告诉编译器：执行到某个字节码位置时，栈和 locals 里各是什么类型；也不会直接告诉编译器：某个参数或新对象会不会逃出当前方法或调用链。于是 HotSpot 还得在字节码层把方法“再跑一遍”，不过跑的是抽象状态，不是真实值。`ciTypeFlow` 用 `StateVector + meet + worklist + fixpoint` 算出每个程序点的类型地图；`BCEscapeAnalyzer` 用“乐观初始化 + 位图跟踪 + 保守降级”估计参数和新分配对象的去向；两者都宁可退成更保守的结论，也不冒险给出错误的精确答案。`share/ci/ciTypeFlow.hpp:158`、`share/ci/ciTypeFlow.cpp:438`、`share/ci/ciTypeFlow.cpp:2727`、`share/ci/bcEscapeAnalyzer.hpp:38`、`share/ci/bcEscapeAnalyzer.cpp:1233`、`share/ci/bcEscapeAnalyzer.cpp:1300`
+
+所以，这一篇最核心的一句话不是“`ciTypeFlow` 做类型流、`BCEscapeAnalyzer` 做逃逸分析”，而是：
+
+**编译器之所以还得自己在字节码层再跑一遍方法，是因为对象视图不等于程序点状态视图；类型流回答“此刻是什么”，逃逸分析回答“最后会去哪”。**
+
+只要这句抓住了，下一篇把 `ciObjectFactory`、`ciReplay` 和 `ciMethodData` 收尾时就好理解了：一旦这些分析每次编译都要重跑，编译数据本身如何缓存、复用、回放，就会变成 `ci` 域最后一个必须收拢的问题。
+
+> → [12-ci/03 — `ciObjectFactory + ciReplay` — `ciObject` 生命周期与编译回放](03-ci-factory-runtime.md)

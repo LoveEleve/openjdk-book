@@ -1,126 +1,222 @@
-# 02. System 与 Runtime 门面 — 时间、数组拷贝、属性、关闭钩子
+# System 与 Runtime 门面：Java 进程如何管理时间、状态与退出
 
-> **前置依赖**: [03-object-system/01 — Object 的方法契约与对象生命周期](01-object-contract-references.md)(对象生命周期)、[02-number-math/01 — 包装类缓存](../02-number-math/01-wrapper-cache-boxing.md)(IntegerCache.high 属性的来源,本文第 3 节闭环)
-> → **后续**:[03-object-system/03 — ProcessBuilder 与本地进程](03-process-native.md)
-> 关联: 内部卷 01-os-abstraction 01-platform-detection(os::javaTimeNanos 与 clock_gettime)、23-stub-routines 02-arraycopy、30-jvm-entry、03-arguments-flags
+> 本文基于 JDK 11 `java.base` 的 `System`、`Runtime`、`Shutdown` 实现。涉及时钟底层时以 HotSpot/Linux 为例；涉及 shutdown hook 时同时区分 Java API 契约与 JDK 11 当前实现。`currentTimeMillis` 的返回格式、`nanoTime` 只适合做差值、`System.exit` 的基本语义属于 API 契约；native 入口、属性快照和 shutdown 槽位则是当前实现证据。
+> **前置依赖**：[Object 的方法契约与对象生命周期](01-object-contract-references.md)、[包装类与缓存](../02-number-math/01-wrapper-cache-boxing.md)
+> **后续**：[进程与本地交互](03-process-native.md)
 
-## 天天在用,没人看过
+## 先把上一层边界接上：为什么这次轮到 System / Runtime
 
-`System.currentTimeMillis()`、`System.arraycopy`、`System.getProperty`、`Runtime.addShutdownHook`——这四个 API 每个 Java 工程师每天都在用,但被追问"哪个是 native?时间会不会回退?属性是谁塞进去的?优雅停机到底怎么停?"时,大多数人就停在"System 嘛,工具类"了。
+上一篇讲的是对象边界：哪些能力可以留在普通 Java 对象内部，哪些能力必须借助 JVM 才能成立。`Object.hashCode()`、`clone()`、`Reference`、`Cleaner` 虽然主题不同，但它们都在说明一件事：只要 Java 代码开始触碰运行时状态、GC 状态或对象生命周期，普通业务对象就不再是完整边界。
 
-这篇把四个机制逐个拆开: 墙上时钟与单调时钟的分野、arraycopy 为什么接近 memcpy、系统属性的启动初始化链(顺便闭环域 02 的 IntegerCache.high)、以及 exit 的完整状态机。
+这一篇再往外走一步。现在要碰的已经不是“某个对象怎样活、怎样死”，而是**整个 JVM 进程此刻处在什么时间、持有哪些全局属性、准备如何退出**。这就是 `System` 和 `Runtime` 的位置：它们不是给业务层凑 API 的工具箱，而是 Java 代码访问进程级能力的门面。
 
-## 1. "时间到底怎么来的" — currentTimeMillis vs nanoTime
+## 两个看似无关的事故，其实在问同一件事
 
-### 1.1 两个 native,两种时钟
+线上接口耗时偶尔出现负数。代码很简单：请求开始时记下 `currentTimeMillis()`，请求结束时再减一次。日志里却出现结束时间小于开始时间。排查后发现，机器在这段时间内发生了 NTP 校时，或者运维手动调整了系统时间。
 
-`System` 的两个时间方法都是 native(`System.java:396`/`440`):
+另一次发布事故更常见：进程收到终止信号，业务线程似乎都停了，容器却迟迟不退出。原因不是 JVM “忘了退出”，而是 shutdown hook 还在等待一个没有超时的网络调用。优雅终止窗口耗尽后，外部系统只能强制杀掉它。
+
+这两个问题分别落在 `System.currentTimeMillis()` 和 `Runtime.addShutdownHook()` 上，但它们共享一个入口：Java 代码正在触碰当前进程之外的状态。
+
+```text
+Java 调用者
+   │
+   ├── System：时间、数组、属性、退出的静态门面
+   └── Runtime：当前 JVM 的单例门面
+          │
+          ├── HotSpot/native：时钟、数组拷贝、堆查询
+          ├── VM 启动状态：系统属性与内部快照
+          └── Shutdown 状态机：hook、清理、最终 halt
+```
+
+因此，这篇文章不按“System 有哪些方法、Runtime 有哪些方法”列清单，而是沿着四次边界穿越来理解它们：时间如何区分“此刻”和“经过多久”，数组为什么把正确性与性能下沉给 JVM，属性为什么同时存在公开集合和启动快照，以及一个 Java 进程怎样从“准备退出”走到“真正终止”。
+
+## 一、时间：两个 API 都叫 time，却不能互换
+
+### 先排除最直觉的方案
+
+如果需求是“记录订单创建时间”，我们需要一个能与 Unix 时间、日志和数据库对齐的时间点；如果需求是“计算一次 RPC 花了多久”，我们只需要两个读数之间的稳定差值。
+
+把这两个需求都交给墙上时钟，看起来最省事，实际上把系统校时也纳入了耗时计算。墙上时钟服务的是日历语义：它可能被同步、修正或人为调整。它适合回答“现在是哪一天”，不适合单独承担“这段代码经过了多久”。
+
+反过来，把 `nanoTime()` 当日期时间也不成立。它的起点是 JVM 实例内部的固定但任意的 origin，同一进程内两次调用的差值有意义，绝对值没有跨进程、跨重启的日历含义。
+
+### native 声明只是边界，真正重要的是契约
+
+这里先给一个路标：这一节不是为了证明“native 就更底层所以更厉害”，而是为了回答两个更具体的问题——谁提供时间值，以及这个时间值到底承诺了什么。只有把这两个问题分开，后面看到 `currentTimeMillis()` 和 `nanoTime()` 的声明才不会误以为“它们只是精度不同”。
+
+带着“两个值到底分别保证什么”的问题看 JDK 11 的声明：
 
 ```java
-// System.java:396 + 440(截取核心,逐字)
+// System.java:396
 public static native long currentTimeMillis();
+```
 
+```java
+// System.java:440
 public static native long nanoTime();
 ```
 
-语义完全不同:
+`currentTimeMillis()` 返回从 1970-01-01 UTC 起算的毫秒数，但源码文档明确提醒：单位是毫秒，不代表底层每毫秒都能变化，实际粒度依赖操作系统。它是记录时间点的入口，不是单调计时器。
 
-- **currentTimeMillis**:墙上时钟(wall clock)——1970-01-01 UTC 至今的毫秒数。它是"日历时间",会被 NTP 校时、手动改时间**拨动**: 时间可能回退、可能跳变。线上"时间回退了"的告警,先查的就是它
-- **nanoTime**:单调时钟(monotonic clock)——任意起点、只用于**差值**比较(`t2 - t1` 有意义,绝对值无意义)。底层走 OS 的单调时钟,不受系统时间调整影响: 同一个 JVM 内,`nanoTime` 的差值保证与墙上时间无关
+`nanoTime()` 返回 JVM 高分辨率时间源的纳秒读数。JDK 文档特意写了三层限制：第一，数值起点任意；第二，只有同一个 JVM 实例中两个读数的差值才有意义；第三，纳秒是单位和精度表达，不保证每纳秒都发生一次变化。做超时比较时还应写成 `nanoTime() - start >= timeout`，而不是先把两个数相加，因为前一种写法能自然处理 long 溢出。
 
-Linux 上两者分别是 `clock_gettime(CLOCK_REALTIME, ...)` 和 `clock_gettime(CLOCK_MONOTONIC, ...)`;JVM 侧实现在 `os::javaTimeMillis()`/`os::javaTimeNanos()`。
+```text
+记录发生时间：currentTimeMillis → epoch 时间点 → 日志/数据库
+测量经过时间：nanoTime(start) ───── nanoTime(end) → end - start
+                         不参与校时，也不解释成日期
+```
 
-关键设计(斜体):*"计算耗时用 nanoTime、记录时间点用 currentTimeMillis"是铁律——用 currentTimeMillis 算耗时,一次 NTP 校时就能得到负值或秒级跳变。注意精度: nanoTime 名义上是纳秒,实际粒度取决于 OS 时钟源(HPET 约 1 微秒、TSC 可到几十纳秒);而 JFR/GC 日志里的时间戳又是一套(JVM 内部的另一路时钟),别混用。面试问"为什么 java 有俩时间方法",答出"墙上 vs 单调"就过关。*
+这也解释了为什么 Java 标准库自己在等待超时时会使用 `nanoTime`：`Process` 的等待逻辑以及 `ReferenceQueue` 的超时计算，都需要的是“剩余时长”，不是会被校时影响的日历时间。
 
-跨层标注: [内部卷: 01-os-abstraction 01-platform-detection——os::javaTimeNanos 与 clock_gettime;内核: man 2 clock_gettime(CLOCK_REALTIME/CLOCK_MONOTONIC)]
+这里要把平台边界说清楚：`System.java` 只承诺 Java 层契约和 native 入口。Linux 下最终使用何种时钟源、是否经过 HotSpot 的平台抽象，是 HotSpot/Linux 实现事实，不是 Java API 对所有 JVM 和操作系统的统一承诺。
 
-## 2. "arraycopy 为什么快" — 系统级数组拷贝
+**这一层只记住一个选择：时间点用墙上时钟，耗时和超时用单调时钟。**
 
-### 2.1 native 声明,三类能力
+到这里主线其实只发生了一件事：Java 进程把“现在几点”与“已经过了多久”拆成了两种不同契约。下面再看第二种门面能力，它不像时间那样容易被校时误导，却同样不能被“看起来差不多”的朴素写法替代。
 
-`System.arraycopy`(`System.java:535`)同样是 native:
+## 二、arraycopy：不是更快的 for 循环，而是 JVM 边界
+
+### 为什么手写循环不够
+
+数组复制表面上只有一个循环，但 API 必须同时处理三组约束：源和目标必须真的是数组；运行时类型必须允许复制；源目标重叠时不能覆盖还没有读取的数据。若复制的是引用数组，写入还会受到引用类型检查和垃圾收集器写屏障的影响。
+
+最直觉的方案是手写 `for`。它能表达“把第 i 个元素赋给第 i 个位置”，却不能自动获得 `arraycopy` 的完整边界语义。尤其是同一数组向后平移时，复制方向必须反过来；引用数组和基本类型数组也不应走同一条底层路径。
+
+### Java 层故意只留一个统一入口
+
+如果前面只记住“`arraycopy` 可能更快”，这一节就还没讲到点上。真正要记住的是：JDK 不想让每个上层库都各自重写一遍数组复制的正确性边界，所以它故意把入口收窄成一个 JVM 能整体接管的调用点。
+
+带着“这些边界由谁保证”的问题看声明：
 
 ```java
-// System.java:535-537(截取核心,逐字)
+// System.java:534-537
+@HotSpotIntrinsicCandidate
 public static native void arraycopy(Object src,  int  srcPos,
                                     Object dest, int destPos,
                                     int length);
 ```
 
-它的能力分三档:
+这个签名看似宽泛，实际把运行时类型检查、范围检查、重叠复制和底层路径选择集中到 JVM 能理解的位置。`native` 说明 Java 方法本身不实现逐元素逻辑，`@HotSpotIntrinsicCandidate` 则说明 HotSpot 可以把它识别为特殊调用，在编译热点代码时选择专用的数组拷贝实现。至于具体是哪个 stub、是否使用特定 CPU 指令，属于 HotSpot 和平台实现，不是 Java API 的性能保证。
 
-1. **类型检查 + 引用数组**:先做运行时类型检查(源/目标数组类型兼容、元素类型能放进去),引用数组逐元素复制,`null` 元素照常搬运
-2. **重叠安全**:源和目标可以是同一个数组(数组内部挪移)——native 实现按重叠方向决定从前往后还是从后往前,`System.arraycopy(arr, 0, arr, 1, n)` 这类"数组内平移"是安全的
-3. **基本类型**:走 CPU 级的连续内存拷贝——接近 `memcpy` 的速度
+```text
+调用者
+  → System.arraycopy
+      → 类型/范围/重叠语义
+      → 基本类型批量复制 或 引用数组复制与写屏障
+      → HotSpot intrinsic / stub / 平台指令
+```
 
-### 2.2 JIT 与 Stub
+所以 `Arrays.copyOf`、集合扩容、字符串内部扩容等上层代码，消费的是这条已经集中处理边界的能力。手写循环并非永远错误：小规模、带业务转换的复制当然可以直接写循环；错误的是把循环当成所有数组复制场景的等价替代，然后自行重复实现重叠、类型和性能边界。
 
-性能的关键在 JIT: **HotSpot 认识 arraycopy 这个调用**——编译热点代码时把它内联成 VM 的数组拷贝 stub(针对不同元素类型的专用汇编例程),基本类型数组的拷贝就是一条条 `rep movsb`/`rep movsq` 级别的指令序列,没有逐元素的方法调用开销。
+**这一层的顿悟是：`arraycopy` 的价值首先是把复杂的正确性集中起来，其次才是让 JVM 有机会把它优化成批量复制。**
 
-跨层标注: [内部卷: 23-stub-routines 02-arraycopy——数组拷贝 stub 的汇编实现]
+这也是一个常见误解分界线：很多人以为 `System` 只是“把几个 native 方法挂出来”，但真正更有价值的动作是它替整个类库统一了边界。时间统一了计时契约，`arraycopy` 统一了复制语义；接下来属性管理会看到同一种思路——公开接口和内部真实状态不能直接混成一份可变字典。
 
-这也解释了 `Arrays.copyOf`/`copyOfRange` 的构成: 它们就是"分配新数组 + `System.arraycopy`"(域 01 的 String 双路径、域 08 的 ArrayList 扩容全都在消费这条链)。
+## 三、属性：公开可变集合与启动快照必须分开看
 
-关键设计(斜体):*arraycopy 是"标准库把底层能力暴露给用户"的典型——拷贝的正确性(重叠、类型、空元素)在 native 里一次解决,性能由 JIT 通过 stub 内联逼近 memcpy。面试点: "List.toArray / 数组扩容底层都是 arraycopy"——能说出 JIT 内联成 stub 这一层,就不只是背 API 了。*
+### 先看一个危险的直觉
 
-## 3. "系统属性从哪来" — getProperty 与 VM 启动
+`System.getProperty(key)` 看起来像是从一个全局字典读值。既然 `System.getProperties()` 能拿到这个字典，那么用户代码似乎可以随意清空、替换或修改它，而 JDK 内部也应该跟着看到同一份结果。
 
-### 3.1 读的是 props 字段
+这套想法对“应用自己的配置”可以成立，对 JDK 启动参数却不安全。JDK 在启动阶段需要读取若干由 VM 注入的配置，例如整数缓存上限、直接内存上限和启动器参数。如果这些内部配置始终依赖公开且可变的 `Properties`，应用代码一次 `clear()` 就能让内部行为失去启动时依据。
 
-`System.getProperty(key)`(`System.java:826-835`):
+### 公开读取链路是什么
+
+这一节先别急着抠每个属性 key。主线只需要先记住两个角色：一份是应用代码看得见、也可能改得动的 `props`；另一份是 JDK 启动阶段保存下来的内部视图。后面的源码只是证明这两份状态确实被刻意分开了。
+
+先回答普通应用调用到底读哪里：
 
 ```java
-// System.java:826-835(截取核心,逐字)
+// System.java:826-834
 public static String getProperty(String key) {
     checkKey(key);
     SecurityManager sm = getSecurityManager();
     if (sm != null) {
         sm.checkPropertyAccess(key);
     }
-
     return props.getProperty(key);
 }
 ```
 
-核心就一行: `props.getProperty(key)`——`props`(`System.java:578`)是一个 `Properties` 对象。**它不是懒加载的**: 由 `initPhase1`(`System.java:1954`)在类初始化早期创建并填充(`System.java:1964` 的 `props = new Properties(84)` 后跟 `initProperties(props)`——"initialized by the VM",即 native 侧把内建属性塞进来)。
+`props` 在 `System.initPhase1()` 中先创建，再由 `initProperties(props)` 让 VM 初始化。它不是第一次调用 `getProperty` 时才凭空生成的。属性来源可以是 VM 初始化值、命令行 `-D` 参数或运行时 API 修改；但“公开读取入口读 `props`”与“内部启动配置永远只读 `props`”是两件不同的事。
 
-属性有三个来源,对应三种生命周期:
+### JDK 11 的隔离动作：先快照，再移除特定项
 
-1. **JVM 内建**:`java.version`、`os.name`、`user.home` 等,VM 初始化时写入
-2. **命令行 `-Dkey=value`**:JVM 启动参数,VM 解析后写入
-3. **`System.setProperty`**:运行时修改,进程内生效
-
-### 3.2 为什么"保存并移除"
-
-`initPhase1` 里有一行容易被忽略的调用(`System.java:1981`):
+真正的启动链路在 `System.initPhase1()`：
 
 ```java
-// System.java:1978-1981(截取核心,逐字)
-// Save a private copy of the system properties object that
-// can only be accessed by the internal implementation.  Remove
-// certain system properties that are not intended for public access.
+// System.java:1964-1965
+props = new Properties(84);
+initProperties(props);  // initialized by the VM
+```
+
+```java
+// System.java:1981
 VM.saveAndRemoveProperties(props);
 ```
 
-`VM.saveAndRemoveProperties`(`jdk/internal/misc/VM.java:187`)做两件事: **① 快照**——把当前全部属性拷贝进 VM 私有副本 `savedProps`; **② 移除**——从公开属性里删掉几个仅供 JDK 内部使用的 key(`VM.java:203-228`):
-
-- `sun.nio.MaxDirectMemorySize`(顺带解析成 VM 的 directMemory 字段)
-- `sun.nio.PageAlignDirectMemory`
-- `java.lang.IntegerCache.high`——**域 02 的 IntegerCache 读的就是这个**(`Integer.java:1007` 的 `VM.getSavedProperty(...)`)
-- `sun.java.launcher.diag`、`jdk.boot.class.path.append`
-
-为什么?注释(`System.java:1969-1973`)说得很明白: 这些属性"for internal implementation use only"。公开的 `System.getProperties()` 返回可变集合——用户代码可以 `System.getProperties().clear()` **清空所有属性**。如果 JDK 内部依赖的属性留在公开集合里,被清掉后 IntegerCache 的配置、直接内存上限就全丢了。快照保证:**用户清得掉公开属性,清不掉 VM 私有副本**;内部实现一律走 `VM.getSavedProperty`(`VM.java:159`)取回。
-
-关键设计(斜体):*"保存并移除"是 JDK 防御用户行为的典型设计——公开 API 给你可变性(Properties 集合),内部实现用快照隔离风险。这条链在域 02 已经出现过: IntegerCache 静态块读 `VM.getSavedProperty("java.lang.Integer.IntegerCache.high")`,当时没说这属性为什么"被保存"——现在闭环了: 它先被 `saveAndRemoveProperties` 从公开属性里拿走,再从快照里取回。*
-
-## 4. "优雅停机怎么做" — shutdownHook 与 exit 流程
-
-### 4.1 单例与入口
-
-`Runtime.getRuntime()`(`Runtime.java:70`)返回单例;`System.exit` 委托 `Runtime.exit`(`Runtime.java:111-117`):
+`VM.saveAndRemoveProperties` 并不是把所有属性都变成不可变内部配置。它先把当时的属性条目复制到 `savedProps`，然后只移除明确属于内部实现的项目。JDK 11 源码列出的例子包括 `sun.nio.MaxDirectMemorySize`、`sun.nio.PageAlignDirectMemory`、`java.lang.Integer.IntegerCache.high`、`sun.java.launcher.diag` 和 `jdk.boot.class.path.append`。
 
 ```java
-// Runtime.java:111-117(截取核心,逐字)
+// VM.java:191-196
+Map<String, String> sp =
+    Map.ofEntries(props.entrySet().toArray(new Map.Entry[0]));
+savedProps = sp;
+```
+
+```java
+// VM.java:220-228
+props.remove("java.lang.Integer.IntegerCache.high");
+
+// used by sun.launcher.LauncherHelper
+props.remove("sun.java.launcher.diag");
+
+// used by jdk.internal.loader.ClassLoaders
+props.remove("jdk.boot.class.path.append");
+```
+
+这里的“快照”是启动时的内部视图，`Map.ofEntries` 也使这份视图不再跟着公开 `Properties` 的后续修改变化；“移除”则是避免某些仅供内部使用的 key 继续出现在公开集合中。内部组件通过 `VM.getSavedProperty` 读取这份启动快照，并且该方法的文档明确限定：只应读取不会在运行时改变的系统属性。
+
+域 02 的 `IntegerCache` 正好把这条链闭合：
+
+```text
+VM 注入 java.lang.Integer.IntegerCache.high
+   → System.initPhase1 创建 props
+   → VM.saveAndRemoveProperties 建立 savedProps
+   → 从公开 props 移除该 key
+   → IntegerCache 通过 VM.getSavedProperty 读取启动值
+```
+
+因此，用户可以改变公开属性视图，却不能用后续的 `clear()` 抹掉已经保存的启动参数。这个隔离并不意味着所有系统属性都可以随意修改：`System` 的文档反而提醒，修改标准属性可能产生不可预测结果。正确做法是把公开属性当作进程级 API 状态，把 JDK 私有快照当作启动时形成的内部状态，两者不要混为一个配置中心。
+
+**这一层只记住两个动作：启动时复制，随后移除特定内部项；公开集合和内部快照拥有不同的使用者与生命周期。**
+
+到这里为止，前三层门面已经能收成一张小图：时间负责给进程读时钟，`arraycopy` 负责给类库借运行时能力，属性负责在“公开可变”和“内部稳定”之间切开边界。最后一层最容易出事故，因为它直接决定进程能不能体面地离场。
+
+## 四、退出：System.exit 只是入口，Shutdown 才是流程
+
+### 先区分三种结束方式
+
+一个 Java 进程可能因为最后一个非守护线程结束而进入关闭，也可能响应用户中断或系统终止事件，还可能由代码调用 `System.exit`。这些情况都会进入 shutdown 语义，但外部强制终止，例如 Unix 的 `SIGKILL`，属于 abort，不能保证 hook 被执行。
+
+代码里还存在一个容易混淆的出口：`halt`。如果业务只是想“做完清理后退出”，使用 `halt` 会绕过 hook；如果进程已经卡在无法结束的清理阶段，`halt` 才是强制终止的逃生门。
+
+### 入口委托与状态机
+
+如果把 `System.exit` 理解成“Java 版 kill -9”，后面所有现象都会看反。它的真实角色更像是提出一个退出请求：有人做安全检查，有人组织 hook，有人等待清理，最后才有人真正把进程停掉。
+
+`Runtime` 不允许外部直接创建，`getRuntime()` 返回当前应用唯一的 `Runtime` 对象。`System.exit` 的实现只是把请求转给它，随后由 `Runtime.exit` 做安全检查并进入 `Shutdown.exit`：
+
+```java
+// Runtime.java:70-72
+public static Runtime getRuntime() {
+    return currentRuntime;
+}
+```
+
+```java
+// Runtime.java:111-117
 public void exit(int status) {
     SecurityManager security = System.getSecurityManager();
     if (security != null) {
@@ -130,69 +226,69 @@ public void exit(int status) {
 }
 ```
 
-真正干活的是 `Shutdown`(`java.lang.Shutdown`,包私有)。`Shutdown.exit`(`Shutdown.java:162`)的状态机:
+JDK 11 的 `Shutdown` 维护一个固定槽位数组。源码注释列出了其中的系统 hook：控制台恢复、应用 shutdown hook 聚合器、delete-on-exit hook。`Shutdown.runHooks()` 按槽位推进 `currentRunningHook`，调用每个槽位的 `Runnable`；所有系统槽位处理完后标记 VM shutdown，`Shutdown.exit` 最终调用 `halt(status)`。
 
-```java
-// Shutdown.java:162-176(截取核心,逐字)
-static void exit(int status) {
-    synchronized (lock) {
-        if (status != 0 && VM.isShutdown()) {
-            /* Halt immediately on nonzero status */
-            halt(status);
-        }
-    }
-    synchronized (Shutdown.class) {
-        ...
-        beforeHalt();
-        runHooks();
-        halt(status);
-    }
-}
+```text
+System.exit(status)
+   → Runtime.exit：安全检查
+   → Shutdown.exit：争抢退出流程
+   → beforeHalt：通知 VM 准备终止
+   → 系统 hook 槽位：按槽位运行
+   → ApplicationShutdownHooks：并发启动用户 hook 并等待
+   → VM.shutdown
+   → halt(status)
 ```
 
-**顺序固定: `beforeHalt()`(native,通知 VM 准备终止,`Shutdown.java:143-144` 注释 "Notify the VM that it's time to halt")→ `runHooks()`(执行所有钩子,含系统槽位钩子如 DeleteOnExit——hooks 数组注释 `Shutdown.java:45-52` 列出槽位 0/1/2)→ `halt(status)`(真正终止)**。注意 `halt`(`Runtime.java:274`)才是直接终止——`exit` 是"先清理再终止",`halt` 是"立刻终止"。
+这里的“顺序”只适用于 JDK 内部的系统槽位，不适用于用户 hook 之间。把两者混成一件事，就会得到“hook 按注册顺序执行”的错误结论。
 
-### 4.2 钩子的注册与执行
+### 用户 hook 为什么会拖住整个进程
 
-`Runtime.addShutdownHook`(`Runtime.java:211-220`)把钩子交给 `ApplicationShutdownHooks.add`;执行时(`ApplicationShutdownHooks.java:94` 起)的流程值得细看:
+这里再给一个读者最容易踩坑的失败方案：很多业务把 shutdown hook 当成“最后还能慢慢补救的一段后台逻辑”，于是把刷库、补偿、远程通知、无限重试都塞进去。问题在于 JVM 不会把 hook 当后台守护任务；它把 hook 当退出流程本身的一部分，所以任何一个 hook 卡住，整个进程就卡在门口。
 
-```java
-// ApplicationShutdownHooks.java:94-108(截取核心,逐字)
-static void runHooks() {
-    Collection<Thread> threads;
-    synchronized(ApplicationShutdownHooks.class) {
-        threads = hooks.keySet();
-        hooks = null;
-    }
+`Runtime.addShutdownHook` 接受的是一个已经初始化但尚未启动的 `Thread`。`ApplicationShutdownHooks` 用 `IdentityHashMap` 保存这些线程。退出时，它先把集合取出并置空，阻止新的 hook 加入；然后启动全部线程，再对每个线程执行 `join()`。这些 hook 是并发开始的，但退出流程仍然要等它们全部结束。
 
-    for (Thread hook : threads) {
-        hook.start();
-    }
-    for (Thread hook : threads) {
-        while (true) {
-            try {
-                hook.join();
-                ...
+```text
+用户注册 hook
+   → shutdown 开始，注册表封存
+   → 启动全部用户 hook，顺序未指定
+   → 逐个 join，但等待的是全部完成
+   → 应用 hook 聚合器返回
+   → Shutdown 继续收尾并 halt
 ```
 
-**先全部 start,再逐个无限 join**——每个钩子线程 start 后,shutdown 流程在主线程逐个 `join()` 等待。机制推论:
+这解释了发布时“进程已经收到终止信号却不退出”的现象：只要一个 hook 卡在无限重试、锁等待或没有超时的网络调用，聚合器的 `join` 就不会返回。异常则是另一回事：用户 hook 是普通线程，未捕获异常会按线程规则处理并结束该线程，不会自动替其他 hook 完成它的清理责任。
 
-- **钩子不结束,exit 就卡住**:某个钩子线程死循环或阻塞,`join` 永远不返回,进程停在 runHooks 阶段——这就是 K8s 优雅终止窗口(SIGTERM 后默认约 30 秒)超时被强杀的场景: 钩子太慢,进程没退成,被 SIGKILL
-- **执行顺序不保证**:用户钩子存在 `IdentityHashMap<Thread, Thread>`(`ApplicationShutdownHooks.java:39`)里,遍历顺序与注册顺序无关
-- **异常不拖垮流程**:系统槽位钩子由 `Shutdown.runHooks`(`Shutdown.java:113`)执行,包着 `catch (Throwable t)`(`Shutdown.java:130-134`,只重抛 ThreadDeath)——单个钩子异常不影响其他钩子与后续 halt;用户钩子跑在各自线程里,异常只终止该线程
+JDK 的 API 文档因此要求 hook 尽量线程安全、避免死锁、不要盲目依赖其他也在关闭的线程服务，并且尽快完成。生产代码可以在 hook 中做连接关闭、状态落盘和最后的指标刷新，但必须设计超时、幂等和失败降级；不要把一个必须无限等待的业务协议塞进 JVM 最后的退出路径。
 
-生产实践: 钩子里做连接池关闭、流量摘除、指标上报,但**必须快速完成**——发布系统的优雅窗口是算在钩子时间里的。
+### `exit`、`halt` 与并发退出不是同一个承诺
 
-### 4.3 gc 与内存查询:全是 native
+这时再回头看第二个事故，就能把责任分清了：收到终止信号却迟迟不退出，未必是 JVM 失灵，更可能是它还在忠实履行 `exit` 的承诺——等待清理链走完。真正放弃这份承诺的是 `halt`，而不是 `exit`。
 
-`Runtime.gc()`(`Runtime.java:660`)是 native——javadoc 明确它是**建议性**的: JVM 自动 GC 该跑还是跑,`gc()` 只是"hint"("The virtual machine performs this recycling process automatically as needed")。`freeMemory`(`Runtime.java:618`)/`totalMemory`(`Runtime.java:631`)/`maxMemory`(`Runtime.java:642`)也都是 native——直接问 JVM 的堆状态。
+`Runtime.exit` 不是“调用后立刻杀掉 OS 进程”。它会等待 shutdown 流程。JDK 11 的 `Shutdown.exit` 还处理了退出竞争：如果非零状态的退出请求到达时 VM 已经处于 shutdown 状态，会直接 halt；随后通过 `Shutdown.class` 的同步锁串行化真正的退出过程，其他试图同时退出或 halt 的线程可能被阻塞。
 
-关键设计(斜体):*exit 的三段式(清理→钩子→终止)是"优雅停机"的机制骨架,`halt` 是它的逃生门(直接终止,不跑任何东西)。面试答"System.exit 与 Runtime.exit 等价(委托关系)、halt 才是直接终止"是基础层;能说出"钩子无限 join,慢钩子会拖死整个退出流程"才到机制层。*
+`Runtime.halt` 则先做安全检查，调用 `Shutdown.beforeHalt()`，再进入同步的 native halt 路径。API 文档明确说明它不启动 hook，也不等待已经运行的 hook。它不是“更快的优雅退出”，而是放弃清理保证后的强制终止。
 
-跨层标注: [内部卷: 30-jvm-entry(启动与退出序列)]
+### Runtime 的其他 native 查询也有边界
 
-## 核心悬念
+`Runtime.freeMemory()`、`totalMemory()` 和 `maxMemory()` 都是 native 查询，但它们回答的是 JVM 堆状态的近似或当前值，不是操作系统进程的全部内存占用。`freeMemory` 是未来对象可用空间的近似值，`totalMemory` 可能随宿主环境变化，`maxMemory` 是 JVM 尝试使用的上限。`Runtime.gc()` 的 API 语义也只是建议 JVM 花力气回收，并非调用线程可以据此证明“一次完整 GC 已经同步结束”。
 
-System/Runtime 管"当前进程内部"——但 Java 进程还能**拉起子进程**: `new ProcessBuilder("java", "-jar", "xxx.jar").start()` 底层发生了什么?从 Java 代码到 fork/exec 系统调用,中间隔了几层?子进程的输入输出流怎么桥接到父进程?进程退出码怎么拿回来?下一篇把 ProcessBuilder 的完整链条拆开。
+这几个方法再次说明 `Runtime` 是进程门面：Java 层只提供稳定调用形式，真正的内存管理和终止动作由 JVM 状态决定。
 
-> → [03-object-system/03 — ProcessBuilder 与本地进程](03-process-native.md)
+## 收网：四条使用规则背后的同一张图
+
+回到开头的两个事故，答案已经不再是“记住几个 API”：
+
+```text
+时间点 ───── currentTimeMillis ───── epoch / 日历语义
+耗时超时 ──── nanoTime ───────────── JVM 内单调差值
+数组边界 ──── arraycopy ─────────── JVM 检查与批量复制
+启动配置 ──── savedProps ────────── 内部快照，不依赖公开可变集合
+优雅退出 ──── exit + hooks ───────── 等待清理后 halt
+强制退出 ──── halt ───────────────── 不跑 hook，直接终止
+```
+
+第一，记录“发生在什么时候”与测量“经过了多久”必须分开；第二，数组复制优先使用标准库，让 JVM 统一承担边界和优化；第三，不要把 `System.getProperties()` 当作 JDK 所有内部状态的唯一真相；第四，shutdown hook 是有限退出窗口中的并发清理，不是一个可以无限阻塞的后台任务；第五，`halt` 是强制终止，不是优雅退出的别名。
+
+如果把这五条规则再压成一句话，就是：`System` 和 `Runtime` 处理的从来不是“几个零散 API”，而是 Java 代码访问进程级状态时必须经过的四道门——读时钟、借运行时能力、读取启动状态、组织退出流程。门外是 OS、VM 和 shutdown 状态机；门内才是业务代码看到的 Java 方法。
+
+`System` 和 `Runtime` 的共同价值，正是把这些进程级能力压缩成 Java API，同时把无法由普通 Java 方法独立保证的部分交给 HotSpot、操作系统和 Shutdown 状态机。下一篇继续沿着这道边界向外走：当 Java 不再只查询当前 JVM，而是要启动另一个操作系统进程时，`ProcessBuilder` 如何把参数、标准输入输出和退出码接起来。

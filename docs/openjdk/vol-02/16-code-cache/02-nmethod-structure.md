@@ -1,288 +1,480 @@
-# 02. nmethod 结构 — 一段编译方法里装了什么
+# 02. 为什么一段编译方法必须自带完整说明书？— `nmethod` 的结构
 
-> **前置依赖**:[01 — CodeBlob 与 CodeHeap](01-codeblob-heap.md):nmethod 是 CompiledMethod 的具体形态,住在 CodeHeap 的段里;CodeBuffer 的三段在这里变成最终的连续布局
-> → **后续**:[03 — nmethod 生命周期](03-nmethod-lifecycle.md)
-> 关联域: 13-jit(编译产物落地)、15-c2(调用点与入口生成)、22-deopt(依赖 scopes/pcs 重建栈帧)、06-oops(常量池解析出来的 Method 落到这里)
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64`。这里讨论的是 HotSpot 里普通 JIT 编译方法 `nmethod` 的结构组织：入口协议、连续布局、`PcDesc/ScopeDesc`、状态字段与补丁边界。动态调用点、verified entry 补丁的具体指令以 x86_64 为例；其他平台实现会不同，但设计意图相同。JVMCI 和 native wrapper 路径有少量例外，正文以主流 C1/C2 路径为主。
+>
+> **前置依赖**：[01 — 机器码为什么也要有正规住址？— `CodeBuffer`、`CodeBlob` 与 `CodeHeap`](01-codeblob-heap.md)
+> → **后续**：[03 — `nmethod` 生命周期](03-nmethod-lifecycle.md)
 
-## 编译产物不是裸机器码
+上一篇刚把“机器码的家”安顿好：`CodeBuffer` 解决编译期可变，`CodeBlob` 给出正式布局，`CodeCache` 和 `CodeHeap` 负责把成品发布到可执行内存里。
 
-C2 花几百毫秒编译一个方法,产物是几 KB 机器码。但如果它只是机器码,GC 就不知道哪些字节里嵌着对象指针(要跟着堆的移动更新),deopt 也不知道"这个 PC 在执行哪个 Java 方法的哪一行",调用方更不知道该从哪个地址进。所以 nmethod 是一整块**自描述的代码**:机器码 + 让 GC、deopt、JVMTI、IC 都能读懂它的元数据,全部装在同一块连续内存里。这篇拆它的骨架: 三扇门(入口)、八段身(布局)、状态机与并发协议。
+但房子安好了，新的问题马上就冒出来了。
 
-## 1. 三扇门: 入口与 inline cache
+假设现在 JIT 已经把一个 Java 方法编成了几 KB 机器码。按最直觉的想法，后面的事情似乎已经很简单：调用方拿到入口地址，CPU 跳进去执行，结束。
 
-### 为什么要三个入口
+可 HotSpot 并没有把编译产物做成一段“只要能跳进去就行”的裸代码。它在 `nmethod` 里额外塞进了大量东西：多个入口地址、重定位流、常量区、oop 表、metadata 表、`PcDesc`、`ScopeDesc`、依赖表、异常表、隐式空指针表、状态字段、锁计数……第一次看源码时，这很容易让人产生一个疑问：
 
-调一个编译方法,如果调用方已经验证过接收者类型,就不该再验一遍;如果方法正在执行中(OSR),还要能从中间进入。三个入口对应三种进入方式(nmethod.hpp:90-93,逐字):
+**为什么一段编译后的 Java 方法不能只是“机器码 + 若干辅助表”？为什么 HotSpot 要把入口协议、常量、重定位、oop/metadata 索引、`PcDesc/ScopeDesc`、依赖、异常表、状态机都塞进同一个 `nmethod`，而且这些东西还要按特定顺序紧贴在一起？**
 
-```cpp
-// nmethod.hpp:90-93(逐字)
-  // offsets for entry points
-  address _entry_point;                      // entry point with class check
-  address _verified_entry_point;             // entry point without class check
-  address _osr_entry_point;                  // entry point for on stack replacement
-```
+换句更狠一点的人话：**JIT 编出来的机器码为什么必须是“可执行、可回收、可反查、可反优化”的自描述对象？**
 
-- `_entry_point` — **带类型检查的入口**。方法代码开头有一段 IC 检查序列: 接收者实际 Klass 与期望 Klass 不符就跳走。调用方还没有把握时走这里;
-- `_verified_entry_point` — **免检入口**。已验证过类型的调用方直连这里,跳过检查直接进入代码;
-- `_osr_entry_point` — **OSR 入口**,从解释器栈上"热替换"进编译代码的中间位置。OSR 的判据是 `_entry_bci != InvocationEntryBci`(nmethod.hpp:63,is_osr_method :270)——`InvocationEntryBci = -1`,即"这不是 OSR 编译"(compilerDefinitions.hpp:44 注释原文 "i.e., not a on-stack replacement compilation"): 普通编译不带 OSR 目标,OSR 编译的入口才指向"从第 N 条字节码进入"。
+这篇先把答案压成一句话：**`nmethod` 不是“机器码本体 + 配套材料”，而是一段带逆向导航能力的代码对象。线程要靠入口协议正确跳进去，GC 要靠 relocation 和 oop 表定位嵌入引用，deopt 要靠 `PcDesc + ScopeDesc` 把一个机器 PC 还原成一串 Java 帧，失效流程还要靠状态机与入口补丁阻止新调用继续闯入。HotSpot 把这些信息做成同一块连续内存，不是为了紧凑，而是为了让“给你一个 PC，就能恢复这段代码的全部语义身份”。**
 
-静态方法没有接收者要验,两个入口重合: `entry_point() == _verified_entry_point()`(nmethod.cpp:775-776 的 assert)。
+把这句话记住，后面那堆字段就不再只是零件，而会变成一个完整协议。
 
-### 未验证入口的 x86 真身
+## 先试两个最自然的理解，看看为什么都不对
 
-C2 对非静态方法在代码最前面插入一个 MachUEPNode(Unverified Entry Point,output.cpp:89-91),x86-64 的编码(x86_64.ad:1685-1692,逐字):
+### 朴素方案一：`nmethod` 不就是“机器码 + 调试信息”吗
 
-```cpp
-// x86_64.ad:1685-1692(截取核心,逐字)
-  if (UseCompressedClassPointers) {
-    masm.load_klass(rscratch1, j_rarg0);
-    masm.cmpptr(rax, rscratch1);
-  } else {
-    masm.cmpptr(rax, Address(j_rarg0, oopDesc::klass_offset_in_bytes()));
-  }
+这是最常见的第一反应。
 
-  masm.jump_cc(Assembler::notEqual, RuntimeAddress(SharedRuntime::get_ic_miss_stub()));
-```
+编译后的方法当然首先是一段机器码。为了调试、异常处理或者 GC，再额外挂几张表，也说得过去。照这个理解，机器码才是主体，其余不过是辅助材料。
 
-- `j_rarg0` 是第一个参数寄存器(x86-64 是 rdi),即**接收者 this**;`[rdi + 8]` 是接收者的 Klass 指针;
-- **期望的 Klass 在 rax 里**——不是入口代码自己嵌入的常量,而是调用方的动态调用点传给它的;
-- 比较不等 → 跳 `get_ic_miss_stub`(sharedRuntime.hpp:218-220): IC miss,重新解析并更新调用方的缓存;相等 → 落入后面的 nop 区,进入正式代码。
+这个理解的问题在于，它低估了运行时真正会对一段编译代码提出多少要求。
 
-入口的偏移关系: `_entry_point = code_begin() + CodeOffsets::Entry`(Entry 恒为 0),`_verified_entry_point = code_begin() + CodeOffsets::Verified_Entry`——即"未验证入口代码的长度"(compile.cpp:932-937,compile.hpp:608 注释原文 "Size of unvalidated entry point code")。UEP 尾部的 nop 是把 verified entry 对齐到 4 字节,让后面的补丁(§3)可以原子写(x86_64.ad:1696-1697 注释原文 "these NOPs are critical so that verified entry point is properly 4 bytes aligned for patching")。
+一段 `nmethod` 一旦发布，JVM 会立刻从多个方向同时依赖它：
 
-### 动态调用点: 期望 Klass 从哪来
+- 普通调用方要知道从哪个入口进；
+- inline cache 要知道是走带类型检查的入口，还是走免检入口；
+- GC 要知道机器码里埋着哪些 oop 和 metadata 引用；
+- deopt 要知道“当前 PC 对应哪个 Java 方法、哪条字节码、哪些局部变量和表达式栈值”；
+- 失效流程要知道怎样阻止新线程再跳进来，同时允许老栈帧把剩下的路径走完。
 
-调用方的虚调用点是这样一条指令对(x86_64.ad:12834-12841,截取核心):
+这里每一项都不是“调试时也许会用到”的外围能力，而是代码作为 JVM 一等执行体的组成部分。换句话说，`nmethod` 不是“机器码先在，旁边再贴注释”，而是**机器码从一开始就被要求能回答运行时会追问的所有问题**。
 
-```cpp
-// x86_64.ad:12834-12841(截取核心,省略 ins_cost 行)
-instruct CallDynamicJavaDirect(method meth)
-%{
-  match(CallDynamicJava);
-  effect(USE meth);
-  ...
-  format %{ "movq    rax, #Universe::non_oop_word()\n\t"
-            "call,dynamic " %}
-```
+所以如果你把其余内容都叫作“调试信息”，会立刻漏掉三类最关键的运行时责任：
 
-`movq rax, imm64`(10 字节)+ `call`(5 字节),共 15 字节——这正是 `MachCallDynamicJavaNode::ret_addr_offset()` 报告的 15(x86_64.ad:574-578): "15 bytes from start of call to where return address points"。**IC 的单态缓存值(Klass*)就写在这个 mov 的 64 位立即数里**: `CompiledIC` 构造时通过 virtual_call relocation 找到这条 load 指令(`_value = _call->get_load_instruction(r)`,compiledIC.cpp:171-179),`set_data`/`get_data` 读写的就是它。所以补丁 IC 其实只改两处: 调用的**目的地**(call 的操作数)和 mov 里的**缓存值**——指令形状从编译期就固定了,不用重排代码。
+- GC 责任：识别和更新嵌入引用；
+- 反优化责任：从一个机器 PC 还原 Java 语义栈；
+- 失效责任：在不撕裂并发执行的前提下阻止新调用进入。
 
-### IC 状态与入口的关系
+这些都不是可有可无的注释，而是代码对象本身的生存条件。
 
-一个调用点的 inline cache 有四种状态(compiledIC.hpp:39-48 的注释图,逐字):
+### 朴素方案二：这些表就算需要，也没必要跟代码贴在一起
 
-```cpp
-// compiledIC.hpp:39-48(截取注释图,逐字)
-//         [1] --<--  Clean -->---  [1]
-//            /       (null)      \
-//           /                     \      /-<-\
-//          /          [2]          \    /     \
-//      Interpreted  ---------> Monomorphic     | [3]
-//  (CompiledICHolder*)            (Klass*)     |
-//          \                        /   \     /
-//       [4] \                      / [4] \->-/
-//            \->-  Megamorphic -<-/
-//              (CompiledICHolder*)
-```
+第二个也很自然的想法是：好，我承认这些表重要。但它们为什么一定要跟着 `nmethod` 一起放在同一块连续内存里？完全可以散落在别处：代码单独放，GC 表放一张全局大表，deopt 地图再放另一边，状态字段放管理器里。只要能查到，不也一样？
 
-- **Clean**: 缓存为 null,目标指向解析桩——首次调用时解析出真实目标再补丁;
-- **Monomorphic**: 缓存为单个 Klass*。目标指向被调方法的入口: **非优化虚调用指向 `_entry_point`(未验证入口,检查在被调方做)**;只有优化/静态绑定的调用才直连 `_verified_entry_point`(compiledIC.cpp:492-496,注释 :493 "entry = method_code->verified_entry_point()" / :495 "entry = method_code->entry_point()")。`set_to_monomorphic` 在 :373-455;
-- **Megamorphic**: 目标换成 vtable/itable 分发桩(VtableStubs,compiledIC.cpp:218-268)——不止一个类时不再"猜一个入口",改走查表。这个状态下缓存值不可靠(注释原文 "Cannot rely on cached_value",compiledIC.cpp:275)——vtable 分支缓存 NULL,itable 分支缓存 CompiledICHolder;
-- **Interpreted**: 目标方法还没编译,缓存为 CompiledICHolder(方法+Klass),走 c2i 入口落到解释器(compiledIC.cpp:508-516)。
+这听起来像是在做“模块分离”，但它忽略了一个决定性的使用模式：**运行时最经常拿到的，不是方法名，不是对象指针，而是一个落在机器码中的地址。**
 
-**关键设计 (斜体)**: *检查放在被调方入口而不是调用点——调用方只负责"报上期望的 Klass",被调方自己验真。这让调用方的补丁极小(改两个操作数即可),也让"已验证的调用方"可以永久直连免检入口;而 IC miss 时被调方一跳就能进解析器,解析器反过来再补丁调用方,形成闭环。*
+比如：
 
-## 2. 八段身: 一块内存里的自描述结构
+- 栈遍历拿到返回地址；
+- 异常处理拿到故障 PC；
+- deopt 从某个 safepoint 或 trap 点恢复；
+- inline cache 补丁、依赖失效、代码清扫都围绕具体代码地址运作。
 
-### 布局总览
+也就是说，JVM 面对编译代码时，最常见的查询不是“给我这个方法的所有资料”，而是“给我这个 PC，我要立刻知道它属于谁、现在是什么状态、对应哪一层 Java 调用链、里面埋了哪些引用、能不能继续跳进去”。
 
-类注释就是权威布局图(nmethod.hpp:36-53,逐字):
+如果这些信息全散落在全局侧表里，就会出现两类问题。
+
+第一类是成本问题。每次遇到一个 `pc`，你都得多跳几层索引：
+
+- 先从地址找出它属于哪个 `nmethod`；
+- 再从 `nmethod id` 找到 GC 表；
+- 再找 deopt 表；
+- 再找状态字段；
+- 再找依赖与异常表。
+
+第二类是更麻烦的并发一致性问题。代码失效、补丁、清扫、注销这些动作本来就很敏感；如果结构信息散在好几个地方，就更难定义“何时算同一个版本”“半更新状态别人会不会看见”。
+
+所以 HotSpot 的选择不是“为了省几个指针把东西挤一起”，而是明确承认：**编译方法必须支持按地址近距离自解释。** 把相关信息贴着代码放进同一块连续内存，可以让“从 PC 出发恢复语义身份”这件事既快又稳。
+
+这就是全篇真正的总前提：`nmethod` 不是孤立代码段，而是一段自带完整导航数据的代码对象。
+
+## 三扇门：为什么一段代码要有多个入口
+
+先从最容易被低估的一层开始：入口。
+
+如果你把 `nmethod` 想成普通函数，最自然的预期就是“一个函数一个入口地址”。但 HotSpot 在 `nmethod` 里明确存了三个入口：
 
 ```cpp
-// nmethod.hpp:36-53(逐字)
-// An nmethod contains:
-//  - header                 (the nmethod structure)
-//  [Relocation]
-//  - relocation information
-//  - constant part          (doubles, longs and floats used in nmethod)
-//  - oop table
-//  [Code]
-//  - code body
-//  - exception handler
-//  - stub code
-//  [Debugging information]
-//  - oop array
-//  - data array
-//  - pcs
-//  [Exception handler table]
-//  - handler entry point array
-//  [Implicit Null Pointer exception table]
-//  - implicit null table array
+address _entry_point;
+address _verified_entry_point;
+address _osr_entry_point;
 ```
 
-机器码(body+桩)之外,还有重定位信息、常量、oop 表、调试信息、异常表、隐式空指针表。所有段不是各自 malloc 的——**它们在同一块 CodeHeap 块里首尾相接**,定位靠 header 里的偏移字段(nmethod.hpp:95-109,12 个 `_xxx_offset`,逐字)。唯一的例外: scopes 数据区直接存了地址 `_scopes_data_begin`(compiledMethod.hpp:157),而 `_scopes_data_offset` 这个字段在 jdk11u 里声明了但并未使用。
+源码注释写得很干脆：`_entry_point` 是带类检查的入口，`_verified_entry_point` 是不带类检查的入口，`_osr_entry_point` 是 on-stack replacement 入口。`share/code/nmethod.hpp:90`
 
-```cpp
-// nmethod.hpp:100-109(截取核心,逐字)
-  int _consts_offset;
-  int _stub_offset;
-  int _oops_offset;                       // offset to where embedded oop table begins (inside data)
-  int _metadata_offset;                   // embedded meta data table
-  int _scopes_data_offset;
-  int _scopes_pcs_offset;
-  int _dependencies_offset;
-  int _handler_table_offset;
-  int _nul_chk_table_offset;
-  int _nmethod_end_offset;
+为什么非要三扇门？因为“进入一段编译代码”这件事，本来就不是单一场景。
+
+### 第一扇门：`entry_point`，给还没验明正身的调用方
+
+虚调用是最典型的例子。调用点常常只知道“我现在大概率要调这个实现”，但还不能完全保证接收者的实际类型就是缓存里那一个。这个时候，调用方需要的是：先带着一个期望 Klass 过去，由被调方法入口再做最后确认。
+
+x86_64 上的未验证入口代码正是这么干的。`MachUEPNode::emit` 会在方法最前面发出一段比较：如果启用了压缩类指针，就先从接收者对象里取出实际 Klass；然后拿 `rax` 里的期望 Klass 和它比较；不等就跳到 `SharedRuntime::get_ic_miss_stub()`。`share/cpu/x86/x86_64.ad:1681`
+
+这一小段代码有两个特别值得记住的设计点。
+
+第一，**被比较的“期望 Klass”不在被调方内部硬编码，而是由调用方带过来。**
+
+第二，**类型检查放在被调方入口，而不是铺在每个调用点上。**
+
+这正是 inline cache 的闭环基础：调用方只负责缓存一个“我这次猜的是谁”，被调方负责在真正进入代码前验一下这次猜测还准不准。不准就统一跳 miss stub，让运行时重新解析并补丁调用点。
+
+所以 `entry_point` 不是“入口 1 号”，而是“**带验票逻辑的入口协议**”。
+
+### 第二扇门：`verified_entry_point`，给已经验过的调用方
+
+如果某个调用方已经不需要再验接收者类型，或者这根本不是依赖 inline cache 的虚调用，那再走一遍入口检查就是重复劳动了。这个时候就应该直连免检入口。
+
+`CompiledIC::compute_monomorphic_entry` 很清楚地写出了这条规则：如果调用被认为是 optimized，就取 `verified_entry_point()`；否则取 `entry_point()`。`share/code/compiledIC.cpp:463`
+
+这说明 HotSpot 并不是简单做了个“快入口”，而是在编码一种非常具体的承诺：
+
+- 走 `entry_point` 的调用方，还没把接收者类型这张票验完；
+- 走 `verified_entry_point` 的调用方，已经为“这个目标现在可进”负责。
+
+这也是为什么 verified entry 后面会成为失效补丁的关键拦截点：既然很多调用方已经绕过了入口检查，那一旦方法失效，就必须能快速把这条直连通路切断。
+
+### 第三扇门：`osr_entry_point`，给“从半路接管”的调用方
+
+还有一类进入方式根本不是“从方法开头调进来”，而是解释器正在某个热循环里跑着，突然决定切到编译代码继续执行。这就是 OSR。
+
+OSR 的判据也写在结构里：`_entry_bci != InvocationEntryBci` 就说明这不是普通入口编译，而是某个特定字节码位置的 on-stack replacement。`InvocationEntryBci` 在 JDK 11u 里定义为 `-1`，注释直说“not a on-stack replacement compilation”。`share/compiler/compilerDefinitions.hpp:44`、`share/code/nmethod.hpp:63`
+
+这意味着 `osr_entry_point` 不是第三个普通门，而是一扇“**从中途接手解释器现场**”的门。它的存在告诉我们：`nmethod` 不只是给未来的新调用准备的，还要能接住已经在路上的执行流。
+
+### 调用点为什么也要配合这三扇门
+
+如果只看被调方入口，还少了一半故事。另一半在调用点自己身上。
+
+x86_64 的动态 Java 调用模板 `CallDynamicJavaDirect` 直接把指令形状固定成：
+
+```text
+movq rax, imm64
+call,dynamic
 ```
 
-### 偏移链: 段与段怎么接上
+也就是先把一个 64 位立即数塞进 `rax`，再发动态调用。`share/cpu/x86/x86_64.ad:12834`
 
-这些偏移在 nmethod 构造函数里逐段算出(nmethod.cpp:685-746,截取核心,逐字):
+这 64 位立即数正是 inline cache 携带的“期望 Klass”缓存位。也就是说，调用点和入口之间形成了一个很精巧的配合：
 
-```cpp
-// nmethod.cpp:685-746(截取核心,逐字)
-    _consts_offset           = content_offset()      + code_buffer->total_offset_of(code_buffer->consts());
-    _stub_offset             = content_offset()      + code_buffer->total_offset_of(code_buffer->stubs());
-...
-    _oops_offset             = data_offset();
-    _metadata_offset         = _oops_offset          + align_up(code_buffer->total_oop_size(), oopSize);
-    int scopes_data_offset   = _metadata_offset      + align_up(code_buffer->total_metadata_size(), wordSize);
+- 调用点把自己的猜测写进 `rax`；
+- 被调方 `entry_point` 用接收者真实 Klass 来验；
+- 不命中就跳 miss stub；
+- 运行时修补调用点的缓存值和目标入口。
 
-    _scopes_pcs_offset       = scopes_data_offset    + align_up(debug_info->data_size       (), oopSize);
-    _dependencies_offset     = _scopes_pcs_offset    + adjust_pcs_size(debug_info->pcs_size());
-    _handler_table_offset    = _dependencies_offset  + align_up((int)dependencies->size_in_bytes (), oopSize);
-    _nul_chk_table_offset    = _handler_table_offset + align_up(handler_table->size_in_bytes(), oopSize);
-    _nmethod_end_offset      = _nul_chk_table_offset + align_up(nul_chk_table->size_in_bytes(), oopSize);
+这套协议再往前一步，就会连到 `CompiledIC::set_to_monomorphic` 这样的安装逻辑上。那段代码里最核心的选择只有一句：调用已优化就直指 `verified_entry_point`，否则走 `entry_point`。`share/code/compiledIC.cpp:373`
+
+这样再回头看，三扇门的意义就很清楚了：**它们不是为了多存几个地址，而是把“谁负责验类型、谁可以跳过检查、谁从中途切入”这些进入责任明确编码进了结构。**
+
+## 连续布局：为什么所有东西要挤在同一块内存里
+
+入口协议说明了“怎么进”，接下来该看“进到的到底是什么”。
+
+`nmethod.hpp` 开头那段注释，是整篇最重要的总图之一。它直接把 `nmethod` 包含的东西列出来：
+
+- header
+- relocation information
+- constant part
+- oop table
+- code body
+- exception handler
+- stub code
+- oop array
+- data array
+- pcs
+- handler entry point array
+- implicit null table array。`share/code/nmethod.hpp:36`
+
+这里最值得记住的不是项目名，而是这种排列方式本身。HotSpot 并没有把它组织成“对象指针 + 一堆外部数组”，而是用一串偏移字段把整块连续空间切成多个功能区。`_consts_offset`、`_stub_offset`、`_oops_offset`、`_metadata_offset`、`_scopes_pcs_offset`、`_dependencies_offset`、`_handler_table_offset`、`_nul_chk_table_offset`、`_nmethod_end_offset` 这些字段全在 `nmethod` 头里。`share/code/nmethod.hpp:100`
+
+也就是说，**`nmethod` 自己知道各段从哪里开始、到哪里结束。**
+
+### 偏移链为什么比“分散对象指针”更合适
+
+普通 Java 方法的 `nmethod` 构造函数里，这些偏移是按严格顺序一段一段推出来的：
+
+- `consts` 起点由 `CodeBuffer` 的 consts section 偏移决定；
+- `stub` 起点由 stubs section 偏移决定；
+- `oops` 从 data 区开头开始；
+- `metadata` 紧跟 `oops`；
+- `scopes data` 紧跟 metadata；
+- `scopes pcs` 紧跟 scopes data；
+- 之后依次是 dependencies、handler table、null check table，最后得到 `_nmethod_end_offset`。`share/code/nmethod.cpp:685`
+
+这条偏移链特别像一张装配单：前一段的终点，直接决定后一段的起点。它把 `nmethod` 做成了真正意义上的“单体对象”，而不是一个对象图。
+
+为什么这很重要？因为这让很多运行时动作都能在“已知 nmethod 基址”的前提下局部完成：
+
+- 入口地址可由 `code_begin() + offset` 算出；
+- 某张表的起点可由 `header_begin() + _xxx_offset` 算出；
+- 代码区与数据区天然共版本；
+- 发布时也能定义出清晰的一次性拷贝和可见性边界。
+
+### 两个反直觉的布局细节
+
+这条偏移链里有两个地方特别容易被想错。
+
+第一，**常量区在机器码前面。**
+
+很多人脑子里的布局会默认成“code 在前，常量和附表在后”。但 `nmethod` 这里的 `consts` 属于 content 区最前面的部分，它来自上一篇 `CodeBuffer` 的 `SECT_CONSTS`。这意味着代码并不是孤立发射的，它天然依赖旁边的常量布局。
+
+第二，**异常处理和 deopt handler 归在 stub section，而不是 code body 正文里。**
+
+源码在构造阶段直接写了注释：`Exception handler and deopt handler are in the stub section`。`share/code/nmethod.cpp:718` 这句话的设计意味很强：HotSpot 把“主路径指令体”和“后备处理路径”在布局上刻意分开了。前者是正常执行主线，后者是故障、异常、去优化时的补救跳板。
+
+这不是简单分类，而是在内存层面保留“主流程”和“兜底流程”的结构差异。
+
+### 为什么发布顺序也写进了结构语义里
+
+构造函数后半段还有一个非常值得停一下的细节：数据拷贝顺序。
+
+普通 `nmethod` 会先做这些事：
+
+- `copy_code_and_locs_to(this)` 拷代码和重定位；
+- `copy_values_to(this)` 拷 `CodeBuffer` 记录的值；
+- `debug_info->copy_to(this)` 拷调试/作用域数据；
+- `dependencies->copy_to(this)` 拷依赖；
+- 然后先 `CodeCache::commit(this)`；
+- 最后才拷 `handler_table` 和 `nul_chk_table`。`share/code/nmethod.cpp:756`、`share/code/nmethod.cpp:766`、`share/code/nmethod.cpp:768`
+
+这个顺序说明一件很重要的事：**不是所有附表都处在同一个发布时机上。**
+
+GC、地址反查、基本调试/反优化这些结构，要在 commit 之前就准备好；`handler_table` 和 `nul_chk_table` 则是在 `CodeCache::commit(this)` 之后补进去。更稳妥的理解不是“后者不重要”，而是“当前实现把它们放在了发布后的补齐阶段”。
+
+这反过来再次证明：这些段不是随便拼的附件，而是按运行时使用方式被分批安放进 `nmethod` 的结构组成。
+
+## GC 字典：为什么 relocation、oop 表、metadata 表必须在场
+
+前面说这些段不是附件，现在可以把 GC 这条线单独拎出来。
+
+如果 `nmethod` 真是纯机器码，GC 最大的问题就是：**它根本不知道代码里哪些位置藏着对象引用或元数据引用。**
+
+而编译代码里确实会嵌引用。
+
+比如：
+
+- 某些常量可能直接指向 oop；
+- 某些调用点、内联缓存、klass 常量、method 常量会把 metadata 地址埋进代码或附表；
+- 垃圾收集、类卸载、补丁和依赖失效都需要理解这些嵌入项的性质。
+
+所以 `nmethod` 必须带两样东西：
+
+- relocation 信息，告诉系统哪些位置需要按特定语义解释；
+- oop/metadata 索引表，提供稳定的引用槽位。
+
+`nmethod` 结构里专门有 `_oops_offset` 和 `_metadata_offset`。`share/code/nmethod.hpp:100` 更关键的是，源码把索引语义直接写死了：`index 0 is reserved for null`。`share/code/nmethod.hpp:362`
+
+这条规则背后的好处很大。它让代码里出现的“引用编号”不需要额外引入一个“无值”标志位；0 就自然表示空，真正有效项从 1 开始。这样无论是解码 relocation，还是在 deopt/debug 信息里引用对象、metadata，都能共享同一套稠密索引语义。
+
+从写作主线角度，最该记住的是一句话：**代码不是不碰对象，恰恰相反，代码区里也会埋对象世界的入口。**
+
+一旦承认这一点，`nmethod` 就绝不可能只是“执行字节流”。它必须额外带着一份词典，让 GC 和补丁逻辑知道这些字节里到底藏了什么。
+
+## deopt 地图：为什么一个机器 PC 能还原出一串 Java 帧
+
+如果 GC 这条线告诉我们“代码里还埋着引用语义”，那 deopt 这条线则更进一步：**一个机器 PC 背后还埋着完整的 Java 执行语义。**
+
+这也是 `nmethod` 最不像普通本地函数的地方。
+
+一个普通 C 函数如果崩在某个 PC 上，调试器顶多给你一条本地调用栈。但 JVM 在 deopt 时要求的远比这多：给你一个正在执行的机器码地址，你要能说出：
+
+- 它对应哪个 Java 方法；
+- 正在执行哪条字节码；
+- 如果这个位置是内联出来的，那它属于内联链里的哪一层；
+- 每一层 Java 帧的局部变量、表达式栈和监视器状态该怎样恢复。
+
+这件事只靠“机器码地址”当然做不到，所以 `nmethod` 里有两张配套地图：`PcDesc` 和 `ScopeDesc`。
+
+### 第一张图：`PcDesc`，把机器 PC 接到解码入口
+
+`PcDesc` 的结构非常小，关键只有三个字段：
+
+- `_pc_offset`
+- `_scope_decode_offset`
+- `_obj_decode_offset`。`share/code/pcDesc.hpp:34`
+
+其中最关键的就是前两个：一个记录“这个描述对应 `nmethod` 起点之后多远的 PC”，另一个记录“对应的 scope 信息从 debug 数据区里的哪个偏移开始解码”。
+
+也就是说，`PcDesc` 不直接存大段语义内容，它更像一张路由表：**先把机器地址定位到某个解码入口。**
+
+### 第二张图：`ScopeDesc`，把 Java 语义一层层展开
+
+真正的 Java 语义记录在 `ScopeDesc` 里。解码头部时会顺序读出：
+
+- `_sender_decode_offset`
+- `_method`
+- `_bci`
+- `_locals_decode_offset`
+- `_expressions_decode_offset`
+- `_monitors_decode_offset`。`share/code/scopeDesc.cpp:79`
+
+这几项几乎就是一张最小可恢复 Java 栈帧说明书：
+
+- 这是哪个方法；
+- 这是哪条字节码位置；
+- 局部变量怎么解码；
+- 表达式栈怎么解码；
+- 监视器状态怎么解码。
+
+而这里最有设计味道的一点，是 `_sender_decode_offset`。
+
+它不是直接存一个“外层 ScopeDesc 指针”，而是存一个偏移。`is_top()` 判断它是不是最外层，`sender()` 再顺着这个偏移去解码上一层。`share/code/scopeDesc.cpp:148`
+
+为什么不用指针链，而要用偏移链？因为这些记录本来就不是常驻展开对象，而是一段紧凑压缩流。真正需要某层 Java 语义时，才顺着偏移现场解码。这样既节省空间，也让整个 `nmethod` 仍然保持“单块连续、按需反解”的结构风格。
+
+### 为什么一个 PC 会对应一串 Java 帧
+
+这一步是很多读者最容易一下子看通的地方。
+
+如果没有内联，一个机器 PC 顶多只对应一个 Java 方法位置。但一旦内联发生，机器码里的某一段实际上同时代表了多层 Java 调用链：
+
+- 最内层是当前真正执行的那段内联方法逻辑；
+- 外面一层是把它内联进来的调用者；
+- 再外面还可能有更上层调用者。
+
+所以 deopt 时不能只恢复“一帧”，而要恢复一串逻辑 Java 帧。HotSpot 的做法正是：
+
+- 先用 `PcDesc` 把当前机器 PC 接到最内层 scope；
+- 再沿着 `ScopeDesc` 的 sender 偏移一层层往外走；
+- 每一层都带着 method、bci、locals、expressions、monitors 的解码入口；
+- 于是整条 Java 语义栈就能重新拼出来。
+
+这就是为什么我前面一直说 `nmethod` 是“可逆”的。因为它不只是能执行，还能在必要时**从机器码世界逆向长回 Java 世界**。
+
+到这里先立一个路标：如果你现在只记得一句话，那就记住——**`PcDesc` 负责把 PC 接到地图上，`ScopeDesc` 负责把地图一层层展开成 Java 帧。**
+
+## 状态机与并发协议：为什么结构对象本身还要带生命体征
+
+讲完入口、布局、GC、deopt，很多人会以为 `nmethod` 的结构已经差不多了：无非是一段代码附带一堆说明书。
+
+还差最后一个常被低估的维度：**这段代码不是静态文档，它是会失效、会被判死刑、会被延迟回收的活动对象。**
+
+所以 `nmethod` 结构里不仅有布局字段，还有生命体征字段。
+
+### 状态不是附属概念，而是结构的一部分
+
+`CompiledMethod` 的状态枚举写得非常清楚：`not_installed`、`in_use`、`not_used`、`not_entrant`、`zombie`、`unloaded`。`share/code/compiledMethod.hpp:188`
+
+这几个状态不是为了打印日志好看，而是在回答一个运行时根本问题：**这段代码现在还能不能接新调用，老栈帧还能不能留在里面，回收器能不能动它。** 这里尤其别把 `unloaded` 误会成“结构生命周期的绝对终点”：按 03 篇会展开的清扫路径，普通 non-OSR 方法在 `unloaded` 之后通常还会继续推进到 `zombie` 再 `flush`，只是它在语义上已经不再可执行。
+
+这意味着 `nmethod` 的结构解释和生命周期解释其实没有完全分家。因为只要入口地址还暴露给别人，状态就会直接决定入口应不应该继续工作。
+
+### 为什么要补丁 verified entry
+
+`make_not_entrant_or_zombie` 这段状态转换逻辑，最值得盯住的动作不是“改 `_state`”，而是更早发生的入口补丁。
+
+在真正改状态之前，如果这不是 OSR 方法，而且当前还没到 `not_entrant`，HotSpot 会调用 `NativeJump::patch_verified_entry(entry_point(), verified_entry_point(), SharedRuntime::get_handle_wrong_method_stub())`。`share/code/nmethod.cpp:1144`、`share/code/nmethod.cpp:1191`
+
+这件事的设计含义非常直接：
+
+- 已经走 verified entry 的调用方，本来跳过了类型检查与其它入口协议；
+- 一旦方法失效，不能指望所有调用方自己“下次别来了”；
+- 所以必须在被调方门口直接换一个路牌，让后来者一律改道去 `handle_wrong_method_stub`。
+
+也就是说，失效不是靠“状态字段改成 not_entrant 然后大家自觉遵守”，而是靠**结构内的入口地址本身被补丁成新的控制流出口。**
+
+这再次证明：入口字段和状态字段不是两套互不相干的资料，它们在同一个对象里共同构成可执行协议。
+
+### 为什么还要 `mark_as_seen_on_stack`
+
+同一段状态转换逻辑里还有另一句很关键的话：如果目标状态是 `not_entrant`，必须先 `mark_as_seen_on_stack()`，再做状态写入，而且中间还有一个 `storestore` 屏障。`share/code/nmethod.cpp:1212`
+
+这在写作上最值得翻译成一句人话：**HotSpot 不仅要阻止新调用进去，还要谨慎地区分“门口关了”和“屋里已经没人了”。**
+
+`not_entrant` 只说明不再接待新客；但老栈帧可能还在里面跑。所以从 `not_entrant` 到 `zombie` 中间必须留出一段等待窗口，靠栈遍历来确认这段代码是不是还被任何线程踩着。
+
+这也解释了为什么状态转换前后会带着入口补丁、栈标记和方法引用清理这些操作。它不是单纯改一个枚举值，而是在推进一整套并发退出协议。
+
+### `nmethodLocker` 不是状态锁，而是“先别动我”计数
+
+除了状态机本身，`nmethod` 结构里还带着 `_lock_count`，`is_locked_by_vm()` 的定义就是 `_lock_count > 0`。`share/code/nmethod.hpp:438`
+
+对应的 `nmethodLocker` 逻辑非常朴素：`lock_nmethod` 做原子加一，`unlock_nmethod` 做原子减一，并断言不能给 zombie 方法乱加锁。`share/code/nmethod.cpp:2037`
+
+这把“锁”的意义特别容易想错。它不是拿来决定状态流转的互斥锁，也不是替代 `Patching_lock` 的结构锁。它做的事情更轻：**谁现在还在危险地用这段代码，先报个数，告诉回收逻辑别急着把尸体拖走。**
+
+所以这里一定要区分两个层次：
+
+- `Patching_lock` 管的是“状态和入口补丁这套转换动作本身怎么安全发生”；
+- `nmethodLocker` 管的是“虽然你已经该死了，但此刻还有 VM 角色在读你，暂时别清走”。
+
+这两个层次叠在一起，才让 `nmethod` 真正具备“既能失效，又不撕裂并发读者”的能力。
+
+## 到这里为止，主线其实只发生了五件事
+
+如果前面信息很多，这里先把它们压回五个动作：
+
+1. `nmethod` 用多入口协议区分未验证调用、已验证调用和 OSR 切入；
+2. 它把代码、常量、重定位、各种表紧贴成一块连续对象；
+3. 它带着 oop/metadata 词典，让 GC 和补丁逻辑读懂代码里埋了什么；
+4. 它带着 `PcDesc + ScopeDesc` 地图，让机器 PC 可以逆向恢复 Java 语义栈；
+5. 它带着状态字段、入口补丁和锁计数，让失效与回收按并发协议发生。
+
+只要这五件事还在脑子里，`nmethod` 就不再是字段清单，而会重新变成一个完整设计。
+
+## 常见误解澄清
+
+### 误解一：`nmethod` 只是带调试信息的机器码
+
+不是。
+
+调试信息只是其中一部分。真正关键的是它还承担 GC 引用索引、deopt 逆向恢复、入口补丁和状态失效协议。没有这些，JVM 根本不能把它当成熟的编译方法对象使用。`share/code/nmethod.hpp:36`
+
+### 误解二：verified/unverified entry 只是性能优化
+
+不只是。
+
+它们首先是调用协议分层：谁还需要验接收者类型，谁已经可以直连，谁从 OSR 半路切进来。性能收益只是这套协议顺带带来的结果，不是唯一目的。`share/code/nmethod.hpp:90`、`share/code/compiledIC.cpp:463`
+
+### 误解三：`ScopeDesc` 只是给 debugger 用
+
+不对。
+
+`ScopeDesc` 最重要的使命是 deopt 时恢复 Java 语义帧，尤其是在内联把多层 Java 调用压成同一段机器码之后。它是反优化与栈语义恢复的核心地图，不是外设。`share/code/scopeDesc.cpp:79`
+
+### 误解四：`CodeCache::commit(this)` 之后再拷异常表，说明异常表不重要
+
+不能这么理解。
+
+它只说明当前实现把 `handler_table` 和 `nul_chk_table` 放在 `CodeCache::commit(this)` 之后补齐；不代表它们在功能上可有可无，也不该直接外推出“它们整体不重要”。更稳妥的结论只是：这些结构和 commit 前那批必须先就位的内容不在同一个发布时机里。`share/code/nmethod.cpp:766`、`share/code/nmethod.cpp:768`
+
+### 误解五：`nmethodLocker` 就是状态锁
+
+不是。
+
+状态转换的关键互斥在 `Patching_lock`；`nmethodLocker` 只是用一个原子计数告诉回收逻辑“现在还有人安全地持有我，别清”。它延迟回收，但不主导状态机。`share/code/nmethod.hpp:438`、`share/code/nmethod.cpp:2037`
+
+## 收网：`nmethod` 是一段能从 PC 反推出完整 Java 语义的代码对象
+
+现在再回头看最开头那个问题，答案已经能收成一张总图了。
+
+```text
+调用者进入 nmethod
+  ├─ entry_point            : 带接收者类型检查
+  ├─ verified_entry_point   : 已验证调用方直连
+  └─ osr_entry_point        : 从解释器栈中途切入
+
+nmethod 连续布局
+  header
+  relocations
+  consts
+  code body
+  handlers / stubs
+  oops / metadata
+  scopes data
+  pcs
+  dependencies
+  exception table
+  implicit null table
+
+运行时读取它
+  ├─ IC / 调用协议：决定从哪扇门进
+  ├─ GC：沿 relocation + oop/metadata 表更新嵌入引用
+  ├─ Deopt：pc -> PcDesc -> ScopeDesc sender 链 -> Java 帧重建
+  └─ 状态机：补丁 verified entry，禁止新调用继续进入
 ```
 
-从第一个偏移出发,后一个永远是"前一个 + 上一段的实际大小(对齐后)",最终得出整块长度。实际内存顺序:
+把它再压成三句话：
 
-```
-header → relocation → consts → 机器码(code) → stubs(含 exception/deopt handler) → oops 表 → metadata 表 → scopes 数据 → scopes pcs → dependencies → handler table → null check table
-```
+- 入口协议让 `nmethod` 不只是“能执行”，还知道“谁以什么资格进来”。
+- 连续布局和各类表让 `nmethod` 不只是“有代码”，还知道“这段代码里埋了什么、发生了什么、怎么退回 Java 世界”。
+- 状态机和补丁让 `nmethod` 不只是“曾经可用”，还知道“什么时候该拒绝新调用、什么时候还能等老栈帧走完”。
 
-对照 01 篇的四区: header+relocation 是头部区,consts+code+stubs 是 content 区,从 oops 表到 null check 表是 data 区。注意两点与直觉不同的地方:
+所以 `nmethod` 的本质，从来都不是一段机器码加几张附表。
 
-- **consts 在机器码之前**——常量段是 content 区的第一段(CodeBuffer 的 SECT_CONSTS 排最前,顺序即最终布局)。C2 加载 double 常量就是 `movsd xmm0, [$constantaddress]`(x86_64.ad:6076-6085 "load from constant table"),x86-64 下是 rip 相对寻址,常量就放在紧邻代码之前;
-- **exception/deopt handler 不在 code 区,在 stubs 区**(nmethod.cpp:718 注释原文 "Exception handler and deopt handler are in the stub section",`_exception_offset = _stub_offset + ...` :722)——它们是补丁性质的后备代码,和出站桩放一起。
+它是一段**可逆的、自描述的、可失效的代码对象**。给你一个落在其中的 PC，HotSpot 不但要能让线程继续跑，还要能回答它属于哪个方法、哪条字节码、哪层内联调用链、现在还能不能再进，以及将来该怎样安全地退出历史舞台。
 
-### 各段干什么: 给 GC 和 deopt 的字典
-
-- **relocation**: 压缩的重定位流——标注哪些地址存着 oop/IC 目标/调用目标,是 GC 和补丁的索引;
-- **consts**: 编译期确定的 double/long/float 常量与跳转表;
-- **oops 表**: 编译时嵌入的 oop 索引数组,GC 移动对象时按它更新嵌入指针。注意**索引 0 保留给 NULL**(nmethod.hpp:361-369,注释原文 "index 0 is reserved for null"),有效索引从 1 开始、真正元素从 oops_begin()[0] 开始,所以 `oop_at(i)` 读的是 `oops_begin()[i-1]`;
-- **metadata 表**: 嵌入的 Klass*/Method* 索引,规则同上(索引 0 保留,NULL);
-- **scopes 数据 + pcs**: deopt 的地图——下面单独讲;
-- **dependencies**: 类层次假设清单(CHA 的赌注,"我赌这个类没有子类"之类),假设破了就 deopt;
-- **handler table / null check table**: 异常处理范围表和隐式空指针表——x86 上解引用空指针会硬件报错,靠 pc 反查这张表决定"抛出 NPE 还是继续执行"。
-
-数据从 CodeBuffer/记录器搬进 nmethod 有固定顺序(nmethod.cpp:756-770): 先拷贝代码与重定位,再拷 oops/metadata 表,然后 scopes、dependencies,`CodeCache::commit(this)` 发布,最后才拷异常表——**发布之后才补最后一类数据**,因为异常表不参与 GC 与补丁,晚一点无妨。
-
-### scopes 与 pcs: 从 PC 反推 Java 栈
-
-deopt 时手里只有一个 PC(正在执行的机器码地址),要还原出"这是在哪个方法的哪条字节码"。两张表配合:
-
-- **PcDesc** —— pc → scope 的索引(pcDesc.hpp:37-39,逐字):
-
-```cpp
-// pcDesc.hpp:37-39(截取核心,逐字)
-  int _pc_offset;           // offset from start of nmethod
-  int _scope_decode_offset; // offset for scope in nmethod
-  int _obj_decode_offset;
-```
-
-每条 PcDesc 把"nmethod 内偏移"映射到"scope 记录的解码偏移";
-
-- **ScopeDesc** —— 一条内联层的记录(scopeDesc.cpp:79-86,截取核心,逐字):
-
-```cpp
-// scopeDesc.cpp:79-86(截取核心,逐字)
-    _sender_decode_offset = stream->read_int();
-    _method = stream->read_method();
-    _bci    = stream->read_bci();
-
-    // decode offsets for body and sender
-    _locals_decode_offset      = stream->read_int();
-    _expressions_decode_offset = stream->read_int();
-    _monitors_decode_offset    = stream->read_int();
-```
-
-每条 scope 记录 = 方法 + 字节码位置 + 局部变量/表达式/监视器值的解码偏移。**内联的调用者不是指针,是 `_sender_decode_offset`**——一个指向外层记录的偏移,`sender()` 按它解码出调用者(scopeDesc.cpp:152-155),`is_top()` 就是该偏移为 serialized_null(最外层,scopeDesc.cpp:149)。为什么用偏移不用指针: 这些记录是压缩流,只在需要时按偏移现解码,不驻留内存。
-
-**关键设计 (斜体)**: *内联会让一个 PC 同时属于多个 Java 帧——PC 落在内联方法的代码里,它的"调用链"就是 sender 链。deopt 时从 PcDesc 找到最内层 scope,沿 sender 链逐层走到最外层,每层都有完整的局部变量描述,Java 栈帧就能逐帧重建。PC 是入口,scope 是地图,scopes_pcs 段是两者的接线表。*
-
-## 3. 状态机与并发协议
-
-### 五个正史状态
-
-代码区比堆更危险: 一段代码可能**正在被执行**(栈上有帧)、**刚被判死刑**(依赖失效)却还不能删、**已无活帧**可回收。nmethod 用状态机管这件事,枚举在父类 compiledMethod.hpp:188-197(逐字):
-
-```cpp
-// compiledMethod.hpp:188-197(逐字)
-  enum { not_installed = -1, // in construction, only the owner doing the construction is
-                             // allowed to advance state
-         in_use        = 0,  // executable nmethod
-         not_used      = 1,  // not entrant, but revivable
-         not_entrant   = 2,  // marked for deoptimization but activations may still exist,
-                             // will be transformed to zombie when all activations are gone
-         zombie        = 3,  // no activations exist, nmethod is ready for purge
-         unloaded      = 4   // there should be no activations, should not be called,
-                             // will be transformed to zombie immediately
-  };
-```
-
-- `not_installed`(-1): 构造中,只有构造线程能推进状态;
-- `in_use`(0): 正常服务;
-- `not_used`(1): "不可进入但可复活"的过渡态。jdk11u 里它实际上不会被赋给 `_state`——`make_not_used()` 直接转调 `make_not_entrant()`(nmethod.hpp:342),分层编译新版本上线时旧代码走的就是这条路径(ciEnv.cpp:1072);
-- `not_entrant`(2): 不可再进入(deopt/依赖失效/类重定义),但栈上可能还有活跃帧,不能删;
-- `zombie`(3): 无活跃帧,等 sweeper 收尸;
-- `unloaded`(4): 终态。
-
-状态单调前进,不能回退。注意 `is_in_use()` 的实现是 `_state <= in_use`(nmethod.hpp:321)——把 not_installed(-1) 也算"可用",这依赖枚举按"存活程度"有序的设计: `is_alive()` 则是 `_state < zombie`(:322)。[实证:] `jcmd Compiler.codelist` 每行第三列就是状态(materials/commands/jcmd-Compiler.codelist.txt,格式见 codeCache.cpp:1667-1681 的 `print_codelist`): 755 个 nmethod 里 696 个 in_use(0)、59 个 not_entrant(2)——"判了死刑但还没被扫除器收走"的代码在真实系统里一直存在。
-
-### 转换: 互斥锁 + 双重检查,不是 CAS
-
-状态转换不是一次原子 CAS。`_state` 是 `volatile signed char`,`Patching_lock` 保护(nmethod.hpp:127-128,注释原文 "Protected by Patching_lock"),转换函数(nmethod.cpp:1144 起)的真实协议是:
-
-- **先看 `_state == state` 就返回 false**——"已是终态,省得抢锁"(nmethod.cpp:1148-1153);
-- 拿 `Patching_lock`(非 safepoint 锁,:1180),**锁内再看一次** `_state == state`——第二个线程已经做完就退出(:1182-1186);
-- 真正做状态转移的线程还会干三件大事:
-  1. `NativeJump::patch_verified_entry(entry_point(), verified_entry_point(), SharedRuntime::get_handle_wrong_method_stub())`(:1190-1193)——**把免检入口的 5 字节改写成 `jmp handle_wrong_method_stub`**,让所有已直连的调用方立刻改道;
-  2. `mark_as_seen_on_stack()`(:1212-1214)——更新栈遍历标记,记录"还有没有活帧"(not_entrant 才有此步骤,顺序在状态变更之前);
-  3. `_state = state`(:1217-1218),如果目标方法还指着这个 nmethod,`method()->clear_code(...)` 清掉引用(:1233-1237)。
-
-补丁的原子性由硬件保证: x86-64 用 8 字节的 `Atomic::store` 一次写完整条 5 字节 jmp + 填充(nativeInst_x86.cpp:545-561)。
-
-### nmethodLocker: 引用计数锁
-
-状态机之外还有一把"软锁": 谁要在代码区做点危险事(反优化时的栈遍历 deoptimization.cpp:1546、JVMTI 的卸载事件 jvmtiImpl.cpp:920、运行时解析 sharedRuntime.cpp:1078),就给 nmethod 加一个引用计数,锁着就不许变 zombie。实现(nmethod.cpp:2035-2049,截取核心,逐字):
-
-```cpp
-// nmethod.cpp:2035-2049(截取核心,逐字)
-void nmethodLocker::lock_nmethod(CompiledMethod* cm, bool zombie_ok) {
-  if (cm == NULL)  return;
-  if (cm->is_aot()) return;  // FIXME: Revisit once _lock_count is added to aot_method
-  nmethod* nm = cm->as_nmethod();
-  Atomic::inc(&nm->_lock_count);
-  assert(zombie_ok || !nm->is_zombie(), "cannot lock a zombie method");
-}
-
-void nmethodLocker::unlock_nmethod(CompiledMethod* cm) {
-  if (cm == NULL)  return;
-  if (cm->is_aot()) return;  // FIXME: Revisit once _lock_count is added to aot_method
-  nmethod* nm = cm->as_nmethod();
-  Atomic::dec(&nm->_lock_count);
-  assert(nm->_lock_count >= 0, "unmatched nmethod lock/unlock");
-}
-```
-
-`is_locked_by_vm()` 就是 `_lock_count > 0`(nmethod.hpp:438,注释原文 "it is unsafe to remove this nmethod even if it is a zombie, since the VM or the ServiceThread might still be using it"),而 sweeper 的 `can_convert_to_zombie()` 明确要求 `!is_locked_by_vm()`(nmethod.cpp:999-1007)——锁计数非零,连 zombie 都不许变。RAII 封装在 nmethod.hpp:630-669: 构造时 lock,析构时 unlock,异常安全。
-
-**关键设计 (斜体)**: *状态机管"代码本身该不该活",nmethodLocker 管"谁正在用所以暂时别杀"——两个层次互不干扰: 加锁只延迟淘汰,不改变状态;解锁后 sweeper 才按栈遍历标记决定收尸。计数锁不用真正的锁,就是一个 int 的原子增减: 非零即被锁(nmethod.hpp:438),sweeper 看到非零就不动它。*
-
-## 核心悬念
-
-nmethod 的骨架到此完整: 三扇门让"已验证/未验证/OSR"各走各的入口,IC 在调用点与入口之间闭环;八段身让 GC、deopt、JVMTI 都能读懂一段机器码;状态机从 not_installed 一路推进到 unloaded,途中靠 Patching_lock、8 字节原子补丁、引用计数保护每一处危险切换。但"谁在什么时候推进状态"还悬着: 谁发现方法变凉了?栈上的活帧怎么查?zombie 的空间怎么回到 CodeHeap?——下一篇: nmethod 生命周期——扫除器怎么判断一段代码不需要了。
+下一篇就顺着最后一个问题继续往下走：结构已经看懂了，但谁在什么时候把一个 `nmethod` 从 `in_use` 推到 `not_entrant`、再推到 `zombie`？谁来证明栈上已经没人？空间又是怎么回到 `CodeHeap` 的？——下一篇展开 `nmethod` 生命周期。
 
 > → [03-nmethod-lifecycle.md](03-nmethod-lifecycle.md)

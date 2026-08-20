@@ -1,192 +1,154 @@
-# 02. AQS 的等待与唤醒 — acquireQueued、park、取消、公平性
+# AQS 的等待与唤醒：为什么线程不能失败就立刻睡下去
 
-> **前置依赖**: [12-lock-sync/01 — AQS 核心](01-aqs-core.md)(state/CLH 队列/acquire 骨架)、[11-thread-threadlocal/01 — 线程生命周期](../11-thread-threadlocal/01-thread-lifecycle.md)(中断与线程状态)
-> → **后续**:[12-lock-sync/03 — ReentrantLock 与 Condition](03-reentrantlock-condition.md)
-> 关联: 域 32 Unsafe(park/unpark,规划中);域 11 线程(WAITING 状态)
+> 本文基于 JDK 11 `AbstractQueuedSynchronizer`。讨论范围聚焦 `acquireQueued`、`shouldParkAfterFailedAcquire`、`parkAndCheckInterrupt`、`cancelAcquire`、`unparkSuccessor` 与公平性检查。Condition 条件队列与共享模式传播放到后续篇章。
+> **前置依赖**：[AQS 核心](01-aqs-core.md)、[线程生命周期与中断基础](../11-thread-threadlocal/01-thread-lifecycle.md)
+> **后续**：[ReentrantLock 与 Condition](03-reentrantlock-condition.md)
 
-## 线程入队之后,睡与醒的完整机制
+## 先看一个最顺手、也最容易把线程永远睡死的朴素方案
 
-第 1 篇讲了 AQS 的骨架: 尝试失败就入队。但入队之后呢——线程怎么挂起、谁唤醒它、中断怎么办、取消的节点怎么清理、公平锁怎么禁止插队?这一篇把 AQS 队列的完整运转拆开: acquireQueued 的自旋+park、SIGNAL 委托、unparkSuccessor 的唤醒传播、以及公平性检查。
+上一篇已经把 AQS 的骨架立住了：`state` 负责表达同步资格，CLH 变体队列负责收容失败线程，`tryAcquire` / `tryRelease` 等模板方法让不同同步器给 `state` 赋予各自语义。可读到这里，很多人会自然补上一句：既然线程失败后已经排队了，那就直接 `park()` 睡下去，等别人 release 时叫醒它不就好了？
 
-## 1. "acquireQueued 在干什么？" — 自旋 + park
+这个想法特别顺手，也特别危险。危险不在于“睡下去”本身，而在于**线程什么时候能安全地睡**。如果它还没和前驱建立起明确的唤醒协议，就贸然 `park()`，恰好可能发生这样一个竞态：前驱已经释放过了，也已经检查过“自己并没有承诺要叫醒谁”，于是它直接返回；后继线程这时才睡下去，于是再也没人知道该来叫它。
 
-### 1.1 循环:前驱是 head 才尝试
+这就是 AQS 等待与唤醒主线真正要解决的问题：**失败线程不是排进去就能睡，必须先把“前驱负责唤醒我”这条协议建好。** 整篇文章都围绕这个问题展开：`acquireQueued` 为什么是“循环 + 挂起”而不是忙等，`SIGNAL` 为什么要挂在前驱节点上，取消节点怎么清理，释放方又为什么有时得从 tail 反向找有效后继。
 
-`acquireQueued`(`AbstractQueuedSynchronizer.java:906-927`)是排队线程的主循环:
+## 一、`acquireQueued` 不是忙等自旋，而是“被唤醒后再乐观重试”的循环
 
-```java
-// AbstractQueuedSynchronizer.java:906-927(截取核心,逐字)
-    final boolean acquireQueued(final Node node, int arg) {
-        boolean interrupted = false;
-        try {
-            for (;;) {
-                final Node p = node.predecessor();
-                if (p == head && tryAcquire(arg)) {
-                    setHead(node);
-                    p.next = null; // help GC
-                    return interrupted;
-                }
-                if (shouldParkAfterFailedAcquire(p, node))
-                    interrupted |= parkAndCheckInterrupt();
-            }
-        } catch (Throwable t) {
-            cancelAcquire(node);
-            if (interrupted)
-                selfInterrupt();
-            throw t;
-        }
-    }
+### 先看它在循环里真正做了哪几件事
+
+AQS 的排队线程主线在 `acquireQueued`，入口位于 `AbstractQueuedSynchronizer.java:906-922`。这段代码看上去是个死循环，但理解它时一定不能把它误认成 while 忙等。它的核心节奏是：**检查自己是不是已经排到可以尝试获取的位置；如果还没到，就决定能不能安全睡下；睡醒后再回来重试。**
+
+这正是“循环 + 挂起”与“忙等自旋”的根本区别。忙等是线程不肯放弃 CPU，一直原地空转检查；AQS 则是在条件不满足时主动 park，把 CPU 让出去，等真正被唤醒后再回来进入下一轮判断。
+
+### 为什么只有前驱是 head 才有资格再次 tryAcquire
+
+`acquireQueued` 里最关键的判断之一，是当前节点的前驱是否正好是 `head`。这条规则不是编码风格，而是在队列里重新建立“谁先尝试”的秩序。线程失败后既然已经排了队，就不能每个节点醒来都同时再去抢一次资格；否则队列就失去意义了。
+
+所以 AQS 采用的是一种近似 FIFO 的推进方式：只有 head 之后的那个节点，才拥有下一次重新 `tryAcquire` 的优先权。排在更后面的节点即使醒来，也不该越过自己的前驱直接参与竞争。
+
+这条规则非常重要，因为它把上一章的“失败线程停泊区”变成了真正有序推进的等待链：线程不是单纯地挤在队列里，而是在 head 之后一位一位地争取出队资格。
+
+### 为什么要在循环里处理异常和中断痕迹
+
+`acquireQueued` 不只关心“睡还是醒”，它还要关心等待过程中线程是否被中断、是否因为异常需要退出排队。`parkAndCheckInterrupt()`（`AbstractQueuedSynchronizer.java:884`）负责在被唤醒后带回中断信息，`selfInterrupt()`（`AbstractQueuedSynchronizer.java:875`）则在适当时机把中断标志补回给上层。这个细节说明：AQS 并没有把等待看成“只要能拿到锁就行”，而是把线程状态也纳入协议的一部分。
+
+所以这一节真正要留下的结论是：**`acquireQueued` 的循环不是为了让线程拼命检查，而是为了让线程在每次被唤醒后，重新确认自己是不是已经进入了可以尝试获取的那一刻。**
+
+## 二、为什么失败后不能立刻 park：`SIGNAL` 是先建好的唤醒承诺
+
+### 先推演那个最致命的竞态窗口
+
+回到开头那个失败方案。线程 tryAcquire 失败后，如果直接 `park()`，表面看好像很自然：反正我拿不到，那就睡。可这中间少了一步最关键的协调：前驱节点根本不知道“自己释放时需要负责叫醒后继”。
+
+于是竞态窗口就出现了：前驱可能在线程真正睡下去之前已经 release 完成，还顺手检查过“没有需要唤醒的后继”。后继这时再去睡，就会错过本该属于自己的那次唤醒，形成永久沉睡。
+
+AQS 解决这个问题的方式，不是让释放者全局扫描谁可能要睡，而是让**准备睡的后继线程先去修改前驱的状态，明确立一个唤醒委托**。这就是 `SIGNAL` 的意义。
+
+### `shouldParkAfterFailedAcquire` 为什么是等待协议的心脏
+
+这套协议的真正心脏在 `shouldParkAfterFailedAcquire`，位于 `AbstractQueuedSynchronizer.java:844-867`。它最重要的不是“判断要不要 park”，而是“判断唤醒协议是否已经成立”。
+
+这里涉及三个关键状态事实：
+
+- `CANCELLED = 1`（`AbstractQueuedSynchronizer.java:401`）
+- `SIGNAL = -1`（`AbstractQueuedSynchronizer.java:402-403`）
+- `waitStatus` 字段（`AbstractQueuedSynchronizer.java:446`）
+
+这几个状态的真正语义，一定要放回协议里看。尤其是 `SIGNAL`，它不是“我已经睡了”的自我标记，而是**前驱节点对后继的承诺：我在 release 时负责唤醒你。**
+
+### 三分支逻辑为什么刚好能闭合竞态
+
+`shouldParkAfterFailedAcquire` 的三条主路径可以这样理解：
+
+1. 如果前驱已经是 `SIGNAL`，说明唤醒委托已成立，后继这时才可以安全睡下去。
+2. 如果前驱是 `CANCELLED`，说明它已经不再是可靠前驱，必须越过它，重新挂到更前面的有效节点后面。
+3. 如果前驱还没准备好（例如状态是 0），后继线程会尝试把前驱状态 CAS 成 `SIGNAL`，但这一轮仍不立刻睡，而是再循环一次确认协议真正稳定。
+
+这里最关键的是第三条。很多人容易忽略“设 SIGNAL 后还要再转一轮”的必要性，以为既然 CAS 成功了就能直接 park。AQS 故意不这么做，就是为了让“建立唤醒承诺”和“真正进入休眠”之间多一次确认，彻底堵住刚才那个释放与休眠交错的竞态窗口。
+
+这一层必须讲透，因为它是整篇的中心句：**线程不是失败就睡，而是先确保前驱已经承担起唤醒义务，再安全地睡。**
+
+## 三、取消节点为什么不会把整条队列堵死：AQS 允许局部脏链，但必须可恢复
+
+### 先看为什么会出现取消节点
+
+线程进入 AQS 队列后，不代表它一定会老老实实等到成功。有几种情况会让它中途放弃：等待期间被中断、超时到达、异常路径提前退出。这些线程一旦不再参与同步竞争，就不该继续占着队列里的有效位置。AQS 用 `CANCELLED` 状态来标记它们。
+
+但问题随之而来：队列不是静态数组，节点已经嵌在双向链里。如果取消节点简单地“宣布自己作废”却不被后续逻辑跳过，那它会变成一块堵在中间的石头，让后继线程永远盯着一个已经不会再帮它唤醒的前驱。
+
+### 为什么清理不是一次全局大扫除，而是顺路修补
+
+AQS 没有选择“取消一个节点就全队重排”这种昂贵路径。它更像是在多个关键环节顺路修补：
+
+- `shouldParkAfterFailedAcquire` 发现前驱已取消时，会持续往前跳过 CANCELLED 节点，直到重新挂到一个有效前驱后面
+- `cancelAcquire`（`AbstractQueuedSynchronizer.java:789-828`）负责把当前节点标记成取消状态，并尽量修补前后链接
+- 释放路径上的唤醒逻辑也会绕过已经取消的节点
+
+这种设计说明，AQS 队列不是一条永远整洁的教科书双向链。它允许在并发入队、取消、唤醒交错的过程中出现临时不整洁状态，但要求任何真正前进的路径都能把无效节点逐步甩开。
+
+这也是为什么本文一直强调“收容结构”和“恢复能力”要一起看。AQS 的队列不是靠完美静态形态维持正确性，而是靠**允许局部凌乱、同时确保后来者能恢复推进**。
+
+## 四、`unparkSuccessor` 为什么有时不能直接叫醒 `next`：因为 `next` 可能暂时不可靠
+
+### 释放者为什么不能天真地认为 `node.next` 一定可用
+
+理想情况下，释放者只要找到 head 的后继节点，把它 `unpark` 就行。但真实并发路径没这么整齐。节点入队时，前驱和后继链接建立不是一个原子动作；取消节点又可能把 `next` 链暂时弄得不好看。所以 `node.next` 这个指针，在某些时刻可能是 `null`，也可能指向一个已经取消的节点。
+
+这就是 `unparkSuccessor`（`AbstractQueuedSynchronizer.java:685-705`）为什么不能盲信 `next`。它当然会先优先看 `node.next`，因为那通常是最快路径；但一旦发现 `next` 缺失或失效，就必须切换到保底策略。
+
+### 为什么保底策略是“从 tail 反向找”
+
+`unparkSuccessor` 的保底做法是从 tail 往前遍历，找到离当前节点最近的一个未取消有效后继。很多人第一次看到这里会疑惑：为什么不从当前节点往后找，非得从 tail 反向扫？
+
+原因在于，并发入队和取消下，`prev` 链通常比 `next` 链更可靠。入队时，节点先知道自己的前驱，再通过 CAS 争夺尾指针；后向引用的补链则可能滞后。于是当 `next` 无法信任时，从 tail 反向沿 `prev` 找，反而更稳。
+
+这条逻辑特别能说明 AQS 的工程取舍：它不要求任何时刻链表都完美整洁，而是允许局部不一致，再用一条更稳妥但可能更慢的恢复路径保证“最终一定能找到该唤醒的人”。
+
+### 唤醒传播为什么是链条式的，而不是广播式的
+
+AQS 也没有选择“每次 release 都把后面全叫醒”。那样会导致大量无意义竞争，被唤醒的线程大多数也拿不到资格。它采用的是更克制的链条式传播：当前释放者只负责把下一位有效候选人叫醒；后者成功获取并最终 release 后，再去推进下一位。
+
+这和前面 `SIGNAL` 的设计正好闭环：等待线程先向前驱登记“你负责叫醒我”，释放者只处理与自己直接相邻的后继推进，于是整个等待链就像接力棒一样一棒一棒往下传。
+
+## 五、公平锁为什么只是多了一道“前面有人吗”的检查
+
+### 非公平和公平的真正差别不在等待机制，而在资格入口
+
+很多人一听“公平锁”，会下意识以为它应该有一套完全不同的队列或唤醒结构。AQS 的实现恰好说明，差别并不在那里。等待、挂起、取消、唤醒这些机制，公平锁和非公平锁照样共享同一套队列骨架。真正不同的地方，只在于**新线程进入 tryAcquire 时，愿不愿意绕过排队者先试一把。**
+
+公平性的关键检查落在 `hasQueuedPredecessors()`，其核心逻辑在 `AbstractQueuedSynchronizer.java:1554-1557` 一带。这个方法真正回答的问题很朴素：我前面是不是已经有人排着了？如果答案是是，那公平语义下的新线程就不该再插队试抢。
+
+### 为什么这刚好能约束“插队”而不重写整套机制
+
+非公平模式允许“新来者先试 CAS 抢 state”，所以刚释放锁的瞬间，队列外的新线程有机会和队首候选人一起竞争。公平模式只是在这个入口前多了一道检查：前面有人，就别试，老老实实排队。
+
+这说明公平性不是另一套睡眠/唤醒协议，而是对“资格尝试入口”的额外约束。AQS 不需要重写整个等待队列，只需要在子类的 `tryAcquire` 语义里，决定是否把“前面已经有人排队”当成直接失败条件。
+
+这一层的重点是：**公平锁的公平，主要体现在是否允许队列外线程抢先尝试，而不是体现在一套完全不同的 park/unpark 机制。**
+
+## 收网：AQS 的等待不是“失败就睡”，而是“先建唤醒协议，再事件驱动地睡”
+
+现在回到开头那个朴素方案，就能看清它为什么危险了。线程失败后如果直接 park，看起来省事，实际上把最关键的唤醒责任丢空了。AQS 之所以多出 `shouldParkAfterFailedAcquire`、`SIGNAL`、取消修补和反向找后继这些看似绕的步骤，本质都在补同一件事：**让等待线程睡得安全、醒得有序、队列在并发取消和断链下仍能恢复前进。**
+
+把整篇压成一张总图，就是：
+
+```text
+获取失败
+  → 先检查自己是不是队首候选
+  → 不是就去建立前驱的 SIGNAL 承诺
+  → 承诺成立后再 park
+  → 被唤醒后回到循环重试
+
+等待中取消
+  → 节点标成 CANCELLED
+  → 后续路径顺路跳过并修补链路
+
+释放成功
+  → 优先找 head 的有效后继
+  → next 不可靠就从 tail 反向找
+  → unpark 下一位候选人
 ```
 
-循环体的路径:
+如果上一篇的关键词是“资格事实 + 失败收容”，这一篇真正补上的就是“失败收容之后，怎样安全地睡，怎样可靠地醒”。到这里，AQS 的公共等待骨架才算真正立住。
 
-1. **前驱是 head 才尝试获取**(`:912`): `p == head && tryAcquire(arg)`——**只有排到队首的节点才有资格尝试**。这就是 FIFO 近似的实现: 队列头的人先获取,后面的排队等
-2. **获取成功 → `setHead(node)`**(`:913`,自己成为新头,`setHead`@674)并 `p.next = null`——断开旧头的 next 引用,`// help GC`(让被替换的旧头可被回收)
-3. **失败 → `shouldParkAfterFailedAcquire(p, node)`**(§2)决定是否 `parkAndCheckInterrupt()`(挂起)
-4. **异常兜底**(`:920-925`): `cancelAcquire(node)` 取消入队、恢复中断标志、重抛
-
-### 1.2 "自旋 + 挂起"混合
-
-面试问"acquireQueued 是自旋吗?"——严格说**不是忙等自旋,是"循环 + 挂起"**: 每次循环要么成功返回、要么 `shouldParkAfterFailedAcquire` 返回 true 就 park 挂起(零 CPU);只有"前驱状态推进中"(设 SIGNAL 的那次重试)会无 park 地快速再循环一次,其余时间线程都在 park 里沉睡,被唤醒后回到循环重新检查(乐观重试)。
-
-关键设计(斜体):*"只有前驱是 head 才尝试"保证 FIFO 近似——队列头的人先获取;循环语义: 被唤醒后重新尝试(乐观重试);park 挂起避免自旋浪费。面试"acquireQueued 是自旋吗": 不是忙等——循环+挂起,前驱检查失败就 park,不空转。*
-
-## 2. "shouldParkAfterFailedAcquire 做什么？" — SIGNAL 状态推进
-
-### 2.1 三分支状态机
-
-`shouldParkAfterFailedAcquire`(`AbstractQueuedSynchronizer.java:844-866`,第 1 篇已提)是"能否安全挂起"的判定:
-
-```java
-// AbstractQueuedSynchronizer.java:844-866(截取核心,逐字)
-    private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
-        int ws = pred.waitStatus;
-        if (ws == Node.SIGNAL)
-            /*
-             * This node has already set status asking a release
-             * to signal it, so it can safely park.
-             */
-            return true;
-        if (ws > 0) {
-            /*
-             * Predecessor was cancelled. Skip over predecessors and
-             * indicate retry.
-             */
-            do {
-                node.prev = pred = pred.prev;
-            } while (pred.waitStatus > 0);
-            pred.next = node;
-        } else {
-            /*
-             * waitStatus must be 0 or PROPAGATE.  Indicate that we
-             * need a signal, but don't park yet.  Caller will need to
-             * retry to make sure it cannot acquire before parking.
-             */
-            pred.compareAndSetWaitStatus(ws, Node.SIGNAL);
-        }
-        return false;
-    }
-```
-
-三个分支:
-
-1. **`pred.waitStatus == SIGNAL`** → **可以安全挂起**(返回 true)——前驱已被承诺"释放时唤醒我"
-2. **`pred.waitStatus > 0`(CANCELLED)** → **跳过已取消的前驱**: `node.prev` 向前越过所有 CANCELLED 节点(顺带清理),返回 false 再循环
-3. **否则(0 或 PROPAGATE)** → **CAS 把前驱设为 SIGNAL**(`:861` 的 `pred.compareAndSetWaitStatus(ws, Node.SIGNAL)`),返回 false 再循环一次
-
-### 2.2 为什么要"设 SIGNAL 后再 park"
-
-**竞态闭合**: 如果直接 park,可能"刚 park 完,前驱就释放了"——释放者检查前驱状态时看到 0(不是 SIGNAL),认为"没人等我",不唤醒——线程永久睡死。所以必须先 CAS 设 SIGNAL 再 park,第二次循环确认前驱状态稳定才挂起。SIGNAL 是"唤醒委托": **我 park 前通知前驱: 你释放时要唤醒我**。
-
-关键设计(斜体):*SIGNAL 机制解决"释放时唤醒谁"的问题——每个节点对前驱承诺"唤醒我",释放者只唤醒 head 的后继;竞态窗口由"设 SIGNAL 后再 park"闭合(第二次循环检查)。面试"CANCELLED 节点怎么来的": 中断/超时放弃的线程;清理在 shouldPark/acquireQueued 中顺带完成。*
-
-## 3. "unparkSuccessor 唤醒谁？" — 释放传播
-
-### 3.1 从 tail 向前找
-
-`unparkSuccessor`(`AbstractQueuedSynchronizer.java:685-712`)在 release 时唤醒后继:
-
-```java
-// AbstractQueuedSynchronizer.java:685-712(截取核心,逐字)
-    private void unparkSuccessor(Node node) {
-        /*
-         * If status is negative (i.e., possibly needing signal) try
-         * to clear in anticipation of signalling.  It is OK if this
-         * fails or if status is changed by waiting thread.
-         */
-        int ws = node.waitStatus;
-        if (ws < 0)
-            node.compareAndSetWaitStatus(ws, 0);
-
-        /*
-         * Thread to unpark is held in successor, which is normally
-         * just the next node.  But if cancelled or apparently null,
-         * traverse backwards from tail to find the actual
-         * non-cancelled successor.
-         */
-        Node s = node.next;
-        if (s == null || s.waitStatus > 0) {
-            s = null;
-            for (Node p = tail; p != node && p != null; p = p.prev)
-                if (p.waitStatus <= 0)
-                    s = p;
-        }
-        if (s != null)
-            LockSupport.unpark(s.thread);
-    }
-```
-
-两步:
-
-1. **清 SIGNAL**(`ws < 0` 时 CAS 置 0)——唤醒前清除委托标记
-2. **找真正的后继**: 先看 `node.next`——**若为 null 或已取消(CANCELLED),从 tail 向前遍历**找最近的未取消节点(`waitStatus <= 0`),然后 `LockSupport.unpark(s.thread)` 唤醒
-
-### 3.2 为什么"从 tail 向前找"
-
-注释说得明白("traverse backwards from tail to find the actual non-cancelled successor"): **入队/取消会临时断链**——enq 的 CAS 尾插中,`prev` 先设、`next` 后连;取消节点也可能使 next 指向异常。向后遍历不可靠,反向遍历保底。
-
-唤醒传播链: 释放者 → unparkSuccessor(head) → 队首线程醒 → tryAcquire 成功 → 新 release → 唤醒下一个——**锁的交接是链条式的**。
-
-跨层标注: [域 32 Unsafe(规划中)——parkAndCheckInterrupt 的 LockSupport.park 是 Unsafe.park 的封装(许可语义);域 11 线程——park 挂起的线程处于 WAITING 状态(jstack 可见)]
-
-关键设计(斜体):*"从 tail 向前找"的原因: 入队/取消会临时断链(prev 不可靠),反向遍历保底;唤醒传播链: 释放者→后继→后继的 release 再唤醒下一个——锁的交接就是这样链条式。面试"为什么唤醒 head 后的第一个而不是 head": head 是已获取者的占位(虚拟头)。*
-
-## 4. "公平性" — hasQueuedPredecessors
-
-### 4.1 非公平:直接 CAS,可以插队
-
-`NonfairSync.tryAcquire`(`ReentrantLock.java:198`,类在 `:196`)走 `nonfairTryAcquire`(`:126`): 先直接 CAS——**新线程可以与队列头竞争**,插队是允许的(能抢到就抢)。
-
-### 4.2 公平:队列非空必须排队
-
-`FairSync.tryAcquire`(`ReentrantLock.java:213`,类在 `:206`)多一个检查(`:217`):
-
-```java
-// ReentrantLock.java:215-224(截取核心,逐字)
-            int c = getState();
-            if (c == 0) {
-                if (!hasQueuedPredecessors() &&
-                    compareAndSetState(0, acquires)) {
-                    setExclusiveOwnerThread(current);
-                    return true;
-                }
-            }
-```
-
-**`!hasQueuedPredecessors()`**——队列里有等待者就放弃这次获取,老老实实排队。`hasQueuedPredecessors`(`AbstractQueuedSynchronizer.java:1551-1569`): 检查 head.next 是否有非取消等待者(与 unparkSuccessor 同理,tail 向前遍历处理并发取消),且不是当前线程自己。
-
-### 4.3 公平 vs 非公平
-
-- **公平代价**: 必须等队列清空——吞吐下降(排队线程可能正好不是刚释放锁的线程)
-- **非公平收益**: 减少唤醒切换——刚释放的线程可能立刻重获锁(缓存还热),吞吐更高
-- **JDK 默认非公平**: "吞吐 vs 公平"的权衡——插队概率实际低,但避免了大量唤醒开销
-
-面试追问 "公平锁一定公平吗?": **工程近似**——`tryLock()`(无超时版)无条件调 `sync.nonfairTryAcquire(1)`(`ReentrantLock.java:346-348`),**即使 FairSync 也直接 CAS 抢锁,绕过队列**(著名的 barging 行为,JDK 文档明说);超时版 `tryLock(timeout)` 走 `tryAcquireNanos`(`:424`)内部仍用公平 tryAcquire,是公平的。
-
-关键设计(斜体):*公平性代价: 必须等队列清空(吞吐下降);非公平收益: 减少唤醒切换(刚释放的线程可能立刻重获);JDK 默认非公平是"吞吐 vs 公平"的权衡。面试"为什么默认非公平": 吞吐优先 + 插队概率实际低;再答"公平锁是工程近似(tryLock() 无超时版直接 nonfairTryAcquire,绕过队列)"就是细节分。*
-
-## 核心悬念
-
-AQS 队列运转通了——**可重入怎么实现**?`ReentrantLock` 的 state 计数、公平/非公平 tryAcquire 的完整差异、`Condition` 的条件队列(await 让出锁、signal 唤醒)——下一篇: ReentrantLock 与 Condition。
-
-> → [12-lock-sync/03 — ReentrantLock 与 Condition](03-reentrantlock-condition.md)
+下一篇继续沿着这个骨架往下走：既然 AQS 已经能管理独占队列和睡醒协议，那 `ReentrantLock` 如何把 `state` 解释成重入计数？`Condition.await()` 又为什么要把线程从同步队列转进条件队列，再在 `signal()` 时转回来？这些问题会把 AQS 骨架和我们真正常用的锁 API 接起来。

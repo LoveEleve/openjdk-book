@@ -1,123 +1,193 @@
-# 01. Stream 接口全景与函数式接口 — 中间/终端分类、Lambda 机制
+# Stream 接口全景与函数式接口：为什么它不只是几串链式 API
 
-> **前置依赖**: [08-collections/01 — ArrayList](../08-collections/01-arraylist.md)(集合数据源)、[01-string/03 — 构建与拼接](../01-string/03-build-concat.md)(invokedynamic 机制,JEP 280)
-> → **后续**:[16-stream/02 — 流水线结构与惰性机制](02-pipeline-lazy.md)
-> 关联: 域 08 集合(数据源);域 04 反射(indy 引导);域 15 JIT(内联衔接)
+> 本文基于 JDK 11 `Stream`、`BaseStream` 与 `java.util.function` 基础接口。讨论范围聚焦中间/终端操作分类、短路语义、函数式接口家族、lambda 作为 SAM 实例、流的主要创建方式，以及 Optional 的求值时机差异；惰性求值内部结构放到下一篇。
+> **前置依赖**：[ArrayList 等集合数据源](../08-collections/01-arraylist.md)、[字符串构建与 invokedynamic 背景](../01-string/03-build-concat.md)
+> **后续**：[流水线结构与惰性机制](02-pipeline-lazy.md)
 
-## 一行链式调用,怎么分类
+## 先看一个最常见、也最容易把 Stream 误讲成“链式调用更优雅”的场景
 
-`list.stream().filter(x -> x > 0).map(x -> x * 2).collect(toList())`——四段调用,两类操作。面试从"中间操作和终端操作区别"问起,一路到"lambda 和匿名类区别""orElse 和 orElseGet 区别"。这一篇画 Stream 的 API 地图、讲函数式接口与 lambda 的编译真相、数据源创建、以及 Optional 的空安全链。
-
-## 1. "Stream 的 API 地图" — 中间 vs 终端
-
-### 1.1 第一原理:中间惰性 + 终端触发
-
-Stream 的所有操作分两类(`Stream.java`,1445 行):
-
-**中间操作**(返回 Stream,惰性——不执行):
-
-| 操作 | 源码 | 语义 |
-|------|------|------|
-| `filter` | `:182` | 过滤 |
-| `map` | `:197` | 映射 |
-| `flatMap` | `:283` | 展平 |
-| `distinct` | `:372` | 去重(有状态) |
-| `sorted` | `:388` | 排序(有状态) |
-| `peek` | `:441` | 调试观察 |
-| `limit` | `:468` | 截断 |
-| `skip` | `:497` | 跳过 |
-| `takeWhile` | `:555` | 条件截断(短路) |
-
-**终端操作**(触发求值——链上所有中间操作此时才执行):
-
-| 操作 | 源码 |
-|------|------|
-| `forEach` | `:647` |
-| `collect` | `:905`/`:961` |
-| `count` | `:1027` |
-| `anyMatch` | `:1048` |
-| `findFirst` | `:1108` |
-| `reduce` | `:757`/`:797` |
-
-**第一原理: 没有终端操作,中间操作什么都不做**——`list.stream().filter(...)` 只是搭了条管道,`collect` 才是按下开关。这也是"stream 不 collect 会怎样"的答案: 无副作用——peek 是唯一接受 Consumer 的中间操作(常用于调试打印),但其 Javadoc 明确要求 action 是 **non-interfering**(不干扰流,`Stream.java:436-437`)——设计上不应产生副作用。
-
-### 1.2 短路:进阶分类
-
-- **短路中间操作**: `limit`/`takeWhile`——结果确定后不再消费剩余元素
-- **短路终端操作**: `anyMatch`/`allMatch`/`noneMatch`/`findFirst`/`findAny`——结果确定即停止
-
-关键设计(斜体):*"中间惰性 + 终端触发"是 Stream 的第一原理——**没有终端操作,中间操作什么都不做**。面试"中间操作有哪些/终端有哪些": 能完整分类是基础;短路中间(takeWhile)与短路终端(anyMatch)是进阶。*
-
-## 2. "函数式接口是什么？" — function 包四族
-
-### 2.1 四大族
-
-`java.util.function`(44 个接口)四大族(`Function.java:40-41`、`Predicate.java:39-40`、`Consumer.java:41-42`、`Supplier.java:40-41` 都是 `@FunctionalInterface`):
-
-| 族 | 接口 | 用途 | 方法 |
-|----|------|------|------|
-| 映射 | `Function<T,R>` | 转换 | `R apply(T)` |
-| 断言 | `Predicate<T>` | 条件判断 | `boolean test(T)` |
-| 消费 | `Consumer<T>` | 副作用 | `void accept(T)` |
-| 供给 | `Supplier<T>` | 惰性生成 | `T get()` |
-
-加上 Bi 版(两参数)与原始类型版(int/long/double 的 IntFunction/IntPredicate 等,避免装箱)。
-
-### 2.2 lambda 的编译真相:invokedynamic
-
-`x -> x > 0` 不是匿名内部类——javac 生成一条 **`invokedynamic`**,引导方法 `LambdaMetafactory.metafactory` 在运行时生成实现类。这与字符串拼接的 `StringConcatFactory` 是同一机制(域 01 第 3 篇已详述 JEP 280)。
-
-关键设计(斜体):*lambda 是"接口实例的语法糖"——SAM 接口 + invokedynamic 引导。面试"lambda 和匿名类区别": 捕获变量要求 effectively final(值捕获)、invokedynamic 生成(不创建独立类文件,引导后可内联);"为什么 lambda 快/慢": indy 引导一次后走内联(JIT 衔接)。*
-
-## 3. "Stream 怎么创建？" — 数据源
-
-四种来源:
-
-- **集合**: `Collection.stream()`/`parallelStream()`——默认接口方法,底层走 `StreamSupport.stream`
-- **数组**: `Arrays.stream`
-- **值**: `Stream.of`(`:1159`/`:1187`)
-- **生成**: `Stream.iterate(seed, f)`(`:1214`,无限)、`Stream.generate(s)`(`:1331`,无限)、`Stream.concat`(`:1374`)
-
-**无限流必须配 limit**(惰性保证安全): `Stream.iterate(0, n -> n+1).limit(10)`——iterate 是惰性序列,limit 截断后才求值。
-
-关键设计(斜体):*"源 → 流水线"的抽象: 任何 Spliterator 都能变 Stream——`StreamSupport.stream(spliterator, parallel)` 是通用桥(域 16 后文)。面试"无限流怎么用": iterate/generate + limit(惰性);大集合注意并行流的线程模型(域 16 后文)。*
-
-跨层标注: [域 01: 03-build-concat——invokedynamic 机制(JEP 280 的 StringConcatFactory)与 lambda 的 LambdaMetafactory 是同一引导技术;域 04 反射——indy 的引导与 MethodHandle 衔接]
-
-## 4. "Optional 与空安全" — 链式空处理
-
-### 4.1 链式 API
-
-`Optional`(`Optional.java`,469 行)的核心链(`map@260`/`filter@218`/`orElse@354`/`orElseGet@368`):
+很多人第一次用 Stream，都会被这种写法吸引：
 
 ```java
-// Optional.java:354 + 368(截取核心,逐字)
-    public T orElse(T other) {
-        return value != null ? value : other;
-    }
-...
-    public T orElseGet(Supplier<? extends T> supplier) {
-        return value != null ? value : supplier.get();
-    }
+list.stream()
+    .filter(x -> x > 0)
+    .map(x -> x * 2)
+    .collect(toList())
 ```
 
-### 4.2 orElse vs orElseGet:求值时机
+表面上看，它像一串连续执行的方法调用：先过滤，再映射，最后收集。于是很多人很自然地把它理解成“每调用一个方法就做完一步处理”。这个理解在语法层面很顺手，在执行模型上却恰好会让后面几乎所有关键问题都答错：为什么不加终端操作时前面什么都没发生？为什么 `limit` 和 `anyMatch` 会提早停？为什么 `filter` 要接 `Predicate`，`map` 要接 `Function`，它们背后的 lambda 到底是什么？
 
-- **`orElse(other)`**: 参数**总是已求值**——即使 value 非空,`other` 也早就算好了
-- **`orElseGet(supplier)`**: **惰性**——value 为空才调 supplier
+所以这篇不能只做 API 导览，而要先立住一个总问题：**Stream 看起来像链式调用，实际上前半段大多只是惰性描述；而这些描述之所以能连起来，是因为每个节点都在消费某种函数式接口实例。**
 
-```java
-// 用法示意(API 形式,非源码片段)
-opt.orElse(expensiveDefault());      // 无论是否为空,expensiveDefault() 都执行
-opt.orElseGet(() -> expensiveDefault());  // 只在为空时执行
+也就是说，Stream 的本体至少有三层：
+
+- 一串尚未真正执行的中间操作描述；
+- 一个真正按下开关的终端操作；
+- 一组作为节点逻辑载体的函数对象协议。
+
+只有把这三层绑在一起，Stream 才不只是“代码写得好看”，而是一套明确的惰性数据处理模型。
+
+## 一、为什么不 collect 时什么都没发生：中间操作本质上只是惰性描述
+
+### 先拆掉“调用了方法就等于执行了处理”这个直觉
+
+在普通集合 API 里，调用 `sort()`、`add()`、`remove()` 往往就意味着状态已经立刻变化。所以很多人带着这套经验来看 Stream 时，会天然觉得 `filter()`、`map()` 也已经把数据处理了一遍。真正不同的地方在于：**大多数 Stream 方法并不直接消费元素，它们只是把‘将来该怎么处理元素’先登记到流水线上。**
+
+这就是为什么 `list.stream().filter(...).map(...)` 没有终端操作时，既不会真正遍历集合，也不会产生任何结果集合。它只是搭起了一条“以后如果要执行，该先过滤再映射”的计划。
+
+### 中间操作和终端操作真正差在哪
+
+JDK 11 的 `Stream` 接口里，中间操作和终端操作的分类非常清楚：
+
+中间操作的典型例子有：
+
+- `filter`（`Stream.java:182`）
+- `map`（`197`）
+- `flatMap`（`283`）
+- `distinct`（`372`）
+- `sorted`（`388`）
+- `peek`（`441`）
+- `limit`（`468`）
+- `skip`（`497`）
+- `takeWhile`（`555`）
+
+终端操作的典型例子有：
+
+- `forEach`（`647`）
+- `reduce`（`757` / `797`）
+- `collect`（`905` / `961`）
+- `count`（`1027`）
+- `anyMatch`（`1048`）
+- `findFirst`（`1108`）
+
+中间操作之所以叫“中间”，关键不是它排在链中间，而是它返回的还是一条 Stream 描述；终端操作之所以叫“终端”，关键也不是它写在最后，而是**它真正触发了这条描述的求值**。
+
+所以 Stream 的第一原理一定要记成一句完整的话：**没有终端操作，中间操作什么都不做；它们只是在累积未来的数据处理计划。**
+
+## 二、为什么短路是另一层重要分类：不是所有流都必须把每个元素看到最后
+
+### 先看“终端触发”为什么还不够描述执行行为
+
+如果只讲“中间操作惰性，终端操作触发”，读者还是会留下一个模糊印象：终端操作一来，整条流就一定会把所有元素从头到尾全处理一遍。现实并不是这样。某些操作天生允许“结果已经够了，就别再往后看”。
+
+这就是短路语义的价值。它进一步告诉你：即便终端操作已经开始执行，流水线也不一定非要把所有元素都彻底消费完。
+
+### 短路中间和短路终端各自在表达什么
+
+在 JDK 11 里：
+
+- `limit`（`Stream.java:468`）和 `takeWhile`（`555`）属于典型短路中间操作；
+- `anyMatch`（`1048`）和 `findFirst`（`1108`）属于典型短路终端操作。
+
+它们的共同点是：**一旦结果条件已经被满足，剩余元素就不必继续推进。**
+
+这很重要，因为它说明 Stream 并不是“语义写得像声明式，执行时却总做全量扫描”的模型。它会根据操作语义，在结果足够确定时及时停下。也正因为如此，后面我们才能真正理解为什么无限流可以和 `limit` 一起安全配合，为什么 `anyMatch` 不需要把所有元素都看完才知道答案。
+
+这一层的结论是：Stream 不只是一条会被终端操作启动的流水线，它还是一条**会根据节点语义决定能否提前停下**的流水线。
+
+## 三、为什么 lambda 能直接塞进 Stream 节点：因为这些节点本来就在接函数式接口实例
+
+### 先别把 lambda 想成“没有类型的匿名代码块”
+
+很多人写 `x -> x > 0`、`String::trim` 时，会直觉地把它理解成“编译器帮我塞进去的一小段代码”。这种理解在语法层面可以凑合，但一旦要回答“filter 到底拿到了什么”“map 为什么能接这个函数”，就会失去抓手。
+
+在 Stream 里，lambda 真正扮演的不是“裸代码片段”，而是**函数式接口实例**。JDK 11 里几个最核心的基础接口分别是：
+
+- `Function<T, R>`（`Function.java:40-41`）
+- `Predicate<T>`（`Predicate.java:39-40`）
+- `Consumer<T>`（`Consumer.java:41-42`）
+- `Supplier<T>`（`Supplier.java:40-41`）
+
+它们都标着 `@FunctionalInterface`，意思很直接：这类接口只需要一个抽象方法，就足够让 lambda 或方法引用来当它的实例。
+
+### 为什么这正好对应 Stream 的节点角色
+
+把这四族和常见 Stream 节点一对照，整个链就变得非常清楚：
+
+- `filter` 要的是 `Predicate`，因为它需要一个“保留/丢弃”的判断函数；
+- `map` 要的是 `Function`，因为它需要一个“把 T 变成 R”的变换函数；
+- `forEach` 要的是 `Consumer`，因为它需要一个“消费这个值”的动作；
+- 某些创建和默认值路径则会要 `Supplier`，因为它需要的是“等真的需要时再给我一个值”。
+
+这也说明 lambda 和 Stream 的关系不是偶然搭配，而是**节点协议和函数对象协议天然吻合**。Stream 把“要做什么”写成一串节点，每个节点再用函数式接口实例去承载自己的具体逻辑。
+
+### 为什么这一步必须服务于 Stream 主线，而不是独立讲语言特性
+
+很多文章会把 lambda 单独讲成语言机制，再把 Stream 当作 API 用例。这种拆法容易让读者觉得两者只是搭配使用。更有帮助的理解是：**没有函数式接口这层协议，Stream 这条链上的过滤、映射、消费逻辑就没有可统一传递的载体。**
+
+所以这一节真正要记住的，不是“lambda 比匿名类更优雅”，而是“Stream 的每个节点，本来就在等一个有明确定义的函数对象角色”。
+
+## 四、为什么流的创建方式会直接决定使用边界：不是所有流都天然有限、天然安全
+
+### 先看为什么 `Stream.of` 和 `Stream.generate` 不该被当成一回事
+
+表面上，它们都能创建 Stream；但从执行边界看，它们代表的是完全不同的数据源特征。
+
+JDK 11 里常见创建方式包括：
+
+- `Stream.of(T)`（`Stream.java:1159`）
+- `Stream.of(T...)`（`1187`）
+- `Stream.iterate(...)`（`1214`）
+- `Stream.generate(...)`（`1331`）
+- `Stream.concat(...)`（`1374`）
+
+以及来自 `BaseStream` 的执行风格入口：
+
+- `sequential()`（`BaseStream.java:113`）
+- `parallel()`（`125`）
+- `unordered()`（`138`）
+
+### 为什么无限流必须和短路配合看
+
+`iterate` 和 `generate` 特别容易暴露前面讲的短路价值。它们可以天然地产生无限流。如果你忘了给它们配 `limit`、`takeWhile` 等短路约束，再配一个需要全量消费的终端操作，就不是“慢一点”，而是根本没有自然结束点。
+
+所以数据源类型会直接决定 Stream 是否安全、是否能自然终止、是否适合并行。这也是为什么创建方式不能只看“从哪来”，还要看“它会不会天然无限、它需要什么样的短路护栏”。
+
+这一节其实是在为下一篇做铺垫：只有先承认流源的边界不同，后面讲流水线惰性和执行策略时才不会把所有 Stream 都看成一个模子刻出来的序列。
+
+## 五、为什么 Optional 要作为这一篇的尾声案例：它把“惰性 vs 立即求值”暴露得最直白
+
+### `orElse` 和 `orElseGet` 真正差的不是写法，而是求值时机
+
+Optional 看起来像另一个话题，但它特别适合作为本篇的尾声案例，因为它把“值是现在就算，还是等真的需要时才算”这件事讲得非常直白。JDK 11 里：
+
+- `orElse` / `orElseGet` 位于 `Optional.java:354-368`
+
+这两个方法表面都在说“如果没有值，就给我默认值”。真正关键差别却在于：
+
+- `orElse(other)`：`other` 往往在调用点就已经求值好了；
+- `orElseGet(supplier)`：只有在当前 Optional 真的为空时，才调用 Supplier 去生成默认值。
+
+这说明 Supplier 族接口的意义，不只是“又一种函数式接口”，而是明确在表达**惰性供值**。
+
+### 为什么这和 Stream 主线是同一类问题
+
+从 Stream 主线回头看，这正好把前面两件事重新勾在一起：
+
+- 一边是“中间操作先描述，终端操作才触发”；
+- 另一边是“默认值现在就算，还是等真的需要时才算”。
+
+它们背后问的都是同一个问题：**这个动作到底该在当前时刻立刻发生，还是应该延后到需求真正成立时再发生。**
+
+所以 Optional 在这里不是插题，而是用更小的 API 场景把惰性求值这条主线再钉一遍。
+
+## 收网：Stream 真正把三样东西绑在了一起——惰性描述、终端触发和函数对象协议
+
+回到开头那个误区，现在已经能看清为什么 Stream 绝不只是“链式 API 更优雅”了。它真正做的，是把数据处理拆成三层互相咬合的模型：
+
+- 前半段中间操作只负责惰性描述，不直接消费元素；
+- 终端操作才是按下开关的一刻，必要时还会根据短路语义提早停止；
+- 每个节点的具体逻辑则由 `Function`、`Predicate`、`Consumer`、`Supplier` 这类函数式接口实例承载。
+
+把整篇压成一张总图，就是：
+
+```text
+数据源
+  → 生成 Stream 描述
+  → 中间操作不断追加处理计划
+  → 终端操作触发真正消费
+  → 短路语义决定是否提前停下
+  → 节点逻辑由函数式接口实例承载
 ```
 
-生产坑: `orElse(expensiveDefault())` 里传"方法调用"——默认值每次都被计算,浪费。
-
-关键设计(斜体):*Optional 是"空值语义化"——强迫调用方处理为空路径。面试"orElse 和 orElseGet 区别": **求值时机**(参数已算好 vs 惰性);生产: 返回值用 Optional,字段/参数不用(规范争议——Optional 不能完全替代 null,作返回值契约)。*
-
-## 核心悬念
-
-API 知道了——**内部怎么组织**?`filter().map().sorted().collect()` 怎么串成一条链?为什么中间操作惰性?Sink 链是什么?——下一篇: 流水线结构与惰性机制。
-
-> → [16-stream/02 — 流水线结构与惰性机制](02-pipeline-lazy.md)
+如果说这一篇解决的是“看起来连环调用的 Stream，到底在什么时候才真的开始干活”，那下一篇就该继续深入：这些惰性描述在内部到底是怎样串成一条流水线的？为什么一旦有终端操作，前面的 filter/map/limit 会被组织成 Sink 链按元素推进？那才是 Stream 从 API 表面走向内部执行骨架的下半场。

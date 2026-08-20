@@ -1,83 +1,152 @@
-# 03. 字节码增强机制 — EventInstrumentation、ASM 注入、性能设计
+# 字节码增强机制：为什么 JFR 事件类能从空壳 API 变成真正可写入记录缓冲的专用路径
 
-> **前置依赖**: [39-jfr/01 — JFR 全景与事件模型](01-jfr-overview-event-model.md)(commit 空实现,§3)、[39-jfr/02 — 自定义事件与注解](02-custom-event-annotation.md)(事件子类)
-> → **后续**: [04-recording-config.md](04-recording-config.md)
-> 关联: 内部卷 32-jfr(缓冲与写入引擎);[04-reflection-annotation/02 — MethodAccessor](../04-reflection-annotation/02-methodaccessor.md)(字节码生成的另一路)
+> 本文基于 JDK 11 `jdk.jfr.internal.EventInstrumentation`、`JVMUpcalls`、`EventHandler`。本文聚焦事件类重转换、ASM 注入和启用判断后的写入路径；录制配置放到下一篇。
+> **前置依赖**：[JFR 全景与事件模型](01-jfr-overview-event-model.md)、[自定义事件与注解](02-custom-event-annotation.md)
+> **后续**：[录制与配置](04-recording-config.md)
 
-## commit 之后发生了什么
+## 先看最容易让人困惑的事实：源码里的 `commit()` 看起来像空壳，但事件最后却真的能写进 JFR
 
-前两篇说事件类的方法默认是空实现——这一篇揭真相: 事件类的字节码被谁改写、用什么技术、为什么注入后"有行为"。
+前两篇已经把事件流模型和事件 Schema 立住了，但只要回头去看 `jdk.jfr.Event` 的源码，马上就会遇到一个非常扎眼的问题：`begin()`、`end()`、`commit()`、`shouldCommit()` 这些方法的公开实现看起来极薄，甚至几乎像空壳。那真正的写入逻辑到底在哪？
 
-## 1. "事件类被改写了?" — EventInstrumentation
+如果把这个问题回答不清，JFR 整套事件模型就会悬在空中：一边说 `commit()` 会把事件送进录制系统，一边源码里又看不到真正的 Java 写入实现。这正是 JFR 最巧妙的一层设计所在：**事件协议并不是静态写死在 `Event` 基类里，而是在运行时被重新编译进具体事件类。**
 
-### 1.1 回调链
+也就是说，JFR 事件类最开始暴露给开发者的是一套非常薄的协议外壳；当 JVM 决定真正激活这些事件时，再通过字节码重转换和注入，把这些空壳方法改写成直达事件处理器的专用路径。
 
-JVM 在类重转换时回调 `JVMUpcalls.onRetransform(long, boolean, Class, byte[])`(`JVMUpcalls.java:53`,签名注释"class being retransformed"——`:47`):
+所以这一篇真正要回答的，不是“JFR 用了 ASM”，而是：**为什么 JFR 要把事件协议推迟到运行时编译，以及这如何同时服务于功能完整性和低开销目标。**
 
-- 判断: `jdk.internal.event.Event.class.isAssignableFrom(clazz)` 且非抽象(`:55`)——**事件子类才注入**
-- 日志: "Adding instrumentation to event class ... using retransform"(`:62`)——**retransform 机制**
-- 注入: `new EventInstrumentation(clazz.getSuperclass(), oldBytes, traceId)`(`:63`)→ `buildInstrumented()`(`:64`)→ 返回新字节替换旧字节(`:66`)
+## 一、为什么事件类是在重转换阶段才被真正“激活”：JFR 要的不是静态 API，而是按需装配的事件类
 
-非事件类走内建事件分支 `JDKEvents.retransformCallback`(`:68`)。
+### 先看 JVM 侧回调入口
 
-### 1.2 增强目标
+JDK 11 里，`JVMUpcalls` 定义在 `JVMUpcalls.java:37`。最关键的入口是：
 
-`EventInstrumentation`(`jdk/jfr/internal/EventInstrumentation.java:60`)把事件类空的 begin/end/commit/isEnabled/shouldCommit 替换为**真实实现**(调用内部 handler);`writeMethod`(`:118`)是事件 handler 的写入方法(import `jdk.jfr.internal.handlers.EventHandler`,`:54`)。
+- `onRetransform(...)`：`JVMUpcalls.java:53`
+- 当识别到事件类时会记录日志 “Adding instrumentation to event class ... using retransform”：`62`
+- 事件类之外的内建事件路径则走 `JDKEvents.retransformCallback(...)`：`68`
 
-面试"事件怎么被激活": 类加载/重转换时 ASM 改写——事件基类空方法被真实实现替换。
+这已经说明，JFR 事件类的“激活”不是在源码编译时一次性做完的，而是在 JVM 运行过程中通过重转换回调按需发生。
 
-关键设计(斜体):*"事件基类方法是空的(第 1 篇 §3,`:121` 空实现)——真实逻辑靠字节码注入"——这是 JFR 的巧妙设计: 未注入前零开销,注入后按需启用。面试"事件怎么被激活": 类加载时 ASM 改写;关联: 字节码替换(ClassFileLoadHook 同族机制,域外)。*
+### 为什么 JFR 不把真实逻辑直接写死在 `Event` 基类里
 
-## 2. "ASM 怎么注入?" — ClassWriter 改写
+如果所有事件类从编译期开始就带着完整写入逻辑，那么即使没有任何录制会话启用，事件路径也可能要持续背负更重的执行成本。JFR 的设计反过来：
 
-### 2.1 内置 ASM
+- 先给开发者一套统一、轻量的事件协议；
+- 真正需要时，JVM 再把这套协议编译进具体事件类；
+- 不需要时，尽量保持事件路径接近空壳或极小判断。
 
-JDK 内置 ASM 库:`import jdk.internal.org.objectweb.asm.ClassReader/ClassWriter`(`EventInstrumentation.java:37-38`)。
+所以重转换不是可选技巧，而是 JFR 成本模型的一部分。它让“事件类存在”与“事件类已经被装配成完整写入路径”这两件事分开了。
 
-### 2.2 改写流程
+## 二、为什么 `EventInstrumentation` 本质上是在“编译事件协议”：它不是给类打补丁，而是把协议落实成可执行方法体
 
-- 读入: `createClassNode`——`new ClassReader(bytes)` 解析旧字节码为 `ClassNode`(`:152-153`)
-- 改写: 遍历方法节点,替换事件方法体(注入 handler 调用——`getEventHandler(methodVisitor)`(`:333`)注入 handler 字段/方法)
-- 写出: `toByteArray`——`new ClassWriter(ClassWriter.COMPUTE_FRAMES)`(`:315`)重新生成字节码(COMPUTE_FRAMES 自动计算栈帧)
+### 先看它的关键骨架
 
-面试"ASM 干什么": 方法体生成/类结构修改——JFR 用它给每个事件类"补全"实现。
+JDK 11 里，`EventInstrumentation` 定义在 `EventInstrumentation.java:60`。关键位置包括：
 
-关键设计(斜体):*"ASM = 运行时改写字节码的库"——JFR 用它给每个事件类"补全"实现。面试"ASM 干什么": 方法体生成/类结构修改;关联: 域 04 反射——MethodAccessor 是字节码生成的另一路(动态代理/访问器,与 ASM 同族)。*
+- `writeMethod` 字段：`118`
+- 创建 `ClassNode`：`127`
+- 生成写入方法元信息：`131`
+- `createClassNode(byte[])`：`150`
+- `buildInstrumented()`：`309`
+- `makeInstrumented()`：`328`
+- 重新写出字节码：`314` / `318`
+- 注入 event handler 获取逻辑：`333` / `336` / `420` / `472`
+- 真正调用 handler 写入方法：`428`
 
-## 3. "性能设计" — 注入后的事件路径
+这些锚点合在一起，已经足以还原它的工作性质：它不是给类打一个小补丁，而是在把事件类从“定义了协议的类”编译成“真正能执行协议的类”。
 
-### 3.1 提交路径
+### 为什么这比“替换几个方法体”更深一层
 
-注入后的 commit → 调用事件 handler 的写入方法(`writeMethod`,`EventInstrumentation.java:118`)→ handler **判断启用**(`EventHandler.isEnabled()`——`jdk/jfr/internal/handlers/EventHandler.java:66`;阈值判断 `shouldWrite`——`:61`)→ 写线程本地缓冲(无锁,内部卷 32-jfr)。
+从表面上看，确实像是在替换 `begin/end/commit/isEnabled/shouldCommit` 这些方法体；但从机制上看，它做的是更本质的事：**把原本抽象在 API 层的事件协议，下沉成一条针对具体事件类生成出来的专用执行路径。**
 
-### 3.2 两级成本
+这也就是为什么应该把它理解成“运行时编译事件协议”，而不只是“字节码改了改”。事件类从这一刻起，不再只是一个声明，而是被 JFR 真正接入了写入引擎。
 
-- **未启用**: commit 判断后直接返回——极小开销
-- **启用**: 事件数据序列化进缓冲——免对象分配的设计(字段直接写)
+## 三、为什么 ASM 在这里不是独立知识点，而是 JFR 把事件协议变成专用代码路径的工具
 
-面试"事件数据怎么进文件": 缓冲 → 后台线程刷盘(内部卷 32-jfr)。
+### 先看它在流程里做什么
 
-关键设计(斜体):*"启用判断前置 + 无锁缓冲写入"——JFR 低开销的工程实现。面试"JFR 为什么快": 注入优化 + 环形缓冲 + 无对象分配;面试"事件数据怎么进文件": 缓冲 → 后台线程刷盘(内部卷 32)。*
+旧稿已经抓到几个非常关键的细节：
 
-## 4. "内建事件" — jdk.jfr.events
+- `createClassNode` 内会从旧字节码构建 `ClassNode`：`EventInstrumentation.java:150`
+- `buildInstrumented()` 里先 `makeInstrumented()` 再输出新字节码：`309-311`
+- 最后通过 `toByteArray()` 写出：`314` / `318`
 
-### 4.1 位置与来源
+这说明 EventInstrumentation 的流水线可以压成三步：
 
-`jdk/jfr/events/` 子包(`jdk.jfr/share/classes/jdk/jfr/events/`,19 个事件类: `FileReadEvent.java`/`SocketWriteEvent.java`/`ExceptionThrownEvent.java` 等)——部分内建事件(Java 层)。
+1. 读入旧事件类字节码；
+2. 按 JFR 事件协议改写相关方法；
+3. 重新生成新的类字节码。
 
-### 4.2 两类来源
+### 为什么 ASM 的意义不在“能改字节码”，而在“能针对事件类生成专用方法体”
 
-- **Java 层内建**: 经 `JDKEvents.retransformCallback` 分支处理(`JVMUpcalls.java:68`)
-- **JVM native 直写**: 子包中**没有 GC 事件类**——GC 事件/分配事件等由 JVM native 直接生成,不经 Java 注入(内部卷 32-jfr)
+JFR 之所以不用通用反射或更高层代理去补逻辑，是因为它不想在每次事件提交时再多走一层动态分派。它要的是：在事件类真正被激活的那一刻，就把最关键的逻辑直接编译进这个类的方法体里。
 
-面试"GC 事件谁发的": JVM native 直写——Java 层注入只服务自定义事件;生产: 内建事件开箱即用(GC/锁/IO),无需埋点。
+所以 ASM 在这里不是一个孤立库知识点，而是 JFR 实现其低开销目标的手段：**用一次重写，换后续每次提交路径都更直接。**
 
-关键设计(斜体):*"JVM 事件 = native 直写"——Java 层注入只服务自定义事件。面试"GC 事件谁发的": JVM native(内部卷 32);生产: 开箱即用(GC/锁/IO 事件),无需埋点。*
+## 四、为什么注入后的路径会落到 `EventHandler`：事件类自己不直接写缓冲，而是先进入一条受控处理链
 
-跨层标注: [内部卷 32-jfr——缓冲、刷盘与 native 事件直写;域 04 反射——MethodAccessor 字节码生成(另一路改写);域 34 JMX——DiagnosticCommand 与 JFR 同属生产诊断通道]
+### 先看 handler 入口
 
-## 核心悬念
+JDK 11 里，`EventHandler` 定义在 `EventHandler.java:40`。关键方法包括：
 
-事件机制通了——**录制怎么配置**?Recording 的 startTime/destination、Configuration 的预置方案、事件级别的 Enabled/Threshold 设置——下一篇: 录制与配置。
+- `shouldWrite()`：`61`
+- `isEnabled()`：`66`
 
-> → [04-recording-config.md](04-recording-config.md)
+再结合 `EventInstrumentation` 里调用 handler 写入方法的位置 `428`，就能看清一条很重要的链：事件类在被注入后，并不是自己直接把字段塞进最终文件，而是先通过专用生成的方法体拿到对应 handler，再由 handler 执行启用判断、阈值判断和后续写入控制。
+
+### 为什么这一步很关键
+
+如果每个事件类都各自手写一整套完整写入逻辑，JFR 会很难统一控制启用状态、阈值语义和底层写入策略。EventHandler 的存在，相当于在“每个事件类被专门编译过”与“整套录制系统仍然统一管理”之间搭了一座桥：
+
+- 事件类获得专用路径；
+- 录制系统仍保留统一控制点。
+
+所以注入后的事件类不是脱离框架单飞，而是通过 handler 被纳入统一写入协议。
+
+## 五、为什么“源码空壳 + 运行时注入”比“直接把逻辑写在基类里”更合理：它同时满足了不开时便宜、开了后也要快
+
+### 不开时为什么要尽量像空壳
+
+JFR 最核心的成本纪律之一，就是没有录制会话、没有启用某类事件时，相关代码路径尽量不为此付费。如果所有逻辑都静态塞进 `Event` 基类，那即使不用 JFR，应用也可能一直背着更重的方法体、更多动态判断甚至更多通用分派开销。
+
+### 开了后为什么又不能只靠通用框架层逻辑
+
+反过来，如果真正启用时仍然完全依赖通用反射或统一解释器路径，每次事件提交又会付出更多调度和分派成本。JFR 不希望在“不用时”和“真用时”之间二选一，而是要两头都兼顾：
+
+- 未激活时，事件类尽量接近空壳；
+- 激活后，再把事件协议编译成专用路径；
+- 这样既避免常驻成本，又避免启用后的通用解释成本。
+
+所以“源码空壳 + 运行时注入”不是奇技淫巧，而是 JFR 低开销设计的关键折中。
+
+## 六、为什么 Java 层自定义事件和 JVM 内建事件要走双轨：并不是所有事件都需要 Java 类注入
+
+### 先看回调里的分流
+
+`JVMUpcalls.onRetransform(...)` 在识别到不是这类事件子类时，会把路径交给 `JDKEvents.retransformCallback(...)`，位置在 `JVMUpcalls.java:68`。再结合旧稿提到的 `jdk/jfr/events` 子包与 GC 事件并不完全在那里，就能看出一个关键结论：JFR 的事件来源本来就不是单轨。
+
+### 为什么双轨是合理设计
+
+- **Java 层自定义事件**：最适合通过事件类 + 注解 + 运行时注入来激活；
+- **JVM 内建事件**：某些事件本来就更靠近虚拟机内部实现，例如 GC、分配、锁、调度等，完全可以由 JVM 或更底层路径直接产生。
+
+这意味着 JFR 事件世界里一直存在两类来源：
+
+- Java 事件类经过注入后写入；
+- JVM 内部事件直接由更底层实现生成。
+
+所以不要把“事件类注入”误解成 JFR 的唯一写入方式。它是自定义 Java 事件的关键机制，但不是整套 JFR 事件宇宙的唯一来源。
+
+## 收网：JFR 事件类之所以能从空壳 API 变成真正可写入记录缓冲的对象，靠的是运行时把事件协议编译成专用字节码路径
+
+现在可以把整篇压成一条主线：
+
+- `Event` 公开 API 故意保持很薄，不把全部真实写入逻辑静态写死；
+- JVM 在合适时机通过 `JVMUpcalls.onRetransform(...)` 识别并重转换事件类；
+- `EventInstrumentation` 用 ASM 把事件协议编译进具体事件类；
+- 注入后的方法体通过 `EventHandler` 接入统一启用判断、阈值判断和后续写入链；
+- 这种“源码空壳 + 运行时注入”的设计同时服务于未启用几乎零成本和启用后低开销；
+- Java 自定义事件和 JVM 内建事件因此形成了双轨来源模型。
+
+所以理解 JFR 字节码增强的正确角度，不是“它用了 ASM 很酷”，而是：**JFR 把事件协议延迟到运行时再编译成专用路径，从而把开发者看到的轻量 API 和底层真正高效的写入机制拆开。** 这才是 `commit()` 明明看起来很薄，却最终真能成为低开销事件流入口的根本原因。
+
+下一篇自然就会落到“既然事件已经能被正确写入，那到底录哪些、不录哪些、录多久、写到哪里”这层控制面上：Recording 的配置、模板和事件级启停，是 `04-recording-config.md` 要接着回答的问题。

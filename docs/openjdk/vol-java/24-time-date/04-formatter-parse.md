@@ -1,71 +1,175 @@
-# 04. 格式化与解析 — DateTimeFormatter 流程与线程安全
+# 格式化与解析：为什么 `DateTimeFormatter` 能安全共享，而 `SimpleDateFormat` 总让人不放心
 
-> **前置依赖**: [24-time-date/03 — 时区体系](03-zone-rules.md)(ZoneId/ZoneRules)、[01-string/04 — 编码与 Unicode](../01-string/04-encoding-unicode.md)(文本表示)
-> → **后续**: 按写作顺序进入组合类型
+> 本文基于 JDK 11 `DateTimeFormatter`、`DateTimeFormatterBuilder`、`DateTimeParseContext`、`ResolverStyle`。本文聚焦模式编译、格式化与解析两阶段、不可变配置与线程安全；`SimpleDateFormat` 只作为对照，不展开旧 API 全史。本文讨论的是 JDK 11 `java.time` 格式化/解析体系，不把这里的 builder 编译链、resolve 过程和线程安全模型外推成所有格式化 API 都必须遵守的统一规范。
+> **前置依赖**：[时区体系](03-zone-rules.md)
+> **后续**：组合类型
 
-## 模式字符串如何变成格式化器
+## 先看最经典的生产问题：为什么一个 formatter 可以做静态常量，另一个共享就可能出事故
 
-`DateTimeFormatter` 的关键不是模式字符串本身,而是把模式编译成可复用的打印/解析节点组合。
+几乎每个 Java 工程师都听过这个经验法则：`SimpleDateFormat` 不要跨线程共享，`DateTimeFormatter` 可以安全定义成静态常量复用。很多时候，这条结论被记住了，但原因却只剩下一个模糊印象：新 API 更现代，所以线程安全。
 
-## 1. "模式字符串怎么变成格式化器?" — Builder 节点链
+真正关键的差异其实不是“谁能格式化日期”，而是：**共享对象里面到底保存的是不可变配置，还是某次调用过程中会被读写的可变状态。**
 
-### 1.1 构建链
+这也是为什么这一篇不能只讲模式字符表。`yyyy-MM-dd HH:mm:ss` 这种字符串本身并不会自动带来线程安全。真正让 `DateTimeFormatter` 可以跨线程复用的，是它先把模式编译成一套不可变的打印/解析节点结构，然后把每次 format / parse 的临时状态都放进本次调用自己的上下文里。
 
-`DateTimeFormatter.ofPattern(String)`(`DateTimeFormatter.java:563`)直接委托:
+所以这一篇的主线不是“模式语法大全”，而是：**格式器对象为什么能只保存配置，而不保存某次调用的中间态。**
 
-`new DateTimeFormatterBuilder().appendPattern(pattern).toFormatter()`。
+## 一、为什么模式字符串不会在每次调用时重新解释：它会先被编译成节点组合
 
-`appendPattern`(`DateTimeFormatterBuilder.java:1706`)再进入 `parsePattern`(`:1712`),把 `yyyy/MM/dd/HH` 等模式片段转换成内部打印/解析节点。
+### 先看构建链路
 
-节点可以表达数字、文本、字面符号、填充与可选段等组合。
+JDK 11 里：
 
-### 1.2 为什么能复用
+- `DateTimeFormatter.ofPattern(String)` 在 `DateTimeFormatter.java:563`
+- `ofPattern(String, Locale)` 在 `587`
+- `DateTimeFormatterBuilder.appendPattern(...)` 在 `DateTimeFormatterBuilder.java:1706`
+- 真正拆模式的 `parsePattern(...)` 在 `1712`
+- 常见节点构建方法包括 `appendValue(...)`（`398` / `452` / `493`）和 `appendLiteral(...)`（`1421` / `1436`）
+- 最终冻结成 formatter 的 `toFormatter()` 在 `2189` / `2210` / `2221`
 
-构建完成后,格式器保存的是不可变配置;每次 format/parse 使用自己的上下文,不会把本次操作的临时字段写回共享格式器。
+这条链路已经把设计意图写得很清楚：模式字符串不是留着运行时每次临时解释，而是先由 `DateTimeFormatterBuilder` 解析成一组 printer/parser 节点，再封装成一个可复用的 formatter。
 
-关键设计(斜体):*"模式 → 节点组合"把格式化变成组合器流水线——打印与解析共享同一套结构。面试"DateTimeFormatter 为什么线程安全": 格式器不可变,每次操作使用独立上下文。*
+### 为什么这一步是线程安全和复用性的地基
 
-## 2. "format 的流程?" — PrintContext 上下文
+如果模式要在每次调用时重新解释，那 formatter 本身的存在价值就会大幅下降：它既难以复用，也更容易把解析过程里的中间状态和最终配置混在一起。
 
-### 2.1 执行链
+现在这种设计正好反过来：
 
-`format(TemporalAccessor)`(`DateTimeFormatter.java:1815`)创建输出缓冲并委托 `formatTo`(`:1837`)。格式化过程从 temporal 读取字段值,再把节点结果写入 Appendable。
+- 模式先被“编译”；
+- formatter 保存的是编译后的不可变结构；
+- 每次真正执行格式化或解析时，只是拿着这套结构跑一遍。
 
-字段缺失或无法按格式表达时,格式化过程抛出日期时间异常。
+所以 `DateTimeFormatter` 本体更像一份冻结好的执行计划，而不是一段等待反复临场解释的文本模板。
 
-### 2.2 线程安全
+## 二、为什么 `format` 可以共享同一个 formatter：格式器只保留配置，不保留本次调用状态
 
-共享一个静态 `DateTimeFormatter` 是安全的: formatter 保存配置,具体 temporal、输出缓冲与打印上下文属于当前调用。
+### 先看调用入口
 
-关键设计(斜体):*PrintContext 是一次调用的只读上下文——格式器本身不保存某次 format 的可变状态,因此可以跨线程复用。面试"format 是纯函数吗": 对同一个 formatter 与 temporal,结果由输入决定,没有共享格式化游标。*
+JDK 11 里：
 
-## 3. "parse 的两阶段" — 解析与 resolve
+- `format(TemporalAccessor)` 在 `DateTimeFormatter.java:1815`
+- `formatTo(...)` 在 `1837`
 
-### 3.1 parse
+格式化流程的核心不是“formatter 自己记住了上一次输出到了哪里”，而是：它根据当前传入的 temporal、当前输出目标和当前格式器配置，创建本次调用的打印上下文，再沿着节点链把结果写出去。
 
-`parse(CharSequence)`(`DateTimeFormatter.java:1871`)先把文本交给模式节点,收集字段值到解析上下文。
+### 为什么这意味着可以安全共享
 
-`parseBest`(`:1987`)可以按候选目标类型尝试转换;`parseUnresolved`(`:2094`)只完成文本解析,返回未 resolve 的结果。
+只要 formatter 本身不持有本次 temporal、不持有输出缓冲、不持有可变游标，那多个线程共享同一个 formatter 时，就只是共享了一份只读配置。真正变化的部分——这次要格式化哪个时间对象、写到哪个缓冲区、当前写到了哪里——都属于本次调用自己的上下文。
 
-### 3.2 resolve
+这就是线程安全的真正来源：**不是 formatter 被加锁保护，而是它根本不把调用态存在共享对象里。**
 
-普通 `parse` 会继续 resolve: 合并字段、补默认值、按目标类型校验。比如 `LocalDate` 需要年/月/日字段组合,非法日期会在解析/resolve 链路中失败。
+所以“把 `DateTimeFormatter` 定义成静态常量”之所以成立，不是经验魔法，而是状态模型天然允许这么做。
 
-关键设计(斜体):*parse = 文本转字段,resolve = 字段转语义对象。两阶段让可选字段与跨字段校验分开。面试"parse 与 parseUnresolved 区别": 后者停在字段解析,不做最终 resolve。*
+## 三、为什么 `parse` 天然分成两阶段：读出字段,不等于已经拿到了合法时间对象
 
-## 4. "与 SimpleDateFormat 对照" — 经典面试题
+### 第一阶段先做什么：把文本拆成字段
 
-### 4.1 为什么 SimpleDateFormat 不安全
+JDK 11 里：
 
-`SimpleDateFormat` 继承的 `DateFormat` 持有可变 `Calendar`;多个线程共享同一 formatter 时,format/parse 会共同读写这份状态,可能相互污染。
+- `parse(CharSequence)` 在 `DateTimeFormatter.java:1871`
+- `parseBest(...)` 在 `1987`
+- `parseUnresolved(...)` 在 `2094`
+- 解析上下文类 `DateTimeParseContext` 在 `DateTimeParseContext.java:92`
 
-### 4.2 DateTimeFormatter 的优势
+很多人第一次看 `parse`，会以为流程很简单：字符串和模式对上了，日期对象就出来了。但源码结构已经说明并不是这样。字符扫描结束之后，首先得到的是一组被模式节点读出来的字段值，比如年、月、日、时、分、秒、偏移这些局部信息，它们先进入本次解析专属的上下文里。
 
-- 不可变,可以安全做静态常量
-- 预定义 ISO 格式
-- 支持 Locale 与 `ofLocalizedDate`
-- 支持 resolver style 等解析严格度控制
+### 为什么“字段读出来了”还不算结束
 
-生产规范: 新代码优先 `DateTimeFormatter`;遗留 `SimpleDateFormat` 可用 ThreadLocal、局部实例,或统一替换。
+因为字段集合本身还不是最终语义对象。比如：
 
-关键设计(斜体):*SimpleDateFormat 的问题是共享可变 Calendar 状态,不是“格式化天然不安全”。面试"为什么不用 SimpleDateFormat": DateTimeFormatter 以不可变配置 + 独立上下文解决了共享状态问题。*
+- 读出了年、月、日，才能进一步尝试组成 `LocalDate`；
+- 读出了本地日期时间和时区信息，才能进一步 resolve 成带时区对象；
+- 某些字段之间还可能互相冲突，或者需要补默认值后才能成立。
+
+所以 parse 的第一阶段解决的是“文本里读到了什么”，不是“这些字段最后能不能组成一个合法时间对象”。
+
+这也就是 `parseUnresolved(...)` 存在的原因：它停在字段解析结果，不继续做后面的语义收束。
+
+## 四、为什么 resolve 是单独的一步：合法时间对象必须经过跨字段校验和策略决策
+
+### resolve 不是附带清理，而是真正决定语义对象是否成立
+
+普通 `parse(...)` 在字符扫描之后，还要继续走 resolve。这一步会做的事包括：
+
+- 合并字段；
+- 补默认值；
+- 做跨字段校验；
+- 按目标类型尝试构造最终时间对象。
+
+这说明 parse 从来不只是“模式匹配成功”。真正重要的问题是：**这些字段组合起来，在当前规则和当前解析策略下，到底是不是一个合法且可落地的时间语义对象。**
+
+### 为什么这一步必须和字符扫描分开
+
+如果把“读字符”和“校验并构造目标对象”硬揉在一起，很多复杂场景就会非常难处理：可选字段、不同目标类型、偏移与时区并存、字段间冲突、非法日期判定……都会让解析逻辑变得又脆又难复用。
+
+把 parse 拆成“先读字段，再 resolve”，本质上是在把“语法层读取”和“语义层收束”分离开。这样 builder 编出来的节点链负责读文本，而 resolve 阶段负责判断这些字段最终代表什么。
+
+## 五、为什么 `ResolverStyle` 会改变同一串字符的命运：解析不只看模式，还看合法性策略
+
+### 先看相关入口
+
+JDK 11 里：
+
+- `withResolverStyle(...)` 在 `DateTimeFormatter.java:1682`
+- `ResolverStyle` 枚举定义在 `ResolverStyle.java:77`
+- builder 默认 `toFormatter(...)` 路径会把 resolver style 也封进 formatter，位置在 `DateTimeFormatterBuilder.java:2211` / `2221`
+
+这说明 formatter 的配置里，不只有模式和 Locale，还有一层非常关键的策略：字段解析完成后，到底按多严格的规则去 resolve。
+
+### 为什么“模式匹配成功”不等于“解析合法”
+
+同一串字符，字符层面完全可能匹配模式，但在语义层面未必合法。比如某个月是否存在某一天、某些字段组合是否自洽、某些宽松进位是否允许，都不只是模式字符能决定的。
+
+`ResolverStyle` 的存在，就是把这个事实显式化：**解析正确性不仅是字符匹配问题，还是合法性判断问题。** 不同 style 下，同一组字段可能得到不同的接受或拒绝结果。
+
+所以一个 formatter 的行为，不能只看 pattern 长什么样，还要看它 resolve 时采用什么规则纪律。
+
+## 六、为什么 `SimpleDateFormat` 共享会出事，而 `DateTimeFormatter` 不会：根本差异在状态模型,不是在“新旧 API 气质”
+
+### 旧问题到底出在哪
+
+`SimpleDateFormat` 的著名坑，不是因为“日期格式化这件事天生无法共享”，而是因为共享 formatter 对象时，某次调用中的可变状态可能直接存放在这个共享对象及其关联状态里，多个线程会互相覆盖、相互污染。
+
+也就是说，问题不是“格式化行为危险”，而是“调用态和配置态没有被干净分离”。
+
+### 新格式器为什么能避开这个坑
+
+`DateTimeFormatter` 正好采取了相反的设计：
+
+- 模式先编译成不可变节点结构；
+- formatter 对象只保存配置；
+- format / parse 每次调用都使用自己的上下文；
+- resolve 规则也作为配置的一部分被冻结在 formatter 里。
+
+这让它可以被安全共享，因为线程之间共享的只是规则，不是过程。
+
+## 七、五个最容易混掉的边界：formatter 不是模式字符串，线程安全不是靠锁，parse 不等于直接拿到对象，ResolverStyle 不只是小配置，SimpleDateFormat 的问题也不在“API 老”
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`DateTimeFormatter` 不是一段模式字符串本身。模式只是原材料，真正被复用的是经由 builder 编译出来的一套打印/解析节点结构。把 formatter 误当成字符串模板，就会低估它为什么能高效复用。
+
+第二，线程安全也不是因为它在内部做了很多同步。真正原因是 formatter 本体只保存不可变配置，本次 format/parse 的可变中间态都落在调用自己的上下文里。没有共享可变状态，自然也就不需要靠锁来救场。
+
+第三，`parse()` 更不等于“字符一读完，目标时间对象就已经拿到了”。字符扫描结束后，先得到的只是字段集合；这些字段还得再经过 resolve，才能判断是否能合法落成 `LocalDate`、`LocalDateTime`、`ZonedDateTime` 等最终语义对象。
+
+第四，`ResolverStyle` 也不是一个可有可无的小配置。它直接参与决定“同一串字符在语义上算不算合法时间”，所以它改变的不是格式器气质，而是解析纪律本身。
+
+第五，`SimpleDateFormat` 的问题也不只是“旧 API 设计老了”。它真正踩坑的根子，是共享对象里混进了会被本次调用修改的状态。只要这一点不改，换再多模式字符也不会自然变安全。
+
+把这五条边界记稳，格式化与解析这一篇就不会重新塌回“模式字符大全”和“新 API 线程安全”这种表面印象。它真正想讲的是：只有先把配置和调用态拆开，格式器对象才值得被缓存、复用和跨线程共享。
+
+## 收网：`DateTimeFormatter` 真正可复用的关键，不是会写模式，而是把配置和调用态彻底拆开
+
+现在可以把整篇压成一条总线：
+
+- 模式字符串先经由 `DateTimeFormatterBuilder` 编译成节点组合；
+- formatter 保存的是不可变配置，而不是某次调用的临时状态；
+- `format` 只是在本次上下文里执行打印节点链；
+- `parse` 先读字段，再通过 resolve 收束为合法时间对象；
+- `ResolverStyle` 决定 resolve 时的合法性纪律；
+- `SimpleDateFormat` 的问题，根子在共享可变状态，而不是“旧 API 不现代”。
+
+所以 `DateTimeFormatter` 之所以值得做静态常量，不是因为它只是“更好用的模式字符串工具”，而是因为它从一开始就把格式器设计成了一份可共享的不可变执行计划。
+
+下一步自然会进入更贴近业务组合对象的一层：当本地日期时间、偏移、时区开始组合起来时，`ZonedDateTime`、`OffsetDateTime`、`LocalDateTime` 这些类型到底该怎么分工，为什么“看起来都像带时间的对象”却不能混用？这就是 `05-zoned-offset.md` 要接着回答的问题。

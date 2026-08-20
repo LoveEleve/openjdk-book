@@ -1,149 +1,147 @@
-# 06. Spliterator 与并行流 — 分割遍历、ForkJoin 引擎、使用陷阱
+# Spliterator 与并行流：为什么并行流不是写个 `parallel()` 就自然变快
 
-> **前置依赖**: [16-stream/02 — 流水线结构与惰性机制](02-pipeline-lazy.md)(链组装、SHORT_CIRCUIT)、[16-stream/04 — 终端求值](04-terminal-eval.md)(归约并行分片)、[16-stream/05 — Collectors 与收集器](05-collectors.md)(特征驱动并行)
-> → **后续**: 域 21 Selector 与网络 NIO(21-selector-nio 系列,按写作顺序)
-> 关联: 域 08 集合(集合 Spliterator 实现);域 13 原子类(CAS 并发基础);内部卷 25-gc-framework(WorkGang 并行任务)
+> 本文基于 JDK 11 `Spliterator`、`StreamSupport`、`Collection.parallelStream()` 与 ForkJoin 共用执行后端。讨论重点是 `tryAdvance` / `trySplit` / `estimateSize` / `characteristics`、并行拆分任务树、commonPool 使用边界与并行流适用条件；不展开每个集合具体 Spliterator 的全部实现。
+> **前置依赖**：[流水线结构与惰性机制](02-pipeline-lazy.md)、[终端求值](04-terminal-eval.md)、[Collectors 与收集器](05-collectors.md)
+> **后续**：域 21 Selector 与网络 NIO
 
-## 并行流的底层引擎
+## 先看一个最容易把并行流误讲成“自动多线程加速”的错觉
 
-前 5 篇把串行求值的每个环节讲完,并行只作为分支提及。这一篇看并行流的底层引擎: `Spliterator` 怎么把数据切碎?ForkJoin 任务树怎么建?`parallelStream` 跑在哪个线程池?以及什么时候并行反而慢。
+很多人第一次接触并行流时，都会把它想成非常直接的一件事：把 `stream()` 改成 `parallelStream()`，或者链上加一个 `parallel()`，然后 JVM 就自动多开几个线程，大家一起处理数据，于是自然会更快。这个想法最大的问题，不在于“多线程”三个字错了，而在于它完全跳过了并行流真正依赖的前提链。
 
-## 1. "Spliterator 是什么" — 可分割迭代器
+并行流从来不是“给现有流水线插个并行开关”这么简单。它至少要同时满足两件事：
 
-### 1.1 四个能力
+1. 数据源本身得**切得够像样**，否则没法把工作平均分给多个任务；
+2. 切出来的任务得落到一个合适的并行执行引擎上，而且每个小任务本身的工作量要足够抵过拆分、调度和合并的成本。
 
-`Spliterator<T>` 接口(`Spliterator.java:296`)的四个核心方法:
+也就是说，并行流真正的起点不是线程，而是 **Spliterator**。如果源数据切不好、特性不清楚、顺序约束太重、任务本身又很轻，parallel 不但不会变快，反而会把拆分和调度成本白白堆上去。
 
-| 方法 | 源码 | 作用 |
-|------|------|------|
-| `tryAdvance(action)` | `:309` | 单步消费一个元素,返回是否还有剩余 |
-| `forEachRemaining(action)` | `:325-327` | 默认实现循环 tryAdvance 直到耗尽 |
-| `trySplit()` | `:370` | **分割**: 返回覆盖部分元素的子 Spliterator,自己保留其余 |
-| `estimateSize()` | `:395` | 大小估计(未知/无限返回 `Long.MAX_VALUE`) |
-| `characteristics()` | `:432` | 特性位 |
+所以这篇的主线不是“并行流内部用的是 ForkJoin”，而是：**为什么并行流首先依赖一个可切分的数据源描述器，再把这些切块交给公共 FJP 去执行；以及为什么一旦切块质量、任务成本或执行环境不匹配，并行反而会变成负担。**
 
-名称来源: Spliterator = split + iterator——既能遍历又能分割。
+## 一、Spliterator 为什么不是 Iterator 的升级版，而是并行流的真正入口
 
-### 1.2 特性位
+### 先看 Iterator 模型为什么不够
 
-`Spliterator.java:486-584` 定义 8 个特性位:
+普通 `Iterator` 很擅长回答一个问题：下一个元素是谁？可这对并行来说远远不够。并行需要的不只是“能往前走”，还要知道“**我能不能把手上的这段数据切一半分给别人**”。如果一个遍历器只能线性向前推进，却不知道如何自我分割，那你再多的线程也只能围着同一条单通道排队取数据。
 
-| 特性 | 值 | 源码 | 含义 |
-|------|-----|------|------|
-| `DISTINCT` | 0x01 | `:493` | 元素两两不等 |
-| `SORTED` | 0x04 | `:507` | 元素已排序 |
-| `ORDERED` | 0x10 | `:486` | 有 encounter order,`trySplit` 必须返回**严格前缀**(`:334-335`) |
-| `SIZED` | 0x40 | `:521` | 大小精确可知 |
-| `NONNULL` | 0x100 | `:528` | 不含 null |
-| `IMMUTABLE` | 0x400 | `:539` | 源不可变 |
-| `CONCURRENT` | 0x1000 | `:567` | 源可被并发安全修改 |
-| `SUBSIZED` | 0x4000 | `:584` | 分割后子与自身大小之和守恒 |
+这正是 `Spliterator` 与 Iterator 最本质的区别。JDK 11 中，`Spliterator` 定义在 `Spliterator.java:296`，它除了 `tryAdvance` 之外，还多了两个并行特别关心的能力：
 
-### 1.3 分割递归: 数据分治的基础
+- `trySplit()`（`Spliterator.java:370`）
+- `estimateSize()`（`395`）
 
-`trySplit` 返回子 Spliterator,子还能再分——递归二分直到任务粒度。`ArrayList` 的 `ArrayListSpliterator`(`ArrayList.java:1565` 起)用 `mid = (lo + hi) >>> 1` 对半切(`:1619-1623`),报告 ORDERED|SIZED|SUBSIZED(`:1667-1669`);`Stream.iterate` 的无限流返回 `Long.MAX_VALUE` 大小估计且不可分(第 2 篇 §4.3)。
+再加上：
 
-面试"并行流数据怎么分": trySplit 递归二分——分割是否均衡决定负载是否均衡(SIZED/SUBSIZED 提供精确预估,不 SIZED 可能分配不均)。
+- `characteristics()`（`432`）
 
-关键设计(斜体):*"流并行 = Spliterator 分割 + ForkJoin 执行"——trySplit 把数据切成任务粒度,特性位告诉框架能否优化(ORDERED 限制分割取严格前缀、SUBSIZED 让大小估计精确)。面试"并行流数据怎么分": trySplit 递归二分;面试"SIZED 特性有什么用": 均衡分割与精确预估(count 的 O(1) 捷径就靠它,第 4 篇 §1)。*
+这就说明 Spliterator 不只是“怎么遍历”，还在回答“怎么切、切得有多大、这段数据有哪些结构性性质”。它不只是遍历器，而是**可切分数据源的执行契约**。
 
-## 2. "并行任务树" — AbstractTask
+### 为什么 `trySplit` 才是并行流真正的入口动作
 
-### 2.1 ForkJoin 任务基类
+并行流真正要做的第一件事，不是把一个现成循环扔给更多线程，而是反复调用 `trySplit`，尽量把数据源切成若干块。只有切块成功，后面的 ForkJoin 任务树才有东西可分。
 
-`AbstractTask` 继承 `CountedCompleter`(`AbstractTask.java:88-90`)——ForkJoin 框架的任务基类。两个关键常量:
+也就是说，parallel 的第一问不是“线程有几个”，而是“源到底切不切得开”。Spliterator 的设计把这个问题提前到了接口层，而不是等框架执行时再临时猜。
 
-```java
-// AbstractTask.java:92 + 160-168(截取,逐字)
-    private static final int LEAF_TARGET = ForkJoinPool.getCommonPoolParallelism() << 2;
-...
-    public static int getLeafTarget() {
-        Thread t = Thread.currentThread();
-        if (t instanceof ForkJoinWorkerThread) {
-            return ((ForkJoinWorkerThread) t).getPool().getParallelism() << 2;
-        }
-        else {
-            return LEAF_TARGET;
-        }
-    }
+这一层一定要立住，因为它会直接决定读者后面怎么理解 `SIZED`、`ORDERED`、`SUBSIZED` 这些特性位：它们不是抽象标签，而是在告诉框架“这块数据切起来靠不靠谱”。
+
+## 二、为什么特性位不是文档注释，而是在告诉框架“我这块数据能不能放心这么切”
+
+### 先看最关键的几类特性
+
+JDK 11 的 Spliterator 常量定义里，和并行流最相关的不是全部特性，而是几类特别会改变执行策略的标记：
+
+- `ORDERED`（`Spliterator.java:486`）
+- `SIZED`（`521`）
+- `IMMUTABLE`（`539`）
+- `CONCURRENT`（`567`）
+- `SUBSIZED`（`584`）
+
+它们表面上像元信息，实际上都在回答一个框架层的问题：我在切分和并行消费这块数据时，哪些假设是成立的？
+
+### 为什么 `SIZED` / `SUBSIZED` 会直接影响并行均衡
+
+如果一个 Spliterator 能准确估计自己和子块的大小，那框架就更容易做相对均衡的分治切块。`SIZED` 说明当前总量精确可知；`SUBSIZED` 则进一步说明切分后的子块大小之和也仍然精确可信。
+
+这对并行非常关键。因为任务树能不能均衡，不只取决于“切成几块”，还取决于“切出来的每块是不是差不多重”。你如果只能模糊估计大小，后面就很容易出现某个 worker 早早干完，另一个 worker 还背着一大坨数据的情况。
+
+这也解释了为什么上一章 `count()` 在 `SIZED` 流上甚至可以直接 O(1) 返回——同一个特性位既能帮助并行切分，也能让某些终端操作跳过完整遍历。
+
+### 为什么 `ORDERED` 和 `CONCURRENT` 也会改变执行成本
+
+`ORDERED` 说明流有 encounter order 约束，这就意味着并行时很多“先到先得”的优化不能随便做，像 `findFirst` 这种终端甚至会因此比 `findAny` 更贵。`CONCURRENT` 和 `IMMUTABLE` 则是在告诉框架：源数据在遍历期间是否可能被并发安全修改，或本来就稳定不变。这些都会影响框架对切分与消费安全性的假设。
+
+所以 Spliterator 的特性位不是 API 附属说明，而是在给并行流一个“**这块数据到底允许你做什么假设**”的执行合同。
+
+## 三、为什么 trySplit 的质量会直接决定并行流到底是加速还是添堵
+
+### 先看“能 split”不等于“split 得好”
+
+只要某个数据源实现了 `trySplit`，并不代表它天然就适合并行。真正关键的是：它切出来的子块是否足够均衡，切分动作本身是否足够便宜，后续合并和顺序约束会不会把这些收益又吃掉。
+
+JDK 在 `Spliterator` 注释里就反复强调：如果是 `ORDERED`，返回子 Spliterator 还必须满足前缀等约束；而 size 估计与切分一致性又依赖 `SIZED` / `SUBSIZED`。这说明“怎么切”不是自由发挥，而是会直接牵动后续并行调度质量。
+
+### 为什么 Collection.parallelStream 只是把“并行标记”送进 StreamSupport
+
+集合默认 `stream()` / `parallelStream()` 在 `Collection.java:710-732`。并行流最终只是把 `spliterator()` 和一个 parallel 标志交给 `StreamSupport.stream(...)`（`StreamSupport.java:67`）。也就是说，集合一旦把自己的 Spliterator 交出去，后面能不能并行拆得像样，主要就看这份 Spliterator 的切分和特性契约。
+
+这再次说明，并行流的真正入口不是“多线程”，而是“**这份数据源描述是否足够适合被切块**”。
+
+## 四、为什么并行流最后还是会落到 commonPool：切完块之后，总得有人去干这些块
+
+### 先看 commonPool 为什么会自然接住并行流
+
+一旦 Spliterator 切出了足够多的数据块，下一步问题就变成：谁来执行这些块？前面异步域已经讲过，JDK 里大量细粒度异步与分治任务最终都会落到 `ForkJoinPool.commonPool()`。并行流也不例外。
+
+JDK 11 中：
+
+- `commonPool()` 位于 `ForkJoinPool.java:2395`
+- `getCommonPoolParallelism()` 位于 `2563`
+
+这说明 parallelStream 默认并不会凭空给你建一座专属线程池，而是把切出来的任务交给全局共享的 commonPool 后端去调度。
+
+### 为什么这件事会直接带来“阻塞拖累全局”的风险
+
+一旦你知道 parallelStream 最终会共享 commonPool，再看很多生产陷阱就顺理成章了。如果你的流回调里做了阻塞 IO、长时间锁等待，或者本来就是很慢的外部调用，那这些任务占住的不是“某次并行流自己的临时线程”，而是整个 JVM 里大家共用的 ForkJoin worker。
+
+于是问题不再只是“这一条流慢”，而是：**别处也在用 commonPool 的 CompletableFuture Async、并行流或分治任务，都可能跟着被拖慢。**
+
+这就是为什么“不要在 parallelStream 里做阻塞操作”从来不只是性能建议，而是共享执行器隔离边界问题。
+
+## 五、什么时候并行流有希望更快，什么时候反而注定更慢
+
+### 先看并行真正需要满足的四个前提
+
+到这里，其实已经能把并行流是否值得开的判断压成四条前提：
+
+1. **数据源能切得开**：`trySplit` 足够均衡，特性位支持靠谱估计；
+2. **单元素处理够重**：每片真正有足够计算量，能覆盖拆分、调度和合并开销；
+3. **顺序与状态约束不太强**：太重的 `ORDERED`、`sorted`、`distinct` 等都会吃掉并行收益；
+4. **执行逻辑不阻塞 commonPool**：否则共享池反而成了拖累。
+
+### 为什么小数据、重顺序、有状态和阻塞是四大常见反例
+
+这四个坑几乎覆盖了 parallelStream 误用的大多数来源：
+
+- **小数据**：任务本身太轻，拆分和调度成本反而是主角；
+- **重顺序**：像 `findFirst`、有序收集等需要守 encounter order，会削弱并行自由度；
+- **有状态中间操作**：`sorted`、`distinct` 这类操作本来就要缓存或全局协调，往往会把并行切块的收益再吃回来；
+- **阻塞回调**：线程不是拿来算，而是拿来等 IO，commonPool 反被拖死。
+
+所以并行流不是“集合够大就开”的简单按钮，而是一条带有明确适用条件的执行路径。
+
+## 收网：并行流真正依赖的是“切得像样的数据源 + 适合切块的执行任务”，不是 parallel 这个名字
+
+回到开头那个误解，现在已经能看清为什么 `parallelStream()` 绝不等于自动加速了。并行流的第一步不是多开线程，而是让 Spliterator 先证明：这份数据能否被切成足够均衡、足够便宜、语义上又合法的子块。只有这一步成立，后面的 ForkJoin 任务树和 commonPool 调度才有机会把并行执行真正做起来。
+
+而一旦数据切分质量不够、元素处理太轻、顺序约束太重、或者执行逻辑本身会阻塞共享池，parallel 不但不会更快，反而会让拆分、调度、合并与资源争用共同变成额外负担。
+
+把整篇压成一张总图，就是：
+
+```text
+parallelStream
+  → 先拿到 Spliterator
+  → 看 trySplit / estimateSize / characteristics
+  → 能切得像样，才分成任务树
+  → 再交给 commonPool / ForkJoin 执行
+  → 结果好不好，取决于切分质量 + 任务成本 + 顺序约束 + 阻塞风险
 ```
 
-**LEAF_TARGET = 并行度 × 4**——叶任务粒度(注释 `:154-158` 说"过度分割,每个处理器约 4 个任务,允许负载均衡: 某叶偏大时其他线程来帮忙")。
-
-### 2.2 compute: 迭代式分治
-
-`compute()`(`AbstractTask.java:302-329`)的核心循环:
-
-```java
-// AbstractTask.java:302-329(截取,逐字)
-        while (sizeEstimate > sizeThreshold && (ls = rs.trySplit()) != null) {
-            K leftChild, rightChild, taskToFork;
-            task.leftChild  = leftChild = task.makeChild(ls);
-            task.rightChild = rightChild = task.makeChild(rs);
-            task.setPendingCount(1);
-            ...
-            taskToFork.fork();
-            sizeEstimate = rs.estimateSize();
-        }
-        task.setLocalResult(task.doLeaf());
-        task.tryComplete();
-```
-
-- `sizeThreshold` 来自 `suggestTargetSize`(`:194-197`): `estimateSize / (并行度 × 4)`——总任务数切到约 4 × 并行度 个
-- **迭代式**: 循环里 fork 一个子任务、自己继续沿另一支往下切——避免深递归(注释 `:294-299`:"alternate which child is forked versus continued")
-- 叶子: `doLeaf()` 计算局部结果;合并沿 `onCompletion` 回父任务(ReduceTask 已见,第 4 篇 §2.2)
-
-### 2.3 短路并行: AbstractShortCircuitTask
-
-匹配/查找类终端的并行基类(`AbstractShortCircuitTask.java:101` 起): compute 循环**每轮先查共享结果** `while ((result = sr.get()) == null)`(`:109`),任一分片命中即 `shortCircuit(result)`(`:150`)写入 `AtomicReference<R> sharedResult`——整棵树停止(第 4 篇 MatchTask 就是它)。
-
-关键设计(斜体):*"任务树"= 分治标准形态: 根任务 split 成子树、fork 一个继续一个、叶子算、onCompletion 向上合并;LEAF_TARGET(并行度×4)控制分割深度,避免任务过细。面试"并行流内部结构": ForkJoin 任务树 + trySplit 递归二分;面试"短路并行怎么停": 共享 AtomicReference 结果,每轮先查。*
-
-## 3. "并行流用什么线程池" — commonPool
-
-### 3.1 全局共享池
-
-`list.parallelStream()`(`Collection.java:732-734`)→ `StreamSupport.stream(spliterator(), true)`——并行任务经 `ForkJoinTask` 提交: 调用线程不是 ForkJoinWorkerThread 时,`fork`/`invoke` 把任务推进 **`ForkJoinPool.commonPool()`**(`ForkJoinPool.java:2395`)的外部队列(`ForkJoinTask.java:704`,`ForkJoinPool.common.externalPush(this)`),一个 JVM 全局共享池。
-
-并行度(`ForkJoinPool.java:2335-2360`): 默认 `Runtime.getRuntime().availableProcessors() - 1`(`:2355-2356`,注释 "default 1 less than #cores");可用系统属性 `java.util.concurrent.ForkJoinPool.common.parallelism` 覆盖(`:2342-2343`)。
-
-### 3.2 共享池的坑
-
-- **无隔离**: 所有 `parallelStream` 共用 commonPool——一个长任务(阻塞 IO/锁)占住工作线程,全应用并行流变慢
-- work-stealing: 空闲线程会偷取其他线程队列里的任务(负载均衡的核心机制)
-- 生产: 阻塞操作禁并行流;计算密集才并行;需要隔离时把任务提交到**自定义** `ForkJoinPool`(`ForkJoinPool` 构造器指定并行度)
-
-面试"并行流线程模型": commonPool + work-stealing;并行度默认核数 - 1。
-
-关键设计(斜体):*"共享公共池"是并行流的大坑——一个长任务阻塞 commonPool,全应用 parallelStream 变慢(无隔离)。面试"并行流线程模型": commonPool + ForkJoin work-stealing;生产规则: 阻塞操作(IO/锁)禁并行流,计算密集才并行,要隔离就用自定义 ForkJoinPool。*
-
-## 4. "什么时候该用并行流" — 性能判断
-
-### 4.1 适用与陷阱
-
-适用: 计算密集 + 大数据量 + 无顺序依赖 + 无共享可变状态。
-
-四大陷阱:
-
-1. **小数据**: 分割与合并的固定成本 > 收益(任务树/线程调度本身有开销)
-2. **有状态操作**: sorted/distinct 并行要分段求值再合并(第 3 篇),额外成本
-3. **共享可变容器**: 线程不安全——除非用 CONCURRENT 收集器(第 5 篇 §4)
-4. **IO/阻塞**: 卡住 commonPool(§3.2),影响全应用
-
-判断公式: 数据量 × 每元素计算成本 > 分割与合并开销——才值得并行。
-
-### 4.2 顺序保证
-
-- 并行流对 ORDERED 源**保留 encounter order**(实测: 并行有序 toList/groupingBy 组内保序,第 5 篇)——但保序要沿任务树按顺序合并,开销大
-- `findAny`/无序操作更快: NOT_ORDERED 标记允许任意分片先到先得(第 4 篇 §3.2)
-- 面试"并行流结果与串行一致吗": 语义一致(收集器满足结合律时);顺序上 ORDERED 保留但费,无序更快
-
-关键设计(斜体):*"并行不总是更快"是流式并行的第一课——分割 + 合并有固定成本。面试"什么时候不用并行流": 小数据 / 阻塞 / 有状态 / 顺序敏感;规则: 先串行正确,再 profile 决定并行;面试"并行流结果与串行一致吗": 语义一致,顺序看 ORDERED。*
-
-跨层标注: [域 08 集合——ArrayList/数组的 Spliterator 按索引二分;域 13 原子类——共享结果的 AtomicReference 与 CAS 并发基础;内部卷 25-gc-framework(WorkGang 任务队列)——HotSpot 侧 GC 并行任务的对应机制]
-
-## 核心悬念
-
-Stream 收官——**网络 IO 的多路复用**来了: `Selector` 怎么让一个线程管上万个连接?`epoll` 是什么?`SocketChannel` 与 BIO 的差异?——下一篇: 域 21 Selector 与网络 NIO。
-
-> → 域 21 Selector 与网络 NIO(21-selector-nio 系列)| 关联: 域 13 原子类(CAS)、内部卷 25-gc-framework(并行任务)
+如果说前五篇把 Stream 的 API、惰性、节点、终端和 Collector 都拆开了，这一篇真正补上的就是：**整条流一旦切到并行模式，最关键的入口其实不在 Stream 本身，而在数据源是否可被良好切分。** 到这里，域 16 从接口表面一直走到并行执行底层，也算真正闭环了。

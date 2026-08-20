@@ -1,106 +1,172 @@
-# 03. IGVN + CCP + Escape Analysis — C2 优化三引擎
+# 03. 为什么 C2 还要三套引擎？— `IGVN + CCP + Escape Analysis`
 
-> **前置依赖**:[15-c2-compiler/01 — C2 Ideal Graph: Node + Type + IGVN](openjdk/vol-02/15-c2-compiler/01-c2-ideal-graph.md):IGVN 的 transform_old 五步与类型格在这里,本篇的三个引擎共用这套地基;[15-c2-compiler/02 — Parse + GraphKit: 字节码→Ideal Graph](openjdk/vol-02/15-c2-compiler/02-c2-parse-graphkit.md):Parse 铺出的海量节点网,本篇讲怎么被优化;[12-ci/02 — ciTypeFlow 与 escape 分析](openjdk/vol-02/12-ci/02-ci-typeflow-escape.md):C1 的浅层 bcEscapeAnalyzer 与 C2 的 ConnectionGraph 对照
-> → **后续**:[15-c2-compiler/04 — Loop Optimization + SuperWord: 循环变换与向量化](openjdk/vol-02/15-c2-compiler/04-c2-loops.md)
-> 关联域: 12-ci(bcEscapeAnalyzer 对照)、09-memory-core(分配底层)、19-sync(锁消除)
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64`。这里讨论 C2 优化中最关键的三套机制：IGVN、CCP、Escape Analysis，以及它们如何在 `Compile::Optimize` 中交错运行。LoopOpts 和 SuperWord 放到下一篇展开。
+>
+> **前置依赖**：[15-c2-compiler/01 — 为什么 C2 要换世界观？— `Ideal Graph = Node + Type + IGVN`](01-c2-ideal-graph.md)、[15-c2-compiler/02 — Ideal Graph 是怎么长出来的？— `Parse + GraphKit`](02-c2-parse-graphkit.md)、[12-ci/02 — `ciTypeFlow + BCEscapeAnalyzer`](../12-ci/02-ci-typeflow-escape.md)
+> → **后续**：[15-c2-compiler/04 — `Loop Optimization + SuperWord`：循环变换与向量化](04-c2-loops.md)
 
-## 一图三引擎
+上一篇我们把 Parse 和 GraphKit 讲完了：到 Parse 结束时，C2 手里已经有了一张 Ideal Graph，图上既有控制流、数据流、内存流，也带着 JVMState、异常边和 safepoint 状态。
 
-02 篇结束时 Parse 留下一张"海量 Node 网"。C2 优化期的三个引擎各有分工: **IGVN**(01 篇)在局部把代数表达式化简、值编号去重; **CCP**(Conditional Constant Propagation)沿控制流传播常量、判死不可达分支; **Escape Analysis** 判断哪些堆分配可以不发生。它们不是三个独立 pass——IGVN 在 CCP 与 EA 的每个间隙都会重跑,EA 消除分配的"最后一刀"要等 `PhaseMacroExpand`。这篇拆 CCP 与 EA 两个新引擎,并纠正大纲三处: CCP 不是"从 BOTTOM 逆风传播"而是**全部 TOP 初始化后的乐观前向传播**;EA 的"compute_escape DFS"是图构建 + 沿边传播而非从分配点搜索;`ArgEscape → field loads 转寄存器` 在源码里不存在。
+看到这里，很容易冒出一个自然想法：既然图都有了，IGVN 也已经会做 `Ideal/Value/Identity`、类型传播和全局值编号，那后续优化是不是就交给 IGVN 一把梭就行了？
 
-## 1. IGVN — 引擎中的引擎
+答案是否定的。
 
-01 篇已把 `transform_old` 五步与 `optimize` 主循环讲透,这里只补它的**调度地位**: `Compile::Optimize`(compile.cpp:2220)里 IGVN 出现在六个位置(compile.cpp:2247-2254 Parse 后 / :2321 EA 后 / :2332 宏消除后 / :2388-2391 CCP 后 / :2424 range-check cast 后 / :2454 opaque4 后),每个结构变换阶段之后都靠它收敛。CCP 与 EA 都**寄生**在 IGVN 之上——PhaseCCP 继承 PhaseIterGVN,EA 直接接收 `PhaseIterGVN*` 参数(escape.cpp:97)——所以"三引擎"更像是"两个引擎 + 一个收敛器"。
+真正的问题是：**图上存在的“优化缺口”并不是一种。**
 
-## 2. CCP — 乐观的常量传播
+- 有些问题是局部图形和等价值复用，IGVN 最擅长；
+- 有些问题是“这条控制流根本走不到”或“这个值其实恒定”，这需要 CCP 的乐观常量传播；
+- 还有些问题是“这个对象其实可以不分配”，这属于 Escape Analysis 的对象去向证明。
 
-场景: 图里某个 `If` 的测试条件是常量(`if (x > 0)` 而 x 的类型已被窄化成 `[1,max]`),两分支里只有一支可达。CCP 的机制是 **Wegman-Zadeck 风格的乐观分析**(phaseX.cpp:1811 注释 "Conditional Constant Propagation, ala Wegman & Zadeck"): 先把**所有节点类型设为 TOP**(乐观假设,phaseX.cpp:1848-1851 "Initialize all types to TOP, optimistic analysis"),再从 `C->root()` 入 worklist 前向传播:
+也就是说，C2 不是缺一个更大的万能优化器，而是图上本来就有三类不同的信息缺口，需要三套互补机制分别去补。
 
-```cpp
-// phaseX.cpp:1847-1859(截取核心,逐字)
-void PhaseCCP::analyze() {
-  // Initialize all types to TOP, optimistic analysis
-  for (int i = C->unique() - 1; i >= 0; i--)  {
-    _types.map(i,Type::TOP);
-  }
+更进一步说，这三者的地位还不完全对称：**CCP 和 Escape Analysis 更像专门负责产出新事实的引擎，而 IGVN 更像负责把这些新事实压回整张图、直到重新稳定下来的统一收敛器。**
 
-  // Push root onto worklist
-  Unique_Node_List worklist;
-  worklist.push(C->root());
+先把这一句记住：**IGVN、CCP 和 Escape Analysis 不是三套并列的“再优化一遍”工具，而是分别解决局部形状、控制可达性/常量、对象逃逸三种不同问题。**
 
-  // Pull from worklist; compute new value; push changes out.
-  // This loop is the meat of CCP.
-  while( worklist.size() ) {
-```
+## 先试两个最自然的误解，看看为什么都不对
 
-循环里每弹出一个节点: `n->Value(this)` 重算类型,若**比当前类型更宽(widen)** 就 `set_type` 并把用户入队(phaseX.cpp:1865-1903)——乐观分析的关键性质是**类型只增不减**(assert "ccp_type_widens ... Not monotonic",:1830-1831),所以 worklist 必然收敛。大纲说"从 StartNode type=BOTTOM 启动逆风传播控制流"是错的——方向正好相反,起点是 root,初值是 TOP。
+### 误解一：IGVN 已经很强了，它应该能一把梭搞定一切
 
-常量条件消除发生在 `transform_once`(phaseX.cpp:2043-2113)。它不做代数化简(那是 IGVN 的事),只做两件事: **①类型是单例就换成常量节点**(`makecon(t)`,TOP 换成 `C->top()`,:2046-2085);**②不可达的 Region 直接切割**:
+这是一种很有诱惑力的想法。IGVN 既会图改写，又会类型传播，还会常量化和全局值编号，听起来几乎已经像个总管。
 
-```cpp
-// phaseX.cpp:2056-2083(截取核心,逐字)
-    if( !n->is_Con() ) {
-      if( t != Type::TOP ) {
-        nn = makecon(t);        // ConNode::make(t);
-        NOT_PRODUCT( inc_constants(); )
-      } else if( n->is_Region() ) { // Unreachable region
-        // Note: nn == C->top()
-        n->set_req(0, NULL);        // Cut selfreference
-        bool progress = true;
-        uint max = n->outcnt();
-        DUIterator i;
-        while (progress) {
-          progress = false;
-          // Eagerly remove dead phis to avoid phis copies creation.
-          for (i = n->outs(); n->has_out(i); i++) {
-            Node* m = n->out(i);
-            if (m->is_Phi()) {
-              assert(type(m) == Type::TOP, "Unreachable region should not have live phis.");
-              replace_node(m, nn);
-              ...
-```
+但 IGVN 的强项是：**围绕单个节点及其 def-use 邻域，看有没有局部图改写、类型变窄、值合并的机会。**
 
-分支判死的链条是: `IfNode::Value` 看测试条件类型——`TypeInt::ZERO` 返回 `TypeTuple::IFFALSE`、`TypeInt::ONE` 返回 `TypeTuple::IFTRUE`(ifnode.cpp:51-67),于是另一支的 IfProj 类型变 TOP;TOP 沿着控制边传播到 Region;`transform_once` 遇到类型 TOP 的 Region 就**切断它的自引用边、把它的死 Phi 全部替换成 top**(:2060-2082)——被消除分支上的整棵子树随之失去引用,由后续 IGVN 的 `remove_dead_node` 清掉。CCP 之后 `igvn = ccp; igvn.optimize()`(compile.cpp:2388-2391)把这个结果收敛进哈希表。
+它并不天然回答另一些问题，比如：
 
-*关键设计: IGVN 是"悲观"的——每个节点用自己的当前输入类型重算,类型只会变窄;CCP 是"乐观"的——先假设全部 TOP,能证明多少是多少,类型只会变宽。两者互补: 乐观假设让 CCP 能沿"尚未证明不可达"的路径推进,一旦证明常量就消除分支;而类型只增不减保证了终止。代价是 CCP 需要整图扫描(analyze 的 worklist 从 root 播遍全图),所以它只在优化中期跑一次,不像 IGVN 那样处处收敛。*
+- 一条 Region 之所以变死，不只是因为局部代数式，而是因为前面控制流上的某个条件被整体证明为常量；
+- 一个对象能否彻底不分配，不只是看某个 `AllocateNode` 周边的小片段，而是要看整张图里谁引用了它、字段怎样传播、调用时如何逃逸。
 
-**实证边界**: CCP 的常量分支在 **javac 层就被折叠**了——`if (1==1)` 编译后只剩 `bipush 10`([实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/15-c2-optimizations-demo.txt)第 4 段),连 `static final int MODE=3` 这种"运行期常量"也是编译期常量(javac 折叠 `mode()` 成 `x*2`)。CCP 真正处理的是**图中才出现**的常量: 内联后值恒定的参数、类型窄化后的比较、Phi 合并出的单例。release 构建没有 flag 能直接打印 CCP 的行为(`TracePhaseCCP` 是 notproduct,c2_globals.hpp:632),能看到的只有 CITime 阶段树里的 "Cond Const Prop"(01 篇素材第 6 段)。
+这些都不是单个节点局部就能看穿的事实。它们需要另一套面向“可达性”和“对象去向”的分析模型。
 
-## 3. Escape Analysis — 证明"可以不分配"
+### 误解二：CCP 和 EA 不过是在 IGVN 之后再跑一遍图优化
 
-场景: 循环里 `new Point(x, y)` 用完即弃。EA 要回答: 这个对象**逃不逃出方法**?不逃,就能把堆分配整个抹掉。C2 的 EA 是 **ConnectionGraph(连接图)**: 把图上的理想节点映射成三类 PointsTo 节点——`JavaObject`(分配点: Allocate/AllocateArray/ConP/常量对象…)、`LocalVar`(局部变量: Phi/Proj/CheckCastPP…)、`Field`(AddP 代表的字段或数组元素),外加一个 `phantom_obj` 兜底(escape.hpp:85-107 的类清单注释)。三类节点的逃逸状态定义在枚举里:
+第二个误解正好走到另一个极端：既然 CCP 和 EA 也都在图上工作，那它们是不是只是在 IGVN 做完后再做一轮更专门的图清理？
 
-```cpp
-// escape.hpp:153-161(截取核心,逐字)
-  typedef enum {
-    UnknownEscape = 0,
-    NoEscape      = 1, // An object does not escape method or thread and it is
-                       // not passed to call. It could be replaced with scalar.
-    ArgEscape     = 2, // An object does not escape method or thread but it is
-                       // passed as argument to call or referenced by argument
-                       // and it does not escape during call.
-    GlobalEscape  = 3  // An object escapes the method or thread.
-  } EscapeState;
-```
+这也不对。它们处理的问题维度完全不同。
 
-**NoEscape = 可标量替换**("It could be replaced with scalar",注释原话)——这是三个级别里唯一能消除堆分配的;ArgEscape 只是"作为参数传出去且调用内不逃逸",**对象还在堆上**——大纲说"ArgEscape → field loads 转 register"在源码里不存在,ArgEscape 能带来的是锁消除、指针比较优化这类次级收益。
+CCP 的核心不是“再做一轮代数折叠”，而是**从控制流和类型角度，证明某些节点永远只能取一个值、某些 Region 根本不可达**。它盯的是“图上的哪些路径其实是假路”。
 
-`compute_escape`(escape.cpp:118-343)不是大纲说的"从每个 AllocateNode DFS/BFS",而是**五步图算法**:
+EA 的核心也不是“再看一遍节点值”，而是**把对象、局部变量、字段、调用关系重新投影成一张 ConnectionGraph，证明某个对象会不会逃出方法、会不会全局可见、会不会足够安全到能标量替换**。它盯的是“图上的哪些分配其实可以不存在”。
 
-- **①建图**: `add_node_to_connection_graph` 遍历**所有**理想节点(:148-197 的 worklist 循环),按节点类型建 PointsTo 节点并连边(`LocalVar →P> JavaObject`、`Field →P> JavaObject`、`JavaObject →F> Field`,escape.hpp:100-107),延迟边随后用 `add_final_edges` 消解(:202-206)。
-- **②传播**: `complete_connection_graph`(:233-238)沿边传播逃逸状态——**GlobalEscape 节点指向的一切标 GlobalEscape,ArgEscape 同理**(escape.hpp:107-112 注释原文)。
-- **③调整**: 对 NoEscape 对象 `adjust_scalar_replaceable_state`(:256-257)——**逃逸不逃逸 ≠ 可标量替换**: 被数组拷贝、被安全点调试信息引用、类型不精确等原因会让对象"不逃逸但不可拆",状态逐级下调(:1757)。
-- **④图级优化**: `optimize_ideal_graph`(:296-299)三件事——`EliminateLocks` 时把不逃逸对象的锁标记为 `non_esc_obj`(:1983-1997,后续宏展开据此做锁消除);`OptimizePtrCompare` 时优化对象指针比较(同一不逃逸对象 → EQ,分配 vs 不可能指向它 → NEQ,:2030-2059);把指向不逃逸分配的 `MemBarStoreStore` 降级成 `MemBarCPUOrder`(注释 "optimize out MemBarStoreStore node if the allocated object never escapes",:2032-2044)。
-- **⑤内存图分离**: 对可标量替换的分配 `split_unique_types`(:319-341,实现 :3058)——把分配对象的内存从公共 MergeMem 里**拆出独占别名域**(要求 `C->AliasLevel() >= 3 && EliminateAllocations`,:321),这样后续 IGVN 才能对该对象做精确的 load/store 优化。
+所以 CCP 和 EA 不是 IGVN 的重复劳动，而是分别给图补上了 IGVN 不擅长的两种事实：控制可达性，和对象去向。
 
-**最后一刀在 PhaseMacroExpand**: EA 只是"证明",消除分配发生在 `eliminate_macro_nodes`(macro.cpp:2567)——先做锁消除(`eliminate_locking_node`,:2593-2595),再对 `Allocate`/`AllocateArray` 调 `eliminate_allocate_node`(:2610-2613)。后者有**四道门**: `EliminateAllocations` 开关、JVMTI pop frame 不可用、`_is_non_escaping`(EA 打的标记)、`can_eliminate_allocation` 检查安全点引用(macro.cpp:1091-1116);通过后 `scalar_replacement`(:759,在 :1128 调用)把分配拆成字段级定义,随后 `process_users_of_allocation`(:946)处理字段访问——**Store 被直接删除**(值留在 def-use 图里,store 的 memory 边直通,`replace_node(n, n->in(MemNode::Memory))`,:959-961),**Load 经由 IGVN 的类型传播解析为字段的唯一定义值**,GC 屏障一并消除(eliminate_gc_barrier)——堆分配、屏障、内存加载一起消失。Compile::Optimize 里的编排(compile.cpp:2307-2337): `ConnectionGraph::do_analysis(this, &igvn)`(:2316)→ `igvn.optimize()`(:2321)→ `PhaseMacroExpand::eliminate_macro_nodes`(:2328-2333)。循环优化之后还有一次 `expand_macro_nodes`(:2432-2440)——把**剩余**的宏节点(真正的分配/锁/数组拷贝)展开成机器级节点,那是"必须发生的分配"。
+## IGVN 的真实地位：它更像“统一收敛器”而不是三引擎之一
 
-**实证**([素材](openjdk/planning/outlines/00-jvm-tools/materials/commands/15-c2-optimizations-demo.txt)第 1/2 段): 2 亿次循环内 `new Point(i, i+1)` 且不逃逸——**EA 开(默认)**: 0 次 GC,70ms;`-XX:-EliminateAllocations` 关闭后: **6 次 GC Pause、每次 570MB 分配、459ms(6.5 倍)**。同一个方法、同样的字节码,只差一个 flag——这就是标量替换的量级。`DoEscapeAnalysis`/`EliminateAllocations` 都是 product flag(c2_globals.hpp:527/:540)所以能开关对照;`PrintEliminateAllocations` 是 notproduct(:543),release 无法打印"++++ Eliminated: N Allocate"(macro.cpp:1147-1152 的打印段)。
+如果去看 `Compile::Optimize`，你会发现 IGVN 并不是在一个固定位置跑一次就结束，而是夹在多个阶段之间反复出现。
 
-*关键设计: EA 把"对象会不会逃逸"变成一张可传播的图——每个理想节点只有一次映射(JavaObject/LocalVar/Field),逃逸状态沿边单调上升(NoEscape→ArgEscape→GlobalEscape),所以传播必然收敛。精确性来自两个地方: 逐字段的 `Field` 节点让"字段逃逸"与"对象逃逸"分开计数;`scalar_replaceable` 与 `escape` 两个维度分开判定——不逃逸是必要条件,可拆性是充分条件。这比 12-02 域 C1 的 bcEscapeAnalyzer(字节码级、保守)深一个量级,也因此只在 C2 的优化中期跑一次。*
+在 EA 路径里，`ConnectionGraph::do_analysis(this, &igvn)` 做完以后，马上又来一次 `igvn.optimize()`，用于把 EA 暴露出来的新常量、新别名关系和死边收敛进图。接着 `PhaseMacroExpand` 真正消掉宏节点后，又会再来一次 `igvn.optimize()`。之后进入 CCP，`PhaseCCP ccp(&igvn)` 先做乐观传播，随后 `igvn = ccp; igvn.optimize();` 再把 CCP 造成的常量化和不可达剪枝收敛回主图。`share/opto/compile.cpp:2308`、`share/opto/compile.cpp:2316`、`share/opto/compile.cpp:2321`、`share/opto/compile.cpp:2328`、`share/opto/compile.cpp:2332`、`share/opto/compile.cpp:2375`、`share/opto/compile.cpp:2376`、`share/opto/compile.cpp:2380`、`share/opto/compile.cpp:2388`、`share/opto/compile.cpp:2390`
 
-## 核心悬念
+这说明 IGVN 更像是一个**统一收敛器**：
 
-三个引擎的分工落定: **IGVN** 处处收敛(六次调用)、**CCP** 乐观传播常量并切断不可达分支(全 TOP 初始化 → root 前向 worklist → transform_once 常量替换与 Region 切割)、**EA** 用 ConnectionGraph 证明 NoEscape 并用 PhaseMacroExpand 完成标量替换(开关对照: 0 次 GC vs 6 次 GC)。但最常被优化的代码不是直线——**循环**。C2 的循环优化(循环不变量外提、剥皮、展开、范围检查消除、以及 SuperWord 向量化)是建立在 LoopNode/CountedLoopNode 上的另一套体系,而且它在编译期管线里占据了比 EA 更长的篇幅。下一篇: 循环。
+- 某个专门分析器先注入新事实；
+- IGVN 再把这些事实沿图传播，直到局部改写、值编号和类型变窄都稳定。
 
-> → [15-c2-compiler/04 — Loop Optimization + SuperWord: 循环变换与向量化](openjdk/vol-02/15-c2-compiler/04-c2-loops.md)
+所以与其说“三引擎并列”，不如说：**两个专门引擎（CCP、EA）不断往图里喂新事实，而 IGVN 负责把这些事实真正消化成一张更小、更窄、更稳定的图。**
+
+## CCP：为什么要从 `TOP` 出发做乐观前向传播
+
+CCP（Conditional Constant Propagation）最容易被讲错的地方，是它到底从哪里开始、往哪个方向传播。
+
+源码注释一开头就把算法来源点出来：Wegman & Zadeck 风格的 Conditional Constant Propagation。构造 `PhaseCCP` 时会清掉 IterGVN 的节点缓存，然后直接进入 `analyze()`。`share/opto/phaseX.cpp:1811`、`share/opto/phaseX.cpp:1812`、`share/opto/phaseX.cpp:1815`、`share/opto/phaseX.cpp:1817`
+
+`analyze()` 的第一步不是把所有类型设成 `BOTTOM`，也不是从某个“已知常量节点”往回推，而是：**把所有节点类型先初始化成 `TOP`，然后从 root 开始前向 worklist 传播。** `share/opto/phaseX.cpp:1847`、`share/opto/phaseX.cpp:1848`、`share/opto/phaseX.cpp:1849`、`share/opto/phaseX.cpp:1854`、`share/opto/phaseX.cpp:1855`、`share/opto/phaseX.cpp:1859`
+
+这正好揭示了 CCP 的乐观本质。它不是先假设“哪里都不通”，而是先假设“哪里都还可能通，值也都还可能宽”，然后一边通过 `Value()` 重新求节点类型，一边只要某个节点类型发生变化，就把用户继续压入 worklist。`share/opto/phaseX.cpp:1865`、`share/opto/phaseX.cpp:1866`、`share/opto/phaseX.cpp:1875`、`share/opto/phaseX.cpp:1876`、`share/opto/phaseX.cpp:1901`
+
+而且 CCP 要求传播单调：源码里的 `ccp_type_widens` 断言就是在保护“类型只能 widen，不可来回震荡”。也就是说，它是靠单调增广事实来收敛，而不是靠来回试探。`share/opto/phaseX.cpp:1830`、`share/opto/phaseX.cpp:1831`
+
+这和 IGVN 很不一样。IGVN 更像基于当前输入类型做“悲观精化”；CCP 则是从 `TOP` 出发，用乐观可达性视角去证明哪些东西其实更具体、更单一。
+
+## CCP 真正消掉的，不是代数式，而是“根本走不到”的图
+
+如果把 CCP 只理解成“多做一点常量折叠”，就低估它了。
+
+真正的关键在 `transform_once()`。它当然会把 singleton 类型换成常量节点，但更重要的是：**当一个 Region 的类型变成 `TOP`，它会被当作不可达 region 直接切掉，自引用先断开，再把死 Phi 急切地替换成 top。** `share/opto/phaseX.cpp:2043`、`share/opto/phaseX.cpp:2045`、`share/opto/phaseX.cpp:2056`、`share/opto/phaseX.cpp:2057`、`share/opto/phaseX.cpp:2060`、`share/opto/phaseX.cpp:2062`、`share/opto/phaseX.cpp:2068`、`share/opto/phaseX.cpp:2071`、`share/opto/phaseX.cpp:2083`
+
+这就是 CCP 和 IGVN 的职责边界最清楚的一幕：
+
+- IGVN 更擅长说“这个节点和另一个节点等价”“这个节点类型变窄了”“这个节点可以常量化”；
+- CCP 则特别擅长说“沿着当前控制与类型事实，这一整块 region 根本不可达了”。
+
+因此 CCP 的价值并不在于把 `x+0` 再消一遍，而在于把**控制流假路**整个剪掉，让后面的图规模和推理空间一起缩小。
+
+## Escape Analysis：为什么对象去向不是 IGVN/CCP 能单独推出来的
+
+对象逃不逃逸，是另一类完全不同的问题。
+
+IGVN 看到的是节点局部关系，CCP 看到的是常量和可达性，而 EA 需要回答的是：**这个对象是谁引用了它、它的字段又指向谁、它作为参数传进调用后会不会变成外部可见、最终它到底是 NoEscape、ArgEscape 还是 GlobalEscape。**
+
+这就是为什么 C2 为 EA 单独造了一张 ConnectionGraph。源码注释把这张图的节点类型和边语义写得很清楚：JavaObject、LocalVar、Field 这些点之间会连出 `LV -P> JO`、`OF -P> JO`、`JO -F> OF` 这样的边，再沿这些边传播逃逸状态。`share/opto/escape.hpp:85`、`share/opto/escape.hpp:100`、`share/opto/escape.hpp:104`、`share/opto/escape.hpp:105`、`share/opto/escape.hpp:106`、`share/opto/escape.hpp:108`、`share/opto/escape.hpp:109`
+
+`EscapeState` 自己也已经说明了分层：
+
+- `NoEscape`：对象不逃出方法或线程，理论上可以标量替换；
+- `ArgEscape`：对象作为参数传到调用，但不全局逃逸；
+- `GlobalEscape`：对象最终全局可见。 `share/opto/escape.hpp:153`、`share/opto/escape.hpp:155`、`share/opto/escape.hpp:157`、`share/opto/escape.hpp:160`
+
+这正说明 EA 不是在看“某个 AllocateNode 周围能不能局部化简”，而是在整张对象引用图上证明“这个分配的生存边界到底在哪里”。换句话说，CCP 补的是“这条路径到底通不通”的缺口，而 EA 补的是“这个对象最终会不会跑出去”的缺口。两者都不是 IGVN 本身能凭节点局部形状直接看穿的事实。
+
+## ConnectionGraph 的核心流程：先构图，再传播，再筛可标量替换对象
+
+`compute_escape()` 把这件事拆成非常清楚的五步。
+
+第一步是建图。它从 root 出发遍历 ideal nodes，为每个相关 ideal 节点建立 `PointsToNode`，并把它们收进不同 worklist：ptnodes、java objects、non-escaped candidates、oop fields、arraycopy 等。`share/opto/escape.cpp:118`、`share/opto/escape.cpp:122`、`share/opto/escape.cpp:136`、`share/opto/escape.cpp:139`、`share/opto/escape.cpp:148`、`share/opto/escape.cpp:152`、`share/opto/escape.cpp:153`、`share/opto/escape.cpp:156`、`share/opto/escape.cpp:158`
+
+第二步是补 deferred edges，再把整张图传播完整。真正的传播动作在 `complete_connection_graph(...)` 里：全局逃逸的东西继续把它能指到的东西也标成全局逃逸，`ArgEscape` 也沿边继续扩散。`share/opto/escape.cpp:202`、`share/opto/escape.cpp:203`、`share/opto/escape.cpp:205`、`share/opto/escape.cpp:231`、`share/opto/escape.cpp:233`
+
+第三步才是很多人最容易跳得太快的地方：`NoEscape` 还不等于“已经可标量替换”。源码会再跑 `adjust_scalar_replaceable_state()`，把那些虽然不逃逸、但仍然不适合被拆成标量的对象排除掉，再把真正的候选分配压进 `alloc_worklist`。`share/opto/escape.cpp:240`、`share/opto/escape.cpp:247`、`share/opto/escape.cpp:248`、`share/opto/escape.cpp:256`、`share/opto/escape.cpp:257`、`share/opto/escape.cpp:273`、`share/opto/escape.cpp:274`
+
+第四步是基于 EA 信息做图级优化，比如指针比较和内存屏障的局部改善。第五步才是在 alias level 足够高、允许 `EliminateAllocations` 时，通过 `split_unique_types()` 为可标量替换对象拆分独占内存切片。`share/opto/escape.cpp:295`、`share/opto/escape.cpp:298`、`share/opto/escape.cpp:319`、`share/opto/escape.cpp:320`、`share/opto/escape.cpp:324`
+
+这条链路特别能说明：EA 不是“找到一个不逃逸分配，然后当场把它删了”。它真正干的是先证明，再筛候选，再准备足够精细的内存图条件，给后面真正删除分配的阶段铺路。
+
+## EA 不是最后一刀：真正删除分配发生在 `PhaseMacroExpand`
+
+这又是另一个特别容易讲错的点。很多人把 EA 直接等同于“分配消除”，好像 `compute_escape()` 一旦算出 `NoEscape`，对象就已经不分配了。
+
+源码并不是这样组织的。
+
+`Compile::Optimize` 里，EA 分析完成后会先 `igvn.optimize()` 收敛图，再进入 `PhaseMacroExpand mexp(igvn); mexp.eliminate_macro_nodes();`。也就是说，EA 只是先把“这个宏节点是否可消”这件事证明出来，真正的删除动作在 macro expand 阶段完成。`share/opto/compile.cpp:2316`、`share/opto/compile.cpp:2321`、`share/opto/compile.cpp:2328`、`share/opto/compile.cpp:2329`、`share/opto/compile.cpp:2332`
+
+`eliminate_allocate_node()` 的几道门也写得很明白：
+
+- 必须开 `EliminateAllocations`；
+- JVMTI `can_pop_frame()` 不能妨碍；
+- 该分配必须 `_is_non_escaping`；
+- 如果不是 scalar replaceable，还得满足额外条件；
+- 还要通过 `can_eliminate_allocation()` 对 safepoint/debug info 的检查；
+- 之后才会进入 `scalar_replacement()` 和 `process_users_of_allocation()`。 `share/opto/macro.cpp:1091`、`share/opto/macro.cpp:1096`、`share/opto/macro.cpp:1099`、`share/opto/macro.cpp:1107`、`share/opto/macro.cpp:1113`、`share/opto/macro.cpp:1128`、`share/opto/macro.cpp:1144`
+
+所以最该记住的边界是：**EA 负责证明“可以消”，MacroExpand 负责真正“把它消掉”。**
+
+这条边界一旦讲清，`NoEscape != 一定被删`、`NoEscape != scalar_replaceable` 这两个容易混淆的点也就顺带清了。
+
+## 把三件事收回到同一个闭环：局部形状、控制可达性、对象去向
+
+现在终于可以把 IGVN、CCP 和 EA 收成同一个优化闭环了。
+
+- IGVN 擅长的是节点局部形状、类型变窄、常量化与值合并；
+- CCP 擅长的是把“控制流哪边其实不可能发生”“哪块 Region 根本不可达”这种事实推过整图；
+- EA 擅长的是把“这个对象其实可以不存在”这种对象去向结论证明出来。
+
+这三者之间并不是并排工作，而是互相喂数据：
+
+- CCP 切掉不可达控制流后，IGVN 才能继续把死 Phi、死 Region 和新暴露的常量收掉；
+- EA 调整内存图和对象候选后，IGVN 又会把新形状、新常量、新等价值关系再收敛一轮；
+- MacroExpand 真删掉分配以后，IGVN 还得再回来把这波删除的后效应传播完。
+
+把它压成一个更具体的时序，就是：**专门引擎先产出新事实，IGVN 先收一轮；当 EA 的结论足够强时，MacroExpand 再真正落刀删除宏节点；删除之后图形再次变化，于是 IGVN 再回来把残留传播完。** 这就是为什么 C2 的优化图景更像闭环系统，而不是“一串各自跑一次的 pass”。
+
+## 收网：C2 不是一个万能优化器，而是三套互补引擎 + 一个统一收敛器
+
+现在可以把整篇压成一张总图了。
+
+Ideal Graph 建好以后，C2 并没有交给某个单一“万能优化器”去做一切。它把图上的优化缺口拆成了三类：局部图形和值等价问题交给 IGVN，控制可达性和常量事实交给 CCP，对象去向与分配可消性交给 Escape Analysis。然后又让 IGVN 在这些阶段之间反复回来，持续把新事实收敛进图；最后再由 MacroExpand 把 EA 证明过的分配和宏节点真正消掉。`share/opto/compile.cpp:2308`、`share/opto/compile.cpp:2316`、`share/opto/compile.cpp:2321`、`share/opto/compile.cpp:2328`、`share/opto/compile.cpp:2375`、`share/opto/compile.cpp:2376`、`share/opto/compile.cpp:2380`、`share/opto/compile.cpp:2388`
+
+所以，这一篇最核心的一句话不是“C2 有 IGVN、CCP 和 EA 三种优化”，而是：
+
+**C2 之所以不是一个万能优化器，是因为图上本来就有三种不同缺口：局部形状、控制可达性、对象去向；三套引擎分别补洞，而 IGVN 负责把它们补出来的新事实统一收敛。**
+
+只要这句抓住了，下一篇循环优化和 SuperWord 就好理解了：那已经不是“图能不能更小”的问题，而是“图已经足够稳定之后，循环和向量这类结构性机会还能不能再榨一层”的问题。
+
+> → [15-c2-compiler/04 — `Loop Optimization + SuperWord`：循环变换与向量化](04-c2-loops.md)

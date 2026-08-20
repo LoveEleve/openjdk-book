@@ -1,214 +1,623 @@
-# 01. Universe + CollectedHeap — JVM 的"宇宙大爆炸"
+# 01. Universe 与 CollectedHeap：JVM 为什么要先造地基，后造世界
 
-> **前置依赖**:[07-classfile-classloader/07 — javaClasses](openjdk/vol-02/07-classfile-classloader/07-javaclasses-core-mirrors.md):基本类型镜像与 mirror 补丁在 genesis 阶段创建,偏移在 well-known 类加载时计算;[07-classfile-classloader/04 — SystemDictionary](openjdk/vol-02/07-classfile-classloader/04-system-dictionary.md):resolve_well_known_classes 在这里被调;[06-oops/02 — Klass 层次](openjdk/vol-02/06-oops/02-klass-hierarchy.md)与 [06-oops/03 — InstanceKlass/ArrayKlass](openjdk/vol-02/06-oops/03-instanceklass-arrayklass.md):这次预创建的 TypeArrayKlass/镜像都来自这两个家族
-> → **后续**:[09-memory-core/02 — VirtualSpace](02-virtualspace.md)(heap 的虚拟内存怎么管理)
-> 关联域: 06-oops(对象模型)、07-classfile-classloader(类加载)、25-gc(GC 堆实现)、10-metaspace(元数据空间)、16-code-cache(CodeHeap)
+> 基于 `OpenJDK 11u / HotSpot / Linux / x86_64` 讨论。本文聚焦 JVM 启动早期的 `Universe` / `CollectedHeap` / `MemAllocator` 协议，说明“堆、类宇宙、镜像和第一批对象”是如何被分阶段点亮的。
+> **前置依赖**：[07-classfile-classloader/07 — javaClasses](../07-classfile-classloader/07-javaclasses-core-mirrors.md)：basic type mirrors、fixup mirror list 和 String/Class offset contract 的时序在这里闭合；[07-classfile-classloader/04 — SystemDictionary](../07-classfile-classloader/04-system-dictionary.md)：well-known classes 在 `genesis` 中落地；[06-oops/02 — Klass 层次](../06-oops/02-klass-hierarchy.md) 与 [06-oops/03 — InstanceKlass / ArrayKlass](../06-oops/03-instanceklass-arrayklass.md)：primitive array klass 与 mirror 家族的前置概念
+> → **后续**：[02 — VirtualSpace](02-virtualspace.md)
+> 关联域：06-oops、07-classfile-classloader、25-gc、10-metaspace、16-code-cache
 
-## 堆是谁创建的?在第一个对象之前
+## 第一个 Java 对象出生前，JVM 靠什么活着
 
-`new Object()` 分配在哪?GC 堆。但堆本身是谁、在什么时候创建的?答案是启动早期的两个函数: `universe_init` 建堆,`Universe::genesis`("创世纪")在堆上造出第一批对象。而且顺序反直觉: 堆诞生时 Java 类一个都还没加载,最早就位的却是**基本类型数组的 Klass**、**基本类型的 Class 镜像**(int.class 这类)、**内部空数组**——因为 JVM 的引导逻辑自己就需要它们。这一篇走完大爆炸全程: 堆怎么被选出来、第一批对象是什么、以及那个被全 VM 调用的 `Universe::heap()` 背后是什么。
+从 Java 代码看，一切对象都像是从 `new` 开始的：
 
-## 1. 先有堆: universe_init 与 GC 的选择
-
-### 启动时序: 堆在最前面
-
-`init_globals`(init.cpp:101-140)是 JVM 的全局初始化主干,堆相关的一串在中间(截取核心,逐字):
-
-```cpp
-// init.cpp:111-125(截取核心,逐字)
-  jint status = universe_init();  // dependent on codeCache_init and
-                                  // stubRoutines_init1 and metaspace_init.
-  if (status != JNI_OK)
-    return status;
-
-  gc_barrier_stubs_init();   // depends on universe_init, must be before interpreter_init
-  interpreter_init();        // before any methods loaded
-  invocationCounter_init();  // before any methods loaded
-  accessFlags_init();
-  templateTable_init();
-  InterfaceSupport_init();
-  VMRegImpl::set_regName();  // need this before generate_stubs (for printing oop maps).
-  SharedRuntime::generate_stubs();
-  universe2_init();  // dependent on codeCache_init and stubRoutines_init1
-  javaClasses_init();// must happen after vtable initialization, before referenceProcessor_init
+```java
+new Object()
 ```
 
-- `universe_init`(:111): 创建并初始化 GC 堆;
-- `universe2_init`(:124): 内部调 `Universe::genesis`——在堆上造第一批对象;
-- `javaClasses_init`(:125): 算 07-07 讲过的 29 个镜像偏移。
+可 JVM 自己在真正执行第一条 Java 方法前，就已经需要很多“像对象一样”的东西：
 
-注意 `interpreter_init`(:117)夹在堆创建与 genesis 之间——它生成模板解释器的机器码,必须在任何 Java 方法运行前完成;而真正的大爆炸 `universe2_init`(:124)反而在它之后。
+- GC 堆本身
+- primitive array klass
+- `Object` / `String` / `Class` 这些 well-known 类
+- primitive mirrors，比如 `int.class`
+- 若干 canonical metadata arrays
+- 预分配的 OutOfMemoryError
 
-### universe_init 里发生了什么
+于是问题就变得反直觉了：
 
-`universe_init`(universe.cpp:675-750)的核心是 `initialize_heap`(:687)。堆创建分两步走(截取核心,逐字):
+```text
+在还没有完整 Java 世界时
+JVM 靠什么把第一批类和对象生出来？
+```
+
+如果回答只是“`Universe::genesis()` 会创建它们”，还不够，因为：
+
+- 先得有 heap substrate，否则对象无处可放
+- 还得先有一小截类宇宙，否则连镜像和数组 klass 都没法组织
+- 更麻烦的是，有些 canonical thing 根本不是 Java heap 对象，而是 metaspace metadata arrays
+- 有些对象，比如 empty `Class[]` 和 OOME 预分配，又明显出现在更晚的 post-init 阶段
+
+所以本文真正的问题是：
+
+**JVM 在启动时为什么要把“选 GC、造堆、引导类宇宙、修镜像、预分配异常对象、建立正常对象分配协议”拆成多段？`Universe` 到底为什么不像一个“全局变量袋子”，而更像一个把这几段顺序串起来的引导台？**
+
+先把全篇主线画出来：
+
+```text
+init_globals()
+  │
+  ├─ universe_init()
+  │    ├─ GCConfig 已选定 collector
+  │    ├─ Universe::create_heap()      -> 只构造 CollectedHeap C++ 对象
+  │    ├─ CollectedHeap::initialize()  -> reserve/aux mappings/barriers
+  │    ├─ metaspace / CLD / SymbolTable / StringTable
+  │    └─ heap substrate ready
+  │
+  ├─ interpreter_init / stubs / ...
+  │
+  ├─ universe2_init()
+  │    └─ Universe::genesis()
+  │         ├─ _bootstrapping = true
+  │         ├─ primitive TypeArrayKlass objects
+  │         ├─ canonical metadata arrays
+  │         ├─ vmSymbols + SystemDictionary::initialize()
+  │         ├─ String/Class offsets, primitive mirrors, mirror fixups
+  │         ├─ Object[] klass, sentinel strings
+  │         └─ minimal class universe ready
+  │
+  ├─ javaClasses_init()
+  │
+  └─ universe_post_init()
+       ├─ fully_initialized = true
+       ├─ vtable/itable post bootstrap repair
+       ├─ canonical empty Class[]
+       ├─ preallocated OOME pool
+       └─ known methods / late canonical objects
+```
+
+一句话先记住：
+
+**`Universe` 不是“存全局单例的袋子”，而是 JVM 启动里的引导台：先把堆和基础设施立起来，再造最小类宇宙，再补镜像和 canonical objects，最后才把普通对象分配协议交给 `CollectedHeap` 与 `MemAllocator` 的日常路径。**
+
+---
+
+## 一、三个看似更简单的方案，为什么都不够
+
+### 1.1 一次性同时创建堆、类、镜像和对象
+
+最直觉的启动方案就是：
+
+```text
+启动时统一 new 出 heap
+同时加载 Object/String/Class
+同时把所有 mirrors 和 canonical objects 都造好
+```
+
+这个方案的问题是依赖环根本拆不开。
+
+比如：
+
+- `java.lang.Class` mirror 本身需要 `Class_klass` 可用
+- 但很多更早创建的 klass 又需要先把 mirror 延迟登记起来
+- primitive array klass 的部分初始化依赖 `Object` vtable 尺寸
+- `Object[]` klass 又依赖 `Object_klass()` 已存在
+
+如果想“一步到位”，最后往往会变成到处判断“这个东西此刻是不是还没完全初始化好”。HotSpot 选择的是把引导顺序显式分段，让每一段只依赖前一段已经保证可用的最小骨架。
+
+### 1.2 `create_heap()` 一步完成所有堆初始化
+
+另一个常见误解是把：
 
 ```cpp
-// universe.cpp:752-771(截取核心,逐字)
-CollectedHeap* Universe::create_heap() {
-  assert(_collectedHeap == NULL, "Heap already created");
-  return GCConfig::arguments()->create_heap();
+Universe::create_heap()
+```
+
+理解成“这里就把 Java heap reserve/commit 完了”。实际上它只是：
+
+```text
+根据已选 GCArguments
+构造具体 CollectedHeap C++ 对象
+```
+
+真正的虚拟地址 reserve、辅助映射、barrier set 初始化、初始扩容，都在：
+
+```cpp
+_collectedHeap->initialize()
+```
+
+这个分层非常重要，因为它把：
+
+- **选哪个 GC / 构造哪个 heap object**
+- **这个 heap object 如何初始化地址空间和内部结构**
+
+拆成了两步。
+
+### 1.3 把所有预分配对象都混叫成“genesis 第一批对象”
+
+现稿里最容易写混的是：
+
+- metaspace canonical arrays
+- primitive mirrors
+- `"null"` / `"-2147483648"`
+- empty `Class[]`
+- preallocated OOME pool
+- `non_oop_word` sentinel
+
+它们都和“启动早期特殊对象”有关，但并不都在同一时刻、同一种存储区域、用同一种目的被创建。
+
+如果一股脑都叫“genesis 第一批对象”，会模糊三个关键区别：
+
+```text
+metaspace metadata arrays
+heap-side canonical Java objects
+error/sentinel objects for failure or compiled metadata paths
+```
+
+这三层必须拆开讲。
+
+---
+
+## 二、`init_globals`：为什么 Universe 夹在解释器、stubs 和 javaClasses 之间
+
+`init_globals()` 的顺序在 `init.cpp:101-127`。最关键的中段是：
+
+```cpp
+jint status = universe_init();
+...
+gc_barrier_stubs_init();
+interpreter_init();
+...
+SharedRuntime::generate_stubs();
+universe2_init();
+javaClasses_init();
+referenceProcessor_init();
+```
+
+这条顺序很值得慢慢看。
+
+### 2.1 `universe_init()` 先于解释器和 `javaClasses_init`
+
+这意味着：
+
+- heap substrate、metaspace、symbol/string tables 等必须先就绪
+- 解释器与 runtime stubs 的生成建立在已经存在的基础设施之上
+- 但真正的类宇宙（`genesis`）和 bulk `javaClasses` offset contract 还没完成
+
+也就是说，JVM 不是“先把所有 Java 世界都准备好，再生成解释器”。它把解释器和 runtime stubs 插在 heap substrate 与 class universe 之间。
+
+### 2.2 `universe2_init()` 和 `javaClasses_init()` 又是两步
+
+`universe2_init()` 调的是 `Universe::genesis()`。而 `javaClasses_init()` 则是更晚的 offset 计算与检查步骤。
+
+这个顺序说明：
+
+```text
+先点亮最小类宇宙
+  → 再完成更全面的 Java offset/access contract
+```
+
+这也解释了为什么 `String`/`Class` 的 offset 会先算，PART2 再 bulk compute。
+
+### 2.3 `Universe` 真正承担的是分阶段引导，而不是简单持有指针
+
+光看 `_collectedHeap`、`_the_empty_int_array`、`_the_null_string` 这些静态字段，Universe 很容易被误看成“全局仓库”。
+
+但从 `init_globals` 的插入位置能看出来，它更重要的角色是：**确保每个子系统只在自己的依赖地基已经到位后再往前走。**
+
+这一点后面会越来越明显。
+
+---
+
+## 三、`universe_init()`：先把能承载世界的地基搭出来
+
+### 3.1 `universe_init` 做的是 substrate，不是完整 Java 世界
+
+`Universe::universe_init()` 在 `universe.cpp:675-750` 中做的事很杂，但可以被压成一个清晰的主题：**先准备堆与元数据基础设施。**
+
+它会：
+
+- 检查对象/heap word 对齐与基本假设
+- `compute_hard_coded_offsets()`
+- 初始化 metaspace 相关状态
+- 调 `initialize_heap()`
+- 准备 null CLD
+- 建 `LatestMethodCache`
+- 创建 `SymbolTable` / `StringTable`
+- 初始化 resolved-method table
+
+这里要强调：很多“Java 世界必需的对象”其实在这一步还没出现。它建立的是承载这些对象的 substrate。
+
+### 3.2 GC 的选择在 `Universe::create_heap()` 之前已经决定了
+
+`Universe::create_heap()` 只是：
+
+```cpp
+return GCConfig::arguments()->create_heap();
+```
+
+而 `GCConfig::arguments()` 在更早的参数/ergonomics 初始化中就已经选好了一个 `GCArguments`。是否 `UseG1GC`、`UseSerialGC`、以及 server-class 机器上的默认选择，都在 `GCConfig::select_gc()` 那一层决定。
+
+所以叙事上应该是：
+
+```text
+先由 arguments / GCConfig 决定 collector family
+再由 Universe 按这个选择去构造具体 heap object
+```
+
+不要写成 “Universe 选择了 GC”。
+
+### 3.3 `create_heap()` 只构造 C++ heap object，虚拟内存工作在 `initialize()`
+
+这是本篇必须反复强调的一条边界。
+
+以 G1 为例：
+
+- `G1Arguments::create_heap()` 最终只是 `create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()`
+- 这个 helper 先 new policy，再 `new G1CollectedHeap(policy)`
+
+而真正的 reserve / barrier set / region mapping / bitmap / card table 建立，在 `G1CollectedHeap::initialize()` 中才发生。`initialize()` 甚至把 “Reserve the maximum.” 直接写进了注释里。
+
+因此应该把“堆诞生”拆成两步叙述：
+
+```text
+1. 选定 collector 后构造 heap C++ 对象
+2. 调 virtual initialize() 真正建立 heap address space 与内部结构
+```
+
+### 3.4 `initialize_heap()` 的后半段还决定压缩 oop 和 TLAB 支持
+
+`Universe::initialize_heap()` 在 heap `initialize()` 成功之后，还会：
+
+- 根据 heap 边界计算 compressed oop base/shift
+- 设置最大 TLAB 大小并启用 TLAB 初始化
+
+所以 `initialize_heap()` 不是一个“简单转发到 collector initialize”的小 wrapper。它是 JVM 级 heap substrate 与 collector-specific 初始化的连接点。
+
+到这里先收一个结论：**`universe_init()` 的产物不是“第一批类对象”，而是“足以承载后续类宇宙和对象出生的地基”。**
+
+---
+
+## 四、`Universe::genesis()`：为什么 primitive array klass 要先于 Object 镜像
+
+### 4.1 `_bootstrapping` 不是装饰标志，而是允许“半成品世界”存在的许可证
+
+`Universe::genesis()` 一开始就通过 `FlagSetting fs(_bootstrapping, true);` 把 `_bootstrapping` 打开。
+
+这不是无关紧要的全局状态。它允许很多对象和 klass 暂时处于“还没补完关系”的中间态，例如：
+
+- array klass 暂时不挂完整 superclass
+- vtable 只拿到 base size，还没完整初始化
+- 部分 mirror 先挂 fixup list，稍后补齐
+
+也就是说，`_bootstrapping` 本质上是：
+
+```text
+允许 Universe 在最小可用前提下逐层点亮世界
+```
+
+### 4.2 第一批 freshly created klass 之一，是 primitive `TypeArrayKlass`
+
+`genesis()` 最早的实质动作之一，是 `compute_base_vtable_size()` 之后创建 8 个 primitive `TypeArrayKlass`：
+
+- boolean
+- char
+- float
+- double
+- byte
+- short
+- int
+- long
+
+这一步很反直觉，因为大家直觉上会以为 `Object` 或 `String` 更早。
+
+真正原因在注释里已经给出：没有 base vtable size，就无法创建 array klass。也就是说，primitive array klass 之所以先出场，不是因为数组比 Object 更“根”，而是因为引导逻辑自己需要这类元数据骨架。
+
+这里要把表述收紧：**它们是最早的一批 freshly created klass 之一，尤其在 non-CDS 路径里非常靠前；但不应把它绝对化成“所有环境下的第一个 klass”。**
+
+### 4.3 canonical metadata arrays 紧跟其后，但它们不是 Java heap 数组
+
+`genesis()` 紧接着创建：
+
+- `_the_array_interfaces_array`
+- `_the_empty_int_array`
+- `_the_empty_short_array`
+- `_the_empty_method_array`
+- `_the_empty_klass_array`
+
+这些全部来自 `MetadataFactory::new_array<T>`，本质是 metaspace 中的 `Array<T>*`，不是堆里的 Java 数组对象。
+
+它们的作用是：
+
+```text
+为 class metadata、方法表、接口表、解析器等路径提供 canonical empty metadata containers
+```
+
+这就是为什么不能把它们写成“`new int[0]` 的全局缓存”。它们属于完全不同的层次。
+
+### 4.4 `vmSymbols` 与 `SystemDictionary::initialize()` 在这里把最小类宇宙点亮
+
+`genesis()` 先初始化 `vmSymbols`，然后调用 `SystemDictionary::initialize()`。这一步不是“顺手加载几个类”，而是把 minimal class universe 从纯 metadata 骨架推进到真正的 well-known classes：
+
+- `Object`
+- `String`
+- `Class`
+- 之后还有 `Reference`、boxes、method-handle 相关等
+
+也正是在这个过程中，上一域的 String/Class offset contract 与 mirror fixup 开始闭合。
+
+### 4.5 `"null"`、`"-2147483648"`、`Object[]` 都属于后续 canonical objects，但含义不同
+
+`genesis()` 中还会 intern：
+
+- `"null"`
+- `"-2147483648"`
+
+以及稍后取得 `Object[]` klass 并挂进 sibling list。
+
+这些对象和前面的 primitive array klass、metaspace empty arrays 不应该混成一类：
+
+- primitive array klass：类元数据骨架
+- empty metadata arrays：metaspace canonical arrays
+- `"null"` 等：heap-side canonical String 对象
+- `Object[]` klass：在最小 class universe 成形后补上的普通对象数组 klass
+
+这就是为什么“genesis 创造了第一批对象”必须具体分层讲，不能一句话打包。
+
+---
+
+## 五、well-known classes、primitive mirrors 与 mirror fixup：类宇宙是怎样被点亮的
+
+### 5.1 `SystemDictionary::initialize()` 不是 class loading 附属动作，而是 genesis 的中枢
+
+`SystemDictionary::initialize()` 先建字典表和一些基础对象，然后调用 `resolve_well_known_classes()`。
+
+在这一步，`Object`、`String`、`Class` 会被最先落地。紧接着 `resolve_well_known_classes()` 就立即计算：
+
+```cpp
+java_lang_String::compute_offsets();
+java_lang_Class::compute_offsets();
+```
+
+这说明它们不是“后面方便的时候再算”。相反，String/Class 的 offset contract 是后面 basic type mirrors 和 mirror fixup 的前提。
+
+### 5.2 primitive mirrors 不是 parser 造的类，而是用 C++ 造的 `Class` 对象
+
+`Universe::initialize_basic_type_mirrors()` 会创建 9 个 primitive mirror：
+
+- `int.class`
+- `float.class`
+- `double.class`
+- `byte.class`
+- `boolean.class`
+- `char.class`
+- `long.class`
+- `short.class`
+- `void.class`
+
+这些并不是通过解析某个 `java/lang/Int.class` 文件得到的，而是通过 `java_lang_Class::create_basic_type_mirror` 直接创建 mirror 对象，并记录在 `Universe::_mirrors` 中。
+
+所以 primitive mirrors 是 JVM 引导世界里的“手工打造镜像”，不是一般 class loading 的产物。
+
+### 5.3 fixup list 解释了为什么 `Class` 必须先可用，才能给老 klass 补镜像
+
+在 `java.lang.Class` 自己还不可用时，一些 klass 已经存在了，但它们的 Java mirror 还不能分配。这些 klass 会被先推入 `_fixup_mirror_list`。
+
+等 `String`/`Class` offset contract 先建立、primitive mirrors 先建好之后，`Universe::fixup_mirrors()` 再把这批“出生得太早的 klass”统一补镜像。
+
+这说明 mirror 世界并不是和 klass 世界同时出现，而是：
+
+```text
+先有一部分 klass
+再有 `java.lang.Class` 自己
+再统一把早产 klass 的 mirror 补起来
+```
+
+### 5.4 `javaClasses_init()` 不是“第一次创建 mirrors”，而是完成更大范围的 offset contract
+
+前文已经说过，`javaClasses_init()` 只做 PART2 的 bulk offset 计算与检查。真正的 String/Class offsets，以及 primitive mirrors 和 fixup mirror list 的核心闭合，已经在 `resolve_well_known_classes()` 里开始发生了。
+
+所以 `javaClasses_init()` 的准确定位是：**在 minimal class universe 已点亮之后，补完更广泛的 well-known Java class offset contract。**
+
+---
+
+## 六、canonical metadata arrays、empty `Class[]`、OOME 池与 `non_oop_word`：为什么“预分配对象”不能混成一类
+
+### 6.1 metaspace canonical arrays 不是 Java heap 数组
+
+前面说过，`_the_empty_int_array`、`_the_empty_method_array` 等是 `MetadataFactory::new_array` 造出来的 metaspace `Array<T>*`。
+
+它们服务的是：
+
+- parser / metadata 路径
+- 空方法表、空接口表、空 nest/member 元数据
+- 某些字段/方法的 canonical empty metadata container
+
+因此不能写成“JVM 预分配了所有零长度数组”。普通 Java `new int[0]` 仍然会走正常分配路径。
+
+### 6.2 heap-side canonical `Class[]` 是另一回事，而且更晚创建
+
+真正的 heap-side canonical empty `Class[]` 是：
+
+```cpp
+Universe::_the_empty_class_klass_array
+```
+
+它不是在 `genesis()` 里创建，而是在 `universe_post_init()` 才通过 `oopFactory::new_objArray(SystemDictionary::Class_klass(), 0, ...)` 创建。
+
+它只服务部分内部常见路径，例如“没有 checked exceptions 时返回 canonical empty `Class[]`”。它也不是“所有 zero-length `Class[]` 请求”的统一对象。
+
+所以要把这两层严格分开：
+
+```text
+metaspace empty arrays
+  !=
+heap-side canonical empty Class[]
+```
+
+### 6.3 OOME 预分配也分成两池，不是一个简单 singleton
+
+`universe_post_init()` 里会预分配：
+
+- 6 个 no-backtrace 默认 OOME
+- 一组带预分配 backtrace 的 OOME 池（数量由 `PreallocatedOutOfMemoryErrorCount` 决定）
+
+`gen_out_of_memory_error()` 会优先尝试从 backtrace-capable 池中取对象；池子耗尽后再退回对应的默认 no-backtrace OOME。
+
+所以“JVM 预分配一个 OutOfMemoryError 对象”这类说法太粗。真实设计是：**稳定 defaults + 可消耗的 backtrace pool** 两层。
+
+### 6.4 `non_oop_word` 根本不是空数组或空对象
+
+`Universe::non_oop_word()` 是另一个完全不同的 bootstrap/sentinel 角色。它的要求是：这个 word 模样必须不像任何真实 oop。
+
+它最典型的用法在 compiled IC / relocation metadata 里充当“伪空值”，而不是在堆或 metaspace 中充当某种空对象。
+
+所以这类 sentinel 不能与：
+
+- empty arrays
+- OOME 池
+- `"null"` 字符串
+- primitive mirrors
+
+混叫成“预分配对象”。它们服务的语义完全不同。
+
+---
+
+## 七、`CollectedHeap` 与 `MemAllocator`：普通对象分配真正在哪发生
+
+### 7.1 `CollectedHeap` 暴露的是四类接口，不是“一个 allocate”
+
+`CollectedHeap` 最核心的抽象接口包括：
+
+- `allocate_new_tlab`
+- `mem_allocate`
+- `collect`
+- `object_iterate`
+
+这已经说明 JVM 把：
+
+- 给线程新建 TLAB
+- 给单个对象分配 raw memory
+- 触发 GC
+- 遍历堆对象
+
+视为 collector-independent contract 的不同侧面。
+
+### 7.2 `oopFactory` 不是对象真正的分配器
+
+`oopFactory` 更像便利入口：它会根据 array/object 类型找到对应 `Klass`，再委派给 `Klass`/heap 分配逻辑。
+
+真正负责：
+
+- 走 TLAB 还是堆外共享空间
+- 是否触发 collector 的 `mem_allocate`
+- 对象 header 如何初始化
+- mark 和 klass 以什么顺序发布
+
+的是 `MemAllocator` 及其下游 collector heap。
+
+所以要明确纠偏：**`oopFactory` 不是普通对象分配的底层实现，它只是上层 convenience layer。**
+
+### 7.3 TLAB miss 不一定会 refill 一个新 TLAB
+
+这是对象分配路径里最容易写歪的一点。
+
+`MemAllocator::allocate_inside_tlab_slow()` 会先检查：
+
+```cpp
+if (tlab.free() > tlab.refill_waste_limit()) {
+    tlab.record_slow_allocation(_word_size);
+    return NULL;
 }
-
-jint Universe::initialize_heap() {
-  _collectedHeap = create_heap();
-  jint status = _collectedHeap->initialize();
-  if (status != JNI_OK) {
-    return status;
-  }
-  log_info(gc)("Using %s", _collectedHeap->name());
 ```
 
-- **`create_heap`(:752-755)只 new 出 CollectedHeap 的 C++ 对象**,选择权在 GCConfig: `GCConfig::arguments()->create_heap()`(gcConfig.cpp:237;`create_heap` 是 GCArguments 的纯虚函数,gcArguments.hpp:41)。典型配置(server-class 机器)走 G1: `G1Arguments::create_heap`(g1Arguments.cpp:151-153)= `create_heap_with_policy<G1CollectedHeap, G1CollectorPolicy>()`——`new G1CollectedHeap` + 配一个策略对象;
-- **GC 怎么被选中**: `GCConfig::select_gc`(gcConfig.cpp:146-183)——`-XX:+UseG1GC/UseSerialGC/...` 显式指定优先;一个都没给时 `select_gc_ergonomically`(:102-114)按机器挑: **server-class 机器(至少 2 个处理器、内存 ≥2GB-256MB 余量,多核包机器还需 ≥2 个物理包,os.cpp:1709-1741)默认 UseG1GC,否则 UseSerialGC**;
-- **`_collectedHeap->initialize()`(:767)才做重活**: G1 的 `initialize`(g1CollectedHeap.cpp:1533 起)检查对齐后 `Reserve the maximum`——**这里才真正 reserve 虚拟地址空间**。new 只是搭了个 C++ 空壳,虚拟内存是 initialize 阶段的事(02 篇的 VirtualSpace 就是在管这块区域)。
+也就是说，如果当前 TLAB 剩余空间太多，直接废弃它去换新 TLAB 太浪费，allocator 会保留当前 TLAB，并让调用路径退回 outside-TLAB 分配，而不是强行 refill。
 
-之后 `universe_init` 建符号表(:734-735 `SymbolTable::create_table()`/`StringTable::create_table()`)、预置 6 个方法缓存(LatestMethodCache,:715-720——VM 内部高频调用的 Java 方法指针缓存,如 `Unsafe.throwIllegalAccessError`),堆就绪。
+因此 TLAB miss 的真实分支是：
 
-**关键设计 (斜体)**: *"C++ 对象创建"与"虚拟内存到位"分两步: create_heap 只做多态选择与构造,initialize 做资源申请。这样 GC 切换(-XX:+UseSerialGC)只影响第一步,堆初始化的大部分逻辑(检查/对齐/基址选择)在第二部统一走。*
-
-## 2. 大爆炸: genesis 在堆上造出第一批对象
-
-### 入口与总流程
-
-`universe2_init`(universe.cpp:992-995)一行调用 `Universe::genesis`(:321-462)。genesis 全程在一个 `_bootstrapping` 标志保护下(:324,FlagSetting 结构块,出块自动恢复)——引导期很多检查会绕开。总流程(截取核心,逐字):
-
-```cpp
-// universe.cpp:322-341(截取核心,逐字)
-  ResourceMark rm;
-
-  { FlagSetting fs(_bootstrapping, true);
-
-    { MutexLocker mc(Compile_lock);
-
-      java_lang_Class::allocate_fixup_lists();
-
-      // determine base vtable size; without that we cannot create the array klasses
-      compute_base_vtable_size();
-
-      if (!UseSharedSpaces) {
-        _boolArrayKlassObj      = TypeArrayKlass::create_klass(T_BOOLEAN, sizeof(jboolean), CHECK);
-        _charArrayKlassObj      = TypeArrayKlass::create_klass(T_CHAR,    sizeof(jchar),    CHECK);
-        _singleArrayKlassObj    = TypeArrayKlass::create_klass(T_FLOAT,   sizeof(jfloat),   CHECK);
-        _doubleArrayKlassObj    = TypeArrayKlass::create_klass(T_DOUBLE,  sizeof(jdouble),  CHECK);
-        _byteArrayKlassObj      = TypeArrayKlass::create_klass(T_BYTE,    sizeof(jbyte),    CHECK);
-        _shortArrayKlassObj     = TypeArrayKlass::create_klass(T_SHORT,   sizeof(jshort),   CHECK);
-        _intArrayKlassObj       = TypeArrayKlass::create_klass(T_INT,     sizeof(jint),     CHECK);
-        _longArrayKlassObj      = TypeArrayKlass::create_klass(T_LONG,    sizeof(jlong),    CHECK);
+```text
+TLAB fast path miss
+  → 若剩余空间还值得保留：outside-TLAB
+  → 否则申请新 TLAB，再在新 TLAB 中分配
 ```
 
-### 第一步是数组 Klass,不是 Object
+### 7.4 对象发布顺序是 mark 先、klass 后
 
-genesis 的第一个实质动作是 `java_lang_Class::allocate_fixup_lists()`(:328——07-07 的 mirror 补丁列表在这里就绪),然后 `compute_base_vtable_size()`(:331)再 `TypeArrayKlass::create_klass` ×8——**基本类型数组的 Klass 反而先于任何普通类**。注释点破原因: "without that we cannot create the array klasses"。`compute_base_vtable_size`(:1115-1117)= `ClassLoader::compute_Object_vtable()`——先算出 Object 的 vtable 长度,因为数组类的方法表长度继承自 Object(06-02 讲过 vtable 从 Klass 头之后开始、数组不引入新方法);没有这个数字,数组 Klass 连尺寸都定不下来。8 个 Klass 存进 `_typeArrayKlassObjs[T_xxx]` 索引表(:343-350),并各有一个具名访问器(`_boolArrayKlassObj`/`_intArrayKlassObj`…)。注意引导期数组 Klass 的 super 先不挂(Object 还没加载,arrayKlass.cpp:93 在 `is_bootstrapping()` 时置 NULL),vtable 构建也在引导期跳过、由 `reinitialize_vtable_of` 后补(klassVtable.cpp:103-110,universe_post_init 时补)。
+`MemAllocator::finish()` 负责最后的对象发布顺序：
 
-### Metaspace 的空数组与"空数组预分配"的真相
+- 先设置 mark word
+- 再用 release 语义发布 `Klass*`
 
-接着造四个**内部空数组**(universe.cpp:354-358,截取核心,逐字):
+这意味着对象只有在 header/body 已足够初始化之后，才对并发 GC 和其他消费者表现为“一个可解析对象”。
 
-```cpp
-// universe.cpp:354-358(截取核心,逐字)
-        _the_array_interfaces_array = MetadataFactory::new_array<Klass*>(null_cld, 2, NULL, CHECK);
-        _the_empty_int_array        = MetadataFactory::new_array<int>(null_cld, 0, CHECK);
-        _the_empty_short_array      = MetadataFactory::new_array<u2>(null_cld, 0, CHECK);
-        _the_empty_method_array     = MetadataFactory::new_array<Method*>(null_cld, 0, CHECK);
-        _the_empty_klass_array      = MetadataFactory::new_array<Klass*>(null_cld, 0, CHECK);
+因此对象分配不是“拿到一块内存再随便填”，而是带着并发可见性约束的协议。
+
+---
+
+## 八、Universe 仓库：为什么它像“引导台”，不只是“全局变量表”
+
+如果只看 `universe.hpp`，很容易把 Universe 理解成一堆静态字段：
+
+- `_collectedHeap`
+- primitive array klass 指针
+- primitive mirrors
+- canonical arrays
+- preallocated exceptions
+- sentinel strings
+- `non_oop_word`
+
+但从全篇走下来，真正重要的不是它“装了什么”，而是：**它把启动依赖顺序显式收进了同一处协议。**
+
+- `heap()` 让全 VM 拿到当前 heap 抽象
+- primitive array klasses 在 bootstrapping 期先被建立成最小元数据骨架
+- `SystemDictionary::initialize()` 点亮最小类宇宙
+- primitive mirrors / fixup list 把 Class mirror 世界接上
+- `universe_post_init()` 再补 canonical heap-side objects 与异常池
+
+所以 Universe 更像：
+
+```text
+JVM 启动时各阶段 bootstrap state 的编排者与仓库
 ```
 
-注意: 这些是 **Metaspace 里的 C 数组**(`Array<int>*` 等),**不是堆上的 Java 对象**——流传的"genesis 预分配空数组,`new int[0]` 直接返回"是张冠李戴: `new int[0]` 每次都会走正常分配;堆上的预分配空数组只有一个——`_the_empty_class_klass_array`(Class[0],在 universe_post_init 里用 oopFactory 创建,universe.cpp:1018)——它的用途很具体: 方法没有 checked exceptions 时返回这个空数组的规范对象(method.cpp:733)。`_the_array_interfaces_array` 则是**数组类的接口清单**——所有 Java 数组的 Klass 共享它,稍后填入 Cloneable 与 Serializable(:383-384)。
+而不只是“保存几个全局单例指针的头文件”。
 
-### SystemDictionary::initialize: 核心类落地
+---
 
-`SystemDictionary::initialize`(systemDictionary.cpp:1907 起)是 genesis 的枢纽: 建字典表、`oopFactory::new_intArray(0)`(:1916)造一个空 int[] 当系统类加载器锁对象(oopFactory 在引导期的重要客户),然后 `resolve_well_known_classes`(:1918)——07-04 那套 well-known 类加载在这里发生: Object/String/Class/System 等被引导加载,同时 07-07 的 String/Class 镜像偏移就地计算。
+## 九、误解澄清：八个最容易写过头的判断
 
-类加载完立刻造两批镜像(javaClasses 篇的悬念在这里闭合):
+1. **`create_heap()` 是否就已经 reserve 了整个 Java heap？** 不是。它只构造具体 `CollectedHeap` C++ 对象；真正的地址空间与辅助结构工作在 `initialize()`。
+2. **G1 是否总是默认 GC？** 不是。只有在相应 build 支持且 ergonomics 选中时，server-class 机器才优先 G1；non-server 可能走 Serial。
+3. **`genesis` 是否创造了“所有第一批对象”？** 不是。它是 class universe bootstrap 的核心阶段，但许多 canonical heap-side object 和异常池在 `universe_post_init()` 才出现。
+4. **primitive array klass 是否就是“绝对第一个 klass”？** 不能这么绝对。它们是最早的一批 freshly created klass 之一，尤其在 non-CDS 路径里很靠前，但不是对所有环境的唯一答案。
+5. **`_the_empty_int_array` 是否意味着所有 `new int[0]` 都复用它？** 不是。它是 metaspace canonical metadata array，不是普通 Java heap `int[]` 缓存。
+6. **`_the_empty_class_klass_array` 与 metaspace empty arrays 是否是一回事？** 不是。前者是更晚创建的 heap-side canonical empty `Class[]`，后者是 metaspace `Array<T>*`。
+7. **`oopFactory` 是否就是对象真正的分配器？** 不是。它是 convenience layer；TLAB/collector/memory publication 由 `MemAllocator` 与 `CollectedHeap` 处理。
+8. **TLAB miss 是否一定会 refill 一个新 TLAB？** 不是。剩余空间过大时会保留当前 TLAB，直接走 outside-TLAB 分配。
 
-- `Universe::initialize_basic_type_mirrors`(universe.cpp:464-509): 为 9 个基本类型(`int`/`float`/`double`/`byte`/`boolean`/`char`/`long`/`short`/`void`)调 `java_lang_Class::create_basic_type_mirror` 造镜像(:478-495)——**int.class 不是加载出来的,是这里用 C++ 造的**;
-- `Universe::fixup_mirrors`(:511-534): 消化 07-07 的 `fixup_mirror_list`——注释说得很直白: "Bootstrap problem: all classes gets a mirror eagerly, but we cannot do that for classes created before java.lang.Class is loaded"(:512-515)。Object 等早期类的镜像在 Class 加载前没法造,先挂补丁列表,这里统一补。
+---
 
-之后 genesis 把 8 个基本类型数组 Klass 初始化(`initialize_basic_type_klass` ×8,:387-394;定义 :306-317: super 设为 Object、挂入类层次链表),再建 `_objectArrayKlassObj`(:414-415,`Object[]` 的 Klass,从 `Object_klass()->array_klass(1)` 来),还有两个 intern 字符串 `"null"` 与 `"-2147483648"`(:368-369)——`_the_null_string` 是编译器/运行时处理 "null" 字面量的规范对象(ciEnv 直接复用它,ciEnv.cpp:322-325),`_the_min_jint_string` 是 `Integer.MIN_VALUE` 的字符串(ciEnv.cpp:330)。
+## 十、收网：Universe 的真正角色，是把世界按依赖顺序点亮
 
-**关键设计 (斜体)**: *genesis 的依赖顺序是"自底向上"的: 数组 Klass(依赖 Object 的 vtable 尺寸)→ 核心类(Klass 存在)→ 镜像(依赖 Class 已加载)→ 基本类型数组 Klass 挂层次(依赖 Object 类在)。每一步都只依赖上一步已经就位的东西——而 `_bootstrapping` 标志(注释 "true during genesis",universe.hpp:209)把"半成品"显式化: 数组 Klass 先不挂 super、vtable 先不建,全靠这个标志让引导期的部分初始化合法化,之后再由 reinitialize_vtable_of 补齐。*
+回到开头的问题：JVM 在第一个普通 Java 对象出生前，靠什么活着？
 
-## 3. Universe: 全局唯一仓库
+答案不是一句“genesis 会创建它们”，而是一整条分阶段引导链：
 
-`Universe`(universe.hpp:96,`AllStatic`)就是这些全局单例的仓库: 堆指针、8 个数组 Klass、基本类型镜像、预分配异常对象。最常用的几个访问器:
+```text
+universe_init
+  → 先立 heap substrate 与基础元数据设施
 
-- `Universe::heap()`(universe.hpp:390)= `_collectedHeap`(universe.hpp:189)——全 VM 到处调用的"当前堆";
-- `intArrayKlassObj()`(:276)等 8 个——genesis 造的数组 Klass,`oopFactory` 的每个工厂都依赖它们(oopFactory.hpp:44-51: `new_intArray` = `TypeArrayKlass::cast(Universe::intArrayKlassObj())->allocate(length)`);
-- `the_array_interfaces_array()`(:327)/`the_empty_int_array()`(:362)——genesis 的空数组;
-- `non_oop_word()`(universe.cpp:656-672): 一个"保证不像任何 oop"的哨兵值——`os::non_memory_address_word() | 1`: 低位置 1 让它绝不对齐到 oop 的 4 字节边界,高位用 OS 提供的非内存地址字,高位低位都不像真 oop(注释 :657-666)。最典型的用途是**内联缓存的"空目标"占位**: compiledIC 的 data 槽存 non_oop_word 表示"还没有目标"(compiledIC.cpp:61-63 判定 `data == non_oop_word` 即无目标,:120 清缓存时写入)。
+Universe::genesis
+  → 再搭最小 class universe 与 mirror bootstrap 骨架
 
-预分配的另一类对象在 `universe_post_init`(universe.cpp:1002 起): 6 个**提前造好的 OutOfMemoryError 实例**(:1020-1029,heap/metaspace/class_metaspace/array_size/gc_overhead_limit/realloc_objects 各一)+ `_delayed_stack_overflow_error_message`(:1032-1034)。设计动机直白: **OOM 发生时往往已经没有空间再分配异常对象了**——`gen_out_of_memory_error`(universe.cpp:615-650)的机制是: 另有一池预分配错误(`_preallocated_out_of_memory_error_array`,:1084,容量 `PreallocatedOutOfMemoryErrorCount`),抛出时优先从池里取一个、把当前错误消息搬过去、填上栈帧返回(:623-641);池用尽就退回 6 个默认 OOME 之一(比如 `out_of_memory_error_java_heap()`,universe.hpp:370)——全程不触发新的异常对象分配。
-
-## 4. CollectedHeap: 所有 GC 堆的公共接口
-
-### 位置与家族
-
-CollectedHeap 在 `share/gc/shared/collectedHeap.hpp:104`——注意不是 `share/memory/heap.hpp`(那是 **CodeHeap**,16 域讲过的代码缓存)。类头注释列了全家族(collectedHeap.hpp:94-102): GenCollectedHeap(Serial/CMS)→ G1CollectedHeap / ParallelScavengeHeap / ShenandoahHeap / ZCollectedHeap。所有 GC 换着插进同一个 `Universe::heap()` 槽位。
-
-### 分配接口: TLAB 与单对象两条路
-
-CollectedHeap 对分配暴露两个接口(截取核心,逐字):
-
-```cpp
-// collectedHeap.hpp:140-160(截取核心,逐字)
-  // Create a new tlab. All TLAB allocations must go through this.
-  // To allow more flexible TLAB allocations min_size specifies
-  // the minimum size needed, while requested_size is the requested
-  // size based on ergonomics. The actually allocated size will be
-  // returned in actual_size.
-  virtual HeapWord* allocate_new_tlab(size_t min_size,
-                                      size_t requested_size,
-                                      size_t* actual_size);
-
-  // Raw memory allocation facilities
-  // The obj and array allocate methods are covers for these methods.
-  // mem_allocate() should never be
-  // called to allocate TLABs, only individual objects.
-  virtual HeapWord* mem_allocate(size_t size,
-                                 bool* gc_overhead_limit_was_exceeded) = 0;
+javaClasses_init / universe_post_init
+  → 最后补全 offset contract、canonical heap objects、异常池与后置修复
 ```
 
-对象分配的真实路径不在 oopFactory,而是 **MemAllocator**(share/gc/shared/memAllocator.cpp,`new` 字节码与反射分配的对象创建路径): `MemAllocator::allocate`(:373-389)是入口,`mem_allocate`(:362-369)按 UseTLAB 分派(截取核心,逐字):
+三句话收束全文：
 
-```cpp
-// memAllocator.cpp:362-381(截取核心,逐字)
-HeapWord* MemAllocator::mem_allocate(Allocation& allocation) const {
-  if (UseTLAB) {
-    HeapWord* result = allocate_inside_tlab(allocation);
-    if (result != NULL) {
-      return result;
-    }
-  }
+- **`Universe` 的第一重身份不是“全局变量袋子”，而是 JVM 启动里的分阶段引导台。**
+- **堆的诞生要拆成“构造 heap object”和“初始化虚拟内存与辅助结构”两步，类宇宙与第一批镜像则在其上继续分阶段点亮。**
+- **metaspace canonical arrays、heap-side canonical objects、异常池和 sentinel 都属于“启动期特殊对象”，但它们的存储层、时序和用途完全不同，不能混成一句“预分配了第一批对象”。**
 
-  return allocate_outside_tlab(allocation);
-}
+下一篇顺着文中被多次提到的一个词继续：reserve。虚拟地址空间为什么要先 reserve 再 commit？为什么 metaspace、code cache 和 Java heap 都离不开这个模式？答案在 `VirtualSpace`。
 
-oop MemAllocator::allocate() const {
-  oop obj = NULL;
-  {
-    Allocation allocation(*this, &obj);
-    HeapWord* mem = mem_allocate(allocation);
-    if (mem != NULL) {
-      obj = initialize(mem);
-```
-
-- **TLAB 内快路径**: `allocate_inside_tlab`(:284-295)从当前线程的 TLAB 里 `tlab.allocate(_word_size)`——一次指针 bump,不碰 GC;TLAB 剩余不足时 `allocate_inside_tlab_slow`(:297 起)权衡: **剩余空间还很多(超过 `refill_waste_limit`),把整个 TLAB 作废太浪费,于是放弃换新、直接走 TLAB 外分配**(:309-311);剩余少到可以丢弃,才作废旧 TLAB、`_heap->allocate_new_tlab(min, requested, &actual)`(:324)换新的;
-- **TLAB 外慢路径**: `allocate_outside_tlab`(:270-281)调 `_heap->mem_allocate(_word_size, &overhead_limit)`——G1 的实现是巨对象直接 `attempt_allocation_humongous`(g1CollectedHeap.cpp:404),普通对象 `attempt_allocation`(:407);
-- 分配成功后 `initialize`(:373 处调用)填对象头: mark 复制 Klass 的 `prototype_header`(偏向锁模式),`release_set_klass` 发布 klass 指针(:396-408,`MemAllocator::finish`)——**先 mark 后 klass,release store 让并发 GC 能看到完整对象**。
-
-### 生命周期接口
-
-- `collect(GCCause::Cause)`(collectedHeap.hpp:398,纯虚): 触发 GC——`System.gc()` 的链路终点就是 `Universe::heap()->collect(GCCause::_java_lang_system_gc)`(jvm.cpp:457-460),`_gc_cause` 记录原因(gc_cause() :299),JMX 的 `GarbageCollectorMXBean.getLastGcInfo()` 读它;
-- `object_iterate(ObjectClosure*)`(:443,纯虚)/`safe_object_iterate`(:447): 遍历堆上所有对象——jcmd `GC.class_histogram`、JFR 堆事件、JVMTI 堆迭代都走这套接口;
-- `total_collections()`(:419): 累计 GC 次数。
-
-## 5. OopClosure 与 ObjectClosure: GC 遍历的回调
-
-遍历的"回调"接口在 `share/memory/iterator.hpp`(不是大纲说的 :30-100,实际): `OopClosure`(:52-56)两个纯虚——`do_oop(oop*)` 与 `do_oop(narrowOop*)`(压缩指针版本),任何要"看引用"的组件实现它;`ObjectClosure`(:161-165)一个 `do_object(oop)`——任何要"看对象"的组件实现它。GC 根集扫描、堆遍历都是"遍历器 + 回调"的组合: 遍历器(栈、静态区、句柄表)把每个引用/对象交给回调,回调做什么(标记、拷贝、统计)由实现者决定。
-
-## 核心悬念
-
-大爆炸的全过程到齐: `universe_init` 选 GC、create_heap + initialize 两步建堆(new 出 C++ 壳,initialize 里才 reserve 虚拟地址)→ `genesis` 在 `_bootstrapping` 下造第一批对象(8 个基本类型数组 Klass 先于一切、Metaspace 空数组、well-known 类与基本类型镜像、`Object[]` Klass)→ `Universe` 仓库与预分配 OOME → `CollectedHeap` 抽象(TLAB 内一次 bump、TLAB 外 mem_allocate/allocate_new_tlab 两条慢路径、collect/object_iterate 生命周期)。但有一个词被反复带过: **reserve**。`G1CollectedHeap::initialize` 里 `Reserve the maximum` 那句话留了个尾巴——"reserve 虚拟地址空间"到底是怎么做的?虚拟地址不像物理内存,reserve 与 commit 分离的机制是 Metaspace、CodeCache、GC 堆共同的地基。下一篇: VirtualSpace——reserve/commit 的虚拟地址管理。
-
-> → [09-memory-core/02 — VirtualSpace](02-virtualspace.md)
+> → [02 — VirtualSpace](02-virtualspace.md)

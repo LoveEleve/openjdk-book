@@ -1,38 +1,208 @@
-# 03. x86 指令集 — JVM 的"常用字表"
+# 03. x86 指令不是字典，而是一组 JIT 运行时模板
 
-> **前置依赖**:[02-assembler/02 — ModR/M → REX → VEX](02-x86-register-operand-encoding.md):操作数编码——本篇的每个字节都建立在那上面;45-math-library/01(SSE2 指令的实战)
-> → **后续**:[04 — MacroAssembler 运行时](04-x86-macroassembler-runtime.md)
-> 关联域: 05-cpu-primitives(原子与屏障)、13-jit、19-sync
+> 基于 `OpenJDK 11u / HotSpot / Linux / x86_64` 讨论
+> **前置依赖**：[02 — x86 寄存器/操作数编码](02-x86-register-operand-encoding.md)：ModR/M、REX、VEX/EVEX
+> → **后续**：[04 — MacroAssembler 运行时](04-x86-macroassembler-runtime.md)：把指令模板拼成完整运行时路径
+> 关联域：05-cpu-primitives、13-jit、19-sync、45-math-library
 
-## 400+ 条指令,JVM 的 JIT 只用其中一小撮
+## 400 多条指令，JIT 为什么只反复用一小撮
 
-x86 有数百条指令(MMX/SSE/AVX/字符串/十进制调整/系统指令……),而 JIT 编译 Java 方法时反复用到的只是**一个小子集**:mov 家族搬数据、add/sub/imul/idiv 算数、cmp/jcc 比较分支、call/jmp 控制流、SSE 浮点、lock 原子。这篇从 assembler_x86.cpp(9501 行)里挑六个"常用字"看它们怎么编码,以及为什么 JIT 的词汇表这么小。
+x86 指令手册里有几百条指令：
 
-## 1. mov 家族与 lea:搬数据
+- 字符串操作
+- 系统指令
+- MMX/SSE/AVX
+- 浮点与整数算术
+- 原子与内存序列化
+- 跳转、调用和返回
 
-### 1.1 场景:Java 的赋值语句编译成什么
+但 Java 方法编译成机器码时，并不是把这几百条指令平均用一遍。
 
-`a = b` 编译成一条 `mov`。家族成员按**操作数宽度**命名(assembler_x86.cpp:2289 起):
+JIT 最常反复做的事情其实很集中：
+
+```text
+搬数据       → mov / movzx / movsx / lea
+算术         → add / sub / imul / idiv
+比较与分支   → cmp / test / jcc / cmov
+调用与返回   → call / jmp / ret
+并发原语     → lock + cmpxchg
+浮点/SIMD    → SSE / AVX
+内存序       → mfence / lfence / sfence
+```
+
+所以本篇不做 x86 指令百科。
+
+真正的问题是：
+
+**Java 的赋值、算术、分支、方法调用、CAS、浮点运算和内存屏障，为什么都能压缩成这么一小组指令家族？Assembler 又如何根据操作数宽度、地址形式、分支距离和 CPU 能力，从家族中挑出具体编码？**
+
+先记住一个总判断：
+
+**Assembler 不是把每条 Java 语句绑定到唯一一条 x86 指令，而是在一组指令模板中做选择。**
+
+选择依据包括：
+
+- 操作数是 8/16/32/64 位
+- 源和目标在寄存器还是内存
+- 立即数是否能缩短
+- 跳转目标距离是否已知
+- CPU 是否支持 SSE2、AVX、EVEX
+- 这条操作需要普通计算、原子性还是内存序
+
+上一篇讲的是“操作数如何编码成 ModR/M、REX、VEX 和 EVEX”。这一篇往上走一层，观察这些编码如何被组织成 Java 运行时真正需要的指令模板。
+
+---
+
+## 一、mov/lea：数据搬运和地址计算不是一回事
+
+### 1.1 `a = b` 为什么通常从 mov 开始
+
+Java 代码里的赋值、参数搬运、字段读写、对象引用转移，都会大量落到数据移动。
+
+最基础的 x86 语义就是：
+
+```text
+源操作数 → 目标操作数
+```
+
+HotSpot 的 `mov` 并不是一条固定编码，而是一整个家族：
+
+- 寄存器到寄存器
+- 内存到寄存器
+- 寄存器到内存
+- 立即数到寄存器
+- 不同数据宽度
+
+源码里高层的 `mov(Register dst, Register src)` 会根据平台选择 `movq` 或 `movl`：
 
 ```cpp
-// assembler_x86.cpp:2289-2291、3023-3031(截取核心,逐字)
+// assembler_x86.cpp:2289-2291
 void Assembler::mov(Register dst, Register src) {
   LP64_ONLY(movq(dst, src)) NOT_LP64(movl(dst, src));
 }
-
-void Assembler::movzbl(Register dst, Address src) { // movzxb
-  ...
-void Assembler::movzbl(Register dst, Register src) { // movzxb
 ```
 
-`movzbl` 是"零扩展字节到 long":取 1 字节、扩展到 32 位(注释里的 "movzxb")——类似 Java 的 `(int)(byte & 0xFF)`,但一条指令完成。符号扩展版是 `movsbl`(2905)、`movslq`(9057,符号扩展 32→64)。
+这里已经出现一个重要的选择点：
 
-**cmovcc:条件移动,消灭分支**(1587-1600):
+- x86_64 下，寄存器宽度可以按 64 位路径处理
+- 32 位模式下，走 32 位路径
+
+Assembler 的职责不是解释 Java 类型，而是接收上层已经决定好的寄存器和宽度，然后发出对应编码。
+
+### 1.2 宽度后缀不是装饰
+
+x86 指令名里的后缀直接表达操作宽度：
+
+```text
+b  → byte，8 位
+w  → word，16 位
+l  → long，在 AT&T 命名习惯里通常表示 32 位
+q  → quadword，64 位
+```
+
+这里的 `l` 是 x86/AT&T 命名，不是 Java 的 `long`；Java `long` 在 x86_64 上通常对应 `q` 宽度。JVM 需要处理 Java 的 byte、short、char、int、long、引用和指针，这些值的宽度不同，不可能都用同一个 `mov`。
+
+例如从内存取一个 byte，再放进更宽的寄存器，不能只说“把它搬过来”，还要回答：
+
+- 高位补 0，还是补符号位
+- 最终结果是 32 位，还是 64 位
+- 源操作数来自内存，还是已经在寄存器里
+
+这就进入 `movzbl`、`movsbl`、`movslq` 等扩展类指令。
+
+### 1.3 `movzx` 与 `movsx`：取窄值时顺手完成类型扩展
+
+`movzbl` 的语义是：
+
+```text
+读取 8 位值 → 零扩展到 32 位
+```
+
+可以把它理解成接近 Java 里的：
+
+```java
+int x = byteValue & 0xff;
+```
+
+符号扩展版本 `movsbl` 则会保留符号位。
+
+`movslq` 进一步完成：
+
+```text
+32 位整数 → 符号扩展到 64 位
+```
+
+这些指令的价值在于：
+
+- 不需要先 load 再单独写扩展逻辑
+- 扩展规则直接包含在硬件指令语义里
+- JIT 可以根据 Java 类型和后续使用宽度选择对应模板
+
+所以“mov 家族”真正表达的是一张数据转换表，而不只是“复制数据”。
+
+### 1.4 `lea`：名字里有 load，实际上不访问内存
+
+`lea` 很容易被初学者误解成“加载内存”。
+
+它真正做的是把地址表达式当作算术表达式：
+
+```text
+lea dst, [rbx + rcx*4 + 8]
+
+32 位 `leal`：低 32 位结果写入 `dst`，在 x86_64 下写入 32 位寄存器会零扩展到对应 GPR
+64 位 `leaq`：`dst = rbx + rcx*4 + 8`
+```
+
+HotSpot 的入口会根据编译目标选择 `leal` 或 `leaq`。在 32 位实现中，`lea` 包装 `leal`；在 LP64 实现中，`lea` 包装 `leaq`，对应源码分别位于 `assembler_x86.cpp:8109-8111` 和 `:8938-8946`。
 
 ```cpp
-// assembler_x86.cpp:1587-1598(截取核心,逐字)
+// 非 LP64 路径
+void Assembler::lea(Register dst, Address src) {
+  leal(dst, src);
+}
+
+// LP64 路径
+void Assembler::lea(Register dst, Address src) {
+  leaq(dst, src);
+}
+```
+
+`leal` 和 `leaq` 都不会读取 `[rbx + rcx*4 + 8]` 指向的内存，但结果宽度不同：x86_64 的 `leaq` 计算 64 位地址表达式，`leal` 使用地址大小前缀形成 32 位结果，并受 x86_64 32 位写寄存器的零扩展规则影响。因此不能只用一个不带宽度条件的 `rax = ...` 公式概括两条路径。
+
+它们都使用 x86 地址编码里的三部分：
+
+- base
+- index * scale
+- displacement
+
+因此 `lea` 可以把多个加法和乘以 `2/4/8` 的操作压进一条指令，而且不修改 flags。
+
+这和 `add` 有一个重要差异：
+
+- `add` 是算术运算，会修改条件标志
+- `lea` 是地址表达式计算，不读内存，也不改变 flags
+
+所以 JIT 会根据后面是否需要 flags 选择两者。
+
+### 1.5 `cmov`：用无条件执行换掉不可预测分支
+
+条件选择有两种常见实现：
+
+```text
+比较
+  → jcc 跳到 true/false 两条路径
+
+比较
+  → cmov 根据条件选择结果
+```
+
+HotSpot 的 `cmovl` 编码很短：
+
+```cpp
+// assembler_x86.cpp:1587-1598
 void Assembler::cmovl(Condition cc, Register dst, Register src) {
-  NOT_LP64(guarantee(VM_Version::supports_cmov(), "illegal instruction"));
+  NOT_LP64(guarantee(VM_Version::supports_cmov(),
+                     "illegal instruction"));
   int encode = prefix_and_encode(dst->encoding(), src->encoding());
   emit_int8(0x0F);
   emit_int8(0x40 | cc);
@@ -40,130 +210,338 @@ void Assembler::cmovl(Condition cc, Register dst, Register src) {
 }
 ```
 
-`0F 40|cc`——cc 是 16 种条件(0-15),同一条指令编码出 cmove/cmovne/cmovg/cmovl……**条件移动 = 无条件执行两条路径之一**,没有跳转就没有分支预测失败。JIT 用它处理"不可预测的分支"(比如 `x = (a < b) ? 1 : 2`)。
+`0x40 | cc` 中的 `cc` 表示条件码，因此同一编码模板可以派生出 `cmove`、`cmovne`、`cmovg`、`cmovl` 等家族成员。
 
-**lea:不算内存的地址运算**(8109,内部转 leal@2252):
+`cmov` 的设计取舍是：
 
-```cpp
-// assembler_x86.cpp:8109-8112(截取核心,逐字)
-void Assembler::lea(Register dst, Address src) {
-  leal(dst, src);
-}
+- 条件选择通常要求候选值在选择点已经可用
+- 但不需要为选择本身执行跳转
+- 因此不会因为这条选择分支发生预测失败
+
+它不是无条件更快。
+
+如果分支高度可预测，`jcc` 可能更便宜；如果分支很难预测，`cmov` 的固定执行路径可能更稳定。
+
+真正的选择需要结合 JIT 的 profile 和上下文，不能写成“cmov 永远优于 jmp”。
+
+### 1.6 这一族指令的失败方案
+
+如果所有地址计算都用：
+
+```text
+mov 临时寄存器
+add 临时寄存器
+imul 临时寄存器
 ```
 
-`lea rax, [rbx + rcx*4 + 8]` 把地址表达式**当算术用**:rax = rbx + rcx*4 + 8——AGU(地址生成单元)算完就返回,**不访问内存**。JIT 常用它做"一条指令的多项式加法"(乘 2/4/8 免费,因为 scale)。
+就会产生更多指令和临时寄存器压力。
 
-- [x86: cmov 与 jmp 的取舍:cmov 执行时间固定(无条件),jmp 依赖预测(命中 1 cycle、失败 ~20);分支可预测时 jmp 更快,不可预测时 cmov 更稳——JIT 的取舍是运行时 profile 决定的]
-- [x86: lea 的 3 个源(base、index*scale、disp)一次算完,mov+add 需要两条;但 lea 不写 flags,需要 flags 的场景用 add]
+如果所有条件选择都用 `jcc`，不可预测分支会产生错误预测成本。
 
-**关键设计 (斜体)**: *mov 家族的宽度后缀(b/w/l/q)是 x86"一条指令一个操作数大小"的体现——JVM 的类型宽度(byte/short/int/long)直接映射到这些后缀;扩展类指令(movzbl/movslq)把"取窄值变宽值"压缩成一条。cmov 是"用执行换分支"的典型:两条路径都算,条件决定取哪条——在分支不可预测时,这比跳转便宜得多。*
+如果所有窄值读取都拆成 load + 手工扩展，编码更长，模板也更复杂。
 
-## 2. 算术与原子:指令即原语
+所以 mov/lea/cmov/movzx/movsx 不是零散指令，而是围绕“数据移动、数据宽度和控制流代价”形成的一组基础模板。
 
-### 2.1 场景:JVM 的算术与并发原语
+---
 
-算数指令走 `emit_arith` 统一路径(addq@8567-8573):
+## 二、算术与原子：从一张 opcode 表到 JVM 的 CAS
+
+### 2.1 `emit_arith`：多个算术操作共享一套编码骨架
+
+加法、减法、按位运算经常具有相似的 x86 编码结构。
+
+HotSpot 不为每个变体复制一大段编码逻辑，而是用统一的 `emit_arith` 处理操作码和操作数形式。
+
+例如 `addq(Register dst, int32_t imm32)`：
 
 ```cpp
-// assembler_x86.cpp:8567-8573(截取核心,逐字)
+// assembler_x86.cpp:8567-8573
 void Assembler::addq(Register dst, int32_t imm32) {
-  (void) prefixq_and_encode(dst->encoding());
+  (void)prefixq_and_encode(dst->encoding());
   emit_arith(0x81, 0xC0, dst, imm32);
 }
 ```
 
-`emit_arith`(257-269)是"加/减立即数"的统一路径——注意它内部的优化:**立即数能放进 8 位时,自动改用 sign-extended imm8 形式**(`op1 | 0x02`,261-264 行),一条 3 字节指令替代 6 字节,否则才发 imm32。乘法 `imulq`(8886-8906)用 0F AF 两操作数形式;除法 `idivq`(8880)是隐含操作数指令(商在 rax、余数在 rdx)。
+这里的 `0x81`、`0xC0` 和 `imm32` 共同组成一个“寄存器加立即数”的编码模板。
 
-**原子操作只有一条指令**——`lock` 前缀(2268-2270):
+### 2.2 为什么立即数有时只占 8 位
+
+`emit_arith` 会根据立即数范围选择不同形式：
+
+```text
+立即数可以用符号扩展 imm8 表示
+    → 使用短格式
+否则
+    → 使用 imm32 格式
+```
+
+短格式的意义很直接：
+
+- 指令更短
+- 代码密度更高
+- 取指和 I-cache 压力可能更小
+
+但它有边界：只有能正确符号扩展到目标宽度的立即数，才能使用 imm8。
+
+因此“算术指令长度”并不是只由操作类型决定，还由立即数值本身决定。
+
+### 2.3 `imul` 与 `idiv`：操作数不总是对称的
+
+`imul` 有多种形式：
+
+- 两操作数寄存器形式
+- 立即数形式
+- 三操作数形式
+
+而 `idiv` 更特殊，它使用隐含寄存器：
+
+```text
+被除数涉及 rdx:rax
+商和余数也有固定寄存器约束
+```
+
+这意味着上层 JIT 不能只说“我要做除法”，还必须安排：
+
+- 被除数放到哪里
+- 除数放到哪里
+- 结果从哪里取出
+- 需要不要提前扩展 `rax` 到 `rdx:rax`
+
+所以指令模板还会把寄存器约束传给寄存器分配器和调用约定。
+
+### 2.4 `lock` 只是一个前缀，但不是普通前缀
+
+HotSpot 的 `lock()` 实现只有一条字节发射：
 
 ```cpp
-// assembler_x86.cpp:2268-2270(逐字)
+// assembler_x86.cpp:2268-2270
 void Assembler::lock() {
   emit_int8((unsigned char)0xF0);
 }
 ```
 
-`lock cmpxchg` = `lock()` + `cmpxchg`——05-cpu 篇讲过的 LOCK 原子操作,在这里就是一行 `emit_int8(0xF0)`。JVM 所有的 CAS、fetch-and-add、safepoint 计数,最终都是这条前缀 + 一条指令。
+但它的语义不能只看这一行。
 
-- [x86: 算数指令的 opcode 家族:0x00-0x05(add 的 6 种组合)、0x81(立即数)、0x03(reg←mem)……JIT 只挑常用子集,`emit_arith` 把它们组织成一张表]
+真正的原子操作通常是：
 
-**关键设计 (斜体)**: *算术的编码由 `emit_arith` 一张表覆盖 4 种操作数组合,每条指令 2-4 字节。而对 JVM 而言更重要的是:**并发原语=一条指令**——`lock cmpxchg` 是唯一硬件原子,05-cpu 篇的整个 `Atomic` 抽象、48-02 篇的 ConcurrentHashTable 的 CAS,底层都是 `lock()` + `cmpxchg` 两个方法调用。指令集在这里不是"汇编课",是 JVM 并发正确性的物理根基。*
-
-## 3. 控制流:jmp 三种编码,前向一律长格式
-
-### 3.1 场景:跳转的距离决定编码
-
-`jmp` 有三种形态(assembler_x86.cpp:2169-2199),**目标距离决定字节数**:
-
-```cpp
-// assembler_x86.cpp:2169-2199(截取核心,逐字)
-void Assembler::jmp(Label& L, bool maybe_short) {
-  if (L.is_bound()) {
-    address entry = target(L);
-    assert(entry != NULL, "jmp most probably wrong");
-    InstructionMark im(this);
-    const int short_size = 2;
-    const int long_size = 5;
-    intptr_t offs = entry - pc();
-    if (maybe_short && is8bit(offs - short_size)) {
-      emit_int8((unsigned char)0xEB);
-      emit_int8((offs - short_size) & 0xFF);
-    } else {
-      emit_int8((unsigned char)0xE9);
-      emit_int32(offs - long_size);
-    }
-  } else {
-    // By default, forward jumps are always 32-bit displacements, since
-    // we can't yet know where the label will be bound.  If you're sure that
-    // the forward jump will not run beyond 256 bytes, use jmpb to
-    // force an 8-bit displacement.
-    InstructionMark im(this);
-    L.add_patch_at(code(), locator());
-    emit_int8((unsigned char)0xE9);
-    emit_int32(0);
-  }
-}
-
-void Assembler::jmp(Register entry) {
-  int encode = prefix_and_encode(entry->encoding());
-  emit_int8((unsigned char)0xFF);
-  emit_int8((unsigned char)(0xE0 | encode));
-}
+```text
+lock + cmpxchg
+lock + xadd
+lock + add/sub
 ```
 
-- **0xEB rel8**(2 字节):±127 短跳
-- **0xE9 rel32**(5 字节):±2GB
-- **0xFF /r**(2 字节,间接):跳转地址在寄存器里(switch table 的 computed goto)
+例如 CAS 的核心结构是：
 
-注释(2188-2192)重申了 01 篇的机制:**前向跳转固定 0xE9 长格式**——生成时不知道目标在哪,先占 5 字节槽,Label 绑定后回填;确定在 256 字节内的才用 `jmpb` 显式短跳。`call`(1530-1552)同构:`0xE8` + rel32 + **relocation 类型参数**——调用方传 `relocInfo::runtime_call_type`(=6,"call to fixed external routine")或 `opt_virtual_call_type`(=3,"statically bound",relocInfo.hpp:261/264)等,重定位系统(01 篇)据此在最终 nmethod 里填运行时地址。
+```text
+比较内存位置与期望值
+    │ 相等
+    ▼
+写入新值，并报告成功
 
-**关键设计 (斜体)**: *跳转的编码由"距离"决定,而距离在生成时常常未知——于是 JIT 的策略是"前向一律 5 字节,反向/短距才省"。"先占槽后回填"让生成器永远不需要回头重写,代价是每个前向跳转平均浪费 3 字节;method 小分支密集时,`jmpb`/`jccb` 显式短跳是手动的省字节手段。这是 01 篇 Label 补丁系统在指令层面的落地。*
+    │ 不相等
+    ▼
+保留实际值，并报告失败
+```
 
-## 4. SSE/AVX 与屏障:浮点与内存序
+`lock` 让这组读—比较—条件写入具备跨线程原子性。
 
-### 4.1 场景:double 运算与内存屏障
+因此 JVM 的 `Atomic`、锁实现中的 CAS、各种无锁数据结构，最后都可能落到这类指令模板。
 
-浮点加法的 SSE 版(assembler_x86.cpp:1274-1283)与整数指令风格一致:
+但不能写成“JVM 所有 CAS 都固定是 `lock cmpxchg`”：
+
+- 单线程或特定对齐场景可能有不同优化
+- 不同宽度对应不同 cmpxchg 变体
+- x86 的原子语义还要结合内存模型和具体指令
+
+更准确的说法是：
+
+**在 OpenJDK x86_64 的通用硬件原子路径中，`lock` 前缀与 cmpxchg/xadd 等指令构成了重要的底层原语。**
+
+### 2.5 失败方案：普通 load/store 不能替代 CAS
+
+假设两个线程同时做：
+
+```text
+读取 old
+计算 new
+写回 new
+```
+
+如果中间没有原子比较，两个线程可能都读到同一个 old，最后一个写入覆盖前一个结果。
+
+软件锁可以解决这个问题，但会引入：
+
+- 锁竞争
+- 阻塞和唤醒
+- 内核调度
+- 更大的临界区
+
+硬件 CAS 把“比较”和“条件写入”压到一个原子指令语义里，JVM 的并发抽象才能在很多短操作上避免完整锁路径。
+
+---
+
+## 三、jmp/call：控制流编码由距离和重定位共同决定
+
+### 3.1 `jmp` 不是一个固定长度
+
+x86 的无条件跳转至少有三类重要形式：
+
+```text
+rel8        短位移跳转
+rel32       长位移跳转
+寄存器/内存间接跳转
+```
+
+HotSpot 的 `jmp(Label&, bool maybe_short)` 位于 `assembler_x86.cpp:2169-2199` 附近。
+
+当目标已经绑定时，它可以计算距离：
+
+```text
+0xEB + rel8    约 2 字节，短跳
+0xE9 + rel32   约 5 字节，长跳
+0xFF /r        间接跳转，目标来自寄存器或内存
+```
+
+短跳更紧凑，但只能在目标距离已经确定且落在 8 位位移范围内时使用。
+
+### 3.2 前向跳转为什么默认使用长格式
+
+如果 Label 尚未绑定，JIT 不知道后面会生成多少代码，也不知道目标会落在哪个 section。
+
+所以前向跳转默认先发长格式：
+
+```text
+登记 patch 位置
+    ↓
+发出 E9
+    ↓
+写入 32 位零位移占位
+    ↓
+bind 时回填
+```
+
+源码注释明确说明：前向跳转默认使用 32 位 displacement，因为生成时不知道 Label 最终在哪里绑定。
+
+只有调用者明确使用 `jmpb`，并且自己能够证明目标足够近时，才强制走短位移。
+
+这和上一篇 Label 的补丁机制直接接上：
+
+- Assembler 决定具体 `jmp` 编码
+- Label 保存未绑定跳转的位置
+- CodeBuffer 保存这些字节和 locator
+- bind 时回填位移
+
+### 3.3 `call`：控制流之外还要告诉 relocation 系统“调用谁”
+
+相对调用通常使用：
+
+```text
+E8 + rel32
+```
+
+但 Java/JVM 运行时调用目标可能在生成阶段尚未固定，或者需要根据调用类型在最终 nmethod 中修正。
+
+因此 HotSpot 的 `call` 不只是发 `0xE8` 和一个位移，还接收 relocation 类型：
+
+- runtime call
+- optimized virtual call
+- static call
+- 其他调用点类型
+
+这让后续代码安装阶段知道：
+
+- 这里是一处调用点
+- 它当前的位移如何解释
+- 最终目标是否需要重定位或修补
+
+所以 `call` 是“机器码控制流 + JVM 运行时链接信息”的结合点。
+
+### 3.4 失败方案：所有跳转都预留最大格式
+
+如果所有已知很近的跳转都使用长格式，功能上通常没问题，但代码会变大。
+
+如果所有跳转都强制短格式，又会因为目标距离变化而溢出。
+
+HotSpot 的折中是：
+
+- 目标已知且足够近：可以选择短格式
+- 目标未知：保守使用长格式
+- 调用者确实知道前向目标很近：显式使用 `jmpb/jccb`
+
+这说明 Assembler 不是单纯编码器，它还承载了一部分“什么时候可以用更短形式”的布局判断。
+
+---
+
+## 四、SSE/AVX 与屏障：CPU 能力改变指令模板
+
+### 4.1 `addsd`：SSE 的破坏性操作数
+
+SSE 浮点指令通常采用破坏性二操作数语义：
+
+```text
+addsd dst, src
+    dst = dst + src
+```
+
+HotSpot 的实现位于 `assembler_x86.cpp:1274-1283` 附近：
 
 ```cpp
-// assembler_x86.cpp:1274-1282(截取核心,逐字)
 void Assembler::addsd(XMMRegister dst, XMMRegister src) {
   NOT_LP64(assert(VM_Version::supports_sse2(), ""));
-  InstructionAttr attributes(AVX_128bit, /* rex_w */ VM_Version::supports_evex(), /* legacy_mode */ false, /* no_mask_reg */ true, /* uses_vl */ false);
-  attributes.set_rex_vex_w_reverted();
-  int encode = simd_prefix_and_encode(dst, dst, src, VEX_SIMD_F2, VEX_OPCODE_0F, &attributes);
+  InstructionAttr attributes(...);
+  int encode = simd_prefix_and_encode(
+      dst, dst, src, VEX_SIMD_F2, VEX_OPCODE_0F, &attributes);
   emit_int8(0x58);
   emit_int8((unsigned char)(0xC0 | encode));
 }
 ```
 
-`addsd`(双精度加)是 **SSE 破坏性**指令:dst = dst + src——注意即使走 VEX 编码,`simd_prefix_and_encode(dst, dst, src, ...)` 的 vvvv 字段填的仍是 dst(保持破坏性语义);前缀是 `VEX_SIMD_F2`(addsd 的 legacy 前缀就是 F2 0F 58)。而 AVX 的 `vaddsd` 用独立 src 填 vvvv:非破坏性 dst = src1 + src2——JIT 在支持 AVX 的机器上自动多一条"免拷贝"收益(编译期选 `UseAVX`,和 45-01 篇 mulsd 的调用链同源)。
+注意这里 `dst` 出现两次：
 
-内存屏障同样是指令(2282-2287):
+- 一次代表目的操作数
+- 一次作为 VEX 编码中源操作数 1
+
+这是为了保持 SSE 的破坏性语义。
+
+### 4.2 VEX/EVEX 编码路径不等于这条 API 已经变成三操作数
+
+AVX 指令集可以表达：
+
+```text
+vaddsd dst, src1, src2
+    dst = src1 + src2
+```
+
+这种形式让源和目的不必重合。
+
+但本文引用的 `Assembler::addsd(XMMRegister dst, XMMRegister src)` 仍然是二参数 API，并且源码调用：
 
 ```cpp
-// assembler_x86.cpp:2282-2287(逐字)
-// Emit mfence instruction
+simd_prefix_and_encode(dst, dst, src, ...)
+```
+
+第一个 `dst` 是目的寄存器，第二个 `dst` 作为 VEX/EVEX 的第一个源操作数，因此它保持 `dst = dst + src` 的破坏性语义。也就是说：**使用 VEX/EVEX 编码路径，不自动等于这条 HotSpot API 已经利用了独立的第三个源操作数。**
+
+真正使用非破坏性三操作数时，Assembler/MacroAssembler 必须提供或调用带有独立 `src1`、`src2` 的接口。
+
+AVX 的独立源操作数仍然有实际收益：如果上层确实使用三操作数形式，就可能省掉为了保留原目的寄存器而额外插入的 `mov`。
+
+但这条路径有前提：CPU 必须支持相应 AVX 能力，JIT 也必须根据 `VM_Version` 和相关开关选择正确编码。
+
+所以阅读 HotSpot 浮点发射代码时，必须同时看：
+
+```text
+前缀编码族：SSE / VEX / EVEX
+操作数 API：二操作数还是三操作数
+语义：目的寄存器是否同时承担源操作数
+```
+
+### 4.3 `mfence`：机器指令不是 JVM 内存模型本身
+
+HotSpot 的 `mfence` 发射很直接：
+
+```cpp
+// assembler_x86.cpp:2282-2287
 void Assembler::mfence() {
   NOT_LP64(assert(VM_Version::supports_sse2(), "unsupported");)
   emit_int8(0x0F);
@@ -172,14 +550,86 @@ void Assembler::mfence() {
 }
 ```
 
-`mfence` = `0F AE F0`(lfence 是 0F AE E8,2262-2266)。05-cpu 篇的 OrderAccess 四屏障,在 x86 上就是这几个字节的排列组合。
+最终字节是：
 
-- [x86: TSO 内存模型下 mfence 是"最重"的屏障(全序);JVM 的 OrderAccess 在 x86 只需要 storeload 真屏障,其余编译器屏障即可(05-cpu 篇已拆);mfence/lfence/sfence 三个字节序列(0F AE F0/E8/F8)是 x86 的全部屏障字表]
+```text
+0F AE F0
+```
 
-**关键设计 (斜体)**: *SSE/AVX 的进化是"破坏性→非破坏性":SSE 的 dst 兼任操作数(AVX 之前要 `mov` 保存现场),AVX 用 VEX 的 vvvv 字段把源操作数独立出来——省一条 mov。JIT 的收益是编译期的指令选择(`UseAVX` 探测),运行期零成本。浮点与内存序在这里汇合:45-01 篇的 `mulsd`、05-cpu 篇的 `lock addl`,都是这几节讲过的指令字节。*
+`lfence`、`sfence` 也有对应编码。
 
-## 核心悬念
+但必须区分三层语义：
 
-"常用字表到齐:mov/add/cmp/jmp/call/lock/SSE/mfence。但 JIT 生成的从来不是'一条指令',而是**模板**——调用 VM 函数要挂载 safepoint 检查、拿对象头要防 GC、switch 要建跳转表。下一篇:MacroAssembler——把指令拼成'运行时'的完整代码模板(call_VM、safepoint 轮询、卡表屏障)。"
+1. x86 指令本身提供什么硬件顺序约束
+2. HotSpot `OrderAccess` 在 x86 上选择什么实现
+3. Java Memory Model 对 volatile、锁和原子操作要求什么语义
+
+不能看到 `mfence` 就说“JVM 的所有内存屏障都是 mfence”。x86 TSO 允许很多 JVM 屏障在特定场景下只需要编译器屏障或更轻的硬件动作；具体选择由 `OrderAccess` 和调用语义决定。
+
+同样，也不能把 x86 的 TSO 结论外推到 ARM、RISC-V 等架构。
+
+### 4.4 失败方案：不看 CPU 能力，直接发 AVX/EVEX
+
+如果 JVM 不先探测 CPU 能力，直接生成 AVX 或 EVEX 指令，旧 CPU 可能触发非法指令。
+
+如果为了兼容所有机器只使用最保守 SSE，又会放弃支持新 CPU 的非破坏性操作数、更宽向量和 mask 能力。
+
+所以平台探测和 Assembler 之间形成了闭环：
+
+```text
+VM_Version 探测能力
+    ↓
+Assembler/MacroAssembler 选择编码族
+    ↓
+CPU 执行对应指令
+```
+
+---
+
+## 五、收网：Assembler 是模板选择器，不是逐句翻译器
+
+现在把本篇的四条指令家族主线收回来：
+
+```text
+Java/JIT 语义
+    │
+    ├─ 搬数据/扩展宽度 → mov / movzx / movsx / lea
+    ├─ 算术/原子       → add / sub / imul / idiv / lock+cmpxchg
+    ├─ 控制流/调用     → jmp / jcc / call + Label/relocation
+    └─ 浮点/内存序     → SSE / AVX / mfence
+          │
+          ▼
+根据宽度、操作数、距离、CPU 能力和内存语义选模板
+          │
+          ▼
+Assembler 发射 opcode / 前缀 / ModR/M / 位移 / 立即数
+          │
+          ▼
+CodeBuffer、Label、relocation 托底
+          │
+          ▼
+nmethod 中的最终机器码
+```
+
+这篇真正讲清的不是 `mov`、`add`、`jmp` 各有多少种 opcode，而是：
+
+- 数据搬运指令族处理宽度、扩展和地址计算
+- 算术模板根据立即数宽度压缩编码
+- 原子模板把 `lock` 与比较交换组合成 JVM 并发原语
+- 控制流模板根据目标距离和 relocation 需求选择形式
+- SSE/AVX 模板根据 CPU 能力和操作数破坏性选择编码
+- 屏障指令必须放回 JVM 内存模型和具体架构边界里解释
+
+如果压缩成三句话：
+
+1. x86 指令不是 Java 语义的一对一翻译，而是一组可按条件选择的编码模板。
+2. `Assembler` 负责具体指令字节，`MacroAssembler` 才负责把这些字节组织成 JVM 运行时动作。
+3. 指令编码、CPU 能力、CodeBuffer、Label、relocation 和 JVM 内存语义共同决定最终机器码。
+
+下一篇进入 `MacroAssembler`：
+
+- `call_VM` 如何保存 Java 状态并调用 VM runtime
+- safepoint polling 如何嵌入运行时模板
+- 对象头、卡表、异常和慢路径如何组合成完整机器码
 
 > → [04-x86-macroassembler-runtime.md](04-x86-macroassembler-runtime.md)

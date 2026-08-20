@@ -1,131 +1,193 @@
-# 03. MBean 类型与 MXBean — 标准约定、动态描述、开放类型映射
+# MBean 类型与 MXBean：为什么三类 MBean 的根本差异，不是写法偏好，而是管理描述从哪里来
 
-> **前置依赖**: [34-jmx/01 — JMX 架构全景](01-jmx-architecture.md)(注册与合规校验)、[04-reflection-annotation/01 — Class 与成员访问](../04-reflection-annotation/01-class-member-access.md)(反射基础)
-> → **后续**: [34-jmx/04 — 通知机制](04-notification.md)
-> 关联: 域 04 反射(Method/注解读取);域 08 集合(映射容器)
+> 本文基于 JDK 11 `StandardMBean`、`DynamicMBean`、`MXBean`、`Introspector`、`DefaultMXBeanMappingFactory`。本文聚焦三类 MBean 的描述来源、合规识别与开放类型映射；通知机制放到下一篇。本文讨论的是 JDK 11 JMX 三类 MBean 的契约生成与开放类型映射，不把这里的内省规则、MBeanInfo 缓存和 MXBean 映射工厂外推成所有管理框架都必须遵守的统一规范。
+> **前置依赖**：[JMX 架构全景](01-jmx-architecture.md)、[Class 与成员访问](../04-reflection-annotation/01-class-member-access.md)
+> **后续**：[通知机制](04-notification.md)
 
-## MBean 的描述从哪来
+## 先看真正的问题不在“注册哪个类”，而在“JMX 怎么知道这个类该怎样被管理”
 
-注册一个 MBean 时,JMX 怎么知道它有哪些属性、哪些操作?答案是: 三种形态,三种描述来源——标准 MBean 靠**接口命名约定 + 反射**,动态 MBean 靠**代码自报**,MXBean 在标准基础上加**开放类型映射**让复杂对象能跨网络传输。这一篇是自定义监控的关键。
+前两篇已经把名字和注册空间立住了：对象要先有 `ObjectName`，再被注册进 `MBeanServer`，才会获得管理身份。但到这里还有一个更基础的问题没有回答：**JMX 到底怎么知道这个对象有哪些属性、哪些操作、哪些通知，以及这些东西该如何被远程管理端理解？**
 
-## 1. "标准 MBean 的约定" — 接口命名 + 反射内省
+这一步不能靠猜。JMX 如果只是看到一个普通 Java 对象就直接暴力反射全部方法，那它既无法稳定地区分属性和操作，也无法保证远程客户端真的懂这些返回值和参数的含义。管理协议必须先拿到一份正式的“管理描述”。
 
-### 1.1 命名约定
+这也就是三类 MBean 分化出来的真正原因。它们的根本差异，不在于语法长得不一样，而在于：**这份管理描述究竟从哪里来，以及里面的数据能不能稳定跨进程传输。**
 
-约定:`XxxMBean` 接口 + `Xxx` 实现类:
+所以这一篇的主线不是“三种风格怎么选”，而是“JMX 的管理契约由谁生成、如何生成，以及远程边界上如何被解释”。
 
-```java
-// 用法示意(API 形式,非源码片段)
-public interface CounterMBean {
-    long getCount();     // getter → 属性 count(只读)
-    void reset();        // 其他方法 → 操作
-}
-public class Counter implements CounterMBean { ... }
-```
+## 一、为什么标准 MBean 代表的是“约定接口 + 反射内省”：描述来自命名规则，而不是手写元数据
 
-- **getter/setter → 属性**(getXxx/setXxx 前缀方法)
-- **其他方法 → 操作**(方法调用)
+### 先看它到底依赖什么约定
 
-约定在源码里的实现: `Introspector.implementsMBean` 用 `clName + "MBean"` 拼接后与接口名匹配(`Introspector.java:526-527`)——所以实现类叫 `Counter`,接口必须叫 `CounterMBean`。
+标准 MBean 最核心的约定，是：
 
-### 1.2 StandardMBean: 适配层
+- 接口叫 `XxxMBean`
+- 实现类叫 `Xxx`
 
-`StandardMBean`(`javax/management/StandardMBean.java`,1234 行)是实现 `DynamicMBean` 的**适配层**(`:126`,`implements DynamicMBean, MBeanRegistration`)——把约定接口翻译成管理描述。`getMBeanInfo()`(`:430` 起)先查缓存,没有则构建并 `cacheMBeanInfo`(`:464`)——**内省只做一次,之后走缓存**(`cacheMBeanInfo` 定义在 `:811`)。
+然后再用 getter/setter 与普通方法来区分属性和操作：
 
-面试"属性 vs 操作": get/set 前缀方法 = 属性(可读/可写由 setter 有无决定);其他方法 = 操作。
+- `getXxx` / `setXxx` 这类方法会被识别为属性；
+- 其他方法会被识别为操作。
 
-关键设计(斜体):*"约定优于配置"——getXxx 变属性 xxx、setXxx 变可写属性、其余方法变操作;MBeanInfo 构建一次后缓存。面试"标准 MBean 属性怎么定": getter/setter 命名约定;面试"为什么标准 MBean 简单": 描述是反射自动生成的。*
+这套约定之所以成立，不是因为 UI 层做了某种显示规则，而是因为 JMX 在注册和内省时会主动按这个约定去识别接口形态。
 
-## 2. "Introspector" — 反射内省器
+### 先看谁在做识别
 
-### 2.1 合规校验
+JDK 11 里，`Introspector` 是关键入口：
 
-`Introspector`(`com/sun/jmx/mbeanserver/Introspector.java`,698 行)是 MBean 的"反射编译器":
+- `checkCompliance(...)` 在 `Introspector.java:148`
+- `testComplianceMXBeanInterface(...)` 在 `240`
+- `testComplianceMBeanInterface(...)` 在 `253`
+- `implementsMBean(...)` 在 `525`
 
-- `checkCompliance(baseClass)`(`:148`,注册时调用,第 1 篇 §4.1)
-- `testComplianceMXBeanInterface`(`:240`)/`testComplianceMBeanInterface`(`:253`)——接口形态校验,非法抛 `NotCompliantMBeanException`
-- `testCompliance(Class)`(`:218`)返回构建好的 MBeanInfo
+旧稿已经抓到一个很重要的点：`implementsMBean(...)` 会把实现类名和约定接口名拼起来比对。这说明标准 MBean 并不是“实现了个接口就行”，而是 JVM 确实按命名规则在识别管理接口。
 
-### 2.2 MBeanInfo 结构
+### 为什么这套方式叫“约定优于配置”
 
-`MBeanInfo`(`javax/management/MBeanInfo.java`,类 `:107`)四个数组字段(`:131-146`):
+因为你不需要手写一份完整的管理元数据。只要接口命名和方法签名遵守规则，JMX 就能靠反射把描述推导出来。也就是说，**标准 MBean 的管理描述不是显式写出来的，而是从接口结构里被内省出来的。**
 
-| 字段 | 源码 | 内容 |
-|------|------|------|
-| `attributes` | `:131` | 属性(类型/可读/可写) |
-| `operations` | `:136` | 操作(参数/返回) |
-| `constructors` | `:141` | 构造器 |
-| `notifications` | `:146` | 可发出通知的类型 |
+这让它非常适合固定结构、接口清晰、无需复杂远程类型映射的场景。开发者写的是普通 Java 接口，JMX 补的是管理契约生成逻辑。
 
-反射来源(域 04): 接口的 Method 元数据 → `MBeanAttributeInfo`/`MBeanOperationInfo`。
+## 二、为什么 `StandardMBean` 不是另一个可选风格，而是把“约定接口”翻译成 `MBeanInfo` 的适配层
 
-面试"MBeanInfo 是什么": MBean 的完整管理契约(四元素);面试"Introspector 干什么": 接口签名 → 管理描述(反射编译器)。
+### 先看它站在哪个位置
 
-关键设计(斜体):*Introspector = "MBean 的反射编译器"——接口签名转成管理描述,合规校验在注册时把关。面试"MBeanInfo 是什么": MBean 的完整管理契约(属性/操作/构造器/通知四元素);面试"标准 MBean 怎么被识别": XxxMBean/XxxMXBean 接口约定。*
+JDK 11 里，`StandardMBean` 定义在 `StandardMBean.java:126`，它直接实现了 `DynamicMBean` 和 `MBeanRegistration`。这已经说明它并不是“和动态 MBean 并列无关的辅助类”，而是一个非常关键的桥接层：它把标准接口模型翻译成 JMX 统一接受的动态管理接口形态。
 
-## 3. "MXBean 的开放类型" — CompositeData
+### 为什么 `getMBeanInfo()` 是关键落点
 
-### 3.1 识别与注解
+旧稿已经抓住几处核心位置：
 
-MXBean 两种声明方式: 接口名后缀 `XxxMXBean`,或显式 `@MXBean` 注解(`javax/management/MXBean.java`):
+- `getMBeanInfo()`：`StandardMBean.java:430`
+- 内省得到支持对象信息：`448`
+- `cacheMBeanInfo(...)`：`464`
+- 缓存方法定义：`811`
 
-```java
-// MXBean.java:1187-1192(逐字)
-public @interface MXBean {
-    boolean value() default true;
-}
-```
+这说明 `StandardMBean` 做的事情非常具体：它不是每次都重新反射扫描一遍接口，而是把生成好的 `MBeanInfo` 缓存下来。也就是说，标准 MBean 的“约定接口 → 管理描述”转换，实质上像一次受控的编译过程：
 
-(注解的 Javadoc 示例里 `@MXBean(true)` 出现在 `:67`,定义在 `:1187`。)
+- 接口签名是源信息；
+- `Introspector` 负责识别和合规检查；
+- `StandardMBean` 负责把结果收束成 `MBeanInfo` 并缓存。
 
-### 3.2 开放类型映射
+### 为什么这一步很重要
 
-MXBean 的复杂返回类型会被映射成**开放类型**(open type)——任何客户端无需业务类就能解释的数据结构。映射规则集中在 `DefaultMXBeanMappingFactory`(`com/sun/jmx/mbeanserver/DefaultMXBeanMappingFactory.java`):
+因为真正被 JMX 统一消费的，不是“某个 Java 接口看起来挺像 MBean”，而是 `MBeanInfo` 这样的正式管理契约。标准 MBean 之所以看上去简单，不是因为它没有描述层，而是因为这层描述被框架从接口里自动生成了。
 
-| 映射类 | 源码 | 规则 |
-|--------|------|------|
-| `IdentityMapping` | `:497` | 基本类型/字符串等原样 |
-| `EnumMapping` | `:518` | 枚举 → 字符串 |
-| `ArrayMapping` | `:545` | 数组 → 开放类型数组 |
-| `CollectionMapping` | `:601` | 集合 → 数组 |
-| `MXBeanRefMapping` | `:685` | 引用其他 MXBean |
-| `CompositeMapping` | `:807` | **自定义对象 → CompositeData** |
+## 三、为什么 `MBeanInfo` 才是真正的管理契约：没有这份描述，远程管理端根本不知道自己在操作什么
 
-核心在 `CompositeData`: 开放类型的**键值容器**——"描述 + 数据"分离的结构化数据(类似 map,但带类型描述)。
+### 先把问题说透
 
-意义: MXBean 返回 `MemoryUsage` 这样的自定义对象时,映射成 CompositeData 后**任何客户端**(JConsole/监控系统/其他语言的 JMX 客户端)都能解释;标准/动态 MBean 的自定义类型无法远程传输。
+无论是标准 MBean、动态 MBean 还是 MXBean，最终都必须落到一件事上：JMX 需要一份正式描述，告诉管理端：
 
-面试"MXBean 解决了什么": 自定义类型跨网络传输(开放类型映射);面试"CompositeData 是什么": 开放类型的键值容器(描述+数据分离)。
+- 这个对象有哪些属性；
+- 哪些属性可读、可写；
+- 有哪些操作，参数和返回值是什么；
+- 会发出哪些通知。
 
-关键设计(斜体):*"MXBean = 类型安全的远程 MBean"——复杂对象映射为开放类型(CompositeData),任何客户端都能解释。面试"MXBean 解决了什么": 自定义类型跨网络传输;面试"映射规则在哪": DefaultMXBeanMappingFactory 的映射族(CompositeMapping/EnumMapping 等)。*
+没有这份契约，管理端就只能靠临时反射猜测对象结构，这不适合作为稳定的跨进程管理协议。
 
-## 4. "动态 MBean 与 ModelMBean" — 完全自控
+### 为什么这也解释了动态 MBean 的存在意义
 
-### 4.1 DynamicMBean: 自描述自实现
+动态 MBean 之所以存在，恰恰是因为 JMX 并不强迫所有对象都走“约定接口自动推导”这条路。只要你愿意自己给出管理契约，JMX 也接受。也就是说，JMX 的真正要求从来不是“你一定要按某种命名写类”，而是“你必须交出一份正式的管理描述”。
 
-`DynamicMBean`(`javax/management/DynamicMBean.java`,接口 `:36`)没有命名约定,四个方法全部自己实现:
+## 四、为什么动态 MBean 把描述权完全交还给对象自己：它解决的是“结构不能靠固定接口预先写死”的场景
 
-| 方法 | 源码 | 作用 |
-|------|------|------|
-| `getAttribute` | `:52` | 读属性(自己分派) |
-| `setAttribute` | `:68` | 写属性 |
-| `invoke` | `:110` | 调操作 |
-| `getMBeanInfo` | `:120` | **自报管理描述** |
+### 先看接口要求什么
 
-适用: 属性集运行时变化(如统计 MBean 动态增删指标)——描述权完全交给实现。
+JDK 11 里，`DynamicMBean` 定义在 `DynamicMBean.java:36`。核心方法包括：
 
-### 4.2 ModelMBean(简述)
+- `getAttribute(...)`：`52`
+- `setAttribute(...)`：`68`
+- `invoke(...)`：`110`
+- `getMBeanInfo()`：`120`
 
-`modelmbean` 包: 完全由描述符(Descriptor)驱动——属性/操作/通知全在描述符里声明。一般不用,面试低频。
+这已经把动态 MBean 的本质说得很清楚：它不是让框架来推断你的描述，而是让对象自己完整负责属性读取、属性写入、操作调用以及最关键的描述输出。
 
-面试"MBean 三种类型怎么选": 固定结构用标准,动态结构用动态,远程传输用 MXBean;生产里 90% 场景 MXBean 足够。
+### 为什么这种自由度有价值
 
-关键设计(斜体):*"标准 = 反射约定,动态 = 代码自报"——动态 MBean 把描述权交给实现(四个方法全自实现)。面试"MBean 三种类型怎么选": 固定结构用标准,动态结构用动态,远程传输用 MXBean;生产: 90% 场景 MXBean 足够。*
+如果一个对象的属性集、操作集、甚至通知结构会随着运行时状态变化，那“写死一个 `XxxMBean` 接口”就会非常别扭。动态 MBean 提供的，正是这种自由：你可以在运行时决定自己长什么样，并通过 `getMBeanInfo()` 把这个结构正式告诉管理端。
 
-跨层标注: [域 04 反射——Introspector 的 Method/注解读取与反射元数据同源;域 08 集合——CompositeData 的键值容器结构;开放类型是远程连接器跨进程传输的基础]
+### 为什么这种自由也意味着更重的责任
 
-## 核心悬念
+因为一旦描述权完全交给实现者，JMX 不再替你从接口里自动推导一致性。你必须自己保证：
 
-MBean 暴露了属性和操作——**变化怎么通知**?`Notification` 的 type/sequenceNumber 结构、`NotificationBroadcasterSupport` 的并发分发、listener 的过滤与线程模型——下一篇: 通知机制。
+- `getMBeanInfo()` 描述出来的属性和操作，真的能被 `getAttribute` / `invoke` 正确处理；
+- 运行时结构变化时，描述和实际行为不会脱节。
 
-> → [34-jmx/04 — 通知机制](04-notification.md)
+所以动态 MBean 不是“更底层所以更高级”，而是“把描述权和一致性责任一起交还给你”。
+
+## 五、为什么 MXBean 不是“标准 MBean 多一个注解”，而是专门解决复杂类型跨进程表示问题
+
+### 先看识别入口
+
+JDK 11 里：
+
+- `@MXBean` 注解定义在 `MXBean.java:1187`
+- `Introspector.testComplianceMXBeanInterface(...)` 在 `Introspector.java:240`
+
+这说明 MXBean 仍然属于“接口被识别并校验”的那一支，而不是完全脱离标准 MBean 另起炉灶。它依然有接口约定，只不过多解决了一层额外问题：远程数据表示。
+
+### 为什么标准接口模型到了远程边界会突然不够用
+
+本地 JVM 里，Java 自定义类型当然很好用。可一旦走到 JMX 远程边界，问题就变了：管理客户端未必拥有你的业务类定义，也未必愿意和你的类路径强耦合。也就是说，如果一个 MBean 直接返回复杂业务对象，远程客户端很可能根本不知道怎么解释它。
+
+MXBean 要解决的正是这个问题：**让接口层仍然保持 Java 类型友好，但真正跨进程传输时，把复杂对象映射成所有客户端都能理解的开放类型。**
+
+### 映射工厂为什么是核心证据
+
+JDK 11 里，映射规则集中在 `DefaultMXBeanMappingFactory`：
+
+- 类定义：`DefaultMXBeanMappingFactory.java:122`
+- `IdentityMapping`：`497`
+- `EnumMapping`：`518`
+- `ArrayMapping`：`545`
+- `CollectionMapping`：`601`
+- `MXBeanRefMapping`：`685`
+- `CompositeMapping`：`807`
+
+这张映射族表非常能说明问题：MXBean 不是简单地“看到什么类型就原样远程传什么”，而是针对不同类型专门定义了开放类型表示。简单类型可以保留；枚举、数组、集合、引用、复合对象则各自有稳定映射方案。
+
+所以 MXBean 的真正价值，不是注解，而是**这套映射协议**。
+
+## 六、为什么 `CompositeData` 是 MXBean 的关键证据：它让远程客户端不依赖业务类也能理解复杂对象
+
+### 先把问题说到底
+
+如果一个平台 MBean 返回 `MemoryUsage` 这种结构化对象，JConsole 为什么能看懂？为什么监控系统、远程客户端、甚至非 Java 管理端也能消费这类数据？关键不在它们恰好有同名类，而在于这些数据已经被压成了一种开放结构。
+
+### 为什么复合对象最终会落到开放容器里
+
+`DefaultMXBeanMappingFactory` 里的 `CompositeMapping` 就是在做这件事：把自定义复合对象映射成一种带有字段描述和字段值的开放结构，也就是旧稿已经点出的 `CompositeData` 语义。
+
+这意味着远程客户端看到的，不再是“一个必须反序列化成某个业务类的对象”，而是“一个带描述信息的结构化数据容器”。客户端只要理解开放类型协议，就能理解这份数据，而不需要和业务类字节码强绑定。
+
+这也就是为什么 MXBean 特别适合平台监控接口和自定义监控指标：它既保留了 Java 端接口设计的清晰，又确保远程边界上的数据表示足够稳定和通用。
+
+## 七、五个最容易混掉的边界：标准 MBean 不是普通接口自动升级，StandardMBean 不是可选语法糖，动态 MBean 不是“更底层就更好”，MXBean 不是多一个注解，CompositeData 也不是 Map 换壳
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，标准 MBean 不是“普通接口顺手就能被 JMX 远程调”。它真正成立的前提，是接口命名、实现类命名以及属性/操作约定都满足 JMX 的识别规则。少了这套约定，JMX 根本不知道该怎样稳定生成管理契约。
+
+第二，`StandardMBean` 也不是一个可有可无的语法糖包装。它真正承担的是把“约定接口 + 反射内省”这条路收束成可缓存、可复用的 `MBeanInfo` 契约，让管理描述不必在每次调用时重新猜或重新扫。
+
+第三，动态 MBean 更不是“更底层，所以任何场景都更高级”。它换来的自由，等价于把描述权和一致性责任一起交还给实现者：你不但要自己接属性和操作调用，还得自己保证 `getMBeanInfo()` 和真实行为始终对得上。
+
+第四，MXBean 也不是标准 MBean 仅仅多一个注解那么简单。它真正额外补上的，是复杂 Java 类型跨进程时的开放类型映射协议；没有这层映射，远程客户端就会被业务类路径强绑定住。
+
+第五，`CompositeData` 也不是“Map 风格换壳”而已。它的关键价值在于：把复杂对象压成带字段描述的开放结构，让远程客户端不用拥有业务类字节码，也能稳定理解和消费这份数据。
+
+把这五条边界记稳，三类 MBean 这一篇就不会重新塌回“几种写法偏好对比”这种表面印象。它真正想讲的是：管理契约究竟由谁生产，以及这份契约在远程边界上是否还能被稳定理解。
+
+## 收网：三类 MBean 的根本差异，不在写法风格，而在管理描述由谁生成，以及这些描述里的数据能否被远程稳定理解
+
+现在可以把整篇压成一条主线：
+
+- 标准 MBean：管理描述来自命名约定和反射内省；
+- `StandardMBean`：把这份约定描述翻译成统一的 `MBeanInfo` 契约并缓存；
+- 动态 MBean：管理描述和分派行为都由对象自己显式提供；
+- MXBean：仍然从接口出发，但额外用开放类型映射解决复杂数据的远程表示问题；
+- `CompositeData`：证明复杂对象可以被远程客户端理解，而不依赖业务类定义。
+
+所以理解三类 MBean 的正确角度，不是“哪种写法更潮”，而是：**JMX 管理契约究竟由谁提供，以及契约里的数据到了远程边界后，是否还能被稳定消费。** 一旦把这个问题看清，标准 MBean、动态 MBean、MXBean 的分工就会非常自然：固定结构靠约定，动态结构靠自报，远程复杂类型靠开放映射。
+
+下一篇自然就会接住契约之外的另一条通道：对象已经能暴露属性和操作了，那运行中状态变化又怎么主动推给管理端？`Notification` 的序号、类型、监听器过滤和分发模型，就是 `04-notification.md` 要接着回答的问题。

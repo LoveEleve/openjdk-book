@@ -1,253 +1,184 @@
-# 01. C2 Ideal Graph: Node + Type + IGVN — C2 的节点海
+# 01. 为什么 C2 要换世界观？— `Ideal Graph = Node + Type + IGVN`
 
-> **前置依赖**:[14-c1-compiler/04 — Runtime1 + FrameMap: C1 runtime 与栈帧](openjdk/vol-02/14-c1-compiler/04-c1-runtime-frame.md):C1 的完整画像,本篇讲 C2 的对立面——它的 IR 是图不是块;[13-jit-framework/01 — 谁决定编译、怎么排队、谁执行?— CompileBroker 编译队列](openjdk/vol-02/13-jit-framework/01-compile-broker-queue.md):C2 编译任务怎么进来;[12-ci/01 — JIT 怎么看到 Java 类?— ciObject 镜像体系](openjdk/vol-02/12-ci/01-ci-overview-mirror.md):C2 读的 ci 镜像在这里
-> → **后续**:[15-c2-compiler/02 — Parse + GraphKit: 字节码→Ideal Graph](openjdk/vol-02/15-c2-compiler/02-c2-parse-graphkit.md)
-> 关联域: 12-ci(编译期镜像)、13-jit-framework(编译入口)、16-code-cache(nmethod 产物)
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64`。这里讨论的是 C2 最核心的三件基础设施：`Node`、`Type` 和 `IGVN`。它们共同决定了 C2 为什么不用 C1 那套“块 + 指令”的世界，而是先把程序表示换成一张统一图。Parse/GraphKit 如何逐字节码建这张图，放到下一篇展开。
+>
+> **前置依赖**：[14-c1-compiler/04 — C1 机器码怎么安全“逃生”？— `Runtime1 + FrameMap + OopMap`](../14-c1-compiler/04-c1-runtime-frame.md)、[13-jit-framework/01 — `CompileBroker` 编译队列](../13-jit-framework/01-compile-broker-queue.md)、[12-ci/01 — `ciObject` 镜像体系](../12-ci/01-ci-overview-mirror.md)
+> → **后续**：[15-c2-compiler/02 — `Parse + GraphKit`：字节码→Ideal Graph](02-c2-parse-graphkit.md)
 
-## C1 的"够用"之上,是一张图
+前面整整一个 C1 域，我们都在强调同一件事：C1 追求的是低延迟，所以它选择块式 HIR、轻量优化、LinearScan 和 Runtime1 这种“够用就好”的编译组织方式。
 
-C1 的 HIR 是**块 + 指令**的线性 IR:每个基本块一串指令,Phi 在块头汇合。这种结构好编译、快出码,但"全局"优化很难做——一个值跨块流动,要么建 Phi 要么做数据流分析。C2 换了一条路:它把整个方法建成**一张图**——每个操作是一个节点,节点之间用边连接,控制流、数据流、内存流都是同一种边。这张"节点海"(sea of nodes)让优化算法直接在图上跑:一个节点被化简,顺着边就能找到所有受影响的消费者。
+到了 C2，这套世界观突然就不够了。
 
-这篇拆 C2 IR 的三个支柱: **Node**(图节点与三类边)、**Type**(节点上的类型格)、**IGVN**(在图上迭代到不动点的优化引擎)。顺带纠正大纲三处: `Ideal()` 返回 `NULL` 表示"无变化"而非 `this`;`TypePtr::NotNull` 的真实名字是 `NOTNULL`,且 `Null meet NotNull = BotPTR`(矛盾,不是"放弃 nullness");`igvn.cpp` 在 JDK11 不存在,`hash_find_insert` 在 `phaseX.cpp`。
+C1 当然也有图，也有 Phi，也能跨块传播值，但它的基本组织单元依然是“基本块里的一串指令”。这很适合快编译，却天然不擅长把控制流、数据流、内存依赖和类型传播揉成一个统一的优化问题。
 
-## 1. Node — 图节点与三类边
+于是 C2 干脆先做了一件更激进的事：**不是在 C1 的块式 IR 上再多加几趟 pass，而是先把程序表示整个换掉。**
 
-`int sum = a + b` 编译时,Parse 构建三个节点: `ParmNode`(方法参数 a)、`ParmNode`(参数 b)、`AddINode`(a+b)。AddI 的输入边指向两个 Parm。关键在于 **`in()`/`out()` 是双向 def-use 边**,不是 C1 的"谁持有谁的指针":
+它换成了什么？一张图：
 
-```cpp
-// node.hpp:282-301(截取核心,逐字)
-  Node **_in;                   // Array of use-def references to Nodes
-  Node **_out;                  // Array of def-use references to Nodes
+- 每个操作是一个 `Node`；
+- 控制流、数据流、内存流都变成边；
+- 每个节点再顶着一个 `Type`，表示“这个节点在运行期可能取哪些值”；
+- 然后由 `IGVN` 沿着图的 def-use 关系和类型信息，反复做图改写、类型收窄、常量化和全局值编号，直到整张图稳定。
 
-  // Input edges are split into two categories.  Required edges are required
-  // for semantic correctness; order is important and NULLs are allowed.
-  // Precedence edges are used to help determine execution order and are
-  // added, e.g., for scheduling purposes.  They are unordered and not
-  // duplicated; they have no embedded NULLs.  Edges from 0 to _cnt-1
-  // are required, from _cnt to _max-1 are precedence edges.
-  node_idx_t _cnt;              // Total number of required Node inputs.
+所以，本篇真正要回答的问题不是“`Node` 有哪些字段”，也不是“`Type` 有什么子类”，而是：
 
-  node_idx_t _max;              // Actual length of input array.
+**为什么 C2 需要先换成一张统一图，再让 `Node + Type + IGVN` 互相推动，才能把优化真正推到全局？**
 
-  // Output edges are an unordered list of def-use edges which exactly
-  // correspond to required input edges which point from other nodes
-  // to this one.  Thus the count of the output edges is the number of
-  // users of this node.
-  node_idx_t _outcnt;           // Total number of Node outputs.
-```
+先把答案压成一句人话：**C2 的关键变化不是“优化更多”，而是“先换世界观”——控制、数据和内存都画成图边；节点的可能取值都刻进类型格；然后用 worklist 驱动的 IGVN，让每一次局部改写都沿图自动传播，直到整张图不再有新变化。**
 
-`_in[]` 是"我依赖谁",`_out[]` 是"谁依赖我"——后者正是 IGVN 能"改一个节点、顺着边级联"的物理基础。节点本身从 `Compile::node_arena()`(Arena,09-03 域)批量分配,`operator delete` 是**空操作**——死节点不真正销毁,由 Arena 一次性回收(node.hpp:231-240 "Delete is a NOP")。
+## 先试两个最自然的理解，看看为什么都不对
 
-**三类边如何区分**: 输入边按**索引位置**约定,而不是打标签。对控制敏感的节点(Region/If/Proj/Call/Load/Store 等)用 `in(0)` 放**控制边**(最近的 IfTrue/IfFalse/Region 投影);纯算术节点反过来——`AddNode` 构造时第一个输入传 `NULL`(`Node(0,in1,in2)`,addnode.hpp:44),**in(0) 槽存在但恒为 NULL**,表示"没有控制输入,可以随意浮动"(loopopts.cpp:1379 "has no control edge (can float about)"),最终位置由全局调度(GCM)决定;读写内存的节点另有**内存边**——`MemNode` 的枚举明确写着每个槽的含义:
+### 误解一：C2 只是“更猛的 C1”
 
-```cpp
-// memnode.hpp:52-58(截取核心,逐字)
-  enum { Control,               // When is it safe to do this load?
-         Memory,                // Chunk of memory is being loaded from
-         Address,               // Actually address, derived from base
-         ValueIn,               // Value to store
-         OopStore               // Preceeding oop store, only in StoreCM
-  };
-```
+这是最常见的第一反应。既然 C1 已经能把字节码变成 HIR、做一些优化，再发机器码，那 C2 会不会只是“把同样的事情做得更深、更久、更聪明”？
 
-于是同一个 `LoadI` 节点同时牵着三条链: 控制链(什么时候可以安全读,`in(0)`)、内存链(读哪块内存——`in(MemNode::Memory)`,挂在最近的 Store 或 `MergeMemNode` 上)、地址链(`in(MemNode::Address)`)。"sea of nodes" 的说法在源码注释里原样出现(loopnode.hpp:992 "Dominators for the sea of nodes";domgraph.cpp:386 "Compute the dominator tree of the sea of nodes")。
+这只说对了一半。C2 确实更愿意花时间做深度优化，但它真正的根变化不是“优化力度”，而是**程序表示本身**。
 
-Parse 每遇到一条字节码就建节点并**立即交给 GVN 化简**(parse2.cpp:2250-2253)——"建图"和"优化"在 C2 里不是两个阶段:
+在 C1 世界里，虽然值之间也能引用，块头也有 Phi，但控制流仍然主要通过基本块边界组织，指令天然被塞在块里。跨块优化要么靠 Phi，要么靠额外数据流分析 pass，把信息在块之间搬来搬去。
 
-```cpp
-// parse2.cpp:2250-2253(截取核心,逐字)
-  case Bytecodes::_iadd:
-    b = pop(); a = pop();
-    push( _gvn.transform( new AddINode(a,b) ) );
-    break;
-```
+C2 则更进一步：它不再把“控制流、数据流、内存流”拆开给不同结构管理，而是直接塞进同一张图。这样一来，一个节点只要被改写，所有使用它的地方天然就能沿 def-use 边被找到；一个类型一旦变窄，也会直接影响依赖它的消费者节点。
 
-`a`、`b` 是 parse1.cpp:831 从 `StartNode` 投影出来的 `ParmNode`(callnode.hpp:101-106),`_gvn` 是编译期全程持有的单遍 GVN(PhaseGVN)。**每个节点的身份**由三样东西决定: `Opcode()`(node.hpp:786,返回 `Op_AddI`/`Op_LoadI`/`Op_If` 等枚举,枚举由 classes.hpp 的宏表生成,opcodes.hpp:28-49)、`class_id` 与 `_flags` 位标志(如 `Flag_is_Con`/`Flag_is_macro`,node.hpp:736-760)、以及类型。`is_Add()/as_Add()` 这类查询由 `DEFINE_CLASS_QUERY` 宏展开成位掩码测试(node.hpp:792-800)。
+所以 C2 不是“在 C1 世界里做更多”，而是**先把世界搭成一个更适合全局传播的形状。**
 
-**三个优化钩子**是所有节点共同的接口(node.hpp:977-986):
+### 误解二：IGVN 不就是“多跑几遍 Canonicalizer”吗
 
-- `Identity(PhaseGVN*)` — 返回"与我等价的既有节点"(`x+0 → x` 的加法单位元);默认返回 `this`(node.cpp:1081-1083)。
-- `Value(PhaseGVN*)` — 用输入的类型算出本节点的类型,默认返回最坏情况 `bottom_type()`(node.cpp:1087-1089)。
-- `Ideal(PhaseGVN*, bool can_reshape)` — 图改写: 返回改写后子图的根节点;默认返回 `NULL` = "已经很理想了"(node.cpp:1144-1146)。
+第二个误解也很常见。看到 C2 里有 `Ideal`、`Identity`、常量折叠、全局值编号，很多人会下意识把它想成“比 C1 多几趟、更强一点的规范化”。
 
-`Ideal` 的返回值约定是 C2 最容易被误解的地方——大纲写"返回优化后的 Node 或 this(NOP=无优化)"。源码的规矩更细(node.cpp:1091-1146 的大段注释,即 node.hpp:984 说的 "read the treatise"):
+问题在于，C1 大量优化仍然是“固定位置发生一次”或“固定趟次跑一遍”。而 IGVN 不是固定次数的 pass，它是一套**会被图变化重新激活的传播机制**。
 
-```cpp
-// node.cpp:1100-1138(截取核心,逐字)
-// The Ideal call almost arbitrarily reshape the graph rooted at the 'this'
-// pointer.  If ANY change is made, it must return the root of the reshaped
-// graph - even if the root is the same Node.  Example: swapping the inputs
-// to an AddINode gives the same answer and same root, but you still have to
-// return the 'this' pointer instead of NULL.
-//
-// You cannot return an OLD Node, except for the 'this' pointer.  Use the
-// Identity call to return an old Node; basically if Identity can find
-// another Node have the Ideal call make no change and return NULL.
-//
-// You cannot modify any old Nodes except for the 'this' pointer.  Due to
-// sharing there may be other users of the old Nodes relying on their current
-// semantics.  Modifying them will break the other users.
-```
+一个节点的 `Ideal()` 改写可能让用户节点暴露出新的常量；一个节点 `Value()` 算出的类型一旦变窄，又会让更多比较、分支、Phi 和内存节点变得可化简；全局值编号把两个等价节点并掉后，它们的用户又会重新排队再看一遍。
 
-三条铁律: **①返回 `NULL` = 无变化**(默认);**②改了图必须返回新根**(原地改输入也返回 `this`);**③想返回"别的旧节点"走 Identity,不许从 Ideal 里返回旧节点**——因为 IGVN 对 Ideal 的返回值会当作新根继续循环理想化,而旧节点的用户会被入队重新处理,返回值约定错了就破坏 worklist 一致性。
+也就是说，IGVN 真正重要的不是“它会做哪些规则”，而是：**图一旦有局部变化，它会沿依赖边把影响继续推下去，直到没有节点再能从别人的变化中获益。**
 
-*关键设计: 把控制流、数据流、内存流统一成同一张图的边,优化就变成了纯粹的图变换——改写一个节点,def-use 边自动暴露所有消费者;而 C1 的块结构让"跨块优化"必须显式建 Phi。代价是图必须小心维护:`set_req` 每次改写都同步更新双向边,死节点靠 IGVN 回收(remove_dead_node)。*
+这和“多跑几遍固定 pass”是两种完全不同的工作方式。
 
-## 2. Type — 节点上的类型格
+## `Node`：为什么 C2 要把控制、数据和内存都画成边
 
-图有了,还要给每个节点一个"运行期可能取值"的抽象。C2 用**类型格**(Type lattice): 越靠近格顶越"宽泛未知",越靠近格底越"精确",最底 `Type::BOTTOM` 是空集(不可能)。格顶 `Type::TOP` 是"未知"(type.hpp:78-118 的枚举,`:412-421` 的静态成员)。
+C2 先换掉的，是程序的形状。
 
-`int y = (x > 0) ? x : 0` 在图中是一个 `PhiNode`(cfgnode.hpp:120)合并两路: 真分支的 x 类型 `TypeInt[1, max_jint]`,假分支的常量 0 类型 `TypeInt[0,0]`。`PhiNode::Value` 把各路输入用 `meet_speculative` 逐路合并(cfgnode.cpp:918-1009),起点 `Type::TOP`:
+`Node` 最核心的两个字段是 `_in` 和 `_out`。源码注释写得非常直接：`_in` 是 use-def 引用数组，`_out` 是 def-use 引用数组。也就是说，一个节点既知道“我依赖谁”，也知道“谁依赖我”。`share/opto/node.hpp:282`、`share/opto/node.hpp:283`
 
-```cpp
-// type.cpp:1455-1490(截取核心,逐字)
-const Type *TypeInt::xmeet( const Type *t ) const {
-  // Perform a fast test for common case; meeting the same types together.
-  if( this == t ) return this;  // Meeting same type?
+更重要的是，输入边还分成两类：required edges 和 precedence edges。required edges 是语义正确性必须要有的输入，顺序有意义，也允许 `NULL`；precedence edges 则主要帮助决定执行顺序，不允许重复和内嵌 `NULL`。`share/opto/node.hpp:285`、`share/opto/node.hpp:286`、`share/opto/node.hpp:287`、`share/opto/node.hpp:289`、`share/opto/node.hpp:291`
 
-  ...
-  // Expand covered set
-  const TypeInt *r = t->is_int();
-  return make( MIN2(_lo,r->_lo), MAX2(_hi,r->_hi), MAX2(_widen,r->_widen) );
-}
-```
+这套设计的关键在于：**控制、数据和内存，不再靠不同数据结构分头维护，而是统一编码在节点输入边的位置约定里。**
 
-区间型的 meet 是"扩并集": `[0,10] meet [5,15] = [0,15]`——比未知(TOP)精确,比单支路粗。`TypeInt::make` 走 **hash-cons**: 相同类型的实例全局唯一、创建后不可变(type.cpp:1429-1449;type.cpp:707-745 "Do the hash-cons trick"),所以类型比较只是指针比较。
+这也是为什么一个普通算术节点和一个内存节点的 `in(i)` 语义完全不同。纯算术节点往往可以没有真实控制输入，于是 `in(0)` 可能是 `NULL`，表示它可以在图里浮动；内存节点则会明确有控制、内存和地址槽位。这样，优化器面对的是一张统一的图，而不是一堆“这个 pass 看基本块、那个 pass 看内存表、另一个 pass 看 def-use 链”的分裂世界。
 
-指针类型的 meet 走 **`ptr_meet` 查找表**(type.cpp:2460-2468)——这里藏着一个大纲写反的关键点:
+`Node` 的寿命管理也呼应了这张图的规模。它们统一从 `Compile::current()->node_arena()` 分配，`operator delete` 是 NOP。也就是说，C2 根本没打算让节点各自做细粒度释放；它依赖的是 Arena 批量回收，而死节点清理由优化阶段在图逻辑上处理。`share/opto/node.hpp:231`、`share/opto/node.hpp:232`、`share/opto/node.hpp:233`、`share/opto/node.hpp:237`、`share/opto/node.hpp:238`
 
-```cpp
-// type.cpp:2460-2468(截取核心,逐字)
-const TypePtr::PTR TypePtr::ptr_meet[TypePtr::lastPTR][TypePtr::lastPTR] = {
-  //              TopPTR,    AnyNull,   Constant, Null,   NotNull, BotPTR,
-  { /* Top     */ TopPTR,    AnyNull,   Constant, Null,   NotNull, BotPTR,},
-  { /* AnyNull */ AnyNull,   AnyNull,   Constant, BotPTR, NotNull, BotPTR,},
-  { /* Constant*/ Constant,  Constant,  Constant, BotPTR, NotNull, BotPTR,},
-  { /* Null    */ Null,      BotPTR,    BotPTR,   Null,   BotPTR,  BotPTR,},
-  { /* NotNull */ NotNull,   NotNull,   NotNull,  BotPTR, NotNull, BotPTR,},
-  { /* BotPTR  */ BotPTR,    BotPTR,    BotPTR,   BotPTR, BotPTR,  BotPTR,}
-};
-```
+这一步非常值得停下来记一句：**C2 的“图”不是一张画出来方便看的草图，而是它真正的程序表示与优化工作面。**
 
-`Null` 与 `NotNull` 的 meet 是 **`BotPTR`**(空集)——"既空又非空"不可能成立,不是大纲说的"放弃 nullness 信息变成 Ptr"。这正是 C2 用类型矛盾剪死路径的机制: 一个节点类型变成空集,依赖它的分支/Phi 就判死,最终由 IGVN 的 `remove_dead_node` 或后续阶段清掉。同格的关系由 `xmeet`/`xdual` 虚函数分派(`meet()` → `meet_helper` → `xmeet`,type.hpp:224-241): 同类精确值 meet 不变,不同类指针 meet 退到 `NotNull` + 类层次最低公共祖先(type.cpp:3977-3986),不同常量 meet 退 `NotNull`(两个不同的对象不可能是同一个,type.cpp:3963-3972)。
+## `Node` 不是被动数据结构：`Identity / Value / Ideal` 三钩子决定它如何参与优化
 
-`dual()` 是绕格心"镜像"(type.hpp:236-238): 区间型就是**翻转 hi/lo**(type.cpp:1494-1497 "Dual: reverse hi & lo; flip widen")——`[0,10]` 的 dual 是 `[10,0]`,即"区间补集",用于按 `join = dual(meet(dual()))` 构造上界(type.hpp:244-253)。
+C2 里每个节点都不是“等着 pass 来改”的被动物体。`Node` 基类直接定义了三个统一钩子：
 
-*关键设计: 类型是"价值集"的抽象——格顶 TOP 是"什么值都可能"(最不精确但永远安全),格底 BOTTOM 是"没有值"(矛盾即死代码)。Phi 合并用 meet 取"两种可能都覆盖的最精确类型",优化器拿这个类型去消除空指针检查、类型检查,甚至把整个分支判死。类型不可变 + hash-cons 让"比较类型"变成指针相等,IGVN 的热路径因此极快。*
+- `Identity(PhaseGVN*)`
+- `Value(PhaseGVN*)`
+- `Ideal(PhaseGVN*, bool can_reshape)` `share/opto/node.cpp:1081`、`share/opto/node.cpp:1087`、`share/opto/node.cpp:1144`
 
-## 3. IGVN — 迭代到不动点的优化引擎
+默认行为本身就很有意思：
 
-**`x + 0` 和 `x * 1` 到底在哪一步被消掉?** 大纲把这一幕放在 IGVN 里,但源码比这更早——**Parse 建节点时**,单遍的 `PhaseGVN::transform_no_reclaim`(phaseX.cpp:864-924,和 IGVN 的 `transform_old` 同款流程,只是没有 worklist、不做级联)就已经在化简: `AddNode::Identity` 对称检查两个输入,任一侧类型是加法单位元就返回另一侧(类注释 "We look for "add of zero" as an identity" 在 addnode.hpp:52-54;实现 addnode.cpp:56-61);`MulNode::Identity` 同理消 `x*1`(mulnode.cpp:52-61)。所以图中根本不会出现 `AddI(x, 0)` 节点。IGVN 的真正价值不是"第一轮折叠",而是 **worklist 迭代到不动点 + 全局值编号 + 结构性图改写**(`can_reshape=true`)。
+- `Identity()` 默认返回 `this`，表示“没找到更好的既有节点”；
+- `Value()` 默认返回 `bottom_type()`，也就是最坏情况类型；
+- `Ideal()` 默认返回 `NULL`，表示“这节点已经够理想了，没有图改写”。 `share/opto/node.cpp:1081`、`share/opto/node.cpp:1082`、`share/opto/node.cpp:1087`、`share/opto/node.cpp:1088`、`share/opto/node.cpp:1144`、`share/opto/node.cpp:1145`
 
-单节点 transform 的完整流程在 `transform_old`(phaseX.cpp:1283-1402),五步:
+这三个钩子之所以重要，是因为它们把三类完全不同的优化动作拆开了：
 
-```cpp
-// phaseX.cpp:1283-1402(截取核心,逐字)
-Node *PhaseIterGVN::transform_old(Node* n) {
-  ...
-  // Apply the Ideal call in a loop until it no longer applies
-  Node* k = n;
-  ...
-  Node* i = apply_ideal(k, /*can_reshape=*/true);
-  ...
-  while (i != NULL) {
-    ...
-    // Made a change; put users of original Node on worklist
-    add_users_to_worklist(k);
-    // Replacing root of transform tree?
-    if (k != i) {
-      // Make users of old Node now use new.
-      subsume_node(k, i);
-      k = i;
-    }
-    ...
-    i = apply_ideal(k, /*can_reshape=*/true);
-  }
+- `Identity` 负责说“我其实等价于某个已有节点”；
+- `Value` 负责说“如果看我的输入类型，我运行时可能值的集合更精确了”；
+- `Ideal` 负责说“我可以把自己或周围子图重写成更好的形状”。
 
-  // See what kind of values 'k' takes on at runtime
-  const Type* t = k->Value(this);
-  ...
-  if (type_or_null(k) != t) {
-    set_type(k, t);
-    // If k is a TypeNode, capture any more-precise type permanently into Node
-    k->raise_bottom_type(t);
-    // Move users of node to worklist
-    add_users_to_worklist(k);
-  }
-  // If 'k' computes a constant, replace it with a constant
-  if (t->singleton() && !k->is_Con()) {
-    Node* con = makecon(t);     // Make a constant
-    add_users_to_worklist(k);
-    subsume_node(k, con);       // Everybody using k now uses con
-    return con;
-  }
+尤其是 `Ideal()` 的返回值契约，非常容易被误解。源码注释写得极细：
 
-  // Now check for Identities
-  i = apply_identity(k);      // Look for a nearby replacement
-  if (i != k) {                // Found? Return replacement!
-    add_users_to_worklist(k);
-    subsume_node(k, i);       // Everybody using k now uses i
-    return i;
-  }
+- 只要做了任何图改写，就必须返回改写后子图的根，即使根还是 `this`；
+- 不能从 `Ideal()` 返回一个“旧节点”，想返回旧节点要走 `Identity()`；
+- 除了 `this` 指针本身，不能去修改旧节点，因为旧节点可能被别的用户共享。 `share/opto/node.cpp:1095`、`share/opto/node.cpp:1100`、`share/opto/node.cpp:1101`、`share/opto/node.cpp:1106`、`share/opto/node.cpp:1107`、`share/opto/node.cpp:1112`、`share/opto/node.cpp:1113`、`share/opto/node.cpp:1118`
 
-  // Global Value Numbering
-  i = hash_find_insert(k);      // Check for pre-existing node
-  if (i && (i != k)) {
-    add_users_to_worklist(k);
-    subsume_node(k, i);       // Everybody using k now uses i
-    return i;
-  }
+这里最该记住的不是规则条文本身，而是它揭示了 C2 的工作方式：**节点优化不是一个 pass 拿着剪刀在外面乱改图，而是每个节点自己暴露“我能否折叠、能否变窄、能否重写”的统一接口。**
 
-  // Return Idealized original
-  return k;
-}
-```
+## `Type`：为什么 C2 必须把“可能值集合”刻在图上
 
-五步的顺序本身就有讲究: **①Ideal 循环**——反复改写直到返回 NULL,每次改写都把旧节点的用户入队;②`Value()` 重算类型,变窄就缓存进类型表并**把用户入队**(类型精确化是级联优化的燃料);③类型是单例就替换成常量(`makecon`,phaseX.cpp:755-769);④`Identity()` 返回既有等价节点;⑤`hash_find_insert()` **全局 CSE**——`NodeHash` 表里已存在 opcode+输入都相等的节点就替换掉(phaseX.cpp:143-198;表 75% 满时翻倍扩容,phaseX.hpp:82-83)。`subsume_node`(phaseX.cpp:1527)做实际的"剪边重连": 遍历旧节点的 `_out`,把所有用它的边改指向新节点,然后递归清掉死节点。
+光有节点和边还不够。优化器还必须知道：某个节点在运行时可能取什么值。
 
-驱动这一切的是 `optimize()` 的 worklist 主循环(phaseX.cpp:1223-1251):
+C2 用 `Type` 做这件事。`Type` 不是“调试信息里的类型注释”，而是一套真正参与优化的格。基类直接提供 `meet`、`join`、`dual` 和它们的辅助函数。`share/opto/type.hpp:224`、`share/opto/type.hpp:228`、`share/opto/type.hpp:236`、`share/opto/type.hpp:240`、`share/opto/type.hpp:247`
 
-```cpp
-// phaseX.cpp:1223-1251(截取核心,逐字)
-void PhaseIterGVN::optimize() {
-  ...
-  uint loop_count = 0;
-  // Pull from worklist and transform the node. If the node has changed,
-  // update edge info and put uses on worklist.
-  while(_worklist.size()) {
-    if (C->check_node_count(NodeLimitFudgeFactor * 2, "Out of nodes")) {
-      return;
-    }
-    Node* n  = _worklist.pop();
-    if (++loop_count >= K * C->live_nodes()) {
-      DEBUG_ONLY(dump_infinite_loop_info(n);)
-      C->record_method_not_compilable("infinite loop in PhaseIterGVN::optimize");
-      return;
-    }
-    DEBUG_ONLY(trace_PhaseIterGVN_verbose(n, num_processed++);)
-    if (n->outcnt() != 0) {
-      NOT_PRODUCT(const Type* oldtype = type_or_null(n));
-      // Do the transformation
-      Node* nn = transform_old(n);
-      NOT_PRODUCT(trace_PhaseIterGVN(n, nn, oldtype);)
-    } else if (!n->is_top()) {
-      remove_dead_node(n);
-    }
-  }
-  NOT_PRODUCT(verify_PhaseIterGVN();)
-}
-```
+对整数区间来说，`TypeInt::xmeet()` 会把两个区间扩成能同时覆盖二者的最小大区间。比如 `[0,10]` 和 `[5,15]` meet 之后得到 `[0,15]`。这不是“求交集”，而是为了给 Phi 和其他合流节点一份同时覆盖多条路径的安全上界。`share/opto/type.cpp:1455`、`share/opto/type.cpp:1457`、`share/opto/type.cpp:1487`、`share/opto/type.cpp:1488`、`share/opto/type.cpp:1489`
 
-工作清单初值不是空的: Parse 期每建一个"值得再看一眼"的节点就 `record_for_igvn` 登记进 `Compile::_for_igvn`(compile.cpp:757 "Node list that Iterative GVN will start with"),`PhaseIterGVN` 构造时把整张清单抄进 `_worklist`(phaseX.cpp:992-993)。时序上 Parse 末尾先跑 `PhaseRemoveUseless` 清掉解析产生的死节点(compile.cpp:841-844,注释 "Remove clutter produced by parsing"),`Optimize()` 的第一个动作才是 IGVN 全图迭代。两个守卫是工程细节也是设计声明: 活节点数接近上限时放弃编译(`check_node_count`,compile.hpp:907-914——optimize 里带 `NodeLimitFudgeFactor * 2` 的余量,c2_globals.hpp:471);循环次数超过 **`K * live_nodes()`**(`K = 1024`,globalDefinitions.hpp:255)判定"无限循环"放弃——**IGVN 承诺终止,靠的是这两道闸**。
+`dual()` 则把类型绕格的中心翻过去。对区间型来说，就是反转上下界。这个操作不是炫技，它是 `join` 构造方式的一部分：C2 借助对偶让格在上下两个方向都保持对称。`share/opto/type.hpp:236`、`share/opto/type.hpp:237`、`share/opto/type.cpp:1492`、`share/opto/type.cpp:1494`、`share/opto/type.cpp:1495`
 
-IGVN 在 C2 管线里不止跑一次。`Compile::Optimize`(compile.cpp:2220)中: Parse 后第一次全图迭代(compile.cpp:2247-2254 "Iterative Global Value Numbering, including ideal transforms"),逃逸分析/宏消除后各一次(:2321/:2332),CCP 之后收尾一次(:2388-2391),range-check cast 与 opaque4 移除后再各补一次(:2424/:2454)。阶段名留在 phasetype.hpp:28-63(`PHASE_ITER_GVN1`/`PHASE_ITER_GVN2`)——这就是 IGVN 的"心脏"地位: 每次结构变换之后都要把它重跑一遍。
+指针类型的地方更能看出格为什么重要。`TypePtr::ptr_meet` 那张表里，`Null` 和 `NotNull` 的 meet 不是“丢掉 null 信息”，而是直接变成 `BotPTR`。也就是说，**“既是 null 又非 null”在格里代表矛盾，不是模糊。** `share/opto/type.cpp:2460`、`share/opto/type.cpp:2465`、`share/opto/type.cpp:2466`
 
-**实证边界**: 理想图本身在 release 构建里**不可见**——`PrintIdeal`/`PrintIdealGraph` 都是 notproduct(c2_globals.hpp:101/:371),release 直接拒绝启动([实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/15-c2-ideal-graph-demo.txt)第 3/4 段: "VM option 'PrintIdeal' is notproduct and is available only in debug version of VM");`PrintOptoAssembly` 虽是 diagnostic 标志,但**从标志处理到汇编打印整个包在 `#ifndef PRODUCT` 里**(compile.cpp:718-733;output.cpp:1554 起的 dump 段),release 静默无输出(实证第 5 段)。能观察的是编译事件与阶段计时: `-Xlog:jit+compilation=debug` 显示每个方法的**编译事件**(实证第 1 段: `idn`/`phi` 最终编译到 level 4,`cfold`(常量方法,2 字节)编到 level 1 为止,旧的 level 2 nmethod 全部 `made not entrant`);`-XX:+CITime` 打印完整阶段树——Parse / Optimize(GVN 1 / IGVN / Cond Const Prop / GVN 2)/ Matcher / Scheduler / Regalloc(实证第 6 段)。折叠行为也有一个间接实证: `bigsum()` 里 50 个 `1+1+…` 在 **javac 编译期**就已折叠成 `bipush 50`(字节码 3 字节,实证第 7 段 "bigsum (3 bytes)")——常量折叠从 javac 到 C2 层层都在做。
+这条语义特别关键，因为它正是 C2 能把某些路径判死、把某些空检查彻底消掉的基础。只有当“类型矛盾”在格里真的是底，而不是“我不确定”，图上的死路才能被真正收缩掉。
 
-*关键设计: IGVN 是"懒计算的定点迭代"——只处理 worklist 上的节点,一个节点的类型变窄只把它的**消费者**入队,而不是全图重扫。这比 C1 的"固定趟数"深一个数量级: C1 是规定次数的规范化,C2 是迭代到"再改也不会有新变化"。代价是终止性要靠 K 守卫,而任何新的 `Ideal()` 改写都必须守 node.cpp 的返回值铁律,否则破坏 worklist 一致性。*
+所以 `Type` 的本质不是“给节点贴标签”，而是：**把节点运行时可能值的集合刻进图里，让结构改写和类型收窄能够互相喂养。**
 
-## 核心悬念
+## IGVN：为什么必须迭代到不动点，而不是跑固定几趟
 
-C2 的世界观在这里立住了: **节点**用双向 def-use 边把控制、数据、内存织成一张图;每个节点顶着一个来自**类型格**的精确类型(TOP 未知、BOTTOM 不可能、区间型 meet 扩并集、指针型 meet 查表——`Null meet NotNull = BotPTR` 即矛盾);**IGVN** 用 worklist 迭代把这三种钩子(`Ideal`/`Value`/`Identity`)+ 哈希 CSE 推到不动点,而且贯穿整个编译期反复运行。但图从哪来? 前面只看到 Parse 一句 `_gvn.transform(new AddINode(a,b))` 和 `record_for_igvn` 的登记——字节码怎么逐步变成这堆节点、控制边怎么在 `do_ifnull`/`merge_common` 里生长、异常边与 safepoint 怎么挂进图里,是下一篇的事。
+有了 `Node` 和 `Type`，最后的问题就是：谁来驱动它们互相传播？答案就是 `PhaseIterGVN`。
 
-> → [15-c2-compiler/02 — Parse + GraphKit: 字节码→Ideal Graph](openjdk/vol-02/15-c2-compiler/02-c2-parse-graphkit.md)
+它最核心的动作都在 `transform_old()` 里。整段流程可以压成五步：
+
+1. 反复跑 `Ideal()`，直到这个节点的图改写不再继续；
+2. 调 `Value()` 重新计算节点类型，如果类型变了，就把用户重新入队；
+3. 如果类型已经精确到 singleton，就直接常量化；
+4. 再试 `Identity()`，看看是否等价于已有节点；
+5. 最后做 `hash_find_insert()`，执行全局值编号。 `share/opto/phaseX.cpp:1283`、`share/opto/phaseX.cpp:1293`、`share/opto/phaseX.cpp:1298`、`share/opto/phaseX.cpp:1320`、`share/opto/phaseX.cpp:1328`、`share/opto/phaseX.cpp:1353`、`share/opto/phaseX.cpp:1361`、`share/opto/phaseX.cpp:1366`、`share/opto/phaseX.cpp:1373`、`share/opto/phaseX.cpp:1381`、`share/opto/phaseX.cpp:1390`
+
+整段最关键的不是“它做了这五件事”，而是每一步几乎都会把旧节点的用户重新放回 worklist。也就是说，**一个节点的局部变化不会停在自己身上，而会沿 def-use 边继续逼着整张图重新考虑。**
+
+这就是为什么 IGVN 不能用“固定跑三趟”“固定跑五趟”来替代。因为你根本不知道一次局部改写最终会触发多少层后续变化：
+
+- 图改写可能暴露新的常量；
+- 类型变窄可能让别的 `If` 或 `Phi` 可折叠；
+- 常量化又可能触发新的 `Identity` 或 hash CSE；
+- 两个节点一旦被 `subsume_node` 合并，它们所有用户都得重新审视。
+
+只有“不停迭代直到没有新变化”这一种组织方式，才能匹配这类互相咬合的传播。
+
+## 这不是“全图反复扫描”：IGVN 的效率来自 worklist 稀疏传播
+
+看到“不动点迭代”，很容易以为 C2 在做的是“全图一遍遍重扫”。如果真这样，它早就慢得不可接受了。
+
+C2 真实做法更稀疏。`Compile` 在 parse 期就准备了一份 `_for_igvn` 初始 worklist，注释直接说了：这是 Iterative GVN 的起始节点列表。`record_for_igvn()` 本身也只是把节点 push 进这张表。`share/opto/compile.cpp:757`、`share/opto/compile.cpp:758`、`share/opto/compile.cpp:759`、`share/opto/node.hpp:1574`、`share/opto/node.hpp:1575`、`share/opto/node.hpp:1576`
+
+真正运行时，`optimize()` 只是不断从 `_worklist` 里弹出节点：
+
+- 若节点还有用户，就对它做 `transform_old()`；
+- 若它已经没用户且不是 top，就把它当死节点清掉；
+- 同时用节点数上限和 `K * live_nodes()` 这种守卫防止优化发散。 `share/opto/phaseX.cpp:1223`、`share/opto/phaseX.cpp:1228`、`share/opto/phaseX.cpp:1230`、`share/opto/phaseX.cpp:1231`、`share/opto/phaseX.cpp:1234`、`share/opto/phaseX.cpp:1235`、`share/opto/phaseX.cpp:1241`、`share/opto/phaseX.cpp:1244`、`share/opto/phaseX.cpp:1246`、`share/opto/phaseX.cpp:1247`
+
+也就是说，C2 真正追求的不是“让所有节点每轮都重新思考”，而是“只让那些被变化波及到的节点重新思考”。
+
+这正是 Ideal Graph 统一 def-use 边的巨大收益之一：你不需要猜哪些节点可能被影响，边本身就把传播路径暴露出来了。
+
+## 把三件事收回到同一个闭环：Node 给路径，Type 给精度，IGVN 给传播机制
+
+现在终于可以把 `Node`、`Type` 和 `IGVN` 收成一条主线了。
+
+- 没有 `Node` 统一控制、数据和内存边，局部改写就难以自然波及全图；
+- 没有 `Type` 格，节点就不知道自己运行时可能值的集合，也就无法因为类型变窄而继续剪枝、常量化或判死路径；
+- 没有 IGVN 的 worklist 传播机制，这些局部变化也很难真正迭代到全局稳定。
+
+这三者合起来，才形成 C2 的核心闭环：
+
+1. 某个节点先因为 `Ideal()` 重写了；
+2. 用户节点被入队，再次检查；
+3. `Value()` 算出的类型更窄；
+4. 类型变窄又触发更多常量化、分支剪死或值合并；
+5. 图继续收缩，直到没有节点再能从别人的变化中获益。
+
+这就是 C2 和 C1 最本质的分水岭：**C1 更像一条固定次序的前端流水线，C2 更像一套围绕统一图与类型反复收敛的全局传播系统。**
+
+## 收网：C2 不是“更多 pass”，而是“统一图 + 类型 + 不动点迭代”
+
+现在可以把整篇压成一张总图了。
+
+C2 之所以不沿着 C1 的块式 HIR 继续增强，不是因为后者完全不行，而是因为它不够适合作为全局传播的工作面。C2 干脆把程序先换成一张统一的 Ideal Graph：`Node` 用 `_in/_out` 把控制流、数据流和内存流织在一起；`Type` 把每个节点可能取值的集合刻在图上；`IGVN` 再围绕这张图，用 `Ideal/Value/Identity` 加上 hash CSE 和 worklist，把局部改写持续传播到全局，直到整张图不再变化。`share/opto/node.hpp:282`、`share/opto/node.cpp:1081`、`share/opto/type.hpp:224`、`share/opto/type.cpp:1455`、`share/opto/type.cpp:2460`、`share/opto/phaseX.cpp:1223`、`share/opto/phaseX.cpp:1283`、`share/opto/compile.cpp:757`
+
+所以，这一篇最核心的一句话不是“C2 有 Node、Type 和 IGVN”，而是：
+
+**C2 不是在 C1 的世界里多加几趟优化，而是先换成一张统一图，再让类型精度和 worklist 迭代把优化推到全局不动点。**
+
+只要这句抓住了，下一篇 `Parse + GraphKit` 就好理解了：既然 C2 的世界观已经是这么一张图，那字节码到底是怎么一条条被灌进这张 Ideal Graph 里的，才是下一步真正该追的问题。
+
+> → [15-c2-compiler/02 — `Parse + GraphKit`：字节码→Ideal Graph](02-c2-parse-graphkit.md)

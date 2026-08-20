@@ -1,21 +1,38 @@
-# 02. Striped64 与 LongAdder — 分片计数、伪共享、弱一致求和
+# Striped64 与 LongAdder：为什么它不是更强的 AtomicLong，而是把热点拆开
 
-> **前置依赖**: [13-atomic/01 — AtomicInteger 与 CAS 封装](01-atomicinteger-cas.md)(CAS 循环与内存语义)、[11-thread-threadlocal/03 — ThreadLocalRandom](../11-thread-threadlocal/03-exception-random.md)(probe 探针与 GAMMA 种子)
-> → **后续**:[13-atomic/03 — 引用原子与 FieldUpdater](03-reference-updater.md)
-> 关联: 域 32 Unsafe(CAS 原语);内部卷 05-cpu-primitives(MESI 与缓存一致性)、06-oops(对象布局与字段填充)
+> 本文基于 JDK 11 `Striped64` 与 `LongAdder` 源码。重点讨论 `base` / `cells` / `cellsBusy`、`Cell`、`longAccumulate()`、`sum()` 与 `@Contended`；LongAccumulator、DoubleAdder 与引用原子类放到相关后续篇章。
+> **前置依赖**：[AtomicInteger 与 CAS](01-atomicinteger-cas.md)
+> **后续**：[引用原子与 FieldUpdater](03-reference-updater.md)
 
-## 一个计数器,怎么扛住百万 QPS
+## 上一篇解决了“怎么原子地改一个数”，这一篇解决“大家都来改同一个数时为什么会卡死在一点上”
 
-上一篇结尾埋了个问题: AtomicLong 高竞争下 CAS 大量失败、自旋烧 CPU。那生产上的计数器(限流、统计、监控)怎么做的?面试官的问题是 "LongAdder 为什么比 AtomicLong 快"——答案是四个字: **分片计数**。这篇拆开 Striped64 与 LongAdder: 一个"数"怎么拆成"一组格子",格子之间怎么避免互相拖累(伪共享),以及为什么 sum 的结果是"弱一致"的。
+上一章里，`AtomicInteger` 已经回答了一个关键问题：如何把“读-改-写”粘成一次 CAS 原子更新。
 
-## 1. "LongAdder 里有什么？" — base + Cell 数组
+但它也留下了另一个更偏性能的问题：**如果所有线程都围着同一个共享值做 CAS，会发生什么？**
 
-### 1.1 一个数,拆成一组格子
+答案是：即使没有锁，没有阻塞，线程仍然会在同一个内存位置上高频碰撞。一个线程刚读到旧值，另一个线程就先一步更新了它，于是第一个线程 CAS 失败，只能重读再试。竞争越激烈，失败重试越多，CPU 时间就越多地烧在“争这个点”上。
 
-`LongAdder`(`LongAdder.java:71`)extends `Striped64`,所有机制都在父类。Striped64 的字段只有三个(`Striped64.java:152-169`):
+`LongAdder` 解决的不是“让单次 CAS 更强”，而是“别让所有线程再盯着同一个点打”。它的核心思路可以先压成一句话：
+
+```text
+无竞争时
+   → 还是像 AtomicLong 一样更新一个 base
+
+一旦竞争出现
+   → 把计数分散到多个 Cell 槽位
+   → 让不同线程大概率各写各格
+```
+
+所以它不是更严格的原子计数器，而是一个**把写热点拆开、把读取改成聚合求和**的吞吐优化结构。
+
+## 一、Striped64 的本体：不是“一个 long”，而是 `base + cells + cellsBusy`
+
+### 三个字段就是 LongAdder 的全部骨架
+
+JDK 11 的 `Striped64` 直接把核心状态列得非常干净：
 
 ```java
-// Striped64.java:152-169(截取核心,逐字)
+// Striped64.java:152-169
 /** Number of CPUS, to place bound on table size */
 static final int NCPU = Runtime.getRuntime().availableProcessors();
 
@@ -36,49 +53,140 @@ transient volatile long base;
 transient volatile int cellsBusy;
 ```
 
-- **`base`**(`Striped64.java:164`):无竞争时的单点——所有线程不打架时,累加只碰这一个数,和 AtomicLong 一样快
-- **`cells`**(`Striped64.java:158`):**分片数组**——竞争出现后,把计数器拆成 2、4、8……个格子,不同线程写不同格子
-- **`cellsBusy`**(`Striped64.java:169`):扩容/初始化的**自旋锁**(0=空闲,1=被占),用 `casCellsBusy`(`Striped64.java:191`)抢
-- **`NCPU`**(`Striped64.java:153`):CPU 核数,表长的上限——格子数超过核数没有意义,后面 §2.4 细讲
+如果把这三个字段翻译成更接近业务理解的话：
 
-三个字段全是 `transient volatile`——序列化交给 LongAdder 的 `SerializationProxy`(`LongAdder.java:215`),volatile 保证跨线程可见。
+- `base`：低竞争时的单点值；
+- `cells`：高竞争时的分片槽位数组；
+- `cellsBusy`：只在初始化/扩容/挂新槽时抢一下的短期自旋锁。
 
-### 1.2 Cell:加了 @Contended 的"迷你 AtomicLong"
+也就是说，LongAdder 并不是一开始就造出很多格子，而是分阶段升级：
 
-格子本身是内嵌类 `Cell`(`Striped64.java:124-129`):
+```text
+起步
+   → 只有 base
+
+第一次发生明显竞争
+   → 初始化 cells
+
+后续竞争继续加剧
+   → 扩大 cells 数组
+```
+
+### Doug Lea 的类注释其实已经写明了整套策略
+
+`Striped64` 的类注释非常像设计文档，关键几句值得直接读：
 
 ```java
-// Striped64.java:124-129(截取核心,逐字)
+// Striped64.java:52-116
+ * This class maintains a lazily-initialized table of atomically
+ * updated variables, plus an extra "base" field. The table size
+ * is a power of two. Indexing uses masked per-thread hash codes.
+ * Nearly all declarations in this class are package-private,
+ * accessed directly by subclasses.
+ *
+ * Table entries are of class Cell; a variant of AtomicLong padded
+ * (via @Contended) to reduce cache contention.
+ *
+ * In part because Cells are relatively large, we avoid creating
+ * them until they are needed.  When there is no contention, all
+ * updates are made to the base field.  Upon first contention (a
+ * failed CAS on base update), the table is initialized to size 2.
+ * The table size is doubled upon further contention until
+ * reaching the nearest power of two greater than or equal to the
+ * number of CPUS. Table slots remain empty (null) until they are
+ * needed.
+ *
+ * A single spinlock ("cellsBusy") is used for initializing and
+ * resizing the table, as well as populating slots with new Cells.
+```
+
+这几句已经把设计哲学讲透了：
+
+- 默认不浪费空间，只有真的竞争了才分片；
+- 分片不是无限长大，而是有 `NCPU` 上限；
+- 结构调整不走重量级锁，只在短暂改表结构时用一个 CAS 自旋锁护一下。
+
+所以 LongAdder 不是“为了高并发，预先建一堆格子”，而是**按争用程度渐进式地从单点数升级成分片数列**。
+
+## 二、Cell 为什么像“迷你 AtomicLong”，而且必须单独做缓存隔离
+
+### 每个格子本质上就是一个可以 CAS 的 long 槽位
+
+```java
+// Striped64.java:118-149
+/**
+ * Padded variant of AtomicLong supporting only raw accesses plus CAS.
+ */
 @jdk.internal.vm.annotation.Contended static final class Cell {
     volatile long value;
     Cell(long x) { value = x; }
     final boolean cas(long cmp, long val) {
         return VALUE.compareAndSet(this, cmp, val);
     }
+    final void reset() {
+        VALUE.setVolatile(this, 0L);
+    }
+    final void reset(long identity) {
+        VALUE.setVolatile(this, identity);
+    }
+    final long getAndSet(long val) {
+        return (long)VALUE.getAndSet(this, val);
+    }
 ```
 
-`Cell` 就是"只有 value 字段 + CAS"的迷你 AtomicLong——但多了类级别的 `@jdk.internal.vm.annotation.Contended` 注解。**这是全篇最重要的一行注解**,§3 专门讲。注意 `VALUE` 是 `VarHandle`(`Striped64.java:141-149` 的 `findVarHandle(Cell.class, "value", long.class)`),不是 Unsafe 偏移——Striped64 族能安全初始化 VarHandle(静态块在 386-407),没有 AtomicInteger 那种启动期循环依赖,所以用 JDK9+ 推荐的 VarHandle 门面。
+这段代码非常值得停一下，因为它几乎就是“把一个 AtomicLong 缩到最小能工作的程度”：
 
-### 1.3 类注释:Doug Lea 的设计文档
+- 一个 `volatile long value`；
+- 一个 CAS；
+- 几个重置/交换工具方法。
 
-`Striped64.java:52-116` 的类注释值得读原文——它是 Doug Lea 写的行为规格。核心约定三条:
+所以 `LongAdder` 所谓的“分片”，本质上就是：**把一个会争抢的共享 long，拆成多个可以各自 CAS 的小槽位。**
 
-1. **表长恒为 2 的幂**,下标用 per-thread 哈希掩码(`(n - 1) & h`)(`Striped64.java:55-56`)
-2. **无竞争时全走 base**;第一次争用(base 的 CAS 失败)才把表初始化为 size 2(`Striped64.java:69-71`)
-3. **之后每次进一步争用,表翻倍**,直到达到 >= CPU 数的最近 2 的幂(`Striped64.java:72-74`)——这就是 `NCPU` 的来历
+### `@Contended` 不是装饰，而是避免伪共享的关键一层
 
-还解释了为什么 Cell 需要 @Contended 而普通原子类不需要(`Striped64.java:59-66`): 普通 Atomic 对象在堆里散布、互不相邻;但 **Cell 们住在数组里、必然相邻,共享缓存行**——不加 padding 会有巨大的性能损失。这个机制 §3 展开。
-
-关键设计(斜体):*"分片"= 把单个计数器拆成多个可累加单元——不同线程按哈希落到不同 Cell,互不争抢;base 只服务低竞争场景。这是"无锁 + 无争抢"的计数方案: 锁和 CAS 解决"同一变量上的竞争",分片从根上让竞争不发生。面试"LongAdder vs AtomicLong": 读少写多、高竞争用 LongAdder(吞吐显著更高,代价是空间,`LongAdder.java:48-54` 的 Javadoc 原话);需要每次精确读(如并发控制信号量)用 AtomicLong。*
-
-## 2. "add() 每次走什么路径？" — 性能阶梯
-
-### 2.1 三级路径:单点 → 分片 → 兜底
-
-`LongAdder.add`(`LongAdder.java:85-94`)整个方法只有 10 行,但暗含三级路径:
+很多人学 LongAdder 时只记住“多个 Cell 分流竞争”，却忽略了类注释对缓存行问题的解释。JDK 11 明说：Cell 之所以要加 `@Contended`，是因为数组里的多个原子槽位物理上很容易相邻，从而共享同一缓存行。
 
 ```java
-// LongAdder.java:85-94(截取核心,逐字)
+// Striped64.java:59-66
+ * Table entries are of class Cell; a variant of AtomicLong padded
+ * (via @Contended) to reduce cache contention. Padding is
+ * overkill for most Atomics because they are usually irregularly
+ * scattered in memory and thus don't interfere much with each
+ * other. But Atomic objects residing in arrays will tend to be
+ * placed adjacent to each other, and so will most often share
+ * cache lines (with a huge negative performance impact) without
+ * this precaution.
+```
+
+这段话其实在讲一个非常关键的性能坑：**伪共享**。
+
+逻辑上，线程 A 和线程 B 可能在写不同的 Cell；但如果这两个 Cell 恰好落在同一个 CPU 缓存行里，那么一个核心写自己的 Cell 时，仍然会导致整个缓存行对别的核心失效，另一个线程也要被迫重新取这一整行。
+
+所以 LongAdder 不是只靠“分片”就够了，它还要继续解决“多个分片别再因为物理相邻互相拖累”的问题。`@Contended` 就是在对象布局层给每个 Cell 做隔离。
+
+也就是说：
+
+```text
+分片
+   → 解决逻辑上的同点竞争
+
+@Contended
+   → 解决物理上的同缓存行竞争
+```
+
+这两层缺一不可。
+
+## 三、`add()` 的真正路径：先赌不竞争，再升级到分片，再走结构调整兜底
+
+### LongAdder.add 并没有一上来就进复杂路径
+
+JDK 11 的 `LongAdder.add` 其实非常短：
+
+```java
+// LongAdder.java:80-94
+/**
+ * Adds the given value.
+ */
 public void add(long x) {
     Cell[] cs; long b, v; int m; Cell c;
     if ((cs = cells) != null || !casBase(b = base, b + x)) {
@@ -91,29 +199,45 @@ public void add(long x) {
 }
 ```
 
-注意第一行的**短路求值**: `(cs = cells) != null || !casBase(...)`——**cells 一旦非空,casBase 根本不会执行**,直接进 if 体走分片。所以三级路径的触发条件是"表是否已存在",不是"base 是否失败":
+看起来只有一层 if，但它隐含了一整套性能阶梯：
 
-- **第一级(单点,只在表未建时)**: `cells == null` 时试 `casBase(b = base, b + x)`——从未竞争过的 adder,一次 CAS 搞定,和 AtomicLong 一样快
-- **第二级(分片,表已建时的常态)**: cells 非空 → 短路跳过 base,按当前线程的 probe 哈希选格 `cs[getProbe() & m]`,CAS 自己的 Cell。**不同线程 probe 不同,大概率落到不同格子,从此互不干扰**——这是竞争发生后的每一条 add 都走的路径
-- **第三级(兜底)**: 格子还没建(`cs == null` 或 `c == null`)/CAS 又失败 → 进 `longAccumulate`(`Striped64.java:228`): 初始化/扩容/挂新 Cell/重试
+#### 第一级：还没建 `cells`，先尝试直接 CAS `base`
 
-`increment()`(`LongAdder.java:99`)就是 `add(1L)`,`decrement()` 就是 `add(-1L)`——没有第二个实现。
+条件 `cells == null` 且 `casBase` 成功时，整个更新就结束了。这条路径本质上和 AtomicLong 的单点 CAS 非常接近，是 LongAdder 在低竞争下保持轻量的关键。
 
-### 2.2 probe:选格子的哈希从哪来
+#### 第二级：如果已经有 `cells`，或者 `base` 的 CAS 失败，就走分片槽位
 
-`getProbe()`(`Striped64.java:199-201`)是选格的依据:
+一旦 `cells` 已存在，逻辑会短路进分片路径，用当前线程的 probe 去选格子：
 
-```java
-// Striped64.java:199-201(截取核心,逐字)
-static final int getProbe() {
-    return (int) THREAD_PROBE.get(Thread.currentThread());
-}
+```text
+c = cs[getProbe() & m]
 ```
 
-`THREAD_PROBE` 是 VarHandle,直接读 `Thread.threadLocalRandomProbe` 字段(`Thread.java:2075`)——**每个线程一个 int 探针哈希**,从 ThreadLocalRandom 借来的(注释明说 "Duplicated from ThreadLocalRandom because of packaging restrictions",`Striped64.java:196-197`)。probe 初始为 0(域 11 第 3 篇讲过 ThreadLocalRandom 的探针机制),第一次进 `longAccumulate` 时强制初始化(`Striped64.java:231-235`):
+如果命中自己的 Cell 且 CAS 成功，这条更新就完成。此时各线程大概率只在自己的槽位上竞争，而不是都去碰 `base`。
+
+#### 第三级：只有当格子不存在、格子 CAS 失败、或表还没建好时，才进 `longAccumulate`
+
+也就是说，真正最复杂的那段结构调整逻辑，并不是每次更新都走。它只在分片结构还没稳定好、或者竞争正在升级时兜底。
+
+这就是为什么 LongAdder 的性能模型不能简单理解成“它内部很复杂，所以肯定更慢”。恰恰相反，它把复杂逻辑放在低频路径上，把大多数更新压回到两个高频快路径里：
+
+```text
+无竞争
+   → CAS base
+
+中等竞争
+   → CAS 自己的 Cell
+
+结构不稳定/竞争继续升级
+   → longAccumulate 负责建表、挂槽、扩容、重试
+```
+
+## 四、`longAccumulate()` 到底在处理什么问题
+
+### 第一步：如果线程 probe 还没初始化，先补上它
 
 ```java
-// Striped64.java:228-235(截取核心,逐字)
+// Striped64.java:228-235
 final void longAccumulate(long x, LongBinaryOperator fn,
                           boolean wasUncontended) {
     int h;
@@ -124,32 +248,12 @@ final void longAccumulate(long x, LongBinaryOperator fn,
     }
 ```
 
-### 2.3 longAccumulate:初始化、挂格、重试、扩容
+这说明线程在第一次真正参与分片竞争前，可能还没有可用的 probe。LongAdder 借用了 `ThreadLocalRandom` 的线程 probe 字段，把它当成每个线程的槽位哈希。
 
-`longAccumulate`(`Striped64.java:228-298`)是长循环,按条件分四类动作:
-
-**① 初始化表**(`Striped64.java:281-292`):cells 还是 null 时,抢到 cellsBusy 锁后建 `new Cell[2]`,把当前线程的 `x` 放进 `h & 1` 格,`break done` 结束:
+### 第二步：槽位为空时，尝试挂一个新 Cell
 
 ```java
-// Striped64.java:281-292(截取核心,逐字)
-else if (cellsBusy == 0 && cells == cs && casCellsBusy()) {
-    try {                           // Initialize table
-        if (cells == cs) {
-            Cell[] rs = new Cell[2];
-            rs[h & 1] = new Cell(x);
-            cells = rs;
-            break done;
-        }
-    } finally {
-        cellsBusy = 0;
-    }
-}
-```
-
-**② 挂新 Cell**(`Striped64.java:240-259`):表已存在但当前线程的格子是空,且 cellsBusy 空闲 → 造一个新 Cell 塞进去。乐观创建 + 锁下复查:
-
-```java
-// Striped64.java:240-259(截取核心,逐字)
+// Striped64.java:240-259
 if ((c = cs[(n - 1) & h]) == null) {
     if (cellsBusy == 0) {       // Try to attach new Cell
         Cell r = new Cell(x);   // Optimistically create
@@ -165,50 +269,125 @@ if ((c = cs[(n - 1) & h]) == null) {
             } finally {
                 cellsBusy = 0;
             }
-            continue;           // Slot is now non-empty
+            continue;
         }
     }
     collide = false;
 }
 ```
 
-**③ 重试 CAS 自己的格**(`Striped64.java:262-264`):格子非空 → `c.cas(v = c.value, v + x)`,成功即完成——add 第二级失败后在这里再试一次:
+这里能看到 `cellsBusy` 的真实角色：它不是日常更新路径上的大锁，而只是“改表结构时，先抢一下门把手”的自旋锁。
+
+### 第三步：如果槽位已存在，就继续尝试 CAS 自己的格子
 
 ```java
-// Striped64.java:262-264(截取核心,逐字)
+// Striped64.java:260-279
+else if (!wasUncontended)
+    wasUncontended = true;
 else if (c.cas(v = c.value,
                (fn == null) ? v + x : fn.applyAsLong(v, x)))
     break;
-```
-
-**④ 扩容**(`Striped64.java:269-278`):重试 CAS 也失败且 collide 标志为 true(上一次冲突的记忆)→ 抢 cellsBusy 锁,`Arrays.copyOf(cs, n << 1)` 双倍扩容:
-
-```java
-// Striped64.java:269-278(截取核心,逐字)
+else if (n >= NCPU || cells != cs)
+    collide = false;
+else if (!collide)
+    collide = true;
 else if (cellsBusy == 0 && casCellsBusy()) {
     try {
-        if (cells == cs)        // Expand table unless stale
+        if (cells == cs)
             cells = Arrays.copyOf(cs, n << 1);
     } finally {
         cellsBusy = 0;
     }
     collide = false;
-    continue;                   // Retry with expanded table
+    continue;
+}
+h = advanceProbe(h);
+```
+
+这段就是 LongAdder 真正的竞争管理核心：
+
+- 槽位 CAS 成功就结束；
+- 一次失败还不急着扩容，先记一次 `collide`；
+- 连续冲突才考虑扩容；
+- 扩不了或不该扩时，换 probe，去尝试别的位置。
+
+这其实很像一个不断调整的分流系统：如果某个格子太挤，先换 lane；如果整体都挤，再扩更多 lane。
+
+### 第四步：如果 `cells` 还没初始化，就先建一个 2 槽表
+
+```java
+// Striped64.java:281-292
+else if (cellsBusy == 0 && cells == cs && casCellsBusy()) {
+    try {                           // Initialize table
+        if (cells == cs) {
+            Cell[] rs = new Cell[2];
+            rs[h & 1] = new Cell(x);
+            cells = rs;
+            break done;
+        }
+    } finally {
+        cellsBusy = 0;
+    }
 }
 ```
 
-### 2.4 NCPU 上限与双哈希
+这就是 LongAdder 从“单点 base”升级成“分片数组”的起点：第一次明确竞争出现后，表才真正被创建出来，而且初始只有 2 个槽位，不会过度分配。
 
-- **停扩条件**(`Striped64.java:265`): `else if (n >= NCPU || cells != cs) collide = false;`——**表长达到 >= NCPU 的最小 2 的幂后不再扩容**(类注释原话: "doubled upon further contention until reaching the nearest power of two greater than or equal to the number of CPUS",`Striped64.java:72-74`;格子数 ≥ 核数后,再多格子也不会更并行,反而白占内存);`cells != cs` 检测表被别的线程换过(过期快照)
-- **双哈希**(`Striped64.java:279` 调 `advanceProbe`):CAS 失败后 `h = advanceProbe(h)`(`Striped64.java:208-214`)用 **Marsaglia XorShift**(`probe ^= probe << 13; >>> 17; << 5`)换一个新哈希,下轮循环换一格——注释称之为 "double hashing"(`Striped64.java:94-95`)
-- **base 兜底**(`Striped64.java:293-296`):cells 还没建成、而 cellsBusy 被别的线程占着(正在初始化)时,回退 `casBase` 一把——保证方法总会收敛,不会无限循环
-
-### 2.5 sum():弱一致求和
-
-`sum()`(`LongAdder.java:119-128`)只有 10 行:
+### 第五步：如果结构调整都抢不到，就退回再碰一次 `base`
 
 ```java
-// LongAdder.java:119-128(截取核心,逐字)
+// Striped64.java:293-296
+else if (casBase(v = base,
+                 (fn == null) ? v + x : fn.applyAsLong(v, x)))
+    break done;
+```
+
+这行代码很容易被忽略，但它很重要：LongAdder 并不是“cells 一旦存在，base 就永远退休”。在结构调整竞争期间，退回 base 依然是一个兜底选项，目的是确保更新能够尽量收敛完成，而不是卡死在“必须先把分片结构调整好”。
+
+## 五、为什么 `cells` 不会无限扩容：它受 CPU 核数上限约束
+
+### 分片不是越多越好，超过并行度就只是在浪费空间
+
+Doug Lea 在类注释里已经讲过：表会在竞争升级时翻倍，直到达到“最近的、不小于 CPU 数的 2 的幂”。
+
+```java
+// Striped64.java:68-74
+ * In part because Cells are relatively large, we avoid creating
+ * them until they are needed.  When there is no contention, all
+ * updates are made to the base field.  Upon first contention (a
+ * failed CAS on base update), the table is initialized to size 2.
+ * The table size is doubled upon further contention until
+ * reaching the nearest power of two greater than or equal to the
+ * number of CPUS. Table slots remain empty (null) until they are
+```
+
+对应字段就是：
+
+```java
+// Striped64.java:152-153
+/** Number of CPUS, to place bound on table size */
+static final int NCPU = Runtime.getRuntime().availableProcessors();
+```
+
+这背后的直觉非常清楚：LongAdder 的分片目标不是“理论上给每个线程一个格子”，而是“给系统并行写入留出足够多的独立槽位”。当槽位数已经接近 CPU 并行执行能力时，再继续扩大表，收益会迅速下降，空间成本却继续上涨。
+
+所以 LongAdder 并不是无限扩表换吞吐，而是到一定程度就停，之后主要靠 probe 变化和随机化去避开持续冲突。
+
+## 六、`sum()` 为什么注定是弱一致，而这恰恰是它适合统计场景的原因
+
+### 读取逻辑非常朴素：把 `base + cells` 全部加起来
+
+```java
+// LongAdder.java:110-128
+/**
+ * Returns the current sum.  The returned value is <em>NOT</em> an
+ * atomic snapshot; invocation in the absence of concurrent
+ * updates returns an accurate result, but concurrent updates that
+ * occur while the sum is being calculated might not be
+ * incorporated.
+ *
+ * @return the sum
+ */
 public long sum() {
     Cell[] cs = cells;
     long sum = base;
@@ -221,112 +400,122 @@ public long sum() {
 }
 ```
 
-把 base 和所有非空 Cell 全加起来。**不是原子快照**——遍历过程中别的线程可能正在更新某个 Cell(先读后写的间隙),sum 可能漏掉正在进行的写入,所以 Javadoc 明说: 无并发更新时准确,有并发更新时"might not be incorporated"(`LongAdder.java:111-115`)。这就是**弱一致**: 每次 sum 可能缺最近几次写入,但误差有限、收敛快。
+这段代码没有锁、没有冻结写入、没有把所有线程停下来等它算。它只是：
 
-关键设计(斜体):*路径设计是"性能阶梯": 表未建时走单点 base(最快);表一旦建成,所有 add 直接走分片(次快);longAccumulate 只在格子为空或冲突的瞬间兜底(最慢、低频)——绝大多数 add 走前两档。面试讲"LongAdder 快在表建成后短路跳过 base + 分片"比只讲"分片"有细节;再补一句"sum 弱一致,不能当精确同步用"就是完整答案。*
+1. 先读 base；
+2. 再把每个非空 Cell 的值加进来。
 
-## 3. "伪共享是什么？" — @Contended 的战场
+### 所以它不可能是严格快照
 
-### 3.1 两个不相干的数据,为什么互相拖慢
+只要你在遍历 `cells` 的过程中，别的线程还在更新某个 Cell，那么这次 `sum()` 读到的是“一个正在变化中的拼接结果”。JDK 文档已经直接写明：并发更新时，正在发生的某些更新可能来不及被纳入。
 
-CPU 读内存的最小单位不是字节,是**缓存行(cache line)**——现代 x86 典型 64 字节。核心 A 改了地址 0x1000 上的数据,整个 0x1000-0x103F 缓存行被标记为 Modified,**其他核心持有同一缓存行的副本全部失效**;核心 B 要读 0x1020(恰好同行的另一个变量),触发 cache miss,从内存重载(100-200ns 级)。
+这就是 LongAdder 和 AtomicLong 的本质取舍：
 
-问题来了: 两个 Cell 在数组里**必然相邻**,格子很小(对象头 + 一个 long 字段),**多个 Cell 挤在同一缓存行**。线程 A 反复更新自己的 Cell → 缓存行失效 → 线程 B 更新它的 Cell 时被迫重载缓存行。**A 和 B 明明写的是不同变量,却互相让对方的缓存行失效**——这就是"伪"共享: 看起来没共享,实际共享了缓存行。
+```text
+AtomicLong
+   → 单点值
+   → 每次读都精确
+   → 高竞争写会在一个点上拥堵
 
-跨层标注: [内部卷: 05-cpu-primitives 01——MESI 协议与 `lock` 前缀的真正代价: 每次原子操作打断其他 CPU 的 cache;伪共享是这个代价在"相邻对象"上的放大版]
-
-### 3.2 @Contended:让 JVM 把格子隔开
-
-`Cell` 类上的 `@jdk.internal.vm.annotation.Contended`(`Striped64.java:124`)告诉 JVM:**给这个类的对象加 padding 填充**,把它推到独立的缓存行——两个 Cell 不再共享同一行,更新互不干扰。
-
-类注释说得明白(`Striped64.java:59-66`): 普通原子对象在堆里散布、一般不会干扰彼此,所以 padding 对它们"overkill";但**数组里的原子对象必然相邻、最常共享缓存行**,必须加这个保险。
-
-几个使用要点:
-
-- **JDK 内部专用**: `@Contended` 在 `jdk.internal.vm.annotation` 包,是 JDK 内部机制;第三方代码使用受 JVM 的 `RestrictContended` 开关限制
-- **类级 vs 字段级**: Cell 是类级注解——整个类的字段一起隔离;字段级可以给同一对象内不同字段各自隔离
-- **代价是空间**: 每个 Cell 被填充/对齐到独立缓存行,空间开销显著放大(填充宽度由 JVM 控制,一般不小于一个 64 字节缓存行)——这就是 LongAdder Javadoc 说的 "at the expense of higher space consumption"(`LongAdder.java:53-54`)
-
-### 3.3 伪共享的检测与一般解法
-
-面试"伪共享怎么检测/避免":
-
-- **检测**: 性能剖析里的高 cache miss 率、单核局部性分析;经典实验是"两个线程各写一个字段,加 padding 前后吞吐对比"
-- **避免**: ① 填充 padding(手动塞 64 字节的冗余字段,或 @Contended)② 数据对齐(按缓存行大小对齐结构)③ 改变访问模式(每个线程写自己的独立对象)
-- **生产案例**: 日志计数器、锁的状态字段、高并发计数器数组——都是伪共享高发区
-
-关键设计(斜体):*伪共享是"并发性能隐形杀手"——两个线程看似零共享,却因缓存行互相拖慢几个数量级。@Contended 是 JVM 级解法: 在对象布局阶段做 padding(内部卷 06-oops 的对象布局)。面试画"缓存行 + 两个 Cell"图是加分项;能说出"数组里的对象比散布的对象更需要 padding"说明读懂了 Doug Lea 的注释。*
-
-跨层标注: [内部卷: 06-oops 01——对象头与字段对齐: 对象按 8 字节对齐、字段布局由 JVM 决定,`@Contended` 正是在布局期做 padding 隔离]
-
-## 4. "LongAccumulator 与 Double 版" — 定制累积
-
-### 4.1 LongAccumulator:可定制运算的分片
-
-LongAdder 只能加法;LongAccumulator(`LongAccumulator.java:82`)把运算抽象成 `LongBinaryOperator` + identity 值:
-
-```java
-// LongAccumulator.java:94-98(截取核心,逐字)
-public LongAccumulator(LongBinaryOperator accumulatorFunction,
-                       long identity) {
-    this.function = accumulatorFunction;
-    base = this.identity = identity;
-}
+LongAdder
+   → 分片写
+   → 写吞吐更高
+   → 读时只能做弱一致聚合
 ```
 
-构造时**把 base 也设成 identity**(比如求最大值就用 `Long.MIN_VALUE`)。`accumulate`(`LongAccumulator.java:105-119`)与 add 同构,但多一个优化——**先算结果,结果与当前值相同就跳过 CAS**:
+所以 LongAdder 非常适合：
 
-```java
-// LongAccumulator.java:105-119(截取核心,逐字)
-public void accumulate(long x) {
-    Cell[] cs; long b, v, r; int m; Cell c;
-    if ((cs = cells) != null
-        || ((r = function.applyAsLong(b = base, x)) != b
-            && !casBase(b, r))) {
-        boolean uncontended = true;
-        if (cs == null
-            || (m = cs.length - 1) < 0
-            || (c = cs[getProbe() & m]) == null
-            || !(uncontended =
-                 (r = function.applyAsLong(v = c.value, x)) == v
-                 || c.cas(v, r)))
-            longAccumulate(x, function, uncontended);
-    }
-}
+- 统计请求数；
+- 监控指标；
+- 频次计数；
+- 对读取精确瞬时值没有严格同步要求的聚合场景。
+
+但它不适合那种“读到的值本身要立刻参与同步控制判定”的场景。比如如果你要靠这个值精确控制某个阈值上的竞态切换，单纯的 LongAdder 就未必合适。
+
+## 七、LongAdder 为什么不是“更强原子性”，而是“更高写吞吐”
+
+到这里必须把最容易混淆的一点说死。
+
+LongAdder 并没有让“一个共享数值的原子语义”变得更严格。恰恰相反，它是在放宽读取一致性要求，换取写入时更少的热点争抢。
+
+所以它和 AtomicLong 的关系，不是：
+
+```text
+AtomicLong 弱
+LongAdder 强
 ```
 
-`(r = fn(b, x)) != b && !casBase(b, r)`——**函数结果等于当前值就不写**(求 max 遇到更小值时典型): 少一次无谓的 CAS,在高竞争下省掉大量 cache 失效。`get()`(`LongAccumulator.java:130-139`)同样弱一致,只是把 `+` 换成 `function.applyAsLong`。
+而是：
 
-关键设计(斜体):*分片能成立的数学前提是运算**可结合且可交换**(associative and commutative)——分片后各 Cell 独立累积、最后任意顺序合并,只有满足这两个性质的运算(加法/乘法/max/min)结果才一致;减法、字符串拼接这类不可结合/交换的运算,分片结果会乱。Javadoc 要求原文就是 "associative and commutative"(`LongAccumulator.java:62-63`)。面试"为什么 Accumulator 必须可结合": 分片后合并顺序不受控,只有可结合且可交换的运算才能保证结果一致。*
+```text
+AtomicLong
+   → 精确单点语义
+   → 适合读值本身就要被严格依赖的场景
 
-### 4.2 DoubleAdder:没有 double 的 CAS
-
-DoubleAdder(`DoubleAdder.java:64`)的注释解释了为什么它用 long 位模式存 double(`DoubleAdder.java:67-76`):
-
-```java
-// DoubleAdder.java:67-76(截取核心,逐字)
-/*
- * Note that we must use "long" for underlying representations,
- * because there is no compareAndSet for double, due to the fact
- * that the bitwise equals used in any CAS implementation is not
- * the same as double-precision equals.  However, we use CAS only
- * to detect and alleviate contention, for which bitwise equals
- * works best anyway. In principle, the long/double conversions
- * used here should be essentially free on most platforms since
- * they just re-interpret bits.
- */
+LongAdder
+   → 分片写、聚合读
+   → 适合高竞争统计与指标收集
 ```
 
-**CAS 用位相等(bitwise equals)判断,而 double 的位相等 ≠ 数值相等**(IEEE-754 里同一个值有多种位表示: 正负零、NaN 的多种 payload)。所以 CAS 根本不能直接作用于 double——底层必须用 long 位模式。好在 `Double.doubleToRawLongBits`/`longBitsToDouble` 只是重解释位,几乎零成本(`DoubleAdder.java:73-75`)。`add`(`DoubleAdder.java:89-103`)就是先转 long 再走 Striped64 的机制,`sum`(`DoubleAdder.java:117-126`)逐个 `Double.longBitsToDouble` 还原。DoubleAccumulator(`DoubleAccumulator.java:107` 的 `accumulate`)同理,加上可定制函数。
+这也是为什么 `LongAdder` 的类注释会明确说：它通常优于 AtomicLong 的场景，是“多个线程更新一个公共和，用于统计，而不是细粒度同步控制”。
 
-### 4.3 生产组合:指标统计的标准答案
+```java
+// LongAdder.java:40-54
+ * One or more variables that together maintain an initially zero
+ * {@code long} sum.  When updates (method {@link #add}) are contended
+ * across threads, the set of variables may grow dynamically to reduce
+ * contention. Method {@link #sum} (or, equivalently, {@link
+ * #longValue}) returns the current total combined across the
+ * variables maintaining the sum.
+ *
+ * <p>This class is usually preferable to {@link AtomicLong} when
+ * multiple threads update a common sum that is used for purposes such
+ * as collecting statistics, not for fine-grained synchronization
+ * control.  Under low update contention, the two classes have similar
+ * characteristics. But under high contention, expected throughput of
+ * this class is significantly higher, at the expense of higher space
+ * consumption.
+```
 
-监控指标的标准组合: **LongAdder 计数**(请求数、错误数)+ **LongAccumulator 求最大值/延迟峰值**(`Long::max`,identity 用 `Long.MIN_VALUE`)——Javadoc 的原话是维护 running maximum(`LongAccumulator.java:66-67`)。读的时候弱一致没问题: 监控本来就不需要精确到纳秒,要的是低开销、不阻塞。
+这段话基本就是整篇文章的官方总结。
 
-跨层标注: [域 02: 03-ieee754——double 的位表示与 NaN/正负零多种位模式,这是"没有 double CAS"的根源]
+## 收网：LongAdder 不是把 CAS 做得更厉害，而是把所有线程别再挤在一个点上
 
-## 核心悬念
+现在回到这篇文章的起点：为什么 AtomicLong 在高并发下会失速？
 
-分片计数解决了"数值计数器"的竞争——但**引用类型**呢?`AtomicReference` 怎么原子替换对象?`AtomicStampedReference` 怎么给引用加版本戳根治 ABA?`FieldUpdater` 怎么在不建对象的情况下原子更新字段、省掉一整块内存?下一篇: 引用原子与 FieldUpdater。
+因为所有线程都在争同一个共享值，即使没有锁，也会因为 CAS 失败重试在同一个点上高频碰撞。
 
-> → [13-atomic/03 — 引用原子与 FieldUpdater](03-reference-updater.md)
+LongAdder 的解决方法不是“让那个点更快”，而是：
+
+- 无竞争时先维持单点 base，别白白分配结构；
+- 一旦竞争出现，就把写入分散到多个 Cell；
+- 再用 `@Contended` 防止多个 Cell 因为缓存行相邻重新互相拖累；
+- 读取时放弃强一致快照，只做 `base + cells` 的聚合求和。
+
+把整篇压成一张图，就是：
+
+```text
+低竞争
+   → CAS base
+
+出现竞争
+   → 初始化 cells[2]
+   → 线程按 probe 命中各自 Cell
+   → 冲突继续时扩容 cells
+   → Cell 用 @Contended 避免伪共享
+
+读取
+   → sum() 聚合 base + 所有 Cell
+   → 结果弱一致
+```
+
+实际使用时，先记住四条：
+
+1. **LongAdder 解决的是高竞争写吞吐，不是更强的单值精确语义。**
+2. **它的核心不是“有很多格子”本身，而是“让不同线程尽量别写同一个格子”。**
+3. **`@Contended` 的必要性来自多个 Cell 会物理相邻，进而产生伪共享。**
+4. **`sum()` 不是原子快照，所以适合统计，不适合把读取值当成严格同步条件。**
+
+下一篇进入另一条原子更新路线：当你要更新的不是一个数，而是一个对象引用，或者一个普通对象里的某个字段，该怎么把 CAS 套上去——引用原子类与 FieldUpdater。
+
+> → 下一篇：[引用原子与 FieldUpdater](03-reference-updater.md)

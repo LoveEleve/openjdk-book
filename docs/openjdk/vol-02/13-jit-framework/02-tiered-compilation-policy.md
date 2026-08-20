@@ -1,146 +1,161 @@
-# 02. 为什么先 C1 再 C2？— TieredThresholdPolicy 5 层编译策略
+# 02. 为什么先 C1 再 C2？— `TieredThresholdPolicy` 5 层编译策略
 
-> **前置依赖**:[13-jit-framework/01 — 谁决定编译、怎么排队、谁执行？— CompileBroker 编译队列](01-compile-broker-queue.md):策略的 `compile()` 落到 broker 的队列;[08-interpreter/03 — 解释器怎么安全地调 C++？— InterpreterRuntime](openjdk/vol-02/08-interpreter/03-interpreter-runtime.md):计数与溢出——事件从哪来;[12-ci/02 — 编译器怎么知道"类型"与"逃逸"？— ciTypeFlow + bcEscapeAnalyzer](openjdk/vol-02/12-ci/02-ci-typeflow-escape.md):C1 的 full profile 采集的就是 ciMethodData 那批数据
-> → **后续**:[14-c1-compiler/01 — C1 管线 + HIR — 字节码→编译图](openjdk/vol-02/14-c1-compiler/01-c1-pipeline-ir.md):本篇说"编译到 level 3",下一篇看 C1 内部怎么做
-> 关联域: 16-code-cache(nmethod 生命周期)、22-deopt(降级与重编译)
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64`。这里讨论的是 tiered compilation 的策略脑：`TieredThresholdPolicy` 如何根据调用计数、回边计数、profile 成熟度、编译器负载和 CodeCache 压力，决定方法的下一跳编译层级。C1/C2 管线本身不在本文展开。
+>
+> **前置依赖**：[13-jit-framework/01 — 谁决定编译、怎么排队、谁执行？— `CompileBroker` 编译队列](01-compile-broker-queue.md)、[08-interpreter/03 — 解释器怎么安全地调 C++？— `InterpreterRuntime`](../08-interpreter/03-interpreter-runtime.md)、[12-ci/02 — 编译器怎么知道“类型”与“逃逸”？— `ciTypeFlow + BCEscapeAnalyzer`](../12-ci/02-ci-typeflow-escape.md)
+> → **后续**：[14-c1-compiler/01 — C1 管线 + HIR — 字节码→编译图](../14-c1-compiler/01-c1-pipeline-ir.md)
 
-## 为什么不能一步到 C2
+上一篇我们已经把 broker 这条异步流水线拆开了：解释器和策略层生产“编译意愿”，`CompileBroker` 把它变成任务，编译线程异步消费。
 
-C2 是很好的优化器,但它慢: 一个中等方法动辄几百毫秒,启动阶段如果每个热点都直接上 C2,程序会卡在"预热"上。C1 是快的编译器(毫秒级),但优化有限。**分层的妥协**: 先用快编译器让热点尽早跑上机器码,同时用便宜的方式收集 profile,成熟后再让慢编译器做重优化。这就是 TieredCompilation 的 5 层阶梯——本篇拆它的"调度大脑": `TieredThresholdPolicy`。
+但 broker 其实故意不回答一个更关键的问题：**为什么这个方法这次该上 level 3，而不是 level 2？为什么有时先 OSR 再补普通编译？为什么有些方法直接到 level 1，另一些却从解释器直接跳到 level 4？**
 
-## 1. 五层,以及"常规路径没有 L1"
+这些问题都属于 `TieredThresholdPolicy`。
 
-层级定义在 `CompLevel` 枚举(compilerDefinitions.hpp:54-62):
+如果只看表面，tiered compilation 很容易被想成一条整齐的楼梯：解释器是 0，接着 1、2、3，最后 4，方法够热就顺着一级级往上爬。但真实实现并不是一条固定台阶，而是一套不断在四件事之间找平衡的动态决策系统：
 
-```cpp
-// compilerDefinitions.hpp:54-63(截取核心,逐字)
-enum CompLevel {
-  CompLevel_any               = -2,
-  CompLevel_all               = -2,
-  CompLevel_aot               = -1,
-  CompLevel_none              = 0,         // Interpreter
-  CompLevel_simple            = 1,         // C1
-  CompLevel_limited_profile   = 2,         // C1, invocation & backedge counters
-  CompLevel_full_profile      = 3,         // C1, invocation & backedge counters + mdo
-  CompLevel_full_optimization = 4          // C2 or JVMCI
-};
-```
+- 尽快让热点跑上机器码，不要让启动期全堵在解释器；
+- 尽快但不过量地收集 profile；
+- 别让慢编译器队列堵死，导致方法长时间泡在又慢又重的 profiling 代码里；
+- 别让 CodeCache 压力把整套系统拖垮。
 
-注意 C1 占三层: **1=无 profile 的纯 C1、2=C1+调用/回边计数、3=C1+完整 MDO profile**。分层策略的核心是**状态转换函数 `common`**(tieredThresholdPolicy.cpp:715-816),源码注释给出了权威的转换图(:676-712):
+所以，本篇真正该记住的一句话不是“tiered 有 5 层”，而是：
 
-- **a. 0→3→4: 最常见路径**——解释器 → C1 full profile → C2;
-- **b. 0→2→3→4: C2 队列负载高时**——先编 level 2(只有计数、便宜),等 C2 队列空下来再升 3(注释: full profile 代码比 limited profile 慢约 30%,C2 忙时不该让大家泡在慢代码里);
-- **c. 0→(3→2)→4**: 已入队 level 3 的任务,因 C1 队列长、profile 已在解释器完成,降级为 2;
-- **d. 0→3→1 或 0→2→1**: **trivial 方法(accessor/constant getter,`is_trivial` :84-90)或 C2 编不了但 C1 能编的方法**才到 level 1;
-- **e. 0→4**: C1 编译失败(仍在解释器 profile)或无需重新 profile。
+**`TieredThresholdPolicy` 的本质不是安排固定阶梯，而是在每次事件发生时，动态回答“此刻最划算的下一跳是什么”。**
 
-**大纲的"L0→L1→L2→L3→L4 阶梯"是错的**: 常规转换里根本没有"先到 L1"这一步——L1 是 trivial 方法的专属终点。`common` 里 `is_trivial` 直接返回 `CompLevel_simple`(:720-721),普通方法从 0 出发要么 3 要么 2。
+## 先试两个最自然的办法，看看为什么都不行
 
-```cpp
-// tieredThresholdPolicy.cpp:720-767(截取核心,逐字)
-  if (is_trivial(method)) {
-    next_level = CompLevel_simple;
-  } else {
-    switch(cur_level) {
-      default: break;
-      ...
-    case CompLevel_none:
-      // If we were at full profile level, would we switch to full opt?
-      if (common(p, method, CompLevel_full_profile, disable_feedback) == CompLevel_full_optimization) {
-        next_level = CompLevel_full_optimization;
-      } else if ((this->*p)(i, b, cur_level, method)) {
-        ...
-          // C1-generated fully profiled code is about 30% slower than the limited profile
-          // code that has only invocation and backedge counters. The observation is that
-          // if C2 queue is large enough we can spend too much time in the fully profiled code
-          // while waiting for C2 to pick the method from the queue. To alleviate this problem
-          // we introduce a feedback on the C2 queue size. If the C2 queue is sufficiently long
-          // we choose to compile a limited profiled version and then recompile with full profiling
-          // when the load on C2 goes down.
-          if (!disable_feedback && CompileBroker::queue_size(CompLevel_full_optimization) >
-              Tier3DelayOn * compiler_count(CompLevel_full_optimization)) {
-            next_level = CompLevel_limited_profile;
-          } else {
-            next_level = CompLevel_full_profile;
-          }
-```
+### 朴素方案一：既然 C2 最强，那热点直接上 C2 不就完了？
 
-注释还暴露了另一个聪明的细节: **level 2 的存在就是为了"排队减速"**——full profile 代码比 limited profile 慢约 30%,所以 C2 队列长时先编便宜的 2,等 C2 有空再升 3 补 profile。
+这听起来特别合理。既然 C2 产出的代码通常最好，那何必要绕一圈 C1？方法一热，直接交给最终优化器，不就省掉中间状态了？
 
-## 2. 阈值: 两档 predicate
+问题在于，C2 的“好”是以“慢”为代价的。它擅长做深优化，但并不擅长在方法刚刚变热、profile 还不成熟的时候立刻给系统一份低延迟反馈。如果所有热点一开始都直奔 C2，应用在预热阶段会把大量时间花在等慢编译器出结果上。
 
-"该升了吗"由两个 predicate 判定:`call_predicate`(调用入口)与 `loop_predicate`(回边/OSR),底层是同一个模板(按当前级别选档):
+更糟的是，C2 做得好的很多优化本来就依赖 profile。没有足够调用频率、类型分布和分支行为数据，C2 要么拿不到该有的信息，要么只能基于更保守的前提工作。这样一来，既慢，还不一定马上值回票价。
 
-```cpp
-// tieredThresholdPolicy.cpp:44-63(截取核心,逐字)
-bool TieredThresholdPolicy::call_predicate_helper(int i, int b, double scale, Method* method) {
-  double threshold_scaling;
-  if (CompilerOracle::has_option_value(method, "CompileThresholdScaling", threshold_scaling)) {
-    scale *= threshold_scaling;
-  }
-  switch(level) {
-  case CompLevel_aot:
-    return (i >= Tier3AOTInvocationThreshold * scale) ||
-           (i >= Tier3AOTMinInvocationThreshold * scale && i + b >= Tier3AOTCompileThreshold * scale);
-  case CompLevel_none:
-  case CompLevel_limited_profile:
-    return (i >= Tier3InvocationThreshold * scale) ||
-           (i >= Tier3MinInvocationThreshold * scale && i + b >= Tier3CompileThreshold * scale);
-  case CompLevel_full_profile:
-   return (i >= Tier4InvocationThreshold * scale) ||
-          (i >= Tier4MinInvocationThreshold * scale && i + b >= Tier4CompileThreshold * scale);
-  }
-  return true;
-}
-```
+这就是为什么 tiered compilation 的第一目标不是“尽快把所有热点都升级到最强优化器”，而是“尽快让热点离开解释器，同时把 profile 慢慢攒够”。
 
-判定是"**单计数达标 或 双计数协同达标**": `i >= TierXInvocationThreshold || (i >= TierXMinInvocationThreshold && i+b >= TierXCompileThreshold)`。一个容易被忽略的细节: **level 3→4 的判定看的是 MDO 的计数增量**(common 的 full_profile 分支: `mdo->invocation_count_delta()`/`backedge_count_delta()`,tieredThresholdPolicy.cpp:802-803——即 level 3 编译代码运行期间新增的计数,而非方法原始计数);`would_profile()` 返回 false(MDO 已收够数据)时更是直接升 4(:807-809)。默认值([实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/13-jit-tiered-demo.txt) PrintFlagsFinal):
+### 朴素方案二：那就老老实实 0→1→2→3→4 一层层爬
 
-- **解释器→C1(Tier3 档)**: `Tier3InvocationThreshold=200`、`Tier3MinInvocationThreshold=100`、`Tier3CompileThreshold=2000`——调用 200 次,或 100 次后调用+回边共 2000;
-- **C1→C2(Tier4 档)**: `Tier4InvocationThreshold=5000`、`Tier4MinInvocationThreshold=600`、`Tier4CompileThreshold=15000`;
-- **回边(OSR)档**: `Tier3BackEdgeThreshold=60000`、`Tier4BackEdgeThreshold=40000`——循环热点按回边计数触发;
-- 全部经 `scale` 缩放: ①`CompileThresholdScaling` 指令可按方法覆盖;②**队列负载反馈 `threshold_scale`**(tieredThresholdPolicy.cpp:558-574): `k = queue_size/(Tier3LoadFeedback=5 × compiler_count) + 1`——C1/C2 队列越长阈值越高(排队越久越要"够热才编");code cache 压力大时 C1 阈值再指数抬升(给 C2 留空间)。
+如果直接上 C2 太激进，另一个自然想法就是严格分层：解释器先到 1，再到 2，再到 3，最后 4。这样看起来既渐进，又有条理。
 
-08-03 说过的"CompileThreshold=10000"是非 tiered 的旧值;tiered 模式下真正的触发点是上面这五六个数。
+可真实方法并不需要同一条升级路径。
 
-## 3. 事件处理: 从计数器溢出到编译请求
+有些方法非常 trivial，比如 accessor、constant getter。这类方法即便交给 C2，也未必能比一个轻量 C1 版本好多少，却要付出更高的编译成本。对它们来说，“纯 C1 结束”反而就是最划算的终点。
 
-08-03 拆过: 解释器计数器溢出 → `InterpreterRuntime::frequency_counter_overflow` → `policy->event()`。`TieredThresholdPolicy::event`(tieredThresholdPolicy.cpp:371)按事件来源分两路(:392-403):
+另一些方法并不需要先经过 1。因为 level 1 的特点不是“所有方法的第一站”，而是“没有 profile 的纯 C1 代码”。普通热点方法如果真正目标是收集 profile，再逐层通向 C2，那么从解释器直接去 level 3，往往比机械踩过 1 和 2 更划算。
 
-```cpp
-// tieredThresholdPolicy.cpp:392-405(截取核心,逐字)
-  if (bci == InvocationEntryBci) {
-    method_invocation_event(method, inlinee, comp_level, nm, thread);
-  } else {
-    // method == inlinee if the event originated in the main method
-    method_back_branch_event(method, inlinee, bci, comp_level, nm, thread);
-    // Check if event led to a higher level OSR compilation
-    nmethod* osr_nm = inlinee->lookup_osr_nmethod_for(bci, comp_level, false);
-    if (osr_nm != NULL && osr_nm->comp_level() > comp_level) {
-      // Perform OSR with new nmethod
-      return osr_nm;
-    }
-  }
-  return NULL;
-}
-```
+还有些时候，系统甚至会因为 C2 队列太长，故意让方法先去 level 2，而不是 level 3。也就是说，层级迁移不仅取决于“这个方法有多热”，还取决于“当前编译系统有多忙”。
 
-- **method_invocation_event(:884)**: 先 `create_mdo`(需要 profile 就现场建 MDO,:886-888,12-ci/03 的 `build_interpreter_method_data` 在这里被调)——注意判定条件是 `should_create_mdo`(:638-648): 方法**还在解释器、且计数达到 C1 阈值的 `Tier0ProfilingStartPercentage`=200%**(足够"老")时,就在解释器里提前建 MDO 开 profile——不用等 C1 版本到场(注释 "start profiling without waiting for the compiled method to arrive");→ `call_event`(:889)算下一级 → 级别变了且编译可用 → `compile(mh, InvocationEntryBci, next_level)`(:896)——**普通编译**,入口是方法入口;
-- **method_back_branch_event(:903)**: 回边溢出——`loop_event` 算下一级 → `compile(imh, bci, next_osr_level)`(:918)——**OSR 编译**,入口是回边的 bci;顺带借这个事件检查"该不该顺便普通编译"(:921-932);**编译完成且级别更高时直接把新 nmethod 交给解释器跳转**(:398-402,OSR 的执行入口);
-- `call_event` 里有个巧妙的**级别均衡**(:827-834): 方法已有 C2 OSR 版本时,把普通编译级别提到 C2——否则每次调用都 OSR 一次(注释: "avoid OSRs during each invocation")。
+所以“严格爬楼梯”这条路看起来有秩序，实际上会让 trivial 方法、热点方法、OSR 场景和负载反馈全都被同一条僵硬路径绑死。
 
-**计数重置**: `handle_counter_overflow`(:273)把溢出计数**打上 carry 标志**(`set_carry_if_necessary`,:266-269,计数过半就置位)——防止刚编译完又立刻触发。
+到这里先立一个路标：这一篇真正要追的，不是“每层名字叫什么”，而是“为什么不同方法、不同事件、不同系统负载下，下一跳会不同”。
 
-[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/13-jit-tiered-demo.txt) `CiDemo::work` 的完整 tier 链(PrintCompilation): `%3`(OSR 到 tier3)→ `3`(普通 tier3)→ `%4`(OSR 到 tier4)→ `4`(普通 tier4),旧的 `%3`/`%4` 依次 `made not entrant`——与 08-03 的 CounterDemo 链(tier3→`%`tier4@4→tier4→made not entrant)同款。注意实证里先出现 `%3` 再出现 `3`——**循环热点先走 OSR**,普通入口随后补上,正是本篇两条事件路的实况。
+## 五层都是什么，但 1 并不是“常规第一站”
 
-## 4. TieredStopAtLevel: 把阶梯砍短
+先把地形图摆清楚。HotSpot 的 `CompLevel` 定义了五个层级：
 
-`TieredStopAtLevel`(默认 4)决定最高允许的级别——`common` 返回前 `MIN2(next_level, TieredStopAtLevel)`(:815)。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/13-jit-tiered-demo.txt) `-XX:TieredStopAtLevel=1` 时 CiDemo::work 只编出 `%1`/`1`(纯 C1,无 profile,就是大纲设想的 L1 形态——但它不是"阶梯的一级",而是"砍到只剩一级");`=3` 时最高 `%3`/`3`(full profile 封顶,不碰 C2)。调试/对比编译器行为时这是最常用的旋钮。
+- `0`：解释器；
+- `1`：纯 C1；
+- `2`：C1 + 调用/回边计数；
+- `3`：C1 + 完整 profiling；
+- `4`：C2 或 JVMCI 的 full optimization。
 
-## 核心悬念
+现稿里已经引用了这组枚举，最重要的是要把它们的语义拆开：`1`、`2`、`3` 都属于 C1 世界，但收集信息的丰富程度不同；`4` 才是“慢但强”的最终优化层。
 
-分层策略拆完了: 5 层(0 解释器/1 C1 无 profile/2 C1 计数/3 C1 全 profile/4 C2);**常规路径是 0→3→4**(C2 队列忙时走 0→2→3→4,trivial 方法才碰 1);两档阈值(200/100+2000 到 C1,5000/600+15000 到 C2,回边 60000/40000)+ 队列负载反馈缩放;事件两路(调用→普通编译、回边→OSR 编译 + 级别均衡);TieredStopAtLevel 砍阶梯。一句话: **快编译器负责"早点跑起来 + 便宜地攒 profile",慢编译器负责"等数据成熟后做重活"——两个队列、两套阈值、一条成熟度曲线。**
+真正容易被讲错的是 `1`。它并不是“所有方法从解释器出来后自然先踩一下的第一级台阶”。`TieredThresholdPolicy::is_trivial()` 明确把 accessor 和 constant getter 当作 trivial 方法，而 `common()` 一开头就对 trivial 方法直接给出 `CompLevel_simple`。也就是说，level 1 更像一种**特例终点**，而不是通用第一站。`share/runtime/tieredThresholdPolicy.cpp:82`、`share/runtime/tieredThresholdPolicy.cpp:84`、`share/runtime/tieredThresholdPolicy.cpp:85`、`share/runtime/tieredThresholdPolicy.cpp:86`、`share/runtime/tieredThresholdPolicy.cpp:720`、`share/runtime/tieredThresholdPolicy.cpp:721`
 
-但"编译到 level 3"只是说 C1 接手了——C1 内部怎么把字节码变成机器码?它和 C2 的管线有什么不同,才让它快一个量级?下一篇进入编译器内部: C1 的 6 步管线。
+这一步非常关键。因为一旦把 level 1 误解成“所有方法都会先到的一级”，后面所有路径都会被读偏。真实世界里，最常见的普通热点路径根本不是 `0→1→2→3→4`。
 
-> → [14-c1-compiler/01 — C1 管线 + HIR — 字节码→编译图](openjdk/vol-02/14-c1-compiler/01-c1-pipeline-ir.md)
+## 真正的核心在 `common()`：它决定的不是“下一层”，而是“下一跳”
+
+`TieredThresholdPolicy` 里最该记住的函数不是某个具体阈值判断，而是 `common()`。头文件已经把它定位得很清楚：给定一个 predicate，决定一个方法是否应该迁移到另一个 level。也就是说，它不是死板楼梯，而是通用状态转移函数。`share/runtime/tieredThresholdPolicy.hpp:173`、`share/runtime/tieredThresholdPolicy.hpp:176`、`share/runtime/tieredThresholdPolicy.hpp:179`、`share/runtime/tieredThresholdPolicy.hpp:180`
+
+而源码里紧贴着 `common()` 的那段大注释，实际上就是 tiered policy 的总路线图。最重要的几条路径是：
+
+- `0 -> 3 -> 4`：最常见路径；
+- `0 -> 2 -> 3 -> 4`：C2 队列太忙，先 limited profile；
+- `0 -> (3 -> 2) -> 4`：任务还在队列里时又因为负载反馈降回 2；
+- `0 -> 3 -> 1` 或 `0 -> 2 -> 1`：方法后来被识别为 trivial，或者 C2 编不了但 C1 还能编；
+- `0 -> 4`：有时不需要重新 profile，或者 C1 失败。 `share/runtime/tieredThresholdPolicy.cpp:676`、`share/runtime/tieredThresholdPolicy.cpp:684`、`share/runtime/tieredThresholdPolicy.cpp:685`、`share/runtime/tieredThresholdPolicy.cpp:689`、`share/runtime/tieredThresholdPolicy.cpp:694`、`share/runtime/tieredThresholdPolicy.cpp:700`、`share/runtime/tieredThresholdPolicy.cpp:704`
+
+这张图本身就已经击穿了“固定爬楼梯”的误解：HotSpot 不是在顺序走 1/2/3/4，而是在不同上下文下选不同下一跳。
+
+`common()` 里最经典的一段是从 `CompLevel_none` 出发的分支。它先递归问一个问题：**如果当前方法已经在 full-profile 层，是否会直接跳到 full optimization？** 如果答案是会，那当前解释器方法也可以直接把下一跳定成 4；否则再看当前的调用/回边计数有没有达到阈值。若达到了，还要再看 C2 队列负载：负载大时去 2，负载正常时去 3。`share/runtime/tieredThresholdPolicy.cpp:736`、`share/runtime/tieredThresholdPolicy.cpp:737`、`share/runtime/tieredThresholdPolicy.cpp:738`、`share/runtime/tieredThresholdPolicy.cpp:740`、`share/runtime/tieredThresholdPolicy.cpp:762`、`share/runtime/tieredThresholdPolicy.cpp:763`、`share/runtime/tieredThresholdPolicy.cpp:764`、`share/runtime/tieredThresholdPolicy.cpp:766`
+
+这段逻辑最值得记住的，不是哪条 if，而是背后的思路：**当前该去哪一层，不只看“我热不热”，还看“如果我现在去某层，会不会在系统当前负载下更划算”。**
+
+## 为什么 level 2 存在：它不是装饰台阶，而是“排队减速带”
+
+如果只看名字，`CompLevel_limited_profile` 很容易被当成 `full_profile` 的过渡层，似乎存在也行，不存在也行。实际恰恰相反，level 2 的存在理由非常具体，而且正好说明 tiered policy 的现实主义。
+
+`common()` 在 `CompLevel_none` 分支里有一段非常直白的注释：C1 生成的 full-profile 代码比 limited-profile 代码大约慢 30%。如果 C2 队列已经很长，而系统还把方法都一股脑推去 level 3，那这些方法会在“等待 C2”的这段时间里长时间泡在更慢的 profiling 代码里。为了解决这个问题，HotSpot 才引入了反馈机制：C2 队列够长时，先编一个 level 2 版本，等负载下来再补 level 3。`share/runtime/tieredThresholdPolicy.cpp:755`、`share/runtime/tieredThresholdPolicy.cpp:756`、`share/runtime/tieredThresholdPolicy.cpp:757`、`share/runtime/tieredThresholdPolicy.cpp:758`、`share/runtime/tieredThresholdPolicy.cpp:759`、`share/runtime/tieredThresholdPolicy.cpp:760`
+
+这说明 level 2 并不是“台阶摆在那里，顺手踩一下”，而是一块很明确的减速带：**当最终优化器太忙时，用更便宜的半 profile 版本顶一下，不让方法在重 profiling 代码里空耗。**
+
+一旦理解了这一点，很多表面上“绕路”的迁移其实就不再奇怪。因为策略并不是在追求“路径最短”，它在追求的是“在当前系统负载下，总成本最低”。
+
+## 阈值不是一个数，而是“两档计数 + 动态缩放”
+
+很多人谈 tiered policy 时最容易把注意力全放到“默认阈值是多少”。这当然重要，但如果只记一个定值，会把整个策略讲扁。
+
+`call_predicate_helper` 和 `loop_predicate_helper` 展示的是两类不同门槛：
+
+- 调用路径：要么调用次数单独达标，要么调用次数和回边次数协同达标；
+- 回边路径：直接看回边计数。 `share/runtime/tieredThresholdPolicy.cpp:44`、`share/runtime/tieredThresholdPolicy.cpp:51`、`share/runtime/tieredThresholdPolicy.cpp:55`、`share/runtime/tieredThresholdPolicy.cpp:58`、`share/runtime/tieredThresholdPolicy.cpp:65`、`share/runtime/tieredThresholdPolicy.cpp:72`、`share/runtime/tieredThresholdPolicy.cpp:75`、`share/runtime/tieredThresholdPolicy.cpp:77`
+
+这已经说明“够热”本身就不是一个单一数字，而是按调用热点和循环热点分成了两套判据。
+
+但更重要的是，这些阈值不是死的。`threshold_scale()` 会根据当前队列负载和 CodeCache 压力动态抬高或放大阈值。它先看当前层级对应编译器的队列长度与编译线程数，算出一个 `k`；然后如果还允许冲到 full optimization，而且当前层级不是 full optimization，就进一步查看对应 CodeBlob 类型的 CodeCache 压力，必要时再指数抬高阈值。`share/runtime/tieredThresholdPolicy.cpp:558`、`share/runtime/tieredThresholdPolicy.cpp:559`、`share/runtime/tieredThresholdPolicy.cpp:560`、`share/runtime/tieredThresholdPolicy.cpp:561`、`share/runtime/tieredThresholdPolicy.cpp:563`、`share/runtime/tieredThresholdPolicy.cpp:567`、`share/runtime/tieredThresholdPolicy.cpp:568`、`share/runtime/tieredThresholdPolicy.cpp:569`、`share/runtime/tieredThresholdPolicy.cpp:570`
+
+也就是说，阈值的真正含义不是“方法跑到某个固定数就升级”，而是“在当前系统负载下，方法是否热到值得消耗下一层的编译资源”。
+
+这也是为什么单独背几个默认值远远不够。默认值只是底稿，真正决定升级与否的，是“计数 × 当前缩放系数”这套动态阈值。
+
+## `event()` 为什么要分成 CALL 和 LOOP 两路
+
+到了真正运行期，Tiered policy 不是定时巡检，而是被事件驱动的。`event()` 就是入口：计数器溢出后，它先处理 counter overflow，再按 `bci` 区分这次事件到底是普通调用入口触发，还是循环回边触发。`share/runtime/tieredThresholdPolicy.cpp:371`、`share/runtime/tieredThresholdPolicy.cpp:383`、`share/runtime/tieredThresholdPolicy.cpp:392`、`share/runtime/tieredThresholdPolicy.cpp:394`
+
+这条分流非常关键，因为“方法被频繁调用”和“方法里的某个循环疯狂回边”不是同一种热点。
+
+- CALL 事件走 `method_invocation_event()`，目标是判断普通入口版本是否该升级；
+- LOOP 事件走 `method_back_branch_event()`，目标是判断 OSR 版本是否该升级。
+
+而且 LOOP 路径不是“只管 OSR，不管别的”。它在决定 OSR 之后，还会顺手检查普通入口是不是也该升。这样一来，你在 `PrintCompilation` 里看到“先 `%3` 再 `3`，再 `%4` 再 `4`”就不再奇怪了：这是循环热点与普通入口升级并行推进的正常表现。`share/runtime/tieredThresholdPolicy.cpp:398`、`share/runtime/tieredThresholdPolicy.cpp:399`、`share/runtime/tieredThresholdPolicy.cpp:401`、`share/runtime/tieredThresholdPolicy.cpp:884`、`share/runtime/tieredThresholdPolicy.cpp:889`、`share/runtime/tieredThresholdPolicy.cpp:895`、`share/runtime/tieredThresholdPolicy.cpp:903`、`share/runtime/tieredThresholdPolicy.cpp:914`、`share/runtime/tieredThresholdPolicy.cpp:917`、`share/runtime/tieredThresholdPolicy.cpp:921`
+
+这一步最值得记住的结论是：**CALL 与 LOOP 不是两种触发方式的细节差异，而是两条不同升级语义的入口。**
+
+## 为什么 profile 不一定非等 level 3 代码到场才开始收集
+
+很多人会下意识觉得：既然 full profiling 对应 level 3，那 profile 应该等方法先编成 level 3 版本，再开始认真收。实际上 HotSpot 比这更现实。
+
+`should_create_mdo()` 明确写了另一种策略：如果方法当前还在解释器层，而且 C2 队列负载没高到不该收 profile，就可以在解释器阶段先开始 profiling。判断条件还会乘上 `Tier0ProfilingStartPercentage` 这类系数。`share/runtime/tieredThresholdPolicy.cpp:636`、`share/runtime/tieredThresholdPolicy.cpp:639`、`share/runtime/tieredThresholdPolicy.cpp:640`、`share/runtime/tieredThresholdPolicy.cpp:641`、`share/runtime/tieredThresholdPolicy.cpp:643`、`share/runtime/tieredThresholdPolicy.cpp:645`、`share/runtime/tieredThresholdPolicy.cpp:646`
+
+而真正执行这件事的，就是 `method_invocation_event()` 和 `method_back_branch_event()` 一开头那几行：只要 `should_create_mdo()` 为真，就调用 `create_mdo()`；而 `create_mdo()` 自己也很克制，native、abstract、accessor、constant getter 这些方法直接跳过，其余才会在没有 MDO 时调用 `Method::build_interpreter_method_data`。`share/runtime/tieredThresholdPolicy.cpp:884`、`share/runtime/tieredThresholdPolicy.cpp:886`、`share/runtime/tieredThresholdPolicy.cpp:887`、`share/runtime/tieredThresholdPolicy.cpp:905`、`share/runtime/tieredThresholdPolicy.cpp:909`、`share/runtime/tieredThresholdPolicy.cpp:663`、`share/runtime/tieredThresholdPolicy.cpp:664`、`share/runtime/tieredThresholdPolicy.cpp:670`、`share/runtime/tieredThresholdPolicy.cpp:671`
+
+翻译成人话就是：**HotSpot 不想傻等 level 3 代码先编好再开始攒 profile，它会在解释器里就提前开 profile，这样等 C1/C2 真来吃数据时，饭已经先煮上了。**
+
+这也再次说明，分层策略真正优化的是“整体时间”，不是“状态看起来多整齐”。
+
+## `TieredStopAtLevel` 不是简单地“只剩前 N 级”，而是把后续所有下一跳都截掉
+
+最后还有一个很常用的调试开关：`TieredStopAtLevel`。它不是一个事后过滤器，而是直接进了 `common()` 的返回值：`return MIN2(next_level, (CompLevel)TieredStopAtLevel);`。`share/runtime/tieredThresholdPolicy.cpp:815`
+
+这个位置特别说明问题：`TieredStopAtLevel` 改的不是“哪些编译结果最后允许安装”，而是“策略在算下一跳时，允许它看见的最高终点”。
+
+所以把它设成 1，不是“仍然按原策略走，只是最后不让上更高层”，而是等于把整套策略裁成“纯 C1 世界”；设成 3，则把 full optimization 整个从下一跳候选里移掉，所有方法最多只会走到 full-profile C1。
+
+这就是为什么这个开关在调试编译器行为时特别有用：它不是单纯限制结果，而是直接改变策略空间。
+
+## 收网：分层策略不是爬楼梯，而是在动态选“下一跳”
+
+现在可以把整篇压成一张总图了。
+
+tiered compilation 的五层并不是一条人人都要走的固定楼梯。对 HotSpot 来说，真正的问题从来不是“当前在第几层”，而是“此刻最值得往哪一层跳”。`TieredThresholdPolicy` 通过 `common()`、`call_predicate`、`loop_predicate`、`threshold_scale()`、CALL/LOOP 两条事件路径，以及解释器里提前建 MDO 的逻辑，同时平衡了启动延迟、profile 成熟度、C1/C2 队列负载和 CodeCache 压力。结果就是：普通热点常走 `0→3→4`，C2 忙时会绕到 `2`，trivial 方法可能直接停在 `1`，循环热点则经常先 OSR 再补普通入口。`share/runtime/tieredThresholdPolicy.hpp:179`、`share/runtime/tieredThresholdPolicy.cpp:676`、`share/runtime/tieredThresholdPolicy.cpp:715`、`share/runtime/tieredThresholdPolicy.cpp:762`、`share/runtime/tieredThresholdPolicy.cpp:798`、`share/runtime/tieredThresholdPolicy.cpp:819`、`share/runtime/tieredThresholdPolicy.cpp:884`、`share/runtime/tieredThresholdPolicy.cpp:903`
+
+所以，本篇最核心的一句话不是“tiered 有 5 层”，而是：
+
+**分层策略不是按 `0→1→2→3→4` 爬楼梯，而是在每次事件发生时，根据热度、profile、队列负载和空间压力，动态选择最划算的下一跳。**
+
+只要这句抓住了，下一篇进入 C1 内部就顺了：当策略说“现在该去 level 3”时，C1 到底是怎样把字节码变成 HIR，再一路编成机器码的。
+
+> → [14-c1-compiler/01 — C1 管线 + HIR — 字节码→编译图](../14-c1-compiler/01-c1-pipeline-ir.md)

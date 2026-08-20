@@ -1,436 +1,314 @@
-# 03. Region A 里谁引用了 Region B？— RSet + CardTable 并发细化
+# 03. 为什么 G1 pause 不扫全老年代？— RSet + CardTable 的反向索引协议
 
-> **前置依赖**:[26-g1-gc/02 — 应用还在跑——你怎么知道谁活着？— 并发标记 + SATB](02-concurrent-marking.md):remark 结束后 `_next_marked_bytes` 已就位,但 Mixed GC 还得知道"哪些 Old Region 指向了我要收的 Young/Old Region";[25-gc-framework/05 — 一次赋值在 GC 眼里怎么变成"脏卡片"？— CardTable + DirtyCardQueue](openjdk/vol-02/25-gc-framework/05-cardtable-dirtycardq.md):post-write barrier、DirtyCardQueue 与并发精炼的底层机制已拆,本篇把它们接到 G1 的 RSet 上;[26-g1-gc/01 — 堆被切成 2048 块](01-heapregion.md):Region 结构、`_rem_set` 字段与 Region 粒度管理
-> → **后续**:[26-g1-gc/04 — 分配与晋升](04-allocation.md)
-> 关联域: 25-01(卡表结构)、25-04(并行消费)、21-shared-runtime(nmethod roots)
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64 / G1`。这里讨论的是 G1 里 remembered set、dirty card queue、并发精炼以及 pause 内 `Update RS / Scan RS` 的接力协议：它们怎样把“谁可能指向我要收的 Region”缩成一个足够小的工作集。SATB 与并发标记本身放在上一篇；分配与晋升放在下一篇。
+>
+> **前置依赖**：[02 — 应用线程还在改图，G1 为什么还敢并发标记？— 并发标记 + SATB](02-concurrent-marking.md)、[25-gc-framework/05 — CardTable + DirtyCardQueue](../25-gc-framework/05-cardtable-dirtycardq.md)、[01 — 为什么 G1 要把堆切成一张网格？— `HeapRegion` 与 `G1CollectedHeap`](01-heapregion.md)
+> → **后续**：[04 — 分配与晋升](04-allocation.md)
 
-并发标记解决了"谁活着"。但 Evacuation Pause 还有另一个问题: **我要收 Region Y,凭什么去扫整个老年代找谁指向它?** G1 的答案是 RSet(remembered set): 每个 Region 自己维护一张"谁引用了我"的反查表。反查表的索引入口是 card table(512B 一卡),来源是 post-write barrier 记下来的脏卡,后台由 concurrent refinement 线程慢慢消化,暂停里再由 Update RS + Scan RS 接力。于是一次 Young GC 扫的不是整个 Old,而只是**那些可能指向 Collection Set 的卡**。
+上一篇并发标记已经回答了一个关键问题：**这一轮哪些对象活着。**
 
----
+但 evacuation pause 还差另一半问题：**如果我要回收或搬移 Collection Set 里的 Region，外面谁还指着它们？**
 
-## 1. RSet 是什么 — 每个 Region 的"谁引用了我"
+最直觉的办法当然是：暂停时把整个老年代扫一遍，看看所有旧对象里哪些字段指向我要收的年轻区或 mixed CSet。
 
-### `_rem_set` 字段挂在 HeapRegion 上
+这当然正确，但几乎等于把每次 Young/Mixed Pause 的成本重新绑回“老年代总大小”。G1 花了这么大力气把堆切成 Region、把并发标记做成快照，最后如果 pause 里还要整块老年代重扫一遍，那前面的粒度化设计就等于在最关键的暂停路径上失效了。
 
-26-01 见过 `HeapRegion` 的成员里有一个 `_rem_set`(heapRegion.hpp:198-201)。它不是"我引用了谁",而是**谁引用了我**。`HeapRegionRemSet`(heapRegionRemSet.hpp:170-183):
+这就逼出本篇最该回答的问题：**并发标记已经知道‘哪些对象活着’，可 evacuation pause 仍然必须知道‘谁指向了我要搬的 Region’。G1 为什么不直接在暂停里扫描整个老年代？为什么要提前把 post-write barrier 变成 dirty card queue，再后台精炼成 remembered set？RSet 到底存的不是‘我引用了谁’，而是‘谁引用了我’这件事，为什么这么关键？**
 
-```cpp
-// heapRegionRemSet.hpp:170-183(截取核心,逐字)
-class HeapRegionRemSet : public CHeapObj<mtGC> {
-  friend class VMStructs;
-  friend class HeapRegionRemSetIterator;
+先把答案压成一句话：**G1 的 remembered set 本质上是一张 per-region 反向索引：我不关心‘这个 Old Region 指向了谁’，我关心‘如果我要收 Region Y，哪些别的 Region 的哪些 card 里可能有指向 Y 的引用’。post-write barrier 只负责把来源 card 标脏并入队；并发精炼线程再把“来源 card → 目标 Region”这层关系慢慢翻译进目标 Region 的 RSet。这样 pause 里就能先 Update RS 清尾，再 Scan RS 只扫可能命中 Collection Set 的卡，而不是整块老年代。**
 
-private:
-  G1BlockOffsetTable* _bot;
+## 先试两个最自然的办法，看看为什么都不行
 
-  // A set of code blobs (nmethods) whose code contains pointers into
-  // the region that owns this RSet.
-  G1CodeRootSet _code_roots;
+### 朴素方案一：Young/Mixed pause 时直接扫描整个老年代找入边
 
-  Mutex _m;
+这是最自然的第一反应。
 
-  OtherRegionsTable _other_regions;
+如果 pause 的目标是搬走一批年轻 Region 或 mixed CSet，那最稳妥的办法似乎就是：把所有可能持有外部引用的 old/humongous Region 全扫一遍，看到指向 CSet 的字段就处理。
+
+这个办法的正确性没什么问题，问题在于它会把 pause 成本重新拖回按老年代体量增长。
+
+因为你真正关心的并不是“老年代里全部对象的全部字段”，而只是“**那些可能跨 Region 指向 CSet 的字段**”。如果每次暂停都从整个 old/humongous 空间重新找这批字段，G1 的暂停时间就会重新和“堆有多大”而不是“这次要收的格子与它们的入边有多少”发生强耦合。
+
+而 G1 之所以要做 Region 网格、并发标记、动态 collection set，本来就是为了把“这次暂停要处理什么”收窄到足够小的工作集。
+
+所以第一种朴素方案失败，不是因为全扫老年代不安全，而是因为**它会把 G1 最关键的暂停时间优势重新抹掉。**
+
+### 朴素方案二：写 barrier 现场直接把完整 RSet 更新好
+
+第二个也很自然的想法是：好，我接受不能在 pause 里全扫老年代。那不如在每次写引用时就立刻把目标 Region 的 remembered set 更新好，这样 pause 里直接读现成结果就行。
+
+这个想法的问题在于，它把 mutator 热路径当成了“后台记账线程”。
+
+写引用的那一刻，应用线程最需要的是：
+
+- 尽快把 card 标脏；
+- 尽快把“这里可能出了跨 Region 更新”的线索留下；
+- 然后回去继续业务逻辑。
+
+如果在 barrier 现场就要求它：
+
+- 找到来源字段所在 card；
+- 扫描 card 上对象边界；
+- 解析字段里到底指向哪个 Region；
+- 再把这条关系更新进目标 Region 的 remembered set 结构里；
+
+那这条 post-barrier 会立刻从“留下线索”膨胀成“替 GC 做完整索引维护”。这对应用线程来说代价太重，也完全失去了批处理和后台精炼的空间。
+
+所以 G1 的做法正好相反：**mutator 只留下脏卡线索，真正的 RSet 翻译工作尽量后移到并发精炼线程和 pause 内 Update RS。**
+
+这两个失败方案合起来，正好引出本篇主线：**G1 想把 pause 里的扫描范围压小，就必须提前把“谁可能指向我”这件事做成一张反向索引，但这张索引又不能在 mutator 热路径上完整维护。**
+
+## `HeapRegionRemSet`：为什么 owner Region 存的是“谁引用了我”
+
+先从 remembered set 的本体开始。
+
+### `_rem_set` 挂在 `HeapRegion` 上，但语义不是“我引用了谁”
+
+`HeapRegion` 里有一个 `_rem_set` 字段。真正的类型是 `HeapRegionRemSet`。`src/hotspot/share/gc/g1/heapRegionRemSet.hpp:170`
+
+它内部最重要的两块是：
+
+- `_code_roots`：代码根（例如 nmethod）里指向这个 Region 的引用；
+- `_other_regions`：普通堆 Region 对这个 owner Region 的外部引用。`src/hotspot/share/gc/g1/heapRegionRemSet.hpp:170`
+
+这里最需要读者记住的一句话是：**这张表的 owner 是“被指向的 Region”，表里记的是“谁从外面指向了我”。**
+
+也就是说，它不是传统正向关系表：“我这个 Region 出去指向了谁”；它恰恰反过来，是：“如果我要回收我自己，外面有哪些来源 Region/代码根 可能要来找我”。
+
+这一步是整篇最重要的方向感。如果这件事方向看反，后面 coarse/fine/sparse、dirty card、refine、scan RS 全都会越看越乱。
+
+### `add_reference(from)` 为什么传的是来源字段地址
+
+`HeapRegionRemSet::add_reference(OopOrNarrowOopStar from, uint tid)` 看起来很小，但语义极重。它拿到的不是 target 对象，不是 owner Region，也不是一条抽象“边”；它拿到的是**来源字段地址** `from`。`src/hotspot/share/gc/g1/heapRegionRemSet.hpp:257`
+
+这就把 remembered set 的真正记录粒度说明白了：它要记的不是“来源 Region 里有个对象指向我”这么粗的事实，而是“来源 Region 里的哪张 card 上有某个字段可能指向我”。
+
+也就是说，RSet 真正想缩小的是 pause 时的扫描粒度：**从整块 Region 缩到具体来源 cards。**
+
+所以本节最该记住的一句话是：**remembered set 不是对象图边表，而是 target Region 视角下的来源 card 反查表。**
+
+## `OtherRegionsTable`：为什么 coarse/fine/sparse 是混合容器，不是单一模式切换
+
+一旦理解了 remembered set 的方向，下一步就要看：它拿什么来装这些“谁的哪些 cards 可能指向我”的信息。
+
+很多材料会把 G1 的 Sparse/Fine/Coarse 讲成一种“三态升级路径”：一开始 sparse，不够了就 fine，再不够就 coarse。这样讲勉强不算错，但很容易让人误会成“整张表此刻只能处在其中一种模式”。
+
+源码里的真实结构更复杂，也更有意思。
+
+### `_coarse_map`、`_fine_grain_regions`、`_sparse_table` 是同一张表里的三种容器
+
+`OtherRegionsTable` 自己同时持有：
+
+- `_coarse_map`
+- `_fine_grain_regions`
+- `_sparse_table`。`src/hotspot/share/gc/g1/heapRegionRemSet.hpp:74`
+
+这说明 remembered set 不是“在 sparse/fine/coarse 三个模式里三选一”，而是**同一张表里并存三种粒度容器**：
+
+- 对某些来源 Region，只有很少几张 card，就待在 `SparsePRT`；
+- 对另一些来源 Region，会升级成 `PerRegionTable` 这种 fine-grained 记录；
+- 如果 fine 表太满，就驱逐某个 fine entry，把对应来源 Region 粗化成 `_coarse_map` 上的一个位。
+
+源码注释把这个策略说得很直白：fine 表有容量上限；溢出时会删除一个 fine entry，并设置对应 coarse-grained bit。`src/hotspot/share/gc/g1/heapRegionRemSet.hpp:50`
+
+所以 coarse/fine/sparse 不是“整张 remembered set 的三态”，而是**同一张 remembered set 里，不同来源 Region 被用不同精度记账的混合容器。**
+
+### `SparsePRT` 自己还分 `_cur` / `_next`
+
+更进一步，`SparsePRT` 自身也不是一张单表，而是 `_cur` 和 `_next` 两张 `RSHashTable`。注释直接写明：迭代只看 `_cur`，其余操作都改 `_next`。`src/hotspot/share/gc/g1/sparsePRT.hpp:225`
+
+这一步很像上一章 `_prev_mark_bitmap` / `_next_mark_bitmap` 的思路：一份给 pause 稳定读取，一份给并发更新继续长。
+
+所以本节最该记住的一句话是：**RSet 内部不是一根链，而是一组按来源 Region 和并发时机共同分层的混合索引结构。**
+
+## 脏卡怎么进 RSet：post barrier 为什么只标脏和入队
+
+现在回到 remembered set 最前面的源头：post-write barrier。
+
+### `write_ref_field_post_slow`：它并不直接改 RSet
+
+`write_ref_field_post_slow()` 的逻辑极其克制：
+
+- 如果这张 card 还不是 dirty，就把它置成 dirty；
+- 然后把 card 的字节地址 `byte` 扔进当前线程的 `dirty_card_queue`；
+- 非 JavaThread 才走共享队列并加锁。`src/hotspot/share/gc/g1/g1BarrierSet.cpp:99`
+
+这说明 post barrier 干的不是“完整更新 remembered set”，而只是两件事：
+
+1. 这张 card 现在值得后续检查；
+2. 把它排进一条待精炼队列。
+
+换句话说，post barrier 记录的是**线索**，不是结论。
+
+### 为什么 pause 开始时还要 `concatenate_logs()`
+
+即便有后台精炼线程，pause 开始前也还得先把各 Java 线程手头尚未写满的 partial dirty logs 拼进全局 completed list。这件事在 `DirtyCardQueueSet::concatenate_logs()` 里做，而且要求在 safepoint 下执行。`src/hotspot/share/gc/g1/dirtyCardQueue.cpp:337`
+
+这一步非常重要，因为它说明 remembered set 的更新不是“后台线程最终总会搞定”的懒散承诺，而是：**后台能处理多少算多少，pause 开始时必须先把尾巴也收进来。**
+
+所以本节最该记住的一句话是：**post barrier 只留下脏卡线索，真正的 remembered set 内容要靠后续精炼和 pause 清尾来补齐。**
+
+## 并发精炼：为什么 refine thread 的工作单位是一整块 completed buffer
+
+既然 post barrier 只留下线索，那真正把 card 线索翻译成 remembered set 的工作，主要就落在并发精炼线程上了。
+
+### `run_service()`：它等的不是单卡，而是 completed buffers
+
+`G1ConcurrentRefineThread::run_service()` 的主循环非常直接：
+
+- 先 `wait_for_completed_buffers()`；
+- 醒来后进入 `SuspendibleThreadSetJoiner`；
+- 然后反复调 `do_refinement_step(worker_id)`，直到这轮工作告一段落。`src/hotspot/share/gc/g1/g1ConcurrentRefineThread.cpp:92`
+
+这一步特别值得记，因为它说明 refine thread 的输入并不是“一张张卡”，而是**completed dirty-card buffers 这种批量单位**。
+
+### `do_refinement_step()`：真正处理的是“下一个已满 buffer”
+
+`do_refinement_step()` 本身也很短：看当前 completed buffer 数量，必要时激活更多线程，然后直接调用 `refine_completed_buffer_concurrently(...)`。`src/hotspot/share/gc/g1/g1ConcurrentRefine.cpp:429`
+
+也就是说，并发精炼线程真正的工作单位不是单个 card，而是：**从队列里取出一整块 completed buffer，再逐卡处理。**
+
+这正是为什么 post barrier 能够便宜：mutator 把 card 地址成批推进队列，后台线程再成批吃掉。
+
+### `G1ConcurrentRefineOopClosure`：更新方向是“来源字段 → 目标 Region.rem_set”
+
+真正的 remembered set 更新逻辑，在 `G1ConcurrentRefineOopClosure::do_oop_work()`。它会：
+
+- 从来源字段 `p` 读出对象 `obj`；
+- 如果 source 和 target 在同一 Region，直接返回；
+- 找到 target 所在的 Region 的 `rem_set()`；
+- 如果 target 的 remembered set 当前处于 tracked 状态，就 `to_rem_set->add_reference(p, _worker_i)`。`src/hotspot/share/gc/g1/g1OopClosures.inline.hpp:131`
+
+这一步特别值得慢下来读，因为它把 remembered set 的方向彻底钉死了：**扫描是在来源 card 上做的，但更新发生在目标 Region 的 rem_set 里。**
+
+也就是说，这条链路真正翻译的是：
+
+“我在来源 card 上发现了一个字段，它指向了别的 Region，那就去那个被指向 Region 的反向索引里记上一笔：有人可能从这张 card 来找你。”
+
+所以本节最该记住的一句话是：**并发精炼不是在给来源 Region 记账，而是在替目标 Region 维护‘谁可能会来找我’。**
+
+## pause 接力：为什么先 Update RS 再 Scan RS
+
+后台线程能吃掉大部分 dirty buffers，但 pause 真正开始时，仍然要有最后一轮接力。
+
+### `prepare_for_oops_into_collection_set_do`：先把各线程尾巴汇总进来
+
+在真正处理 collection set 之前，`prepare_for_oops_into_collection_set_do()` 会先 `concatenate_logs()`，再 reset `_scan_state`。`src/hotspot/share/gc/g1/g1RemSet.cpp:511`
+
+这一步意味着：pause 并不是“后台都做完了，我直接用 RSet”，而是先把各线程手上还没凑满的 dirty-card 尾巴也推进 completed list，再开始正式处理。
+
+### `update_rem_set`：先清尾，不然看到的是过期索引
+
+`G1RemSet::oops_into_collection_set_do()` 的顺序非常短，却非常关键：
+
+- 先 `update_rem_set(pss, worker_i)`；
+- 再 `scan_rem_set(pss, worker_i)`。`src/hotspot/share/gc/g1/g1RemSet.cpp:506`
+
+这个顺序不能反。因为如果先扫 remembered set，再去处理 dirty-card 尾巴，你扫到的就是一张还没把最新来源卡片翻进去的过期索引。
+
+`update_rem_set()` 自己的作用也很明确：
+
+- 先处理 hot card cache；
+- 再处理所有 remaining dirty-card buffers；
+- 每处理一张 card，都通过 `G1ScanObjsDuringUpdateRSClosure` 决定：
+  - 如果目标已经在 CSet，直接把引用推去 evacuate 队列；
+  - 否则再把这张来源 card 记进目标 Region 的 remset。`src/hotspot/share/gc/g1/g1RemSet.cpp:477`、`src/hotspot/share/gc/g1/g1OopClosures.inline.hpp:159`
+
+所以 Update RS 干的不是“顺手扫一遍脏卡”，而是**把暂停开始瞬间还没精炼完的那批线索正式翻译成可用于本次 evacuation 的 remembered-set 视图。**
+
+### `scan_rem_set`：真正扫的是 CSet 各 Region 的入边表
+
+等尾巴清完，`scan_rem_set()` 才真正以 collection set 为中心展开。`src/hotspot/share/gc/g1/g1RemSet.cpp:425`
+
+`scan_rem_set_roots()` 的迭代方式特别能说明 remembered set 的用途：
+
+- 它遍历的是 `r->rem_set()`；
+- 也就是“这个 CSet Region 的外部入边来源 cards”；
+- 再按 block claim、`scan_top` 截断、`claim_card` 等机制逐卡扫描。`src/hotspot/share/gc/g1/g1RemSet.cpp:341`
+
+这意味着 pause 里的扫描工作集不再是“整块 old/humongous 空间”，而是“**collection set 中每个 Region 的 remembered set 里列出的那些可能命中的来源 cards**”。
+
+这就是 remembered set 设计真正的收益兑现点。
+
+所以本节最该记住的一句话是：**Update RS 先把索引补新，Scan RS 再用这张索引去只扫必要的 cards。**
+
+## 到这里为止，主线其实只发生了四件事
+
+如果前面层次很多，这里先把整件事压回四步：
+
+1. post barrier 只把“这张来源 card 可能变脏了”记成 dirty-card 线索；
+2. 并发精炼线程把大部分线索提前翻译成“目标 Region.rem_set 记住了这张来源 card”；
+3. pause 开始时再用 Update RS 把尾巴清干净；
+4. 最后 Scan RS 只扫 Collection Set 各 Region 的 remembered set 里列出的来源 cards，而不是整个老年代。
+
+只要这四步还在脑子里，RSet 就不会再像一堆 sparse/fine/coarse 结构体细节。
+
+## 常见误解澄清
+
+### 误解一：RSet 记录的是“我引用了谁”
+
+不是。
+
+它是 target Region 视角下的反向索引：如果我要收我自己，外面谁的哪些 cards 可能指向我。`src/hotspot/share/gc/g1/heapRegionRemSet.hpp:257`
+
+### 误解二：Sparse/Fine/Coarse 是三选一单状态机
+
+不对。
+
+同一张 `OtherRegionsTable` 里可以同时有 `_sparse_table`、`_fine_grain_regions` 和 `_coarse_map`；它们是混合容器，不是整表三态。`src/hotspot/share/gc/g1/heapRegionRemSet.hpp:74`
+
+### 误解三：post barrier 会直接更新完整 RSet
+
+不会。
+
+它只把 card 置 dirty 并入队；真正把来源 card 翻成 target Region.rem_set 的工作，主要在并发精炼和 pause 内 Update RS。`src/hotspot/share/gc/g1/g1BarrierSet.cpp:99`
+
+### 误解四：Scan RS 在扫整个老年代
+
+不是。
+
+它是围绕 collection set 的 owner Region 逐个遍历 `rem_set()`，只扫 remembered set 里列出的来源 cards。`src/hotspot/share/gc/g1/g1RemSet.cpp:425`
+
+### 误解五：`rebuild` / `tracking` 和并发标记里的 liveness 统计是一回事
+
+不对。
+
+并发标记负责“谁活着”；RSet/RemSet tracking 负责“谁可能指向我要收的 Region”。两者会在同一轮 GC 周期里衔接，但回答的是不同问题。
+
+## 收网：RSet 的本质，不是“多一张表”，而是把 pause 的工作集从整块老年代缩到可能命中的 cards
+
+现在再回头看最开头那个问题，答案已经能收成一张总图了。
+
+```text
+写引用时
+  G1 post-barrier
+    └─ card 置 dirty + byte* 入 DirtyCardQueue
+
+并发期
+  G1ConcurrentRefineThread
+    └─ 取 completed dirty buffers
+         └─ 扫 card 上对象字段
+              └─ 对每个跨 Region 引用: 目标 Region.rem_set.add_reference(from)
+
+暂停期
+  prepare_for_oops_into_collection_set_do
+    └─ 把各线程尾巴 dirty logs 拼进 completed list
+  update_rem_set
+    └─ 处理尚未精炼完的脏卡
+  scan_rem_set
+    └─ 以 Collection Set 的每个 Region 为 owner，反查来源 cards
 ```
 
-`_code_roots` 记录代码里的强根(nmethod 等代码根),`_other_regions` 才是普通堆引用的主表。**owner region = 这张 RSet 所属的 Region;表里的每条记录都在回答: 哪个别的 Region 的哪些 card 里,可能有指向 owner 的引用。**
+把它再压成三句话：
 
-### `OtherRegionsTable`: coarse + fine + sparse 三层混合
+- G1 remembered set 真正记录的不是“谁往外指”，而是“如果我要收我，谁可能从外面来找我”。
+- post barrier、dirty-card queue、并发精炼、Update RS、Scan RS 组成的是一条“线索 → 反向索引 → pause 工作集”的接力链。
+- 没有这条链，Young/Mixed pause 就会重新退化成扫描整个 old/humongous 空间，暂停时间重新和老年代体量绑定。
 
-`OtherRegionsTable` 的设计注释(heapRegionRemSet.hpp:50-58,74-104):
+所以这一篇真正该记住的，不是 `_coarse_map`、`SparsePRT` 这些结构名本身。
 
-```cpp
-// heapRegionRemSet.hpp:50-58,82-87,103-104(截取核心,逐字)
-// The "_coarse_map" is a bitmap with one bit for each region, where set
-// bits indicate that the corresponding region may contain some pointer
-// into the owning region.
+真正该记住的是：**G1 想把 pause 时间压短，靠的不是‘扫描得更快’，而是‘在暂停前就把要扫的东西缩小到只剩可能命中的 cards’。RSet 正是这张工作集压缩表。**
 
-// The "_fine_grain_entries" array is an open hash table of PerRegionTables
-// (PRTs), indicating regions for which we're keeping the RS as a set of
-// cards.  The strategy is to cap the size of the fine-grain table,
-// deleting an entry and setting the corresponding coarse-grained bit when
-// we would overflow this cap.
+下一篇就顺着这条链继续往后走。到这里，G1 已经既知道“谁活着”，也知道“谁可能指向我要收的 Region”；剩下最现实的问题就是：对象平时怎么落到 Region、何时进 TLAB、什么时候横躺成 humongous、晋升失败又怎么兜底。
 
-  CHeapBitMap _coarse_map;
-  size_t      _n_coarse_entries;
-...
-  PerRegionTable** _fine_grain_regions;
-  size_t           _n_fine_entries;
-...
-  SparsePRT   _sparse_table;
-```
-
-不是大纲里那种"Sparse/Fine/Coarse 三个独立模式三选一"。真实结构是**同一张 RSet 同时持有三种容器**:
-
-1. **SparsePRT** — 小量 entry 走稀疏表,按"来源 Region → 少量 card index"存;
-2. **fine-grain PRT** — 某些来源 Region 升级成 `PerRegionTable`,按 card 位图或表结构存更细信息;
-3. **coarse_map** — 再装不下时,直接退化成"这个来源 Region 整体可能有引用",扫描时只能按整个 Region 粗扫。
-
-所以**粗化(coarsen)**不是"Sparse 升 Fine 再升 Coarse 的单对象状态机",而是: 这张 RSet 里,某个来源 Region 原来有 fine entry;当 fine 表总量逼近上限,就驱逐一个 fine entry,把它对应的来源 Region 位置到 `_coarse_map` 上。源码注释说得很直白(heapRegionRemSet.hpp:54-58): *cap the size of the fine-grain table, deleting an entry and setting the corresponding coarse-grained bit when we would overflow this cap.*
-
-### add_reference: 引用是从来源地址算出来的
-
-`HeapRegionRemSet::add_reference`(heapRegionRemSet.hpp:257-268):
-
-```cpp
-// heapRegionRemSet.hpp:257-268(截取核心,逐字)
-  // Used in the sequential case.
-  void add_reference(OopOrNarrowOopStar from) {
-    add_reference(from, 0);
-  }
-
-  // Used in the parallel case.
-  void add_reference(OopOrNarrowOopStar from, uint tid) {
-    RemSetState state = _state;
-    if (state == Untracked) {
-      return;
-    }
-    _other_regions.add_reference(from, tid);
-  }
-```
-
-传入的不是 target oop,而是**来源字段地址 `from`**。`OtherRegionsTable::card_within_region` 会把这个字段地址换算成"来源 Region 内的第几张 card"(heapRegionRemSet.hpp:133-137)。所以 RSet 存的是:
-
-- 来源 Region 是谁;
-- 该 Region 里哪几张 card 可能有指向 owner region 的引用。
-
-这样 Young GC 扫 Collection Set 时,就能从 **target region → source cards** 反查回来,只扫这几张 card,不用扫整块老年代。
-
----
-
-## 2. 稀疏表怎么存 — SparsePRT 不是"128 entries"
-
-大纲把 Sparse/Fine 的阈值和内存模型都写偏了。真实稀疏结构在 `sparsePRT.hpp`。
-
-### 一条 Sparse entry = 一个来源 Region + 若干张 card
-
-`SparsePRTEntry`(sparsePRT.hpp:46-73):
-
-```cpp
-// sparsePRT.hpp:46-73(截取核心,逐字)
-class SparsePRTEntry: public CHeapObj<mtGC> {
-private:
-  // The type of a card entry.
-  typedef uint16_t card_elem_t;
-...
-  RegionIdx_t _region_ind;
-  int         _next_index;
-  int         _next_null;
-...
-  static size_t size() { return sizeof(SparsePRTEntry) + sizeof(card_elem_t) * (cards_num() - card_array_alignment); }
-  // Returns the size of the card array.
-  static int cards_num() {
-    return align_up((int)G1RSetSparseRegionEntries, (int)card_array_alignment);
-  }
-```
-
-一条 `SparsePRTEntry` 绑定一个 `_region_ind`(来源 Region 编号),后面拖一段 `_cards[]` 变长数组。`cards_num()` 直接取 `G1RSetSparseRegionEntries`。**所以大纲的"<128 entries"是错的**——实际阈值由 flag `G1RSetSparseRegionEntries` 控制,不是固定 128,而且单位是**每个来源 Region 内能直接塞多少张 card**。更进一步,这个值默认还会按 region 大小做人体工学放大(heapRegionRemSet.cpp:630-641): `G1RSetSparseRegionEntries = G1RSetSparseRegionEntriesBase * (region_size_log_mb + 1)`。
-
-### SparsePRT 是双哈希表,不是单表就地改
-
-`SparsePRT`(sparsePRT.hpp:225-254):
-
-```cpp
-// sparsePRT.hpp:225-254(截取核心,逐字)
-class SparsePRT {
-  friend class SparsePRTCleanupTask;
-
-  //  Iterations are done on the _cur hash table, since they only need to
-  //  see entries visible at the start of a collection pause.
-  //  All other operations are done using the _next hash table.
-  RSHashTable* _cur;
-  RSHashTable* _next;
-...
-  void expand();
-
-  bool _expanded;
-...
-  static SparsePRT* volatile _head_expanded_list;
-```
-
-这才是 pause 与并发更新能并存的关键: **暂停中的迭代看 `_cur`; 并发插入改 `_next`。** Pause 结束后再统一 cleanup/切换,避免边扫边改把迭代器搞乱。26-02 的双 bitmap 是"上轮结果 + 本轮构造"双份并存;这里的 `SparsePRT` 也是类似思路——**一份给 pause 稳定读取,一份给并发写入生长。**
-
----
-
-## 3. 扫描时怎么用 — Scan RS 不是扫整个 Old
-
-### G1RemSet 的职责写在头文件上
-
-`G1RemSet` 的注释(g1RemSet.hpp:54-69):
-
-```cpp
-// g1RemSet.hpp:54-69(截取核心,逐字)
-// A G1RemSet in which each heap region has a rem set that records the
-// external heap references into it.  Uses a mod ref bs to track updates,
-// so that they can be used to update the individual region remsets.
-class G1RemSet: public CHeapObj<mtGC> {
-private:
-  G1RemSetScanState* _scan_state;
-...
-  // Scan all remembered sets of the collection set for references into the collection
-  // set.
-  void scan_rem_set(G1ParScanThreadState* pss, uint worker_i);
-
-  // Flush remaining refinement buffers for cross-region references to either evacuate references
-  // into the collection set or update the remembered set.
-  void update_rem_set(G1ParScanThreadState* pss, uint worker_i);
-```
-
-两步很清楚:
-
-1. **Update RS** — 先把还在 dirty-card queue 里的剩余脏卡消费掉: 指向 CSet 的引用直接入 evacuate 队列,其余跨 Region 引用补记到 target region 的 RSet;
-2. **Scan RS** — 再遍历 Collection Set 各 Region 的 RSet,按 card 反查来源,把真正指向 CSet 的对象找出来并 evacuate。
-
-### Pause 内实际入口: `oops_into_collection_set_do`
-
-入口很短但顺序极关键:g1RemSet.cpp:506-509 先 `update_rem_set(pss, worker_i)`,再 `scan_rem_set(pss, worker_i)`。顺序不能反。因为如果先扫 RSet、后处理剩余 dirty card queue,你看到的就是一张过期索引。
-
-### `scan_rem_set`: 遍历的是 Collection Set 各 Region 的入边表
-
-`scan_rem_set`(g1RemSet.cpp:425-441):
-
-```cpp
-// g1RemSet.cpp:425-441(截取核心,逐字)
-void G1RemSet::scan_rem_set(G1ParScanThreadState* pss, uint worker_i) {
-  G1ScanObjsDuringScanRSClosure scan_cl(_g1h, pss);
-  G1ScanRSForRegionClosure cl(_scan_state, &scan_cl, pss, worker_i);
-  _g1h->collection_set_iterate_from(&cl, worker_i);
-...
-  p->record_thread_work_item(G1GCPhaseTimes::ScanRS, worker_i, cl.cards_scanned(), G1GCPhaseTimes::ScanRSScannedCards);
-  p->record_thread_work_item(G1GCPhaseTimes::ScanRS, worker_i, cl.cards_claimed(), G1GCPhaseTimes::ScanRSClaimedCards);
-  p->record_thread_work_item(G1GCPhaseTimes::ScanRS, worker_i, cl.cards_skipped(), G1GCPhaseTimes::ScanRSSkippedCards);
-```
-
-这里不是"遍历整个老年代找旧卡"。它是 `collection_set_iterate_from(&cl, worker_i)`: **以 CSet 里的每个 Region 为 owner,遍历它自己的 remembered set。** 所以 Scan RS 的工作集天然被限制在"谁指向了我要收的 Region"。
-
-### `scan_rem_set_roots`: card 级 claim + top 截断
-
-真正的 card 扫描在 `G1ScanRSForRegionClosure::scan_rem_set_roots`(g1RemSet.cpp:341-394):
-
-```cpp
-// g1RemSet.cpp:341-394(截取核心,逐字)
-void G1ScanRSForRegionClosure::scan_rem_set_roots(HeapRegion* r) {
-  uint const region_idx = r->hrm_index();
-...
-  size_t const block_size = G1RSetScanBlockSize;
-
-  HeapRegionRemSetIterator iter(r->rem_set());
-  size_t card_index;
-
-  size_t claimed_card_block = _scan_state->iter_claimed_next(region_idx, block_size);
-  for (size_t current_card = 0; iter.has_next(card_index); current_card++) {
-    if (current_card >= claimed_card_block + block_size) {
-      claimed_card_block = _scan_state->iter_claimed_next(region_idx, block_size);
-    }
-    if (current_card < claimed_card_block) {
-      _cards_skipped++;
-      continue;
-    }
-...
-    HeapWord* const top = _scan_state->scan_top(region_idx_for_card);
-    if (card_start >= top) {
-      continue;
-    }
-...
-    claim_card(card_index, region_idx_for_card);
-
-    MemRegion const mr(card_start, MIN2(card_start + BOTConstants::N_words, top));
-
-    scan_card(mr, region_idx_for_card);
-  }
-}
-```
-
-三件事很关键:
-
-1. **按 block claim** — 用 `iter_claimed_next(region_idx, block_size)` 给多个 GC worker 分块,不是一张卡一把锁;
-2. **按 `scan_top` 截断** — region 的扫描上界在 pause 开始时快照到 `_scan_top`(g1RemSet.cpp:125-149,195-199),避免扫到这次 GC 过程中不该看的新分配部分;
-3. **每张 card 最多 claim 一次** — `claim_card` 里会把 card 标成 claimed,同时把对应来源 Region 加进 dirty-region buffer,后面统一清卡表。
-
-这就是 G1 Pause 能把 Scan RS 压到 card 粒度的核心。
-
----
-
-## 4. 脏卡怎么变成 RSet — post barrier → DirtyCardQueue → 并发精炼
-
-### post barrier 只做两件事: 标脏 + 入队
-
-26-02 说 SATB pre-barrier 记录旧值;RSet 这条链看的是第二道 post-barrier。`write_ref_field_post` + slow path(g1BarrierSet.inline.hpp:48-55, g1BarrierSet.cpp:99-113):
-
-```cpp
-// g1BarrierSet.inline.hpp:48-55(截取核心,逐字)
-template <DecoratorSet decorators, typename T>
-inline void G1BarrierSet::write_ref_field_post(T* field, oop new_val) {
-  volatile jbyte* byte = _card_table->byte_for(field);
-  if (*byte != G1CardTable::g1_young_card_val()) {
-    // Take a slow path for cards in old
-    write_ref_field_post_slow(byte);
-  }
-}
-```
-
-```cpp
-// g1BarrierSet.cpp:99-113(截取核心,逐字)
-void G1BarrierSet::write_ref_field_post_slow(volatile jbyte* byte) {
-  // In the slow path, we know a card is not young
-  assert(*byte != G1CardTable::g1_young_card_val(), "slow path invoked without filtering");
-  OrderAccess::storeload();
-  if (*byte != G1CardTable::dirty_card_val()) {
-    *byte = G1CardTable::dirty_card_val();
-    Thread* thr = Thread::current();
-    if (thr->is_Java_thread()) {
-      G1ThreadLocalData::dirty_card_queue(thr).enqueue(byte);
-    } else {
-      MutexLockerEx x(Shared_DirtyCardQ_lock,
-                      Mutex::_no_safepoint_check_flag);
-      _dirty_card_queue_set.shared_dirty_card_queue()->enqueue(byte);
-    }
-  }
-}
-```
-
-它并不直接更新 RSet。它只做:
-
-1. 把 `field` 所在 card 标成 dirty;
-2. 把这张 card 的字节地址 `byte` 扔进 `DirtyCardQueue`。
-
-真正的 RSet 更新在后面的 refinement/Update RS。
-
-### refine thread 是"吃 completed buffer 的后台工人"
-
-`G1ConcurrentRefineThread::run_service`(g1ConcurrentRefineThread.cpp:92-128):
-
-```cpp
-// g1ConcurrentRefineThread.cpp:92-128(截取核心,逐字)
-void G1ConcurrentRefineThread::run_service() {
-  _vtime_start = os::elapsedVTime();
-
-  while (!should_terminate()) {
-    // Wait for work
-    wait_for_completed_buffers();
-    if (should_terminate()) {
-      break;
-    }
-...
-    {
-      SuspendibleThreadSetJoiner sts_join;
-
-      while (!should_terminate()) {
-        if (sts_join.should_yield()) {
-          sts_join.yield();
-          continue;             // Re-check for termination after yield delay.
-        }
-
-        if (!_cr->do_refinement_step(_worker_id)) {
-          break;
-        }
-        ++buffers_processed;
-      }
-    }
-
-    deactivate();
-```
-
-主循环很朴素: 睡眠等 buffer → 醒来一批批 refine → 队列回落到阈值以下就 deactivate。它加入 STS,说明**并发精炼是可让步的后台工作**,不会长时间卡住应用。
-
-### 真正一步: 取一个 completed buffer,逐卡 refine
-
-`do_refinement_step`(g1ConcurrentRefine.cpp:429-446)做的事非常集中: 先看当前 completed buffer 数量,必要时 `maybe_activate_more_threads(worker_id, curr_buffer_num)`,然后直接调 `dcqs.refine_completed_buffer_concurrently(worker_id + worker_id_offset(), deactivation_threshold(worker_id))`。`refine_completed_buffer_concurrently` 在 25-05 已看过,就是从 completed list 取一个 buffer,把里面每张 card 交给 `G1RefineCardConcurrentlyClosure`。因此**refine thread 的工作单位不是单张 card,而是一整块 completed buffer。**
-
-### `refine_card_concurrently`: 过滤、清卡、扫描 card、更新 target RSet
-
-核心逻辑在 `G1RemSet::refine_card_concurrently`(g1RemSet.cpp:539-671)。
-
-```cpp
-// g1RemSet.cpp:539-547,574-576,621-650(截取核心,逐字)
-void G1RemSet::refine_card_concurrently(jbyte* card_ptr,
-                                        uint worker_i) {
-  assert(!_g1h->is_gc_active(), "Only call concurrently");
-...
-  // If the card is no longer dirty, nothing to do.
-  if (*card_ptr != G1CardTable::dirty_card_val()) {
-    return;
-  }
-...
-  if (!r->is_old_or_humongous()) {
-    return;
-  }
-...
-  HeapWord* scan_limit = r->top();
-
-  if (scan_limit <= start) {
-    // If the trimmed region is empty, the card must be stale.
-    return;
-  }
-...
-  G1ConcurrentRefineOopClosure conc_refine_cl(_g1h, worker_i);
-
-  bool card_processed =
-    r->oops_on_card_seq_iterate_careful<false>(dirty_region, &conc_refine_cl);
-```
-
-这一步不是"看到 card 就直接 whole-region 扫"。它按顺序做:
-
-1. **脏位检查** — card 已不脏就跳过;
-2. **Region 类型过滤** — 只处理 old/humongous,young/free/stale 情况直接返回;
-3. **按 `top()` 截断** — card 末尾可能已经越过已分配区,要 trim 到 `scan_limit`;
-4. **清卡后加 fence** — 先把 card 设 clean,再 `OrderAccess::fence()` 保证随后读取对象布局/顶端时不乱序;
-5. **逐对象遍历 card 内引用** — `oops_on_card_seq_iterate_careful<false>` 会按 BOT 找到对象边界,对 card 覆盖的对象区间做精确迭代;
-6. **由 closure 更新 target region 的 RSet** — card 里每个 field 若指向别的 Region,并且目标 region 的 remset 处于 tracked 状态,就会在那个 target region 的 `HeapRegionRemSet` 里登记"来源 Region 的这张 card 可能指向我"。并发精炼这条方向写在 `G1ConcurrentRefineOopClosure::do_oop_work` 里(g1OopClosures.inline.hpp:131-156): 先算 `HeapRegionRemSet* to_rem_set = _g1h->heap_region_containing(obj)->rem_set()`,检查 `to_rem_set->is_tracked()`,再 `to_rem_set->add_reference(p, _worker_i)`。
-
-所以 RSet 的更新方向是: **从来源 card 扫到目标 oop → 去目标 Region 的 RSet 里 add_reference(来源字段地址)**。不是把卡挂到来源 Region 自己身上。
-
-### Hot Card Cache: 拦住高频重复写
-
-`G1HotCardCache` 的类注释在 g1HotCardCache.hpp:40-54 已经把目的写透了: 它是 *An evicting cache of cards that have been logged by the G1 post write barrier*。它不是 RSet 的一层存储,只是**重复脏卡的减震器**。某张 card 刚被脏化、还没来得及精炼时,mutator 可能又在同一张 card 上连续写几十次。Hot Card Cache 会把它短暂缓存起来,等变"热"后统一处理,减少 barrier 和 refinement 的重复工作。26-02 里 SATB 的目标是"别漏旧值";这里 Hot Card Cache 的目标是"别被同一张热卡刷爆"。
-
----
-
-## 5. Pause 内接力 — Update RS 先清尾,Scan RS 再反查
-
-### Update RS 先把队列尾巴处理干净
-
-在真正进 `update_rem_set` 之前,`prepare_for_oops_into_collection_set_do`(g1RemSet.cpp:511-516)会先 `dcqs.concatenate_logs()` 把各 Java 线程手里还没满的 partial dirty-card log 也拼进全局 completed list,再 `_scan_state->reset()` 建好这次 pause 的扫描快照。于是 Update RS 处理的不只是之前已经 completed 的 buffer,也包括 pause 开始瞬间各线程手头那点尾巴。
-
-`update_rem_set`(g1RemSet.cpp:477-499):
-
-```cpp
-// g1RemSet.cpp:477-499(截取核心,逐字)
-void G1RemSet::update_rem_set(G1ParScanThreadState* pss, uint worker_i) {
-  G1GCPhaseTimes* p = _g1p->phase_times();
-...
-  {
-    G1EvacPhaseTimesTracker x(p, pss, G1GCPhaseTimes::UpdateRS, worker_i);
-
-    G1ScanObjsDuringUpdateRSClosure update_rs_cl(_g1h, pss, worker_i);
-    G1RefineCardClosure refine_card_cl(_g1h, &update_rs_cl);
-    _g1h->iterate_dirty_card_closure(&refine_card_cl, worker_i);
-
-    p->record_thread_work_item(G1GCPhaseTimes::UpdateRS, worker_i, refine_card_cl.cards_scanned(), G1GCPhaseTimes::UpdateRSScannedCards);
-    p->record_thread_work_item(G1GCPhaseTimes::UpdateRS, worker_i, refine_card_cl.cards_skipped(), G1GCPhaseTimes::UpdateRSSkippedCards);
-  }
-}
-```
-
-这里吃的是**暂停开始时 dirty-card queue 里还没被并发精炼线程吃完的 completed buffers**。Update RS 不只是补 RSet: `G1ScanObjsDuringUpdateRSClosure::do_oop_work`(g1OopClosures.inline.hpp:169-181)里,若目标 `state.is_in_cset()` 就 `prefetch_and_push(p, obj)` 直接把引用送进 evacuate 队列;只有目标不在 CSet 且跨 Region 时,才 `to->rem_set()->add_reference(p, _worker_i)` 补记回 RSet。
-
-### 然后 Scan RS 才能只扫必要的 card
-
-接着 `scan_rem_set` 读取 CSet 各 Region 的 RSet,把来源 card 逐张拿出来扫描。这样 Pause 的对象图追踪路径变成:
-
-1. post barrier 把 card 扔进 dirty queue;
-2. 并发 refine 尽可能提前把 card 变成 RSet entry;
-3. 暂停开始先 Update RS 清尾;
-4. 再 Scan RS 通过 RSet 反查来源 card;
-5. 在 card 里找到真正指向 CSet 的 oop,交给 `G1ParScanThreadState` 做复制/转发。
-
-Pause 收尾时 `cleanup_after_oops_into_collection_set_do`(g1RemSet.cpp:518-524)会按 `_scan_state` 里记下的 dirty regions 并行清卡表,把这轮临时 claim/dirty 状态抹平。
-
-没有 RSet,第 4 步只能退化成"扫所有 old/humongous region"。G1 的 pause time 就会从"和跨 Region 引用数成正比"退化成"和老年代大小成正比"。
-
----
-
-## 核心悬念
-
-**并发标记回答了"哪些对象活着";RSet 回答了"哪些来源 card 可能指向我要收的 Region"。** 现在 G1 已经知道: 某个 Region 值不值得收(`_next_marked_bytes`),以及收它时该从哪里找入边(RSet)。剩下的问题就变成最现实的一步: **对象平时怎么分配到 Region,什么时候走 TLAB,什么时候直接 humongous,晋升失败又怎么兜底?** 下一篇看分配与晋升。
-
-> → [04-allocation.md](04-allocation.md)
+> → [04 — 分配与晋升](04-allocation.md)

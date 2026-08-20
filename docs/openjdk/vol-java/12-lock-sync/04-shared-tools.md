@@ -1,157 +1,172 @@
-# 04. 共享模式与并发工具族 — Semaphore/CountDownLatch/CyclicBarrier
+# 共享模式与并发工具族：为什么独占锁叫醒一个，共享工具却要继续往后传播
 
-> **前置依赖**: [12-lock-sync/01 — AQS 核心](01-aqs-core.md)(独占模式/模板方法)、[12-lock-sync/02 — AQS 的等待与唤醒](02-await-wakeup.md)(队列/park)、[12-lock-sync/03 — ReentrantLock 与 Condition](03-reentrantlock-condition.md)(Condition 条件队列)
-> → **后续**:[12-lock-sync/05 — StampedLock 与读写锁](05-stamped-readwrite.md)
-> 关联: 域 13 原子类(CAS 前置);域 11 线程(park/状态)
+> 本文基于 JDK 11 `AbstractQueuedSynchronizer` 的共享模式，以及 `Semaphore`、`CountDownLatch`、`CyclicBarrier` 三个代表工具。讨论重点是 `doAcquireShared`、`setHeadAndPropagate`、共享 state 语义，以及 CyclicBarrier 的 `ReentrantLock + Condition + Generation` 实现。读写锁与 StampedLock 放到下一篇。
+> **前置依赖**：[AQS 核心](01-aqs-core.md)、[AQS 的等待与唤醒](02-await-wakeup.md)、[ReentrantLock 与 Condition](03-reentrantlock-condition.md)
+> **后续**：[StampedLock 与读写锁](05-stamped-readwrite.md)
 
-## 独占锁唤醒一个,共享锁怎么唤醒多个
+## 先看一个独占锁思维在共享工具上立刻失效的现场
 
-ReentrantLock 是独占模式——一个线程持有,唤醒时只叫醒一个。但 Semaphore 释放 3 个许可,要唤醒 3 个排队者;CountDownLatch 计数归零,要唤醒所有等待者——这就是**共享模式**。这一篇拆: 共享模式的级联唤醒、三个工具的实现差异、以及 CyclicBarrier 为什么不用 AQS 共享模式。
+独占锁的直觉很简单：锁释放了，就叫醒下一个候选线程；下一个线程成功后，再由它交给再下一个。这个思路在 `ReentrantLock` 上完全成立，因为同一时刻只能有一个线程拿到资格。
 
-## 1. "共享模式是什么？" — doAcquireShared 级联
+但一旦问题换成共享工具，这个直觉就开始失效。假设一个 `Semaphore` 现在有 3 个许可，队列里有 3 个线程都在等。如果释放路径仍然只像独占锁那样叫醒一个人，然后就停下，那另外两个本来已经有资格同时通过的线程，还得继续无意义地睡着，等第一个线程再绕一圈来“接力放人”。再比如 `CountDownLatch` 计数归零时，如果它只叫醒一个等待者，其他等待者明明等的条件已经完全满足，却还被留在队列里，这就不是单纯的性能问题，而是语义已经不对了。
 
-### 1.1 获取成功:setHeadAndPropagate
+这正是 AQS 共享模式和独占模式的根本分岔点：**独占模式只需要把资格交给一个后继；共享模式只要 state 仍允许继续通过，就必须把“通道已经打开”这个事实继续向后传播。**
 
-`doAcquireShared`(`AbstractQueuedSynchronizer.java:994-1013`)与独占版的差异只有一处(`:1000-1004`):
+所以这篇文章真正要回答的，不是“Semaphore、CountDownLatch、CyclicBarrier 各自怎么用”，而是三件更底层的事：共享模式为什么必须有传播语义；为什么 `Semaphore` 和 `CountDownLatch` 明明都站在共享骨架上，却把 state 解释成完全不同的东西；以及为什么 `CyclicBarrier` 看起来也像“等一批人”，却干脆不用 AQS 共享模式。
 
-```java
-// AbstractQueuedSynchronizer.java:998-1013(截取核心,逐字)
-                if (p == head) {
-                    int r = tryAcquireShared(arg);
-                    if (r >= 0) {
-                        setHeadAndPropagate(node, r);
-                        p.next = null; // help GC
-                        return;
-                    }
-                }
-                if (shouldParkAfterFailedAcquire(p, node))
-                    interrupted |= parkAndCheckInterrupt();
+## 一、AQS 共享模式真正多出来的，不是“能放行多个”，而是“成功后还得继续传话”
+
+### 先把独占和共享的差别讲成一句人话
+
+独占模式的 release 很像把钥匙交给下一个人：我放下，你接上，一次只发生一份所有权转移。共享模式则更像一扇能同时放多人通过的门：第一个人成功通过后，不能把门又顺手关上，而是要继续确认“后面是不是还有人此刻也能一起过”。
+
+JDK 11 中，这条差别直接体现在 `doAcquireShared` 和 `setHeadAndPropagate` 上。共享获取主线里，线程成功之后不只是 `setHead`，还会触发传播检查。也就是说，共享模式的成功线程除了“自己通过”，还要承担一部分“把后继是否还能继续通过”这个信息往后传的责任。
+
+### `setHeadAndPropagate` 为什么是共享模式的灵魂
+
+`setHeadAndPropagate` 位于 `AbstractQueuedSynchronizer.java:755-775`。它的意义不是“改个 head 再顺手多做点事”，而是共享模式能成立的关键收口：当前线程已经获取成功，但如果 `propagate` 表示后面还可能继续放行，或者旧 head / 新 head 状态表明后继仍需推进，就继续触发共享释放传播。
+
+把这条语义翻译成人话就是：**共享模式下，成功获取的线程不能只对自己的成功负责，还要判断“通道是不是仍然开着”，如果是，就把放行机会继续往后递。**
+
+这和独占模式“我成功了，后面先都别动”完全不同。共享同步器的根本价值，就在于它能把一次状态变化变成连续的放行链，而不是一锤子买卖。
+
+### 为什么这不是优化，而是正确性的一部分
+
+很多人第一次看共享传播，会觉得这是“为了减少唤醒次数的优化”。恰恰相反，它首先是语义正确性的要求。因为共享模式本来就不是“一次只允许一个线程通过”，而是“只要 state 还表明可以继续通过，后继就不该被无意义地继续困在队列里”。
+
+也就是说，`setHeadAndPropagate` 不是锦上添花，而是在把“共享可通过性”真正落实到队列推进上。没有它，共享同步器就会退化成“披着共享语义外衣的独占接力”。
+
+这一层的顿悟是：**共享模式的核心不是多个线程最终都能成功，而是第一个成功者必须继续把‘还可以放行’这件事往后传播。**
+
+## 二、Semaphore 为什么是“许可池”，不是“多把小锁”
+
+### 先排除一个很容易混淆的想法
+
+很多人会把 `Semaphore(3)` 想成“三把锁的打包版”：线程来一个拿一把，拿完就没了。这个比喻有一点帮助，但不够准确，因为它容易让人忽略 state 的真正语义和共享传播机制。Semaphore 的重点不是“有几把锁”，而是**当前全局还剩多少个可同时通过的许可。**
+
+这在源码里也写得很明确。`Semaphore` 的核心实现就在它的 Sync 子类上，state 被解释成剩余 permits。`tryAcquireShared` 在 `Semaphore.java:234`（非公平）和 `249`（公平）附近，语义都是围绕“当前还有没有足够许可”展开；`tryReleaseShared` 在 `Semaphore.java:193`，则把归还许可变成 state 增加，并触发共享释放路径。
+
+### 为什么它天然适合 AQS 共享骨架
+
+Semaphore 的 state 语义非常适合共享模式：
+
+- state > 0：说明至少还有一些线程可以继续通过
+- 获取一个许可：state 递减
+- 释放一个许可：state 递增，并可能让后续线程继续通过
+
+这和独占锁完全不同。独占锁拿到一次就把门关死；Semaphore 拿走一个许可后，门不一定关，后面可能还剩 2 个、1 个、或者刚好归零。于是共享传播就顺理成章：一个线程成功获取许可后，不代表其他等待者都还得继续沉睡，它们还得看剩余许可数是否允许继续放行。
+
+### 公平与非公平为什么仍然只是入口差异
+
+Semaphore 的公平/非公平也没有发明新骨架。非公平版允许新来线程先尝试消费许可；公平版则先看前面是否已经有人在排队。这和 `ReentrantLock` 的公平性逻辑是同一种思想：**等待与唤醒骨架不变，变的是新来线程能不能绕过排队者先试一次。**
+
+这一层要留下的结论是：Semaphore 之所以站得住共享模式，不是因为它“支持多个线程”，而是因为它把 state 解释成了一个会连续消耗和归还的全局余量池。
+
+## 三、CountDownLatch 为什么也是共享模式，却根本不是许可池：它等的是“外部事件归零”
+
+### 先看它和 Semaphore 最容易混淆的地方
+
+`CountDownLatch` 也会让很多线程一起 await，也会在条件满足时一下子放行很多等待者。所以很多人会误以为它只是另一种 Semaphore。真正差别在于：等待线程本身并不“消费通行额度”，它们只是等外部事件把一扇门彻底打开。
+
+源码里这个差别表现得非常干净。`CountDownLatch.java:173-177` 的共享钩子逻辑本质上是：
+
+- `tryAcquireShared`：只看 `state == 0` 还是不是 0
+- `tryReleaseShared`：把 state 向 0 递减，归零那一刻返回 true，触发共享传播
+
+这说明 state 在这里不是“还能让几个人同时进”，而是“还差几次外部 countDown 才能开门”。等待者自己不改 state；推进 state 的是执行 `countDown()` 的那批线程或事件。
+
+### 为什么它天然是一把一次性门闩
+
+一旦 state 归零，所有 await 者都通过，后面新来的 await 也立即通过。因为这个 state 不会再自动涨回去，所以门一旦开了就不再关上。这就是 CountDownLatch 的一次性本质。
+
+也就是说，它虽然复用了 AQS 共享传播骨架，但 state 的业务解释已经和 Semaphore 完全不同：Semaphore 的 state 是剩余可消费资源，CountDownLatch 的 state 是尚未完成的外部倒计时。一个描述余量，一个描述未完成量。
+
+### 为什么共享模式在这里仍然成立
+
+尽管语义不同，它依然非常适合共享传播：当 state 终于归零时，等待者不是一个一个被排他放行，而是因为“门已经打开”这一事实可以连续向后传播，于是等待线程们都能被接力唤醒并穿过同步点。
+
+这再次说明，共享模式的统一之处不是“业务看起来像”，而是“**一旦条件满足，就需要继续传播后继放行**”。
+
+## 四、为什么 CyclicBarrier 不用 AQS 共享模式：它解决的根本不是余量传播，而是‘这一轮人到齐没有’
+
+### 先推演把 Barrier 硬套成 CountDownLatch 会出什么问题
+
+表面看，Barrier 和 Latch 很像：都像在等一批线程。于是最自然的失败方案就是把 Barrier 想成“可重置版 CountDownLatch”：大家都来减一个计数，减到 0 一起放行，然后再把计数设回去下一轮继续。
+
+问题在于，这种想法少看了两个关键条件。
+
+第一，Barrier 等待的是**同一批参与者互相汇合**，而不是外部某些事件线程把门打开。第二，Barrier 不只是“计数归零后放人”，它还要区分“这是第几轮”、这一轮是否已经 broken、超时或中断是否要让整代人一起失败并重置状态。也就是说，它是一个带代次概念的阶段同步问题，不只是 state 递减到 0 的共享传播问题。
+
+### 为什么它转而选择 `ReentrantLock + Condition + Generation`
+
+JDK 11 的 `CyclicBarrier` 明确走了另一条路。类定义在 `CyclicBarrier.java:139`，它内部用的是：
+
+- `ReentrantLock lock`
+- `Condition trip`（`CyclicBarrier.java:159`）
+- `nextGeneration()`（`CyclicBarrier.java:178`）
+- `breakBarrier()`（`CyclicBarrier.java:190`）
+- `dowait()`（`CyclicBarrier.java:199`）
+
+这已经说明它关心的重点不是“共享 state 继续传播多少个后继”，而是“当前这一代参与者是不是到齐了、是否 broken、是否该切换到下一代”。最后一个到达的线程触发 `nextGeneration()`，唤醒同一代等待者并切换轮次；异常、中断、超时则可能触发 `breakBarrier()`，让这一代整体失败。
+
+换句话说，CyclicBarrier 的核心不是余量传播，而是**代际同步**。这就是为什么它宁愿回到 `ReentrantLock + Condition`，也不复用 AQS 共享模式。
+
+### CountDownLatch 和 CyclicBarrier 真正差在哪
+
+两者表面都在“等一批”，本质问题却完全不同：
+
+- `CountDownLatch`：外部事件把门打开，等待者自己不参与递减，是一次性门闩
+- `CyclicBarrier`：参与者自己互相等，最后一个到的人负责触发换代，是可复用屏障
+
+这也解释了为什么一个天然适合 AQS 共享 state，另一个却天然需要 generation 和条件队列。你如果先不区分“等外部事件”和“参与者互相汇合”，后面选型几乎一定会错。
+
+## 五、怎么把这三个工具放回同一张图：不是都叫“等待”，而是各自等待的东西不同
+
+### 先别再按类名背诵
+
+读完这三个工具后，最容易留下一个表面印象：“共享模式工具挺多，名字记住就行。” 真正有用的记法不该是背类名，而是先问清楚：**我到底在等什么？**
+
+- 如果我在等“还剩多少资源可同时通过”，那是 `Semaphore`
+- 如果我在等“外部事件还差几步才开门”，那是 `CountDownLatch`
+- 如果我在等“这一轮参与者是不是都到齐了”，那是 `CyclicBarrier`
+
+这三种等待对象不同，决定了它们为什么分别落在共享传播、一次性门闩和代际条件同步上。
+
+### 共享模式的统一点和边界也因此更清楚了
+
+通过这三者的对照，AQS 共享模式的边界反而更清楚：它擅长的是“只要 state 还允许继续通过，就把放行资格向后传播”的问题。`Semaphore` 和 `CountDownLatch` 都符合这个模型，只是一个在传播资源余量，一个在传播“门已经开了”的事实。
+
+而 `CyclicBarrier` 则超出了这条边界，因为它要处理的是“同一代参与者的互相汇合、失败和轮次切换”。这不是简单的共享 state 传播问题，所以它不用 AQS 共享模式，反而是合理的设计选择。
+
+## 收网：共享模式真正多出来的是传播语义，不是“大家都能进”这么简单
+
+回到开头那个问题：为什么独占锁只叫醒一个，共享工具却要继续往后传播？现在已经可以给出一个完整答案了。因为独占模式下，一次资格变化只会让一个线程真正通过；而共享模式下，条件一旦满足，很可能不止一个线程已经具备通过资格，成功者必须把这件事继续往后传。
+
+这也正是 `setHeadAndPropagate` 的存在意义：它让共享获取从“一个人成功”变成“如果 state 还允许，就继续带着后继往前走”。
+
+在这条共享传播骨架上，`Semaphore` 把 state 解释成许可池，解决的是资源并发占用；`CountDownLatch` 把 state 解释成待归零计数，解决的是外部事件开门；`CyclicBarrier` 则说明并不是所有“等一批人”的问题都适合共享模式——一旦问题变成代际汇合与重用，它就自然转向 `ReentrantLock + Condition + Generation`。
+
+把整篇压成一张总图，就是：
+
+```text
+共享模式
+  → 成功者不能独吞通道已开的事实
+  → setHeadAndPropagate 继续向后传播
+
+Semaphore
+  → state = 剩余许可
+  → 获取消费许可，释放归还许可
+
+CountDownLatch
+  → state = 剩余外部计数
+  → 归零后一次性开门
+
+CyclicBarrier
+  → 不问“还剩多少可过”
+  → 只问“这一代参与者是否到齐”
+  → lock + condition + generation
 ```
 
-- **`tryAcquireShared` 返回剩余许可数**(`r >= 0` 表示成功,负值表示失败)
-- 成功时调用的是 **`setHeadAndPropagate(node, r)`**(`:755`),不是独占版的 setHead——**多了"传播"**
+如果说前几篇讲的是独占锁如何让一个线程进、另一个线程等，这一篇真正补上的就是：**当通过资格本来就能同时授予多人时，唤醒不再是交接，而是传播。**
 
-### 1.2 setHeadAndPropagate:级联唤醒
-
-`setHeadAndPropagate`(`AbstractQueuedSynchronizer.java:755-773`)的核心:
-
-```java
-// AbstractQueuedSynchronizer.java:755-773(截取核心,逐字)
-    private void setHeadAndPropagate(Node node, int propagate) {
-        Node h = head; // Record old head for check below
-        setHead(node);
-        /*
-         * Try to signal next queued node if:
-         *   Propagation was indicated by caller,
-         *     or was recorded (as h.waitStatus either before
-         *     or after setHead) by a previous operation
-         *     (note: this uses sign-check of waitStatus because
-         *      PROPAGATE status may transition to SIGNAL.)
-         * and
-         *   The next node is waiting in shared mode,
-         *     or we don't know, because it appears null
-         */
-        if (propagate > 0 || h == null || h.waitStatus < 0 ||
-            (h = head) == null || h.waitStatus < 0) {
-            Node s = node.next;
-            if (s == null || s.isShared())
-                doReleaseShared();
-        }
-    }
-```
-
-设 head 后,**满足任一传播条件就调 `doReleaseShared`**(`:717`)继续唤醒下一个共享节点: ①还有剩余许可(propagate > 0)②head 状态为负(SIGNAL/PROPAGATE,表示有后继要唤醒)③head 为空(极端竞态,保守处理)——**被唤醒的节点获取成功后又唤醒下一个**,链条式传播。释放 3 个许可,队头 3 个都能依次获取。
-
-跨层标注: [域 13: 01-atomicinteger——Semaphore/CountDownLatch 的 state 递减全部走 CAS(compareAndSetState),与 AtomicInteger 同一机制;域 11 线程——共享队列的 park 挂起与独占模式相同(WAITING 状态)]
-
-关键设计(斜体):*独占/共享的核心差异: 独占"唤醒一个",共享"传播唤醒"——setHeadAndPropagate 是共享模式的灵魂。面试"共享锁怎么唤醒多个": 级联信号——每个成功者检查剩余许可,还有就继续唤醒下一个。*
-
-## 2. "Semaphore" — 许可池
-
-### 2.1 state = 许可数
-
-`Semaphore`(`Semaphore.java`,720 行)把 AQS 的 state 解释成**剩余许可数**(注释原话 "Uses AQS state to represent permits",`:168-169`)。构造时 `setState(permits)`(`:176`),公平/非公平结构同 ReentrantLock(`NonfairSync@227`/`FairSync@242`)。
-
-- **`acquire()`**(`:317-318`): `sync.acquireSharedInterruptibly(1)`——**共享获取一个许可**
-- **`release()`**(`:431-432`): `sync.releaseShared(1)`——归还一个许可
-
-非公平 tryAcquireShared(`:234` 调 `nonfairTryAcquireShared`@183): 循环里 `available - acquires`,`remaining < 0` 失败否则 CAS——**先到先得,可插队**。公平版(`:249-259`): 先 `hasQueuedPredecessors()` 检查,有等待者直接返回 -1。
-
-### 2.2 面试点:Semaphore vs 锁
-
-**锁排他(一个持有),信号量共享(多个可同时持有)**——state=5 时 5 个线程可同时 acquire 成功。许可不足时,`acquireSharedInterruptibly` 走 doAcquireShared 入共享队列 park(域 12 第 2 篇的机制)。
-
-关键设计(斜体):*Semaphore = "AQS 共享模式的 state 语义化"(state=剩余许可);公平版本同前驱检查。面试"Semaphore vs 锁": 锁排他,信号量共享(多个可同时持有);"acquire 会阻塞吗": 许可不足时入共享队列 park。*
-
-## 3. "CountDownLatch" — 门闩
-
-### 3.1 state = 计数,归零放行
-
-`CountDownLatch`(`CountDownLatch.java`,316 行)的 Sync(`:162`)把 state 解释成**待完成计数**:
-
-```java
-// CountDownLatch.java:173-186(截取核心,逐字)
-        protected int tryAcquireShared(int acquires) {
-            return (getState() == 0) ? 1 : -1;
-        }
-
-        protected boolean tryReleaseShared(int releases) {
-            // Decrement count; signal when transition to zero
-            for (;;) {
-                int c = getState();
-                if (c == 0)
-                    return false;
-                int nextc = c - 1;
-                if (compareAndSetState(c, nextc))
-                    return nextc == 0;
-            }
-        }
-```
-
-- **`tryAcquireShared`**: state **非零一律失败**(返回 -1),只有归零才返回 1——**门闩语义**
-- **`tryReleaseShared`**: CAS 递减,**归零那一刻返回 true**(触发 doReleaseShared 级联唤醒)
-- **`await()`**(`:231-232`): `acquireSharedInterruptibly(1)`——等 state=0
-- **`countDown()`**(`:291-292`): `releaseShared(1)`——计数减一
-
-### 3.2 一次性
-
-**计数归零后不可重置**——await 全部通过,新来的 await 也立即通过(state 恒为 0)。这就是"一次性门闩"。
-
-关键设计(斜体):*CountDownLatch = "倒计数共享锁"——state 到 0 时所有等待者级联唤醒(共享模式)。面试"await 多个线程": 都等 state=0,级联唤醒全部;"与 CyclicBarrier 区别": Latch 一次性、Barrier 可复用且阻塞的是参与者自己。*
-
-## 4. "CyclicBarrier" — 可复用屏障
-
-### 4.1 实现:独占锁 + 条件变量(不是 AQS 共享模式!)
-
-`CyclicBarrier`(`CyclicBarrier.java`,492 行)**没有用 AQS 的共享模式**——它内部是 ReentrantLock + Condition(`:157-159`):
-
-```java
-// CyclicBarrier.java:155-159(截取核心,逐字)
-    /** The lock for guarding barrier entry */
-    private final ReentrantLock lock = new ReentrantLock();
-    /** Condition to wait on until tripped */
-    private final Condition trip = lock.newCondition();
-```
-
-`dowait`(`:199`)的流程: 持锁 → 检查 broken/中断 → `--count` → **最后一个参与者(count 归零)**: 执行 barrierCommand(可选)后 `nextGeneration`(`:178`,trip.signalAll 唤醒全部 + **generation 换新代**)→ **其余参与者**递减后 `trip.await()` 挂起,被 signalAll 唤醒后**检查代次是否变化**(generation 换新则放行,否则继续等)。
-
-### 4.2 Generation:轮次区分
-
-`Generation`(`:151`)标记"当前轮次";**每次冲破屏障换一代**(`nextGeneration`,`:178`)——这就是可复用的机制: 下一轮是新 Generation,计数器复位。中断/超时/异常时 `breakBarrier`(`:190`)把当前代标记为 broken,其余等待者抛 `BrokenBarrierException`。
-
-### 4.3 Latch vs Barrier
-
-| | CountDownLatch | CyclicBarrier |
-|--|---------------|---------------|
-| 等待对象 | 外部事件(计数归零) | **参与者互相等** |
-| 谁阻塞 | 调 await 的人 | 每个 await 的参与者 |
-| 可复用 | 否(一次性) | 是(Generation 换代) |
-| 实现 | AQS 共享模式 | ReentrantLock + Condition |
-
-关键设计(斜体):*"Barrier = 汇合点"——分治任务每轮并行计算后汇合;Generation 区分轮次(中断/超时破坏屏障需 reset)。面试"Latch vs Barrier": 等待外部事件 vs 参与者互相等;能说出"CyclicBarrier 是 ReentrantLock+Condition 实现,不是 AQS 共享"就是冷门细节分。*
-
-## 核心悬念
-
-工具族收官——但**读写分离**呢?`ReentrantReadWriteLock` 怎么让"多个读者并行、写者独占"?`StampedLock` 的乐观读是什么——不用锁的读?——下一篇: StampedLock 与读写锁。
-
-> → [12-lock-sync/05 — StampedLock 与读写锁](05-stamped-readwrite.md)
+下一篇继续把视角切到读写分离：既然独占和共享都讲过了，为什么读写锁还要再细分成“多个读者并行、写者独占”？`StampedLock` 的乐观读又为什么看起来像“先不加锁先试一下”？这些问题会把同步器能力继续推到更细粒度的并发控制上。

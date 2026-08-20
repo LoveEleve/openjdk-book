@@ -1,143 +1,250 @@
-# 01. 为什么 String 是不可变的?— 存储结构、不可变保证、构造链
+# 为什么 String 是不可变的？— 从共享风险到 JDK 11 存储边界
 
-> **前置依赖**: 无(本卷开篇第一篇,直接从源码看起)
-> → **后续**:[01-string/02 — equals/hashCode/compareTo 逐行实现](02-equals-hashcode-compare.md)
-> 关联: 内部卷 07-classfile-classloader 03-symbol-string-table(stringTable 与字符串驻留)
+> 基于 JDK 11 `java.base` 的 `java.lang.String` 实现。本文讨论的是 HotSpot/JDK 11 当前实现，不把 `byte[] + coder` 当成 Java 语言规范要求。
+> → **后续**: [String 的相等、哈希与比较](02-equals-hashcode-compare.md)
+> 关联: 内部卷 07-classfile-classloader/03-symbol-string-table(字符串驻留)
 
-## 从"面试必背"到"源码依据"
+## 先别回答“因为 final”
 
-"String 为什么不可变"是每个 Java 面试的开场题,标准答案背得出四件事:缓存、共享、线程安全、安全。但被追问"不可变到底怎么保证的?JDK9 之后它内部存的是什么?"时,大多数人就停在"因为有 final"上了。
-
-这篇从 `String.java` 的字段开始,把"存储结构 → 不可变保证 → 构造与解码"拆开讲。你会发现"不可变"不是一个 final 关键字,而是一整套设计:字段布局、操作语义、包私有构造的共享数组——每一层都在回答"为什么能安全地把 String 当值用"。
-
-## 1. String 里到底存了什么
-
-### byte[] + coder 双字段
-
-先看 JDK11 里 String 的两个核心字段(`String.java:140` 起,逐字):
+假设有一段代码：
 
 ```java
-// String.java:140-153(截取核心)
-private final byte[] value;    // 存储本体
-private final byte coder;      // 编码标记: LATIN1=0 / UTF16=1
+Map<String, Integer> map = new HashMap<>();
+String key = new String("user");
+map.put(key, 1);
 ```
 
-JDK8 及之前,String 存的是 `char[]`——每个字符两个字节,哪怕内容全是一个字节就够的 ASCII。JDK9 的 JEP 254(Compact Strings)把它改成 `byte[]` + `coder`:
+如果 `key` 的内容后来能够变化，`HashMap` 会发生什么？它放入数据时按旧内容计算了桶位置，查找时却可能按新内容计算另一套哈希。对象还在，值却像“丢了”。
 
-- **coder = LATIN1(0)**: 字符串里所有字符都是 ISO-8859-1 可表示的(典型的英文/数字/常见符号)——**每字符 1 字节**,内存减半
-- **coder = UTF16(1)**: 出现了需要双字节的字符——回到每字符 2 字节
+这不是 `HashMap` 的特殊问题。字符串常量池、类名、URL、协议字段、跨线程共享，都默认相信一件事：**一个 String 的值在发布后不会偷偷变化**。
 
-代价是每次操作都要判断 coder 分支(取 `value[0]` 到底是 1 字节还是 2 字节?),换来的是典型应用里字符串占堆内存的比例——省一半内存意味着 GC 压力显著下降。这是一个"用时间换空间"的决定,和 Java 惯用的"空间换时间"正好相反。选择依据在 JEP 254 的动机里写得很清楚:典型业务字符串绝大多数是 Latin-1 可表示的。
+所以真正的问题不是“String 有没有 `final`”，而是：
 
-两个常量在 `String.java:3269-3270`:
+> JDK 如何保证外部输入不会继续污染 String，内部数组不会被改写，String 的变换不会破坏所有共享者？
 
-```java
-// String.java:3269-3270
-@Native static final byte LATIN1 = 0;
-@Native static final byte UTF16  = 1;
+本文的答案先给出来：
+
+```text
+外部 byte[]/char[]
+        │ 复制或解码
+        ▼
+受控的 byte[] + coder
+        │ private/final，不暴露数组
+        ▼
+substring/concat 等只返回新值
+        │
+        ▼
+String 可以安全共享、缓存、驻留和跨线程读取
 ```
 
-`isLatin1()` 就是 `coder == LATIN1` 的判断,后面几乎所有方法的第一步都是它。
+接下来每看一段源码，都只问一个问题：它在这条边界上承担什么责任？
 
-### 为什么访问变慢了还要这么做
+## 一、最直觉的三个方案，为什么都不够
 
-关键设计(斜体):*Java 惯用"空间换时间"(比如 HashMap 扩容、缓存),这里反过来了——因为 String 在堆里的体量太大,内存是第一矛盾。JDK9 的取舍是: 访问路径多一次分支判断(慢一点),但堆占用减半(GC 压力大降)。面试如果能把"取舍"讲成"内存 vs 速度",而不是背"JEP 254"四个字母,就过关了。*
+### 1. 让 String 可继承：值对象会失去统一语义
 
-## 2. 不可变到底怎么保证的
+如果字符串类型可以被继承，子类就可能改变 `equals`、比较甚至内容访问的行为。调用方以为拿到的是稳定的值对象，实际拿到的却可能是带有不同规则的对象。
 
-### final 只是表面
-
-回到面试题。`String.java:125` 是 `public final class String`——类不能继承。`String.java:140` 的 `value` 是 `final` + `private`——引用不能改、外部拿不到。但这两条加起来还不够:final 只保证"引用不换",不保证"数组内容不被改"。如果某个方法对 `value[0]` 写了新值,不可变就破了。
-
-真正的保证是第三层:**String 的所有操作都不修改 value 数组本身**。拿最典型的一个——substring(`String.java:1835`):
+JDK 11 直接把这条路堵上了：
 
 ```java
-// String.java:1835-1846(截取核心)
-public String substring(int beginIndex) {
-    if (beginIndex < 0) {
-        throw new StringIndexOutOfBoundsException(beginIndex);
+// String.java:125-126(截取,逐字)
+public final class String
+    implements java.io.Serializable, Comparable<String>, CharSequence {
+```
+
+`final class` 不是 String 不可变的全部原因，但它先保证了：**String 的行为不能通过子类替换**。
+
+### 2. 只把数组引用声明为 final：数组内容仍然能变
+
+下面这个判断是错的：
+
+```text
+final byte[] value  ⇒  byte[] 内容不可变
+```
+
+`final` 只限制 `value` 这个引用不能指向另一块数组，并不禁止 `value[0] = ...`。因此 String 还必须满足第二个条件：内部数组不能被外部拿到，也不能被自身的公开操作原地修改。
+
+### 3. 直接保存调用方传入的数组：外部修改会穿透边界
+
+如果 `new String(char[])` 直接保存调用方数组，调用方只要继续修改原数组，String 的内容就会跟着变。于是构造方法必须在“不可信输入”和“内部存储”之间建立隔离：外部数组复制，外部字节按 charset 解码，只有内部已经受控的数组才允许走共享路径。
+
+到这里可以先收网一次：String 的不可变不是一个关键字单独完成的，而是**类边界、字段边界、数组边界和操作边界**共同完成的。
+
+## 二、JDK 11 的 String 到底存什么
+
+### 1. `char[]` 为什么变成 `byte[] + coder`
+
+JDK 8 及以前的典型 String 存储模型是 `char[]`。JDK 9 引入 Compact Strings 后，JDK 11 的核心存储变成两个字段：
+
+```java
+// String.java:140-153(截取,逐字)
+    private final byte[] value;
+
+    /** The identifier of the encoding used to encode the bytes in {@code value}. */
+    private final byte coder;
+```
+
+`value` 是存储本体，`coder` 告诉 String 应该用哪条解释路径读取这组字节。两个编码标志在源码中是：
+
+```java
+// String.java:3269-3270(截取,逐字)
+    @Native static final byte LATIN1 = 0;
+    @Native static final byte UTF16  = 1;
+```
+
+于是存储策略变成：
+
+- 内容全部能用 Latin-1 表示：使用单字节数组，`coder = LATIN1`。
+- 内容需要更宽的字符表示：使用 UTF-16 路径，`coder = UTF16`。
+
+这是一笔明确的交易：访问路径多了编码分支，数组却可能缩小一半。注意这里优化的是**内部表示**，不是把 Java 的字符语义改成“字节语义”。调用者仍然看到字符、长度和 Unicode 行为，只有 String 内部根据 `coder` 选择读取算法。
+
+### 2. Compact Strings 不是不可变性的来源
+
+`byte[] + coder` 解决的是“怎么省空间”，不可变边界解决的是“谁能修改它”。这两个问题不能混为一谈：
+
+```text
+Compact Strings：减少 value 的空间
+不可变设计：阻止 value 的内容被污染
+```
+
+如果 `value` 是 `char[]`，它也可以不可变；如果 `value` 是 `byte[]`，它也可能被错误地共享而变得可变。JDK 11 的设计是把两件事叠在一起：用紧凑编码存储，同时严格控制数组生命周期。
+
+## 三、不可变的四层防线
+
+### 第一层：类不能被替换
+
+`String` 是 final 类，子类无法改写它的核心行为。这个防线解决的是“行为一致性”，还没有解决数组内容问题。
+
+### 第二层：字段不能被外部直接拿到
+
+```java
+// String.java:140-153(字段证据)
+    private final byte[] value;
+    private final byte coder;
+```
+
+`private` 让普通调用者拿不到内部数组，`final` 让 String 自己不能把 `value` 引用换成另一块数组。这里仍然要强调：数组元素是否改变，还要看所有内部方法是否遵守“不原地修改”的约束。
+
+### 第三层：变换操作返回新值
+
+看 `substring`。它有一个容易被忽视的快路径：从下标 0 开始取整个剩余内容时，可以直接返回当前对象；真正截取一段内容时，则走 Latin-1/UTF-16 对应的创建路径。
+
+```java
+// String.java:1835-1846(截取,逐字)
+    public String substring(int beginIndex) {
+        if (beginIndex < 0) {
+            throw new StringIndexOutOfBoundsException(beginIndex);
+        }
+        int subLen = length() - beginIndex;
+        if (subLen < 0) {
+            throw new StringIndexOutOfBoundsException(subLen);
+        }
+        if (beginIndex == 0) {
+            return this;
+        }
+        return isLatin1() ? StringLatin1.newString(value, beginIndex, subLen)
+                          : StringUTF16.newString(value, beginIndex, subLen);
     }
-    int subLen = length() - beginIndex;
-    ...
-    if (beginIndex == 0) {
-        return this;                       // 从头截: 直接返回自己,零拷贝
+```
+
+这段代码证明了两个判断：
+
+1. 结果与当前 String 完全相同，可以直接复用 `this`。
+2. 结果是原内容的子集时，交给编码专用实现创建新值，而不是修改原数组。
+
+以 Latin-1 路径为例：
+
+```java
+// StringLatin1.java:714-716(截取,逐字)
+    public static String newString(byte[] val, int index, int len) {
+        return new String(Arrays.copyOfRange(val, index, index + len), LATIN1);
     }
-    return isLatin1() ? StringLatin1.newString(value, beginIndex, subLen)
-                      : StringUTF16.newString(value, beginIndex, subLen);
-}
 ```
 
-`StringLatin1.newString`(`StringLatin1.java:714`)是:
+`Arrays.copyOfRange` 建立了新的数组。原 String 的 `value` 没有被改写，原 String 的其他共享者也不会看到变化。
+
+这也解释了一个历史变化：早期 JDK（典型如 JDK 6 及 JDK 7 的早期更新）里的 substring 曾经共享底层大数组，小字符串可能长期拖住一整块巨大数组；后来的实现改成复制有效区间，用复制成本换取更可控的内存保留行为。这个历史差异不能拿来解释 JDK 11 当前路径。
+
+### 第四层：共享只发生在可信内部路径
+
+String 的包私有构造器允许内部实现把已经可信的数组直接接进来：
 
 ```java
-// StringLatin1.java:714-716
-public static String newString(byte[] val, int index, int len) {
-    return new String(Arrays.copyOfRange(val, index, index + len), LATIN1);
-}
+// String.java:3252-3255(截取,逐字)
+    String(byte[] value, byte coder) {
+        this.value = value;
+        this.coder = coder;
+    }
 ```
 
-`Arrays.copyOfRange` 复制出一段新数组。也就是说:**substring 返回的是"新数组的新 String",原数组碰都没碰**。JDK7 之前 substring 是共享数组的(数组 + offset 偏移字段),结果一个 1MB 的字符串 sub 出 1KB 的小串,那个小串还攥着 1MB 的数组——内存泄漏。JDK7 移除了共享设计(offset 字段取消),改成复制,把"共享"的坑填了。
+它没有复制数组，但这是包内实现之间的约定：调用者必须保证数组之后不会被修改，外部代码也拿不到这个包私有入口。这个构造器不能被拿来证明“String 构造都不复制”，恰恰相反，它证明了 JDK 把**可信内部数组**和**不可信外部数组**分开处理。
 
-concat、replace、toUpperCase 同理——全是"新数组 + 新 String",没有一个是原地改的。
+## 四、外部输入怎样进入 String
 
-关键设计(斜体):*不可变 = final(不能继承、引用不变)+ private(拿不到数组)+ 操作全部返回新对象(数组内容不变)。三件事缺一不可。面试答"因为有 final"会被追问"final 能防数组内容被改吗"——能说出第三层才算真懂。*
+### 1. 已经是 String：可以共享
 
-### 不可变带来的四个收益
+`new String(String original)`(`String.java:235`) 的实现直接复用 `original.value/coder/hash`。由于原对象本身已经遵守不可变边界，内部实现可以共享受控数组，而不需要担心调用方通过原对象修改它。
 
-- **哈希可缓存**: 内容不变 → hash 算一次存下来永远有效(`String.java:156` 的 `private int hash` 就是干这个的,下一篇展开)。如果 String 可变,缓存就失效了——这是"不可变"最直接的性能收益
-- **常量池可共享**: 相同内容可以安全地驻留为同一个对象(intern,下一篇),因为没人能改它
-- **线程安全**: 无需同步,任何线程读同一个 String 都看到同一内容
-- **安全**: 类名、URL、文件路径这些会被安全检查的字符串,不怕调用方中途改掉
+### 2. 字节数组：先解码，再选择存储格式
 
-关键设计(斜体):*四个收益里,缓存和共享是性能,线程安全和安全是正确性。面试把四点背全不难,难的是能指着 `String.java:156` 说"这个字段就是不可变换来的"。*
+带 charset 的字节输入会进入 StringCoding 解码链。JDK 11 的多个构造路径最终分别调用 `StringCoding.decode`，例如：
 
-### 和 JVM 的关系
+- `String.java:467`：按 charset 名称解码
+- `String.java:507`：按 Charset 解码
+- `String.java:592`：字节数组到内部结果的解码路径
 
-`String.java:3127` 的 intern 是 native:
+心智图是：
 
-```java
-// String.java:3127
-public native String intern();
+```text
+外部 byte[]
+   → CharsetDecoder/StringCoding
+   → 得到字符内容与编码结果
+   → 选择 LATIN1 或 UTF16
+   → 放入受控 value + coder
 ```
 
-它查入的是 JVM 的字符串常量池——JDK7 之后这个池在堆里。驻留机制本身在 VM 侧(stringTable),Java 侧只是把"驻留"这个动作暴露出来。
+这条链把“外部字节如何解释”和“内部如何压缩存储”连接起来。编码错了，得到的是错误内容；存储 coder 错了，得到的则是错误的内部解释。两层都必须正确。
 
-跨层标注: [JVM Spec: §4.2 字符串常量池];[内部卷: 07-classfile-classloader 03-symbol-string-table(stringTable::intern 与符号驻留)]
+### 3. 外部 char[]：不能直接借用
 
-## 3. 字符串从哪来——构造与解码
+外部数组可能在构造完成后继续被调用方修改，所以公开构造路径必须把它转换为自己的内部表示。String 的不可变性不是对调用者的善意假设，而是通过复制/解码把风险挡在构造边界之外。
 
-### 构造的复制规则
+这也是为什么“外部数组”和“内部可信数组”不能混为一谈：公开构造要防御性复制，包内构造(`String.java:3252`)才允许共享。
 
-`new String("abc")`(拷贝构造,`String.java:235`)共享原数组:`this.value = original.value`——因为 original 也是不可变的,共享安全。`new String(bytes, "UTF-8")` 走 `StringCoding.decode`(`String.java:592`,返回 `Result` 含 value+coder)后直接赋值。真正会复制的是外部传入的数组:`new String(char[])` 的三参构造(`String.java:275` → `String.java:3207` 的四参内部构造)会 `StringUTF16.toBytes(value, off, len)`(`String.java:3224`)——把调用方的 char[] 拷成内部 byte[]。
+## 五、不可变性为什么值得复制成本
 
-而 `StringLatin1/StringUTF16` 内部用的 `String(byte[], coder)`(`String.java:3252`)是另一个包私有构造:**不复制数组**。以它为例:
+回到开头的 HashMap key。现在可以完整回答了：
 
-```java
-// String.java:3252(截取)
-String(byte[] value, byte coder) {
-    this.value = value;
-    this.coder = coder;
-}
+```text
+String 类不能被子类替换
+        ↓
+value/coder 是 private final
+        ↓
+外部输入先复制或解码
+        ↓
+substring/concat 等不原地改数组
+        ↓
+内容发布后可安全缓存、共享和比较
 ```
 
-注意:**这里不复制数组**。这个构造是包私有的(只有 String 家族内部在用),外部代码拿不到数组引用,所以共享是安全的。
+由此得到四个直接收益：
 
-关键设计(斜体):*"内部共享数组、外部必须复制"——同一套不可变,对内零拷贝,对外防御性复制。分界线画在包边界上: 包内的数组来源可信(不会改),包外的调用方数组不可信(可能继续改),必须拷。*
+1. **哈希缓存可靠**：内容不变，缓存过的 hash 不会与内容脱节；`String.java:156` 的 `hash` 字段正是下篇要展开的入口。
+2. **共享可靠**：常量池驻留和 String 复用不必担心某个调用者改掉共享对象。
+3. **跨线程读取可靠**：只读对象不需要为每次访问加同步。
+4. **安全边界可靠**：类名、URL、路径、协议字段等被检查后不会被中途改写。
 
-### 字节怎么变成字符
+这里最后再澄清四个误解：
 
-`new String(byte[], charset)` 走的是 `StringCoding.decode`(`StringCoding.java:225` 的 `decode(String charsetName, byte[] ba, int off, int len)`):
+- `final byte[]` 不等于数组内容不可变。
+- `byte[] + coder` 是 JDK 11 的存储实现，不是 Java 规范要求的唯一布局。
+- String 的所有构造不都复制数组；包内可信路径可以共享，外部输入必须隔离。
+- substring 不总是复制；`beginIndex == 0` 时可以直接返回当前对象，其余截取路径创建新值。
 
-```
-字节数组 → CharsetDecoder.decode → 按解码结果选 coder → 存入 value
-```
+## 收网
 
-解码结果全是 Latin-1 可表示 → coder=LATIN1;否则 UTF16。这条链的细节(快路径、替代符、乱码)在第 4 篇展开,这里只要建立"构造 = 字节 → 解码 → 选存储格式"的心智模型。
+String 能成为 Map key、常量池条目和跨线程共享值，不是因为它“天生特殊”，而是因为它把可变性挡在了对象边界之外：外部数据进入时被复制或解码，内部数组不向外暴露，公开变换返回新值，编码压缩也不改变值语义。
 
-关键设计(斜体):*无参的 `new String(bytes)` 用默认 charset——默认 charset 是 JVM 启动时探测的,换环境(Windows GBK/Linux UTF-8)结果就不同。生产乱码的一大来源就是这里: 你以为是"文件编码问题",其实是"默认 charset 探测问题"。*
-
-## 核心悬念
-
-"String 不可变"是块基石——Map 敢拿它当 key、常量池敢驻留它、锁敢用它当载体,全都建立在"内容不会变"之上。但"内容不会变"要成立,还差最后一环:**两个 String 怎么才算相等?`equals` 先比什么后比什么?`hashCode` 为什么用 31?** 如果 equals 和 hashCode 的契约有瑕疵,HashMap 里拿 String 当 key 就是灾难。下一篇: equals/hashCode/compareTo 的逐行实现。
-
-> → [01-string/02 — String 的相等、哈希与比较](02-equals-hashcode-compare.md)
+下一篇继续追问：**如果两个 String 的内容不变，JDK 又怎样判断它们相等、计算 hash，并让它们在 Map 中正确工作？**

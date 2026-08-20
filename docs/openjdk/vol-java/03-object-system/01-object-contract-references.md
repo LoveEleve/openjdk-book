@@ -1,196 +1,134 @@
-# 01. Object 的方法契约与对象生命周期 — 六方法 + 四种引用
+# Object 的方法契约与对象生命周期 — 从集合 key 到引用处理
 
-> **前置依赖**: [02-number-math/01 — 包装类、缓存与装箱](../02-number-math/01-wrapper-cache-boxing.md)(包装类 hashCode 已见)、[01-string/01 — String 的不可变](../01-string/01-storage-immutable.md)(equals/hashCode 覆写实例)
-> → **后续**:[03-object-system/02 — System 与 Runtime](02-system-runtime.md)
-> 关联: 内部卷 06-oops(对象头 markOop/Klass)、25-gc-framework 03-reference-processing(引用处理与 pending 链);[JVM Spec: §2.2.1 对象引用]
+> 基于 JDK 11 `java.base` 的 `Object`、`Reference`、`Cleaner` 实现；对象头与 GC reachability 的底层细节属于 HotSpot 当前实现，不等于 Java API 规范的全部内容。
+> **前置依赖**: [02-number-math/01 — 包装类与 equals](../02-number-math/01-wrapper-cache-boxing.md)(对象身份/值比较)、[01-string/02 — String 的 hash 契约](../01-string/02-equals-hashcode-compare.md)(不可变 key)
+> → **后续**: [System 与 Runtime 门面](02-system-runtime.md)
 
-## 六个方法,三个 native,一道弃用史
+## 先看一个会“消失”的 HashSet 元素
 
-"Object 有哪些方法"是 Java 面试的开场题——大多数人的答案是背出来的: getClass、hashCode、equals、clone、toString、finalize。但追问三个细节就露馅: 为什么其中三个是 native?为什么重写 equals 必须重写 hashCode?finalize 为什么从 JDK9 开始被弃用,替代方案 Cleaner 又是怎么工作的?
-
-这篇把六个方法逐个过一遍,然后讲透三件事: 方法背后的 JVM 契约、hashCode-equals 的一致性规则、以及从 Finalizer 到 Cleaner 的对象清理机制——最后落到四种引用和它们的状态机。
-
-## 1. "Object 的六个方法为什么大多是 native" — JVM 契约
-
-### 1.1 六方法总览
-
-`Object.java`(共 559 行)的全部公开方法:
-
-| 方法 | 行号 | 性质 | 为什么 |
-|------|:--:|------|--------|
-| `getClass()` | 72 | native | 需要对象头里的 Klass 指针——语言层面拿不到 |
-| `hashCode()` | 109 | native | 需要对象头的 hash 位(或 JVM 生成策略) |
-| `equals(Object)` | 157 | Java | 默认引用比较,留给子类覆写 |
-| `clone()` | 222 | native | 需要位级复制对象字段 |
-| `toString()` | 245 | Java | 拼字符串,子类覆写的主场 |
-| `finalize()` | 558 | Java | 空实现 + `@Deprecated(since="9")` |
-
-### 1.2 native 的三个:语言表达不了的事
-
-三个 native 方法的共同点:**它们需要的状态或操作在 Java 语言层面不存在**:
-
-- `getClass()`:对象在 JVM 里的类型信息(`Klass` 指针)存在对象头里,Java 字段表里没有——只有 JVM 能读
-- `hashCode()`:默认实现需要对象头的 hash 位(或懒生成的随机数),与 Java 代码无关
-- `clone()`:浅拷贝是"按位复制所有字段",Java 写不出来(没有反射到任意字段并整体复制的语言操作)
-
-跨层标注: [内部卷: 06-oops 01-markoop-oopdesc——对象头的 hash 位与 Klass 指针布局;06-oops 02-klass-hierarchy——getClass 返回的 Class 对象的来源]
-
-### 1.3 Java 侧的两个:契约留给子类
-
-`equals`(`Object.java:157-159`)与 `toString`(`Object.java:245-248`)是纯 Java:
-
-```java
-// Object.java:157-159 + 245-248(截取核心,逐字)
-public boolean equals(Object obj) {
-    return (this == obj);
-}
-
-public String toString() {
-    return getClass().getName() + "@" + Integer.toHexString(hashCode());
-}
+```text
+对象放入 HashSet
+   → 按 hashCode 找桶
+   → 再用 equals 确认
+   → 对象参与 hash 的字段被修改
+   → 再查/再删时走了另一条路径
 ```
 
-`equals` 默认就是引用比较——语义是"同一性";`toString` 输出 `类名@十六进制hash`——它调用了 `getClass()` 和 `hashCode()`,所以子类重写 toString 时通常也要重写这两个。把这两个方法留在 Java 侧的意义: **契约由 Java 层维护**——JVM 不关心你的 equals 是什么语义,Java 层用 javadoc 契约(第 2 节)约束子类。
+对象还在，集合却可能找不到它。这个事故说明：`equals` 与 `hashCode` 不是两个独立的面试方法，而是集合正确性的共同前提。
 
-关键设计(斜体):*native 与 Java 的分界线画在"语言能否表达"上: 对象头信息、位级操作、内部状态必须进 native;而 equals/hashCode/toString 是"语义"不是"机制",留 Java 侧让每个子类按业务定义。面试能说出"native 是因为语言表达不了,不是 JVM 偷懒",就比背方法列表高一档。*
+Object、finalize、Reference 看起来属于不同主题，其实都在回答同一个边界问题：**对象的身份、值、资源和死亡通知，谁负责保证？**
 
-## 2. "hashCode-equals 契约是什么" — 一致性三规则
+## 一、Object 契约：身份与值必须先分清
 
-### 2.1 契约的原文
+### 1. equals/hashCode 不是随便覆写
 
-`Object` 的 javadoc(`Object.java:87` 附近)用规范语言写死了契约——核心一条:
+Object 的默认 `equals` 是引用比较；子类如果定义值相等，就必须同时保证：
 
-- **equals 相等 ⇒ hashCode 必相等**:*"If two objects are equal according to the equals(Object) method, then calling the hashCode method on each of the two objects must produce the same integer result"*(`Object.java:87-88` 区域)
-- 反过来不成立:hashCode 相等不代表 equals 相等(哈希碰撞)
-- 生命周期稳定:hashCode 在对象存活期间不得变化(除非 equals 语义变)
+- equals 相等的对象必须拥有相同 hashCode
+- 参与比较的状态在对象作为集合 key 期间保持稳定
+- equals 满足自反、对称、传递等契约
 
-### 2.2 违反的后果:集合类失效
+否则 HashMap/HashSet 在“放入”和“查找”之间会使用不一致的定位条件。
 
-生产 bug 的标准剧本: 对象放进 HashSet 后改了某个参与 equals 的字段——它的 hashCode 变了,但它在哈希表里还挂在**旧的桶**上。`contains` 按新 hash 定位到新桶,找不到;旧桶里的它永远等不到被访问。**对象既删不掉也查不到**。
+这也是为什么不可变值对象天然适合做 key：值不会在放入集合后悄悄变化。
 
-机制在 HashMap:`put`/`get` 都先 `hash(key)` 定位桶,再在桶内用 equals 确认(`HashSet` 底层就是 HashMap)。hash 定位错了桶,equals 再好也白搭。
+### 2. Object 的六类能力
 
-### 2.3 默认 hashCode 与地址无关
+不要先把 Object 方法当成一张背诵表。先按“Java 能否独立完成”分类：
 
-顺带澄清一个流传很广的误解: 很多人说"默认 hashCode 是内存地址"。`Object` 的 javadoc(`Object.java:97-102`)明确否认:*"The hashCode may or may not be implemented as some function of an object's memory address at some point in time"*——**"可能或不可能"**,不是"就是"。真实原因: JVM 的默认实现通常基于对象头里保存的 hash 值(首次调用时生成),**与地址解耦**——因为 GC 会移动对象(复制/压缩),如果 hash 依赖地址,对象搬家后 hash 就变了,哈希表直接失效。
+- `getClass()`(`Object.java:72`)——需要读取对象运行时类型信息，native
+- `hashCode()`(`:109`)——默认身份哈希由运行时提供，native
+- `equals(Object)`(`:157`)——默认可以用 Java 的引用比较表达
+- `clone()`(`:222`)——需要运行时执行浅拷贝，native
+- `toString()`(`:245`)——Java 层拼接类型名与哈希表示
+- `finalize()`(`:557-558`)——历史生命周期钩子，JDK 11 仍存在且 `@Deprecated(since="9")`
 
-关键设计(斜体):*契约的本质是"哈希表正确性的前置条件"——HashMap/HashSet 的正确性建立在"hash 定位、equals 确认"两段式上,任何一环被违反就静默失效(不报错、不抛异常,只是找不到)。Java 用 javadoc 强制(编译器不检查),C++ 的 unordered_map 靠用户自觉——面试答"违反契约会让集合类静默失效"比背三条规则有区分度。*
+native 并不自动等于“更安全”或“更快”；它表示该能力需要进入运行时对象、线程或内存边界，Java 方法本身无法完整表达。
 
-## 3. "finalize 为什么被弃用" — Finalizer 与 Cleaner
+关键设计(斜体):*Object 的方法分工反映了两层边界：equals/toString 可以由 Java 代码表达并允许子类覆写,getClass/hashCode/clone 则需要运行时协助。面试"为什么 Object 有 native 方法": 先说清它们依赖 JVM 内部状态。*
 
-### 3.1 现状:空实现 + 弃用标记
+## 二、clone 与 hash：看似简单，契约才是难点
 
-`Object.finalize`(`Object.java:553-558`)的完整内容:
+### 1. clone 不是深复制保证
 
-```java
-// Object.java:557-558(截取核心,逐字,省略 javadoc)
-    @Deprecated(since="9")
-    protected void finalize() throws Throwable { }
+Object 的 `clone()` 是 native 浅拷贝入口。它复制对象字段的当前值，但不会自动递归复制字段引用指向的对象；数组有相应的运行时复制路径。
+
+如果对象没有实现 `Cloneable`，调用 clone 会失败。实现接口也不等于得到业务上正确的深拷贝，只是满足了运行时允许复制的门槛。
+
+### 2. hashCode 不是地址承诺
+
+默认 hashCode 的目标是让对象在生命周期内稳定地参与哈希结构，不等于把内存地址暴露给 Java。GC 可能移动对象，因此业务代码不能把 hashCode 当作地址、持久 ID 或唯一标识。
+
+失败方案：
+
+- 只重写 equals，不重写 hashCode
+- 把可变字段参与 hash 后再修改对象
+- 把 hashCode 当唯一 ID
+
+这些方案的问题不是“API 用得不优雅”，而是直接破坏集合的定位前提。
+
+## 三、finalize：对象死了，资源却未必立刻释放
+
+### 1. Finalizer 的根本问题
+
+用 `finalize()` 清理文件、Socket 或 native 内存，直觉上像是“对象回收前最后补一刀”，但它有四个结构性问题：
+
+1. 执行时机由 GC 与 Finalizer 线程共同决定，不可预测。
+2. 对象进入待处理队列后，资源释放还要等待线程消费。
+3. finalize 抛出的异常不能作为可靠业务错误通道。
+4. 对象可能在 finalize 中重新建立可达性，形成复活。
+
+所以 finalize 的问题不是“某个实现写得慢”，而是它把确定性的资源生命周期交给了不确定的 GC 调度。
+
+### 2. Cleaner 解决什么，不解决什么
+
+`Cleaner`(`jdk.internal.ref.Cleaner.java:59`)用虚引用跟踪对象死亡，并在引用处理线程中执行清理动作：
+
+- `Cleaner.create(Object, Runnable)`(`:130`)登记 referent 与清理任务
+- 对象不可达后，引用处理机制最终触发清理动作
+- `clean()`(`:139`)允许显式执行一次清理
+
+Cleaner 解决了“不要依赖 finalize 复活对象”的问题，但不提供确定的即时释放保证。文件/Socket 等资源仍应优先使用 try-with-resources；Cleaner 更适合作为兜底机制。
+
+关键设计(斜体):*finalize 是不确定的生命周期钩子,Cleaner 是引用处理驱动的兜底桥接,显式 close 才是资源管理的主路径。不要把 Cleaner 当成同步析构函数。*
+
+## 四、四种引用：对象死亡如何通知 Java
+
+### 1. 引用对象本身也有状态
+
+`Reference` 持有几个关键字段：
+
+- `referent`(`Reference.java:151`)——被引用对象，GC 特殊处理
+- `queue`(`:161`)——可选 ReferenceQueue
+- `next`(`:171`)——引用处理链路
+- `ReferenceHandler`(`:190`)——守护线程，处理待处理引用
+
+状态可以文字化为：
+
+```text
+active
+  → GC 判断弱化引用对象不再满足存活条件
+pending
+  → ReferenceHandler 处理并决定是否入队/触发清理
+inactive
+  → 引用处理完成，referent 不再作为业务可达对象
 ```
 
-空实现,JDK9 起标注弃用。弃用的理由在 JEP 表面之下,是四个实打实的机制问题:
+### 2. 强、软、弱、虚不是四种缓存 API
 
-1. **时机不确定**:finalize 依赖 GC 触发——对象什么时候被回收、Finalizer 线程什么时候跑,都不保证,甚至可能永远不跑(对象一直可达)
-2. **延迟回收**:对象进 Finalizer 队列后,还要等 Finalizer 线程逐个执行——清理慢的 finalize 会拖垮整条队列,堆积的对象延迟释放
-3. **异常被吞**:finalize 里抛的异常被 Finalizer 线程静默忽略(线程 run 循环捕获后继续),错误无声无息
-4. **可复活**:finalize 里把 `this` 重新赋给外部引用,对象"复活"——但复活对象再次变不可达时,finalize 不会再执行第二次(协议规定),清理逻辑可能执行一半
+- **强引用**：正常可达性，仍然是对象存活的直接依据
+- **软引用**：内存压力下可被回收，适合可丢弃的内存敏感缓存，但不应当当作精确缓存容量控制器
+- **弱引用**：GC 判断对象只剩弱关联时即可清理，常用于不阻止对象回收的关联结构
+- **虚引用**：`get()` 不用于取回对象，只用于死亡通知与清理协作
 
-实现侧(`Finalizer.java:34` 的 `final class Finalizer extends FinalReference<Object>`)由专门的 `FinalizerThread`(`Finalizer.java:146`)消费队列——一个守护线程扛着所有对象的清理,一旦某个 finalize 卡住,全局陪葬。
+失败方案：用 WeakReference 当强缓存、用 PhantomReference.get 读取业务对象、用 ReferenceQueue 代替真正资源所有权管理。
 
-### 3.2 替代:Cleaner
+关键设计(斜体):*四种引用的差别是“对象存活强度 + 死亡通知时机”。Java 层负责引用对象、队列与回调,GC/运行时负责可达性判断;两边不能混成一个 API 行为。*
 
-JDK9 引入 `Cleaner`(`java/lang/ref/Cleaner.java:131`)。工厂方法(`Cleaner.java:173-177`):
+## 收网：对象、资源、引用三条边界
 
-```java
-// Cleaner.java:173-177(截取核心,逐字)
-public static Cleaner create() {
-    Cleaner cleaner = new Cleaner();
-    cleaner.impl.start(cleaner, null);
-    return cleaner;
-}
-```
+- **对象值边界**：equals/hashCode 稳定，值对象适合做集合 key
+- **资源生命周期边界**：try-with-resources/显式 close 是主路径，Cleaner 只是兜底
+- **引用可达性边界**：soft/weak/phantom 影响对象存活与通知，不等于业务所有权
 
-机制与 finalize 的差别(`Cleaner.java:157-158` 的 javadoc 说得很清楚): **"The cleaner creates a daemon thread to process the phantom reachable objects and to invoke cleaning actions"**——基于**虚引用**(PhantomReference)跟踪对象死亡,清理动作在自己的守护线程里执行:
-
-- **动作隔离**:清理动作抛异常会被捕获忽略(`jdk/internal/ref/CleanerImpl.java:152-153` 注释原文 "ignore exceptions from the cleanup action"),但队列中后续动作继续执行——finalize 的异常同样被吞(`Finalizer.java:93` 的 `catch (Throwable x) { }` 空捕获),两者真正的区别在: Cleaner 的动作是**用户显式注册的代码**,可以在动作内部自行 try-catch 处理错误,而不像 finalize 那样把整个清理责任交给框架
-- **不复活**:PhantomReference 的 get() 恒返回 null,无法通过引用拿到对象并复活它——finalize 的"复活"问题在 Cleaner 里物理上不可能
-
-典型应用是 DirectByteBuffer 的堆外内存释放(域 19/32 展开)——堆外内存不归 GC 管,必须靠引用机制在缓冲区对象死亡时释放 native 内存。
-
-关键设计(斜体):*Cleaner 的哲学是"把清理从 GC 语义里拿出来,变成引用机制的副产品"——虚引用只负责通知"对象死了",清理动作由用户代码显式注册、独立执行。面试点: "JDK9 后不要用 finalize;资源清理用 try-with-resources(确定性)或 Cleaner(兜底性)"——try-with-resources 是主动管理,Cleaner 是防泄漏的最后防线,两者不是替代关系是互补关系。*
-
-## 4. "四种引用是怎么工作的" — 引用强度状态机
-
-### 4.1 强度梯度
-
-四种引用按强度排列:
-
-```
-强引用 > 软引用(SoftReference) > 弱引用(WeakReference) > 虚引用(PhantomReference)
-```
-
-- **强引用**:普通赋值,GC 永不回收
-- **软引用**:内存不足才回收(GC 的最后手段)——适合内存敏感缓存
-- **弱引用**:GC 一轮即回收——WeakHashMap 的 key
-- **虚引用**:get() 恒 null,只用于"对象死亡通知"——Cleaner 的机制
-
-差异只在 **GC 触发的时机与存活策略**,Java 侧的处理路径完全一样(第 4.3 节)。
-
-### 4.2 Reference 的字段布局
-
-所有引用都继承 `Reference`(`java/lang/ref/Reference.java`),核心字段:
-
-```java
-// Reference.java:151 + 161 + 171 + 185(截取核心,逐字)
-private T referent;         /* Treated specially by GC */
-
-volatile ReferenceQueue<? super T> queue;
-
-volatile Reference next;
-
-private transient Reference<T> discovered;
-```
-
-- **referent**(`Reference.java:151`):被引用对象——注释 "Treated specially by GC" 是关键: 普通字段 GC 不管,这里 GC 在做可达性分析时**按引用类型分派**处理(强/软/弱/虚走不同的存活策略)
-- **queue**(`Reference.java:161`):关联的引用队列,volatile——入队状态可见性
-- **next**(`Reference.java:171`):入队链表的下一个——queue 里的链表结构
-- **discovered**(`Reference.java:185`):**pending 链表的链接**——GC 把要通知的引用串成 pending 链表,discovered 就是这个链表的 next 指针(注释 173-184: 与 next 分离是为了 enqueue 可以在 pending 状态下并发操作)
-
-### 4.3 状态机:active → pending → inactive
-
-`Reference.java:47-149` 有一大段状态机注释,核心是三个阶段:
-
-```
-active  →  (GC 检测到可达性变化)  →  pending  →  (ReferenceHandler 处理)  →  inactive
-```
-
-- **active**:可达,referent 有效,由 GC 特殊对待
-- **pending**:被 GC 挂上 pending 链表,等 ReferenceHandler 处理;referent 已被清除(注释 61 行:"referent = null")
-- **inactive**:处理完(入队或清除),终态
-
-消费 pending 链表的是 `ReferenceHandler` 线程(`Reference.java:190-216`)——注释自称 "High-priority thread to enqueue pending References"(`Reference.java:188`):
-
-```java
-// Reference.java:188 + 190 + 211-215(截取核心,逐字)
-/* High-priority thread to enqueue pending References */
-private static class ReferenceHandler extends Thread {
-    ...
-    public void run() {
-        while (true) {
-            processPendingReferences();
-        }
-    }
-}
-```
-
-守护线程,`while (true)` 死循环——`waitForReferencePendingList()`(`Reference.java:231`)阻塞等待,`getAndClearReferencePendingList()`(`Reference.java:221`,native)取走整条链表,逐个 `discovered` 字段遍历处理(`Reference.java:247-250`)。处理时按引用类型分派(`Reference.java:252-253`): **识别为 `jdk.internal.ref.Cleaner` 类型的引用直接调用其 `clean()`**(公开的 `java.lang.ref.Cleaner` 内部委托这套 jdk.internal.ref 实现),其余引用入队(`ReferenceQueue`)。这个线程是四种引用机制的统一出口: 软/弱/虚引用在这里入队,Cleaner 的清理动作在这里被触发。
-
-关键设计(斜体):*四种引用 = 可达性分析的四个等级(JVM Spec §2.2.1 定义对象引用的可达性等级),Java 侧只负责"入队与回调",判定逻辑全在 GC。生产上最经典的考点是 ThreadLocal 泄漏(域 11 展开): 弱引用 key + 强引用 value——key 被回收后 value 还挂在 Thread 上,键没了值还在,就是引用强度不对等的产物。*
-
-跨层标注: [内部卷: 25-gc-framework 03-reference-processing——GC 侧 pending 链的构建与 ReferenceHandler 的 VM 支撑];[JVM Spec: §2.2.1 对象引用(强/软/弱/虚可达性定义)]
-
-## 核心悬念
-
-对象是"值 + 方法",但**进程级的全局状态**——时间、系统属性、GC 控制、关闭钩子、标准输入输出——都藏在 `System` 和 `Runtime` 两个门面类里。面试连招的下一问是: `System.currentTimeMillis()` 和 `System.nanoTime()` 都是 native,有什么区别?`System.gc()` 真的会立刻 GC 吗?`Runtime.addShutdownHook` 的钩子什么时候跑?下一篇把这两个门面类拆开。
-
-> → [03-object-system/02 — System 与 Runtime](02-system-runtime.md)
+这三条边界连接起来，才能解释为什么 Object 的方法、finalize 的废弃和 Reference 的状态机都会出现在同一套 JDK 设计里：它们共同规定了对象从“可识别、可共享”到“不可达、可清理”的全过程。

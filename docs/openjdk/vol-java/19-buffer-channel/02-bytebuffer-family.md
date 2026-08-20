@@ -1,12 +1,16 @@
 # 02. ByteBuffer 家族与生成体系 — 模板、wrap、视图、字节序
 
-> **前置依赖**: [19-buffer-channel/01 — Buffer 抽象与状态机](01-buffer-state-machine.md)(四状态字段与翻转)
-> → **后续**:[19-buffer-channel/03 — FileChannel 与 mmap 零拷贝](03-filechannel-mmap.md)
-> 关联: 域 32 Unsafe(堆外内存);域 08 集合(subList 视图同思想)
+> 本文基于 JDK 11 `ByteBuffer` 及其生成出来的 Heap/Direct/AsXBuffer 视图类。本文聚焦模板生成体系、`allocate/allocateDirect/wrap`、字节序、视图（slice/duplicate/asXBuffer）与共享底层语义；FileChannel 与 mmap 放到下一篇。本文讨论的是 JDK 11 `java.nio` Buffer 家族生成与视图体系，不把这里的模板工程、共享底层语义和字节序视角外推成所有缓冲抽象都必须遵守的统一规范。
+> **前置依赖**：[19-buffer-channel/01 — Buffer 抽象与状态机](01-buffer-state-machine.md)(四状态字段与翻转)
+> **后续**：[19-buffer-channel/03 — FileChannel 与 mmap 零拷贝](03-filechannel-mmap.md)
 
-## 七个近亲,一份源码
+## 为什么看起来像七套几乎一样的类,却还能共享同一套底层逻辑
 
-`ByteBuffer`、`CharBuffer`、`ShortBuffer`、`IntBuffer`、`LongBuffer`、`FloatBuffer`、`DoubleBuffer`——七种基本类型的 Buffer,方法几乎一模一样,区别只有元素类型。JDK 怎么组织这七份近同的代码?答案: 源码里根本找不到七份实现——它们从**一个模板文件**生成。这一篇拆三件事: 模板生成体系、wrap 的零拷贝包装、视图与字节序。
+`ByteBuffer`、`CharBuffer`、`ShortBuffer`、`IntBuffer`、`LongBuffer`、`FloatBuffer`、`DoubleBuffer`——第一次看到这七个近亲时,很多人都会自然追问: 它们的方法几乎一模一样,区别看起来只在元素类型,那 JDK 难道真的手写维护了七份几乎重复的实现?如果答案只是“模板生成”,那还只解释了工程手法,没有解释后面更关键的问题: `wrap` 为什么不复制? `slice`/`duplicate` 为什么明明是新对象却共享数据? `order(ByteOrder)` 改的到底是字节,还是解释方式?
+
+真正值得抓住的不是类名有多少,而是 **ByteBuffer 家族一直在坚持同一个原则: 尽量共享底层存储,只改变观察和访问这段存储的方式**。模板生成解决的是“逻辑近同代码怎么统一维护”;视图、字节序和 direct/heap 则是在回答“同一块底层内存怎样被不同 API 视角重新解释”。
+
+所以这一篇的主线不是把类谱系再背一遍,而是围绕三件事展开: 为什么七种 Buffer 能从一套模板长出来,为什么 wrap/slice/duplicate/asXBuffer 都更像视图而不是复制,以及为什么同样的状态机落在堆内与堆外后,会导出两条不同的 I/O 成本路径。
 
 ## 1. "七种 Buffer 从哪来？" — 模板生成体系
 
@@ -187,8 +191,44 @@ wrap/slice/duplicate/asXBuffer 组成"视图家族"——**全部不复制数据
 
 关键设计(斜体):*"视图"家族(wrap/slice/duplicate/asXBuffer)全部共享底层——修改互相可见、游标各自独立。面试"slice 与 duplicate 区别": 范围 vs 全量、新游标起点不同,共享语义相同;再补一句"和 ArrayList.subList 同思想(域 08)"就是跨域联想。*
 
-## 核心悬念
+## 五、四个最容易混掉的边界：模板不是运行时魔法，wrap 不是复制，字节序不是改字节，视图也不是新数组
 
-Buffer 家族讲完——但**通道**呢?`FileChannel` 怎么把文件映射进内存?`map()` 的 mmap 是什么?`transferTo` 的零拷贝怎么做到"三次拷贝变一次"?`MappedByteBuffer` 的 load/force 干什么?——下一篇: FileChannel 与 mmap 零拷贝。
+在收网之前，先把这一篇最容易记错的四条边界压实。
 
-> → [19-buffer-channel/03 — FileChannel 与 mmap 零拷贝](03-filechannel-mmap.md)
+第一，模板生成不是运行时黑魔法。JDK 不是在程序执行时动态拼出七种 Buffer，而是在构建期用模板展开成具体类族。运行期调用方拿到的，仍然是普通的 `ByteBuffer`、`IntBuffer`、`HeapByteBuffer`、`DirectByteBuffer` 这些真实类。
+
+第二，`wrap()` 也不是把数组复制进一个更安全的新容器。它做的恰恰是零拷贝包装：把现有数组直接借给 `ByteBuffer` 用。于是数组改了，Buffer 看到的内容也跟着变；Buffer 写了，原数组也会被同步改掉。
+
+第三，`order(ByteOrder)` 更不是去重排底层字节。它改变的是多字节值如何被解释和组装：同样四个字节，在大端和小端视角下读出来的 int 可能不同，但底层那四个字节本身没有被重写。
+
+第四，`slice()`、`duplicate()`、`asIntBuffer()` 这些视图也不是“再造一份数组”。它们共享的始终是同一块底层存储，只是各自带着不同的范围、游标和解释方式。把它们误当复制体，最容易在共享修改和并发访问上踩坑。
+
+把这四条边界记稳，ByteBuffer 家族这一篇就不会重新塌回“类很多、名字很多”的表面印象。它真正想讲的其实只有一条主线：**尽量共享底层存储，尽量把变化限制在观察视角、游标状态和字节解释方式上。**
+
+## 收网：ByteBuffer 家族真正统一的，不是类名，而是“共享底层、改变视角”的一套生成与视图体系
+
+回到开头那个疑问，现在已经能看清为什么 ByteBuffer 家族看起来像一堆近亲类，底层却还能保持高度统一。因为 JDK 先用模板解决了“七种原始类型实现几乎一样”的工程问题，再用 wrap、slice、duplicate、asXBuffer 和字节序，把“共享底层存储、切换观察方式”这条主线一路贯彻到底。
+
+这也把整篇的三个重点收回来了：
+
+- 模板生成负责把近同实现压成一套可维护源码；
+- 视图家族负责在不复制数据的前提下，切出不同范围、不同游标、不同类型解释；
+- heap/direct 与 byte order 则进一步决定同一套状态机落在什么存储位置、按什么字节规则被解释。
+
+把整篇压成一张总图，就是：
+
+```text
+ByteBuffer 家族
+  → 构建期模板生成七种近同类
+
+共享底层
+  → wrap：数组直接借用
+  → slice/duplicate：共享存储、分离游标
+  → asXBuffer：共享存储、改变元素解释
+
+解释方式
+  → order：改多字节组装规则
+  → heap/direct：改 I/O 成本路径
+```
+
+如果说这一篇解决的是“为什么 Buffer 家族看起来很多，底层却还能围绕同一思想统一起来”，下一篇就会继续把这套共享存储与 direct 语义推到文件通道和 mmap 上：文件为什么能像内存一样访问，`transferTo()` 又为什么总和“零拷贝”绑在一起。

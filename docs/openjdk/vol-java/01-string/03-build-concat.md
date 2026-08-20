@@ -1,14 +1,22 @@
-# 03. 字符串构建与拼接 — 扩容算法、方法级同步、JEP 280
+# 字符串构建与拼接 — 可变缓冲、扩容与 JEP 280
 
-> **前置依赖**: [01-string/01 — 为什么 String 是不可变的?](01-storage-immutable.md)(byte[]+coder 存储模型)、[01-string/02 — equals/hashCode/compareTo](02-equals-hashcode-compare.md)
-> → **后续**:[01-string/04 — 字符编码与 Unicode](04-encoding-unicode.md)
-> 关联: [JEP 280: Indify String Concatenation];内部卷 07-classfile-classloader 03-symbol-string-table(常量池与字符串驻留)、15-c2-compiler 07-c2-macro-intrinsics(intrinsic 机制)
+> 基于 JDK 11 `java.base` 的 `AbstractStringBuilder`、`StringBuffer`、`StringConcatFactory` 与 `StringJoiner` 实现。
+> **前置依赖**: [String 为什么是不可变的](01-storage-immutable.md)(byte[]+coder 与不可变边界)、[String 的相等、哈希与比较](02-equals-hashcode-compare.md)(值对象收益)
+> → **后续**: [字符编码与 Unicode](04-encoding-unicode.md)
 
-## 面试三连问,一次给全源码答案
+## 先看一个会慢到失控的循环
 
-"StringBuilder 和 StringBuffer 的区别"是道送分题,背一句"前者非线程安全、后者方法加锁"就能过。但面试官几乎一定会追问:"默认容量多少?扩容一次扩多少?`a + b + c` 在 JDK11 里到底编译成什么?"——第三问的答案,已经不是 JDK8 时代面试宝典里的"new StringBuilder 了"。
+假设程序要拼接一百万个片段。最直觉的写法是每次都生成一个新的 String；稍微聪明一点的写法是复用 StringBuilder，但如果缓冲区每次只增长固定大小，旧内容仍会被反复搬家。
 
-这篇把三个问题对应的源码一次看全:`AbstractStringBuilder` 的扩容算法、`StringBuffer` 的同步与 toString 缓存、JEP 280 的 invokedynamic 拼接策略,最后是 `StringJoiner` 这个分隔符拼接工具。你会发现三者的核心逻辑其实都指向同一个骨架——前两篇建立的 `byte[] + coder` 存储模型,在这里以"可变"形态出现。
+这两个方案分别浪费了什么？前者不断创建短命对象，后者不断复制越来越长的数组。JDK 的设计因此分成三层：
+
+```text
+可变构建器 → 指数扩容，摊平复制成本
+共享构建器 → 锁保护可变状态，换取线程安全
+语言级 a+b → invokedynamic，把拼接策略推迟给运行时
+```
+
+本文不是先列类，而是追踪同一个问题：**一段字符串内容怎样以尽可能少的复制，从可变输入变成不可变 String？**
 
 ## 1. 可变缓冲区的骨架: AbstractStringBuilder
 

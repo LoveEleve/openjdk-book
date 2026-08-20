@@ -1,12 +1,16 @@
 # 01. Buffer 抽象与状态机 — mark/position/limit/capacity 与翻转
 
-> **前置依赖**: [03-object-system/01 — 对象生命周期](../03-object-system/01-object-contract-references.md)(对象内存布局与数组存储)、[18-serialization/01 — 序列化协议](../18-serialization/01-protocol-flow.md)(流式读写与状态推进的对照)
-> → **后续**:[19-buffer-channel/02 — ByteBuffer 家族与生成体系](02-bytebuffer-family.md)
-> 关联: 域 32 Unsafe(堆外内存与 Cleaner,规划中);内部卷 01-os 02-virtual-memory(虚拟内存与地址空间)
+> 本文基于 JDK 11 `Buffer` 与各类 Buffer 共用状态机抽象。本文聚焦 `mark/position/limit/capacity`、`flip/clear/rewind/mark/reset`、`remaining/hasRemaining`，以及 `isDirect` 背后的堆内/堆外边界；ByteBuffer 家族与视图生成留到下一篇。本文讨论的是 JDK 11 `java.nio` Buffer 状态机，不把这里的游标规则、direct 语义和 shadow buffer 路径外推成所有缓冲抽象都必须遵守的统一规范。
+> **前置依赖**：[03-object-system/01 — 对象生命周期](../03-object-system/01-object-contract-references.md)(对象内存布局与数组存储)、[18-serialization/01 — 序列化协议](../18-serialization/01-protocol-flow.md)(流式读写与状态推进的对照)
+> **后续**：[19-buffer-channel/02 — ByteBuffer 家族与生成体系](02-bytebuffer-family.md)
 
-## 一个数组,凭什么让面试官问三分钟
+## 为什么看起来只是一个数组,却要靠四个游标字段才能安全读写
 
-`ByteBuffer` 是 NIO 的心脏。面试从 "flip 是干什么的" 问起,一路到 "allocate 和 allocateDirect 的区别"——每个问题背后都是同一个设计: **一个数组 + 四个游标字段**。这篇把 Buffer 的抽象与状态机讲透: 四个字段是什么、flip/clear/rewind 各改了什么、remaining 怎么算、堆内堆外两种实现差在哪。
+很多人第一次学 `ByteBuffer` 时,都会把注意力放在 API 名字上: `flip()`、`clear()`、`rewind()`、`mark()`、`reset()`——看起来像一堆记忆题。可如果只背方法效果,很快就会在最基本的读写切换上出错: 明明刚把数据 put 进去,为什么 get 读不到?为什么 clear 之后旧数据看起来还在?为什么 rewind 和 flip 明明都把 position 设回 0,语义却完全不同?
+
+真正的问题不在数组本身,而在于 **Buffer 从来不是“一个带方法的 byte[]”**,而是一套围绕 `mark/position/limit/capacity` 运行的状态机。底层数据通常不动,真正变化的是“下一次从哪读/写”“当前边界在哪”“还有多少可读/可写”。也正因为如此,Buffer 的核心不是存储,而是状态推进。
+
+这篇就沿着这条主线来讲: 为什么四个字段本身就是全部抽象核心,为什么 `flip/clear/rewind` 都只是 O(1) 的状态切换,以及为什么同样的状态机在堆内和堆外两种存储位置上,又会导出两条完全不同的 I/O 成本路径。
 
 ## 1. "Buffer 的四个状态是什么？" — 字段与语义
 
@@ -213,14 +217,54 @@ frame.clear();                      // 读完→写,复用缓冲区
 - 清理: `Cleaner`(`Direct-X-Buffer.java.template:96` 的 `private final Cleaner cleaner`)——对象被 GC 回收时,cleaner 回调 `Deallocator.run` 的 `UNSAFE.freeMemory`(`:85-90`)释放内存
 - `isDirect` 返回 true
 
-**为什么 Direct 快**: 系统调用直接读写这段稳定地址的内存,**免中间拷贝**;堆内缓冲做 IO 时要先拷进堆外/固定位置。但堆外内存不受 GC 管理,申请了忘释放就是泄漏(域 32 的 Cleaner 展开)。
+**为什么 Direct 快**: 系统调用直接读写这段稳定地址的内存,**免中间拷贝**;堆内缓冲做 IO 时要先拷进堆外/固定位置。但堆外内存不受 GC 管理,申请了忘释放就是泄漏(域 32 会单独讲 Cleaner 机制)。
 
 关键设计(斜体):*"直接缓冲区"直接持有本机地址——系统调用零拷贝的前提;堆内缓冲 IO 时必然经历"拷贝或固定"。面试"为什么 Direct 快": 少一次拷贝(堆内→堆外临时缓冲);再问"Direct 的坑": 堆外内存泄漏(Cleaner 回收时机不可控,域 32)。生产: 大 IO/网络高频用 Direct,小数据堆内足够。*
 
 跨层标注: [内部卷: 01-os——read/write 系统调用需要稳定地址,这是"堆内缓冲 IO 慢"的根源;域 32 Unsafe——allocateMemory/freeMemory 与 Cleaner 的完整机制]
 
-## 核心悬念
+## 五、五个最容易混掉的边界：Buffer 不是数组包装，flip 不只是归零，clear 不擦数据，remaining 不脱离模式，Direct 也不是无脑更快
 
-Buffer 抽象讲完了——但**具体类型**呢?7 种基本类型的 Buffer(Byte/Char/Short/Int/Long/Float/Double,无 Boolean——boolean 没有对应 Buffer)从哪来?`ByteBuffer.wrap`、`asReadOnlyBuffer` 视图、大小端字节序怎么处理?堆内堆外两套实现为什么几乎一模一样的代码?——下一篇: ByteBuffer 家族与生成体系。
+在收网之前，先把这一篇最容易记错的五条边界压实。
 
-> → [19-buffer-channel/02 — ByteBuffer 家族与生成体系](02-bytebuffer-family.md)
+第一，Buffer 不是“多几个便捷方法的数组”。它真正值钱的不是底层存储本身，而是那四个游标字段把“下一次从哪读/写、当前边界在哪、还有多少可操作空间”都封进了状态机里。离开这套状态去看数组内容，很多 API 就会全部失去语义。
+
+第二，`flip()` 也不只是把 `position` 设回 0。更关键的动作是把“刚才写到了哪”改写成“现在读到哪为止”，也就是 `limit = oldPosition`。少了这一步，读方根本不知道有效数据到底只占了前多少字节。
+
+第三，`clear()` 更不是擦除底层数据。它做的只是把写模式重新开放到全容量：`position = 0`、`limit = capacity`。旧字节往往还躺在那儿，只是状态机告诉你“这些旧内容已经不再是当前有效边界的一部分”。
+
+第四，`remaining()` 也不能脱离当前模式去理解。写模式下，它表达的是还能写多少；flip 进入读模式后，它才表达还有多少已写数据可读。同一个公式 `limit - position`，意义会随状态切换而改变。
+
+第五，DirectBuffer 也不是无脑更快。它真正占优的是高频 I/O 场景里少一次堆内到堆外的过渡拷贝，并给系统调用提供稳定地址；如果数据很小、生命周期很短、管理成本更敏感，堆内缓冲一样可能更合适。
+
+把这五条边界记稳，Buffer 这一篇就不会重新塌回“flip/clear/rewind 的记忆题”这种表面印象。它真正讲的是一套读写边界状态机，以及这套状态机在堆内和堆外两种存储位置上怎样分裂出不同的 I/O 成本路径。
+
+## 收网：Buffer 的核心不是数组，而是四个游标字段驱动的读写状态机
+
+回到开头那个最常见的误会，现在已经能看清为什么 `ByteBuffer` 最难的从来不是底层数组，而是状态机。真正决定你接下来读到什么、还能写多少、什么时候该切换模式的，不是数组内容本身，而是 `mark/position/limit/capacity` 这四个字段怎样共同划定边界。
+
+这也把整篇的主线压回来了：
+
+- 四个游标字段定义当前模式和边界；
+- `flip/clear/rewind/mark/reset` 都只是 O(1) 的状态切换，不负责搬动底层数据；
+- `remaining/hasRemaining` 只是对当前边界的读取，因此必须放在读模式/写模式里理解；
+- `isDirect` 则在同一套状态机外，再把底层存储切成堆内与堆外两条 I/O 成本路径。
+
+把整篇压成一张总图，就是：
+
+```text
+Buffer
+  → 不是数组本身
+  → 是 mark/position/limit/capacity 组成的状态机
+
+状态切换
+  → flip：写边界变读边界
+  → clear：恢复全容量写模式
+  → rewind：回到已写起点重读
+
+存储位置
+  → heap：数组好管理，但 I/O 常多一层过渡拷贝
+  → direct：地址稳定，更利于高频 I/O
+```
+
+如果说这一篇解决的是“为什么 Buffer 必须先被当成状态机来理解”，下一篇就会继续往具体家族展开：`ByteBuffer`、视图 buffer、`wrap/slice/duplicate` 和字节序，到底怎样在同一套模板和共享存储思想上长出来。

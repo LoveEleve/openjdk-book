@@ -1,194 +1,198 @@
-# 03. ReentrantLock 与 Condition — 可重入、公平性、条件队列
+# ReentrantLock 与 Condition：为什么一个锁还要再带几条条件队列
 
-> **前置依赖**: [12-lock-sync/01 — AQS 核心](01-aqs-core.md)(state/tryAcquire 模板)、[12-lock-sync/02 — AQS 的等待与唤醒](02-await-wakeup.md)(公平性/hasQueuedPredecessors)
-> → **后续**:[12-lock-sync/04 — 共享模式与并发工具族](04-shared-tools.md)
-> 关联: 内部卷 19-sync(wait/notify 的 JVM 实现);域 11 线程(中断语义)
+> 本文基于 JDK 11 `ReentrantLock` 与 `AbstractQueuedSynchronizer.ConditionObject`。讨论范围聚焦 `nonfairTryAcquire`、`tryRelease`、`FairSync/NonfairSync`、`newCondition`、`await/signal/signalAll`、`fullyRelease` 与条件队列转移；共享模式工具留到下一篇。
+> **前置依赖**：[AQS 核心](01-aqs-core.md)、[AQS 的等待与唤醒](02-await-wakeup.md)
+> **后续**：[共享模式与并发工具族](04-shared-tools.md)
 
-## 面试"ReentrantLock 和 synchronized 区别"怎么答
+## 先看两个最常见、也最容易把锁语义想简单的现场
 
-可重入、公平性、Condition——面试必考三件套。这一篇把 ReentrantLock 的完整实现拆开: state 计数怎么实现可重入、公平/非公平的 tryAcquire 差异、Condition 的条件队列与 wait/notify 对照、最后给选型矩阵。
+第一个现场是递归或嵌套调用。线程已经拿到一把锁，进入某个方法后又调用了另一个同样需要这把锁的方法。如果这把锁只会回答“有人持有，所以失败”，那它会把自己再次挡在门外，等价于同一线程把自己锁死。
 
-## 1. "可重入怎么实现？" — state 计数
+第二个现场是生产者-消费者队列。线程已经拿着锁检查了共享队列，发现“现在队列为空”或“现在队列已满”。这时如果它只是傻傻地把锁一直握在手里等条件变化，别的线程根本进不来修改条件；如果它只是普通 `park()` 睡下去，又没有和锁的释放、重新获取形成闭环。它真正需要的不是“再来一把锁”，而是一条专门等这个业务条件的等待队列，并且在等待前先把当前锁完整放掉。
 
-### 1.1 state 即重入计数
+这两个现场把 `ReentrantLock` 和 `Condition` 的核心问题同时立住了：**一方面，锁不能只是二值占用标记，它必须知道“同一线程已经拿了几层”；另一方面，AQS 主队列只解决‘拿不到锁去哪排队’，并不自动解决‘拿着锁发现条件不满足时去哪等’。**
 
-`nonfairTryAcquire`(`ReentrantLock.java:126-140`)的核心:
+所以这篇不把“可重入、公平性、Condition”当成三道平行面试题，而是沿着一条更统一的主线来讲：为什么 `state` 必须被解释成重入计数，为什么主同步队列之外还要再分出条件队列，以及 `await/signal` 怎样把“释放锁等待条件”和“回到主队列重新抢锁”接成一个闭环。
 
-```java
-// ReentrantLock.java:126-140(截取核心,逐字)
-        final boolean nonfairTryAcquire(int acquires) {
-            final Thread current = Thread.currentThread();
-            int c = getState();
-            if (c == 0) {
-                if (compareAndSetState(0, acquires)) {
-                    setExclusiveOwnerThread(current);
-                    return true;
-                }
-            }
-            else if (current == getExclusiveOwnerThread()) {
-                int nextc = c + acquires;
-                if (nextc < 0) // overflow
-                    throw new Error("Maximum lock count exceeded");
-                setState(nextc);
-                return true;
-            }
-            return false;
-        }
+## 一、为什么同一线程再次 `lock()` 不会把自己锁死：因为 `state` 不是布尔值，而是重入计数
+
+### 先排除最朴素的二值锁模型
+
+如果一把锁只会表达“0=空闲，1=占用”，那第一次 `lock()` 的线程当然能成功；可同一线程第二次再进来时，它看到的依然只是“锁已被占用”，于是要么失败，要么排队等待自己释放。这就是自锁死的起点。
+
+所以可重入锁必须比“是否被占用”多记一层信息：不仅要知道锁有没有被占，还要知道**是谁占的、占了几层**。没有“持有者身份 + 计数”，就没有真正的可重入。
+
+### `nonfairTryAcquire` 为什么正好体现了这两层信息
+
+JDK 11 中，可重入的核心逻辑就在 `ReentrantLock.java:126-140` 的 `nonfairTryAcquire`。它不是抽象地说“如果是自己就放行”，而是把两条路径写得很清楚：
+
+- `state == 0`：锁当前空闲，尝试 CAS 抢占，并记录 owner
+- `current == getExclusiveOwnerThread()`：锁已经是我自己拿着，那就不是失败，而是把 `state` 累加
+
+这说明 `state` 在 `ReentrantLock` 里不是“锁标志位”，而是**重入计数**。第一次拿到锁时，计数从 0 变成 1；同一线程第二次进来，计数从 1 变成 2；第三次再来，继续加。线程之所以不会把自己锁死，不是因为 JVM 特判“你是同一个线程”，而是因为这把锁本来就被设计成“同一 owner 重入时累加计数”。
+
+### 为什么 owner 身份追踪和计数缺一不可
+
+只有计数，没有 owner，不知道谁有资格重入；只有 owner，没有计数，又不知道要解锁几次才算真正释放。可重入锁必须同时具备这两层信息。
+
+这也是为什么 `getHoldCount()` 会成为一个有意义的 API。它不是辅助调试小玩具，而是在直接暴露：这把锁当前对持有线程来说，已经重入了几层。
+
+这一层一定要讲透，因为它是 `ReentrantLock` 和“一个普通互斥位”之间最根本的分界线。
+
+## 二、为什么 `unlock()` 一次有时并不会真的放锁：归零前它只是在退重入层数
+
+### 先看“解一次锁就应该彻底放开”的直觉为什么会错
+
+如果你把锁想成二值开关，那 `unlock()` 看起来自然应该一步归位：反正锁开了，现在关掉就完了。但在可重入模型里，这个直觉马上失效。线程可能已经递归拿了三层；此时解一次，只是说明“我退出了最内层那次进入”，并不代表外层两次持有已经结束。
+
+所以 `unlock()` 的真正语义不是“一调用就彻底放开”，而是“**重入计数减一，只有减到零才真正释放 owner 身份**”。
+
+### `tryRelease` 为什么刚好把这个闭环补齐
+
+这个逻辑直接体现在 `ReentrantLock.java:146-156` 的 `tryRelease`：
+
+- 先把 `state` 减去这次释放量
+- 如果当前线程不是 owner，直接抛 `IllegalMonitorStateException`
+- 只有当新计数 `c == 0` 时，才把 owner 清掉，并让上层看到“这次释放真的完成了”
+
+这条路径特别值得记，因为它解释了一个经常被低估的 bug：**重入泄漏**。如果一段代码 lock 了两次，却只 unlock 一次，那 `state` 仍然大于 0，这把锁对外就还是被当前线程持有着，别的线程永远进不来。
+
+所以“可重入”从来不是白送的便利，它实际上把锁从简单的占用位变成了一份必须正确加减的持有计数账本。你多拿几次，就得对应地多还几次。
+
+## 三、公平与非公平为什么源码上只差一道前驱检查：它们差在资格入口，不差在等待骨架
+
+### 先拆掉“公平锁一定是另一套机制”的误解
+
+很多人一听公平锁和非公平锁，就会想象两套完全不同的等待队列、唤醒顺序甚至内部实现。AQS 恰好说明，差异并不在这些地方。等待、挂起、唤醒、取消节点清理，公平和非公平锁照样共享同一套 AQS 队列骨架。真正不同的地方，是**新来的线程在尝试获取锁之前，要不要先尊重排队者。**
+
+### 非公平模式为什么允许“先试一把”
+
+`NonfairSync` 在 `ReentrantLock.java:196-199`，它的 `tryAcquire` 直接走 `nonfairTryAcquire`。也就是说，新来的线程会先立即尝试抢这把锁，只要当前 `state` 恰好是 0，它就可能在队列外直接成功。这样做的收益很明确：减少了一次无谓的入队、出队、唤醒切换，吞吐量通常更高。
+
+### 公平模式为什么只多了一句 `hasQueuedPredecessors()`
+
+`FairSync` 在 `ReentrantLock.java:206-213`。它和非公平模式的真正差别，几乎就压在一行逻辑上：在 `state == 0` 时，不是直接 CAS，而是先问 `hasQueuedPredecessors()`。如果前面已经有人排着，就别插队，老老实实进队列。
+
+这恰好说明，公平性本质上不是另一套锁，而是**对资格入口的额外约束**。AQS 的等待协议没变，变的是“队列外的新线程此刻有没有资格先试一次”。
+
+### 为什么 `tryLock()` 看上去像在“作弊”
+
+这时很多人会追问：那公平锁是不是任何路径都绝不允许插队？答案是否定的。JDK 11 中无超时版 `tryLock()`（`ReentrantLock.java:346-347`）直接走 `sync.nonfairTryAcquire(1)`。也就是说，就算你构造的是公平锁，只要你主动选择 try 语义，就接受“此刻谁抢到算谁”的结果。
+
+这再次说明公平本来就是工程约束，而不是绝对教条。公平锁并不是承诺“任何情况下都严格先来先得”，而是在正常阻塞获取路径上尽量让排队者优先。`tryLock()` 这类 API 明确表达了调用方自己的偏好：我现在就想赌一把有没有空档，赌不到立刻返回。
+
+## 四、为什么 AQS 主队列还不够：拿不到锁和条件没满足是两种完全不同的等待
+
+### 先看主队列到底解决了什么问题
+
+AQS 的主同步队列解决的是：线程想获取同步状态，但当前拿不到，于是入队等待。它回答的是“**获取失败去哪排队**”。
+
+可业务里还有另一类等待，根本不是因为获取失败。线程已经拿到了锁，检查共享状态后发现业务条件暂时不满足——比如“队列现在为空，我得等 notEmpty”；或者“缓冲区现在已满，我得等 notFull”。这时它并不是抢锁失败，而是主动发现：我现在虽然拿着锁，但不能继续干活。
+
+这两类等待如果混成一条队列，就会出问题。因为“抢锁失败的人”是在等持有者释放资格；“条件不满足的人”则是在等别的线程修改某个业务条件，并且在等待期间必须先把自己手里的锁完整放掉。
+
+所以 AQS 主队列还不够。它只能管理“谁拿不到锁”；它不能独立表达“谁已经拿着锁，但现在该去等条件”。这正是 `ConditionObject` 要补出来的那条专用等待链。
+
+### `ConditionObject` 为什么一定要是另一条队列
+
+JDK 11 中，`ConditionObject` 定义在 `AbstractQueuedSynchronizer.java:1868`，并且自己维护：
+
+- `firstWaiter`（`AbstractQueuedSynchronizer.java:1871`）
+- `lastWaiter`（`AbstractQueuedSynchronizer.java:1873`）
+
+这已经说明它不是 AQS 主队列的一个状态位，而是另一条专门服务“条件等待”的链。线程从 `await()` 进去时，不是继续留在主同步队列里，而是先转到条件队列，在那里等“条件成立”这件事，而不是等“锁刚好释放”。
+
+这一层一定要立住，因为它决定了后面 `await()` 和 `signal()` 的所有动作顺序。
+
+## 五、`await()` 为什么一定要 fullyRelease：你不先把锁全放掉，别人根本改不了条件
+
+### 先看最容易写错的失败方案
+
+很多人理解 `await()` 时，会下意识把它想成“我拿着锁，暂时睡一会儿，等别人叫我”。这个想法最大的问题是：如果你睡的时候还握着锁，别的线程根本进不来改条件。生产者无法往队列里放元素，消费者无法从队列里取元素，条件就永远不会发生变化，你等的东西也永远不会到来。
+
+所以 `await()` 的第一个硬前提不是“能睡”，而是“**睡之前必须把自己当前持有的锁完整放掉**”。
+
+### `await()` 为什么不是只放一层，而是 fullyRelease
+
+`await()` 入口在 `AbstractQueuedSynchronizer.java:2074-2085`。它的关键动作顺序是：
+
+1. `addConditionWaiter()`（`AbstractQueuedSynchronizer.java:1886`）先把当前线程挂到条件队列
+2. `fullyRelease(node)`（`AbstractQueuedSynchronizer.java:1762`）保存并释放当前全部重入状态
+3. 线程在条件队列上 `park`
+4. 被 `signal` 转回主同步队列后，再通过 `acquireQueued(node, savedState)` 把之前释放掉的锁重新拿回来
+
+这里最容易漏掉的是“fully”两个字。它不是简单放一次锁，而是要把当前线程持有的**全部重入层数**都释放掉。否则只放一层，锁仍然被当前线程残留持有，其他线程依旧没法真正进来改变条件。
+
+这也解释了为什么 `await()` 比 `Thread.sleep()` 或普通 `park()` 高一个层次：它不是单纯暂停线程，而是把“释放当前独占状态 → 在条件队列睡眠 → 被 signal 后重返主队列 → 重新抢回原先层数的锁”接成了一条完整协议。
+
+## 六、`signal()` 为什么不是直接让线程继续跑：它只是把线程送回“抢锁赛道”
+
+### 先拆掉“signal = 立刻恢复执行”的误解
+
+很多人看到 `signal()`，会自然联想到“唤醒那个等待线程，它继续往下跑”。这个理解少了一整步：等待线程在 `await()` 时已经把锁放掉了，而在 `signal()` 发生的那个瞬间，当前线程往往还持有着这把锁。被 signal 的线程怎么可能立刻越过持有者继续执行？
+
+所以 `signal()` 的真正职责不是“立刻恢复执行”，而是**把条件队列里的节点重新送回 AQS 主同步队列，让它重新获得参与抢锁的资格**。
+
+### `transferForSignal` 为什么是条件等待闭环的关键
+
+这个动作发生在 `transferForSignal`，位于 `AbstractQueuedSynchronizer.java:1713-1728`。`signal()`（`AbstractQueuedSynchronizer.java:1979-1984`）先校验当前线程确实持有独占锁，再通过 `doSignal()`（`AbstractQueuedSynchronizer.java:1912`）把条件队列头节点转移出去。
+
+关键顺序是：
+
+- 节点先从 `CONDITION` 状态脱离
+- 再通过 `enq` 进入 AQS 主同步队列
+- 再由正常的同步获取路径去等待锁真正释放
+- 最后在 `await()` 那边重新 `acquireQueued(..., savedState)`，把原先重入层数拿回来
+
+这条线特别重要，因为它说明 `signal` 并不直接替线程拿锁；它只是把“等条件的人”重新送回“等锁的人”这条队伍里。条件满足只是你获得了重返同步竞争的资格，不等于持锁线程已经让路。
+
+### 这为什么比 `wait/notify` 更强
+
+`Object.wait/notify` 只有一条 wait set，等待者们都混在一起。Condition 则允许一把锁派生多条条件队列，例如 notEmpty 和 notFull 分开等。这样 `signal()` 就能更精确地唤醒“这类条件上的人”，而不是把一大堆实际上还不该醒的线程一起炸起来。
+
+所以 Condition 真正多出来的能力，不是单纯“也能 await/signal”，而是：**它把‘锁竞争失败’和‘业务条件不满足’拆成了两层等待协议，并允许一把锁拥有多条业务条件等待链。**
+
+## 七、ReentrantLock 相比 synchronized 真正多出来的，不是速度神话，而是能力边界
+
+### 先别再用“谁更快”当选型主线
+
+今天还把 `ReentrantLock` 和 `synchronized` 的区别讲成“Lock 更快”，已经不太准确了。现代 JVM 对 `synchronized` 早就做了大量优化，真正值得拿来做选型分界的，主要不是性能神话，而是能力差异。
+
+从本文主线看，ReentrantLock 真正多出来的几件事包括：
+
+- 可选择公平或非公平获取策略
+- 可显式暴露重入层数与持有状态
+- 可派生多个 `Condition` 队列
+- 可表达可中断、可超时的获取与等待路径
+
+也就是说，它的优势不在于“总比 synchronized 快”，而在于**它把 JVM 内置监视器没有直接暴露的一整套等待与条件控制能力，变成了 Java 层可组合 API。**
+
+这一层和前面几节正好收口：如果你的场景需要的不只是“互斥”，而是“同一线程多层进入”“不同条件分开等待”“公平入口约束”，那 ReentrantLock + Condition 才真正体现出价值。
+
+## 收网：ReentrantLock 负责可重入资格，Condition 负责把“等条件”从“等锁”里拆出来
+
+回到开头两个现场，现在已经能看清它们为什么必须放在同一篇里讲了。
+
+同一线程再次 `lock()` 不会把自己锁死，是因为 `ReentrantLock` 把 AQS 的 `state` 解释成了持有计数，而不是布尔占用位；只有计数归零，锁才真正释放。公平与非公平的差别，也只是围绕“新线程有没有资格先插队试抢”这一入口约束展开。
+
+而当线程已经拿着锁，却发现业务条件不满足时，AQS 主同步队列又不够用了。`ConditionObject` 必须把这类线程转移到专门的条件队列，让它们先 fullyRelease 当前锁、在那里睡下去，再在 `signal()` 时重新转回主同步队列，恢复成“重新抢锁”的问题。
+
+把整篇压成一张总图，就是：
+
+```text
+ReentrantLock
+  → state = 重入计数
+  → owner = 当前持有线程
+  → unlock 直到计数归零才真释放
+  → 公平/非公平差在资格入口检查
+
+Condition
+  → 主同步队列不解决“条件不满足”
+  → await: 入条件队列 → fullyRelease → park
+  → signal: 转回同步队列 → 重新 acquireQueued
+  → 多条条件队列实现定向唤醒
 ```
 
-两条路径:
+如果说前两篇 AQS 讲的是“骨架”和“睡醒协议”，这一篇真正补上的就是：**怎么把这套骨架落到最常用的独占锁上，以及怎么在一把锁之上再分出多条条件等待链。**
 
-1. **`c == 0`(无人持有)**: `compareAndSetState(0, acquires)` CAS 抢占,成功则 `setExclusiveOwnerThread(current)` 记录持有者
-2. **`current == getExclusiveOwnerThread()`(自己持有)**: **`setState(c + acquires)` 计数累加**——这就是可重入: 同一线程 lock 两次,state 变 2,不死锁
-
-`exclusiveOwnerThread`(`AbstractOwnableSynchronizer.java:64`)由 `setExclusiveOwnerThread`(`:73`)/`getExclusiveOwnerThread`(`:83`)维护——**持有者身份追踪**。
-
-### 1.2 释放:归零才真正释放
-
-`tryRelease`(`ReentrantLock.java:146-156`):
-
-```java
-// ReentrantLock.java:146-156(截取核心,逐字)
-        protected final boolean tryRelease(int releases) {
-            int c = getState() - releases;
-            if (Thread.currentThread() != getExclusiveOwnerThread())
-                throw new IllegalMonitorStateException();
-            boolean free = false;
-            if (c == 0) {
-                free = true;
-                setExclusiveOwnerThread(null);
-            }
-            setState(c);
-            return free;
-        }
-```
-
-每次 unlock `state-1`;**归零(`c == 0`)才真正释放**(清 owner);非持有者调用抛 `IllegalMonitorStateException`。面试题 "lock 两次不 unlock 会怎样": state=2 未归零,其他线程永远拿不到——**重入泄漏**,连接/资源场景的常见 bug。
-
-关键设计(斜体):*"可重入 = 同一线程重复计数"——state 从布尔锁升级为计数锁。面试"为什么 synchronized 可重入": JVM 维护同一原理(内部卷 19);Lock 的重入是显式的 state 语义——计数+持有者追踪,两次 lock 必须两次 unlock。*
-
-## 2. "公平与非公平的实现差异" — tryAcquire 对比
-
-### 2.1 非公平:直接 CAS
-
-`NonfairSync.tryAcquire`(`ReentrantLock.java:198`,类在 `:196`)直接调 nonfairTryAcquire——**新线程与队列头竞争,插队被允许**(能 CAS 到就赢)。
-
-### 2.2 公平:前驱检查
-
-`FairSync.tryAcquire`(`ReentrantLock.java:213`,类在 `:206`)多一个条件(第 2 篇已详述):
-
-```java
-// ReentrantLock.java:213-221(截取核心,逐字)
-        protected final boolean tryAcquire(int acquires) {
-            final Thread current = Thread.currentThread();
-            int c = getState();
-            if (c == 0) {
-                if (!hasQueuedPredecessors() &&
-                    compareAndSetState(0, acquires)) {
-                    setExclusiveOwnerThread(current);
-                    return true;
-                }
-            }
-```
-
-**`!hasQueuedPredecessors()`**——队列里有等待者(且不是自己)就放弃。实现差异就是这一行。
-
-### 2.3 tryLock 的"愿赌服输"
-
-`tryLock()`(`ReentrantLock.java:346-348`)无条件 `sync.nonfairTryAcquire(1)`——**即使公平锁也走非公平路径**("愿赌服输": 既然选择了 try,就接受插队竞争的结果);超时版 `tryLock(timeout)`(`:422-424`)走 `tryAcquireNanos`,内部仍用公平 tryAcquire。
-
-关键设计(斜体):*实现差异一行代码(hasQueuedPredecessors)——面试"公平锁代码差别"答案: 前驱检查。tryLock() 不走公平(获取瞬间的插队是允许的,但超时版公平);生产: 默认非公平,公平锁用于饥饿敏感场景(低频)。*
-
-## 3. "Condition 是什么？" — 条件队列
-
-### 3.1 接口与实现
-
-`Condition`(`Condition.java:180` 接口,490 行)提供 `await()/signal()/signalAll()`,类比 `Object.wait/notify/notifyAll`。实现是 AQS 内部类 **`ConditionObject`**(`AbstractQueuedSynchronizer.java:1868`)——**每条件一条等待队列**(`firstWaiter`/`lastWaiter`,`:1871-1873`;节点状态 `CONDITION=-2`,第 1 篇已见)。
-
-### 3.2 await:释放锁 + 挂起
-
-`await()`(`AbstractQueuedSynchronizer.java:2074-2094`)五步:
-
-```java
-// AbstractQueuedSynchronizer.java:2074-2094(截取核心,逐字)
-        public final void await() throws InterruptedException {
-            if (Thread.interrupted())
-                throw new InterruptedException();
-            Node node = addConditionWaiter();
-            int savedState = fullyRelease(node);
-            int interruptMode = 0;
-            while (!isOnSyncQueue(node)) {
-                LockSupport.park(this);
-                if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
-                    break;
-            }
-            if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
-                interruptMode = REINTERRUPT;
-            if (node.nextWaiter != null) // clean up if cancelled
-                unlinkCancelledWaiters();
-            if (interruptMode != 0)
-                reportInterruptAfterWait(interruptMode);
-        }
-```
-
-1. **中断检查**: 已中断直接抛 InterruptedException
-2. **`addConditionWaiter()`**(`:1886`): **先校验持锁**(`:1887-1888` 的 `isHeldExclusively`,非持有者抛 `IllegalMonitorStateException`——与 wait 必须持锁的前提相同),再入条件队列
-3. **`fullyRelease(node)`**(`:1762`): **保存当前 state(重入计数)并全部释放**——与 wait 相同: 必须释放锁才能让其他线程进
-4. **`while (!isOnSyncQueue(node)) LockSupport.park(this)`**: 在条件队列上挂起,直到被 signal 转移回主队列
-5. **`acquireQueued(node, savedState)`**: 被唤醒后**重新获取锁(恢复重入计数)**——savedState 就是原计数
-
-### 3.3 signal:转移节点
-
-`signal()`(`AbstractQueuedSynchronizer.java:1979-1986`): 持锁校验(`isHeldExclusively`,非持有者抛 `IllegalMonitorStateException`)→ `doSignal(first)`(`:1912`)→ `transferForSignal`(`:1713`):
-
-```java
-// AbstractQueuedSynchronizer.java:1713-1732(截取核心,逐字)
-    final boolean transferForSignal(Node node) {
-        /*
-         * If cannot change waitStatus, the node has been cancelled.
-         */
-        if (!node.compareAndSetWaitStatus(Node.CONDITION, 0))
-            return false;
-
-        /*
-         * Splice onto queue and try to set waitStatus of predecessor to
-         * indicate that thread is (probably) waiting. If cancelled or
-         * attempt to set waitStatus fails, wake up to resync (in which
-         * case the waitStatus can be transiently and harmlessly wrong).
-         */
-        Node p = enq(node);
-        int ws = p.waitStatus;
-        if (ws > 0 || !p.compareAndSetWaitStatus(ws, Node.SIGNAL))
-            LockSupport.unpark(node.thread);
-        return true;
-    }
-```
-
-**`CONDITION → 0 → enq 主队列 → 设 SIGNAL`**: 把节点从条件队列**转移**到 AQS 主队列(不是直接唤醒)——被转移的线程在 await 的 while 循环里发现 `isOnSyncQueue` 为 true,退出等待,进入 `acquireQueued` 排队获取锁。特殊分支(`:1727-1728`): 前驱已取消或 CAS 设 SIGNAL 失败时,`LockSupport.unpark(node.thread)` **直接唤醒**——让线程自己重新同步(此时 waitStatus 的短暂不一致无害)。
-
-### 3.4 为什么用 Condition:定向唤醒
-
-**一个锁可以有多个条件队列**(`lock.newCondition()` 多次)——生产者消费者经典用法: "队列不满"和"队列不空"两个条件分开等。用 synchronized 只有一个 wait set,只能 notifyAll 全唤醒(惊群);Condition 是**定向唤醒**。
-
-关键设计(斜体):*Condition 的价值: 多条条件队列(如"队列不满"和"队列不空"分开等)——用 synchronized 只能 notifyAll 全唤醒。面试"await 和 wait 区别": Lock 体系 vs 内置监视器;await 可超时/可中断;能说出 await 的五步(入队→全量释放→挂起→转移→重获取)就是源码级。*
-
-跨层标注: [内部卷: 19-sync 03-enter-exit-wait——Object.wait/notify 的 JVM 实现(ObjectMonitor 的 wait set)与 ConditionObject 的条件队列是"监视器条件等待 vs Java 层条件队列"两种方案;synchronized 单 wait set vs Lock 多条件]
-
-## 4. "synchronized vs Lock" — 选型矩阵
-
-| 维度 | synchronized | ReentrantLock |
-|------|-------------|---------------|
-| 实现 | JVM 内置(内部卷 19) | Java AQS(本域) |
-| 公平性 | 非公平 | 可选公平 |
-| 中断 | 不可中断 | `lockInterruptibly` |
-| 超时 | 无 | `tryLock(timeout)` |
-| 条件 | 一个 wait set | 多 Condition |
-| 性能 | 现代 JVM 已优化 | 相当 |
-
-关键设计(斜体):*现代 JVM 的 synchronized 已高度优化(偏向锁/轻量锁/膨胀三级,内部卷 19)——业界共识是 JDK6+ 与 Lock 性能相当;选型看**能力**不看性能: 需要超时/中断/多条件用 Lock,否则 synchronized(简洁)。面试别再说"Lock 快";能说"性能相当(业界共识),选型看能力"才是现在的正确答案。*
-
-## 核心悬念
-
-独占锁讲完——**共享模式**呢?Semaphore 的"多个许可"、CountDownLatch 的"计数归零"——`doAcquireShared` 的级联传播(`setHeadAndPropagate`)怎么让多个线程同时唤醒?——下一篇: 共享模式与并发工具族。
-
-> → [12-lock-sync/04 — 共享模式与并发工具族](04-shared-tools.md)
+下一篇继续把视角切到共享模式：既然独占锁已经讲清了，`Semaphore` 为什么能让多个线程同时通过？`CountDownLatch` 为什么是“计数归零后一次性开门”？AQS 的共享获取与传播，又会怎样把“一个人醒”变成“一批人能接力通过”？

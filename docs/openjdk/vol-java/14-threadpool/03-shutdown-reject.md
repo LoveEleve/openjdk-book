@@ -1,104 +1,200 @@
-# 03. 线程池关闭与拒绝策略 — shutdown/Now、awaitTermination、四策略
+# 线程池关闭与拒绝策略：为什么线程池不只要会干活，还要会体面退场
 
-> **前置依赖**: [14-threadpool/01 — ctl 与 Worker](01-ctl-worker.md)(状态机)、[14-threadpool/02 — execute 与 Worker 生命周期](02-execute-worker.md)(任务提交流程)
-> → **后续**: [04-futuretask-scheduled.md](04-futuretask-scheduled.md)
+> 本文基于 JDK 11 `ThreadPoolExecutor`。讨论范围聚焦 `shutdown`、`shutdownNow`、`interruptIdleWorkers`、`interruptWorkers`、`drainQueue`、`awaitTermination`、`tryTerminate`、`reject` 与四个内置 `RejectedExecutionHandler`；FutureTask 和定时调度放后续篇章。本文讨论的是 JDK 11 Java 层实现路径，不把这里的关闭顺序和拒绝处理写成所有线程池实现的抽象规范。
+> **前置依赖**：[ctl 与 Worker](01-ctl-worker.md)、[execute 流程与 Worker 生命周期](02-execute-worker.md)
+> **后续**：[FutureTask 与定时调度](04-futuretask-scheduled.md)
 
-## 线程池怎么关、满了怎么办
+## 先看两个最容易把线程池问题想成“调用个 API 就结束”的现场
 
-线程池的难点不是创建,而是**关闭语义**和**饱和语义**。这一篇把优雅停机与拒绝策略讲清。
+第一个现场是发布停机。服务准备下线，线程池里有些任务已经在跑，有些还躺在队列里，有些调用方还在继续提交新任务。这时真正的问题不是“调 shutdown 还是 shutdownNow”，而是：**你此刻对不同阶段的任务分别还承诺什么？** 已经跑起来的任务要不要尽量让它收尾？队列里没开始的任务要不要继续处理？新来的任务从哪一刻开始算作“不再受理”？
 
-## 1. "shutdown vs shutdownNow" — 两种关闭
+第二个现场是系统满载。core 满了，queue 也塞不下，maximum 也顶住了，又有新任务进来。这时拒绝策略也不是善后选项，而是在定义系统如何退化：是抛异常让上游感知失败？是让调用线程自己做活，从而天然减速？还是直接丢任务，甚至丢掉队列里最老的一个腾位置给新任务？
 
-### 1.1 shutdown
+这两个现场说明，线程池不仅要会“把任务跑起来”，还必须会**定义退场语义和饱和语义**。如果前两篇讲的是线程池怎样生和怎样忙，这一篇讲的就是：它在不再继续接活、或者再也接不住活时，如何明确表达系统下一步的行为边界。
 
-`shutdown()`(`ThreadPoolExecutor.java:1369`)做的是:
+## 一、shutdown 为什么不是“停掉线程池”，而是“停止接新活，继续清旧账”
 
-- `advanceRunState(SHUTDOWN)`(`:1374`)
-- `interruptIdleWorkers()`(`:1375`;定义 `:809`)
-- 不再接收新任务,但队列里的任务继续处理
+### 先拆掉“调用 shutdown 就会把一切都停掉”的误解
 
-它中断的是**空闲 Worker**,不是正在执行任务的 Worker。
+很多人第一次接触 `shutdown()` 时，会本能把它理解成“关闭线程池 = 让线程池停止运行”。这个理解太粗糙了，因为线程池里的任务并不都处在同一状态：有些任务已经开始执行，有些只是排在队列里，还有些尚未提交。把它们全部粗暴视为“一起停”不仅不准确，也和 JDK 的真实语义不符。
 
-### 1.2 shutdownNow
+JDK 11 的 `shutdown()` 入口在 `ThreadPoolExecutor.java:1369-1380`。它做的核心动作不是“杀死所有 worker”，而是先把线程池推进到 `SHUTDOWN`，再唤醒空闲工人，让它们重新检查状态。这里最重要的承诺是：**从这一刻起，不再接收新任务；但已经进入队列、尚未处理的旧任务，仍然会继续被清理。**
 
-`shutdownNow()`(`:1400`)更强硬:
+这就是为什么它更像“停接新活，继续清旧账”，而不是“机器立刻熄火”。
+
+### 为什么它只中断空闲 worker，不中断正在执行的任务
+
+这件事在 `interruptIdleWorkers()` 上体现得非常明显：
+
+- `interruptIdleWorkers(boolean)` 位于 `ThreadPoolExecutor.java:783`
+- 无参版位于 `809-810`
+
+线程池在 `shutdown()` 之后选择中断的是**空闲** worker，因为这些线程大概率正阻塞在 `getTask()` 的 `take()` / `poll()` 上。把它们叫醒，是为了让它们意识到“线程池状态变了”，而不是永远睡在旧的取任务逻辑里。
+
+反过来，正在执行任务的 worker 没被一刀切打断，原因也很直接：`shutdown()` 的设计目标就是给已经接下来的活一个收尾机会，而不是把它们直接打爆。你如果希望“尽快让所有在跑任务也停下来”，那已经不是 `shutdown()` 这条语义了，而是后面更强硬的 `shutdownNow()`。
+
+这一层真正要记住的是：**shutdown 关的是“新任务入口”，不是“正在跑的一切动作”。**
+
+## 二、shutdownNow 为什么更像“尽快清场”：它改变的是承诺，不是保证瞬间终止
+
+### 先看它和 shutdown 最本质的分歧
+
+`shutdownNow()` 入口在 `ThreadPoolExecutor.java:1400-1412`。如果说 `shutdown()` 的承诺是“队列旧账继续履行”，那 `shutdownNow()` 的态度刚好相反：它更接近“尽快清场，别再继续积压和执行能停掉的任务”。
+
+它主要做三件事：
 
 - 状态推进到 `STOP`
-- **尽力**中断所有 Worker(通过 `Thread.interrupt`;任务若不响应中断,不保证立即终止)
-- `drainQueue()`(`:842`)把还没执行的任务取出来作为 `List<Runnable>` 返回
+- `interruptWorkers()`（`ThreadPoolExecutor.java:758`）尽力中断所有 worker
+- `drainQueue()`（`ThreadPoolExecutor.java:842`）把还没开工、仍在队列里的任务捞出来返回
 
-面试"停机想等任务跑完": `shutdown()` + `awaitTermination()`;面试"shutdownNow 返回什么": 尚未执行的队列任务。
+这一条路径比 `shutdown()` 强硬得多，但也千万不能被讲成“调用后所有任务必然立刻消失”。因为中断本身仍然是协作式请求：任务如果不响应中断，正在运行的 worker 并不会被神奇地瞬间抹掉。
 
-关键设计(斜体):*"优雅 vs 强制"——shutdown 让队列任务收尾,shutdownNow 立即中断并退回未执行任务。面试"两者区别": SHUTDOWN 继续处理队列,STOP 尽快终止。*
+### 为什么返回的 `List<Runnable>` 不是“所有没完成的任务”
 
-## 2. "awaitTermination" — 等待终结
+这又是一个常见误区。`shutdownNow()` 返回的是 `drainQueue()` 捞出来的任务，也就是**还躺在队列里、根本没开始执行的那部分活**。已经跑起来的任务不在这个列表里，因为它们已经不在队列里了，当前只能通过中断请求去尽力催停。
 
-### 2.1 等待条件
+所以线程池关闭时，至少要分清三类任务命运：
 
-`termination` 是 `mainLock` 上的 Condition(`ThreadPoolExecutor.java:473`)。
+- **已经在执行中的任务**：只能尽力中断，不能从队列里退回
+- **还在队列里的任务**：可被 `drainQueue()` 取出并返回
+- **尚未来得及提交的新任务**：之后会在 execute 入口被拒绝
 
-`awaitTermination(timeout, unit)`(`:1445`)等待状态进入 `TERMINATED`;到时返回 `true`,超时返回 `false`。
+这三类任务如果混成一句“shutdownNow 会返回没完成任务”，就会把真正的边界讲错。
 
-### 2.2 典型模式
+### 为什么它更适合“止损”，不适合“善后”
+
+因此，`shutdownNow()` 的关键不在于“更强”，而在于它表达的是另一种系统承诺：**我现在不再继续为这些旧任务兜底清完，而是尽快中止、退回能退回的部分，把后果显式暴露给调用方或上层协调者。**
+
+这也是为什么生产停机常常不会一开始就直接调用它，而是先给 `shutdown()` 一个优雅收尾窗口，再把它作为超时兜底。那不是写法惯例，而是两种不同退场承诺的先后顺序。
+
+## 三、awaitTermination 为什么不是“再等一会儿”，而是在等状态机真正走到终态
+
+### 先看为什么光调 shutdown 还不够
+
+即使你已经明确选择了 `shutdown()` 或 `shutdownNow()`，主线程也仍然有一个现实问题：**我怎么知道线程池什么时候真的完全结束了？** 不是状态刚切到 `SHUTDOWN` 或 `STOP` 的那一刻，而是所有工人、队列、清理逻辑都真正收完的那一刻。
+
+这正是 `awaitTermination()` 的意义。JDK 11 中：
+
+- `termination` Condition 位于 `ThreadPoolExecutor.java:473`
+- `awaitTermination(long timeout, TimeUnit unit)` 位于 `1445`
+
+它等待的不是“固定睡多久”，而是 `TERMINATED` 这个终态真的到来。也就是说，`awaitTermination()` 本质上是在等线程池状态机走到最后，而不是在做一个时间层面的延迟技巧。
+
+### 为什么生产代码常写成“shutdown → await → 超时再 shutdownNow”
+
+典型写法大家都见过：
 
 ```java
-// 用法示意(API 形式,非源码片段)
 pool.shutdown();
 if (!pool.awaitTermination(60, SECONDS)) {
     pool.shutdownNow();
 }
 ```
 
-这是生产优雅停机的标准三连: **先优雅关闭,超时再强退**。
+这段代码好用，不是因为它像模板，而是因为它恰好把两种退场承诺串了起来：先给旧任务一个收尾窗口；如果窗口耗尽还没走到终态，再切换到止损语义。它并不是在“等一等看运气”，而是在明确地把优雅退场和强制清场分阶段表达出来。
 
-关键设计(斜体):*"shutdown + awaitTermination + 超时兜底 shutdownNow"是生产优雅停机的标准模式。面试"优雅停机怎么写": 先等队列收尾,超时再强退。*
+这一层的重点是：**awaitTermination 在等的是状态机终点，不是在替代 shutdown 逻辑。**
 
-## 3. "拒绝策略四选一" — RejectedExecutionHandler
+## 四、tryTerminate 为什么才是线程池真正收口的地方
 
-### 3.1 默认策略
+### 线程池不是一调用 shutdown 就自动 TERMINATED
 
-默认拒绝处理器是 `defaultHandler = new AbortPolicy()`(`ThreadPoolExecutor.java:554-555`)。
+很多人会自然以为，只要调用了 `shutdown()` 或 `shutdownNow()`，线程池接下来就会线性地自动滑到 `TERMINATED`。真实情况是，终态到达需要额外条件：队列是否清空、workerCount 是否归零、当前 runState 是否已走到允许终结的阶段。这些都不在同一个瞬间自动满足。
 
-### 3.2 四种策略
+所以真正推动线程池迈进 `TIDYING → TERMINATED` 的核心入口，是 `tryTerminate()`，位于 `ThreadPoolExecutor.java:701-721`。
 
-- `CallerRunsPolicy`(`:2012`)——调用者线程自己执行,形成背压
-- `AbortPolicy`(`:2039`)——抛 `RejectedExecutionException`
-- `DiscardPolicy`(`:2063`)——静默丢弃
-- `DiscardOldestPolicy`(`:2084`)——丢弃队头最旧任务后重试提交
+### 为什么它要在很多关键点反复尝试
 
-`reject(command)`(`:824`)最终统一委托给 `handler.rejectedExecution(command, this)`(`:825`)。
+`tryTerminate()` 的存在本身就在说明：终态不是一个单次动作，而是一组条件逐渐满足后的最终收口。它会在多个关键路径上被反复触发，例如：
 
-面试"CallerRunsPolicy 为什么有用": 队列/线程满时让提交方自己干活,天然减速限流。
+- shutdown/shutdownNow 之后
+- worker 退出之后
+- 队列可能刚清空之后
 
-关键设计(斜体):*"拒绝策略 = 饱和语义"——抛异常/背压/丢弃,本质上是在定义系统满载时怎么退化。面试"默认拒绝策略": AbortPolicy。*
+这是因为线程池无法预先知道“哪个动作会成为最后一块拼图”。可能是最后一个队列任务刚被取走，也可能是最后一个 worker 刚退出。只有到了那一刻，状态机才真正具备切到终态的资格。
 
-## 4. "关闭的完整语义" — 状态机视角
+### 为什么它会先到 TIDYING，再 signalAll
 
-### 4.1 tryTerminate
+当满足条件后，线程池先 CAS 把状态推进到 `TIDYING`，做完终结收尾，再设成 `TERMINATED`，最后 `termination.signalAll()` 唤醒所有在 `awaitTermination()` 上等着的人。这再次呼应了我们在第 1 篇就立住的结论：状态不是标签，而是阶段性策略切换。
 
-真正推动 `TIDYING → TERMINATED` 的核心是 `tryTerminate()`(`ThreadPoolExecutor.java:701`)。
+这里的关键结论是：**TERMINATED 不是调用关闭 API 时许下的愿望，而是队列、工人和状态都收干净后，被 tryTerminate 真正推到的最终事实。**
 
-它会在以下时机反复尝试终结:
+## 五、拒绝策略为什么不是“最后随便挑一个”——它定义的是系统满载时怎样退化
 
-- `SHUTDOWN` 状态下队列清空且 worker 数减到 0
-- `STOP` 状态下 worker 数减到 0(待执行任务已由 `shutdownNow` drain)
-- shutdown/shutdownNow 过程中的关键节点
+### 先看 reject 解决的到底是什么问题
 
-当满足条件时:
+关闭语义回答的是“旧任务怎么办”；拒绝语义回答的是“**新任务再来时怎么办**”。当 core 满、queue 满、maximum 也顶满，或者线程池状态本来就不再接受新任务时，`execute()` 不能再继续假装一切照旧。它必须明确把系统退化方式暴露出来。
 
-- CAS 把状态设成 `TIDYING`
-- 调用 `terminated()` 钩子
-- 置 `TERMINATED`
-- `termination.signalAll()`(`:721`)唤醒 `awaitTermination` 的等待线程
+JDK 11 的统一入口在 `reject(Runnable command)`：
 
-### 4.2 关闭后还能不能用
+- `reject` 位于 `ThreadPoolExecutor.java:824-825`
+- 默认处理器 `defaultHandler = new AbortPolicy()` 位于 `554-555`
 
-不能。线程池状态单向推进: `RUNNING → SHUTDOWN/STOP → TIDYING → TERMINATED`,不可逆。
+也就是说，所谓拒绝策略，本质上是在问：**当系统已经接不住新活时，我们是立刻报错、把压力反推给调用者、还是直接牺牲一部分任务？**
 
-面试"关闭后 execute 会怎样": 不再是 RUNNING,最终走 `reject` 分支。
+### 四个内置策略真正代表了四种退化选择
 
-关键设计(斜体):*"关闭是状态机迁移"——每次状态变化都会改变 execute/getTask/中断逻辑的分支。面试"TERMINATED 怎么到达": 队列空 + workerCount 为 0 + tryTerminate 成功。*
+JDK 11 内置了四个处理器：
 
-## 核心悬念
+- `CallerRunsPolicy`（`ThreadPoolExecutor.java:2012`）
+- `AbortPolicy`（`2039`）
+- `DiscardPolicy`（`2063`）
+- `DiscardOldestPolicy`（`2084`）
 
-执行与关闭通了——**异步结果**呢?`FutureTask` 的状态机、`get()` 的阻塞、`cancel()` 的语义;定时调度的 `ScheduledThreadPoolExecutor` 又怎么把 DelayQueue 用起来?——下一篇: FutureTask 与定时调度。
+它们的差别，远不只是“一个抛异常、一个不抛”。
+
+#### Abort：最快暴露失败
+
+`AbortPolicy` 是默认值。它的好处是最诚实：线程池接不住就是接不住，调用方会立刻收到 `RejectedExecutionException`。这适合“任务绝不能悄悄丢”的系统，因为错误会被第一时间显式暴露出来。
+
+#### CallerRuns：让调用者自己背压
+
+`CallerRunsPolicy` 最值得停一下。它不是简单“换个线程执行”，而是在给提交方施加背压：线程池忙不过来时，提交者自己得花时间把这单活干了，于是提交速度天然下降。也就是说，它在用吞吐下降换系统不丢活。
+
+这为什么有价值？因为很多系统真正需要的不是“永远继续接任务”，而是“接不住时让上游自己慢下来”。CallerRuns 正是在表达这种退化策略。
+
+#### Discard / DiscardOldest：承认有些任务就是可以牺牲
+
+`DiscardPolicy` 是最激进的静默牺牲：当前任务直接不要了。`DiscardOldestPolicy` 则更偏向“优先保最新”：先把队列里最老的那个扔掉，再尝试把当前新任务塞进去。
+
+这两种策略危险，不是因为代码复杂，而是因为它们在语义上已经明确接受了“任务丢失是可接受的”。如果业务没有配套的幂等、补偿或监控，盲用它们就等于在满载时默默制造业务黑洞。
+
+所以拒绝策略不是 API 小尾巴，而是系统降级协议。
+
+## 六、四个最容易混掉的边界：关闭不是停机，返回列表不是全部损失，CallerRuns 不是白送执行，丢弃不是免费优化
+
+在收网之前，先把这篇最容易记错的四条边界压实。
+
+第一，`shutdown()` 不是“线程池立刻停机”。它关掉的是新任务入口，保留的是旧任务清账承诺。只要队列里还有活、worker 还在继续跑，这个池子就仍然处在退场过程里，而不是已经结束。
+
+第二，`shutdownNow()` 返回的 `List<Runnable>` 也不是“所有没完成任务”的总清单。它只覆盖还留在队列里、尚未开工的那部分任务；已经跑起来的任务只能通过中断去尽力催停，不会神奇地重新回到这个列表里。
+
+第三，`CallerRunsPolicy` 也不是“线程池帮你换个线程继续做”。真正干活的是调用 `execute()` 的那个线程，所以它带来的不是额外吞吐，而是对提交方的直接减速。它的价值恰恰在于把压力反推给上游，而不是偷偷扩容执行能力。
+
+第四，`DiscardPolicy` 和 `DiscardOldestPolicy` 不是“更高性能的拒绝优化”。它们代表的是系统已经接受某些任务可以被牺牲；如果业务语义并不允许无声丢活，这两种策略带来的不是优化，而是黑洞。
+
+把这四条边界记住，shutdown/shutdownNow、awaitTermination、tryTerminate 和 reject 才不会重新塌回“关闭 API”和“策略枚举”这类说明书印象。它们真正管理的是线程池在极端条件下的承诺边界：哪些活还算账，哪些活要退回，哪些活要拖慢上游，哪些活已经被业务明确允许放弃。
+
+## 收网：线程池的退场语义回答“旧任务怎么办”，拒绝语义回答“新任务怎么办”
+
+回到开头两个现场，现在已经能看清为什么关闭和拒绝必须放在同一篇里讲。因为它们共同定义了线程池在极限边界下的行为：一边处理已有任务如何善后，另一边定义新任务从哪一刻开始不再受理、如何被退回、拖慢或牺牲。
+
+`shutdown()` 代表的是“停接新活，清完旧账”；`shutdownNow()` 代表的是“尽快清场，退回还没开工的活，并尽力中断在跑任务”；`awaitTermination()` 则是在等 tryTerminate 真正把状态机推进到终态。另一方面，拒绝策略则在系统饱和时决定退化方式：抛错、背压、静默丢弃，还是牺牲最老任务保住最新提交。
+
+把整篇压成一张总图，就是：
+
+```text
+已有任务
+  → shutdown：继续清旧账
+  → shutdownNow：尽快止损，退回未开工任务
+  → awaitTermination：等 tryTerminate 真正收口
+
+新提交任务
+  → 线程池仍接得住：继续走 execute 决策链
+  → 线程池接不住：进入 reject
+      → Abort / CallerRuns / Discard / DiscardOldest
+```
+
+如果前两篇讲的是线程池怎样收任务、怎样养工人，这一篇真正补上的就是：**当这台机器不再愿意接活、或已经接不住活时，它到底怎样有边界地退场和退化。**
+
+下一篇继续沿着这条线往后走：任务已经进池了，异步结果是谁来持有？为什么 `submit()` 和 `execute()` 在异常表现上不同？`FutureTask` 的状态机又怎样把“结果、取消、等待、异常”绑成同一个对象？这些问题会把线程池从“执行任务”继续接到“管理结果”。

@@ -1,111 +1,150 @@
-# 01. TPE 核心 — ctl 状态机与 Worker 结构
+# TPE 核心：为什么线程池不是“开几个线程”，而是一套联合状态机
 
-> **前置依赖**: [12-lock-sync/01 — AQS 核心](../12-lock-sync/01-aqs-core.md)(Worker 互斥)、[10-concurrent-collections/05 — 阻塞队列](../10-concurrent-collections/05-blocking-queues.md)(workQueue)
-> → **后续**: 02-execute-worker(按写作顺序)
+> 本文基于 JDK 11 `ThreadPoolExecutor`。讨论范围聚焦 `ctl` 打包字段、运行状态常量、`runStateOf/workerCountOf/ctlOf`、`Worker` 结构、`interruptIfStarted`、核心参数与 `workQueue` 角色；`execute` 主流程、`addWorker`、shutdown 与拒绝策略放到后续篇章展开。
+> **前置依赖**：[AQS 核心](../12-lock-sync/01-aqs-core.md)、[阻塞队列家族](../10-concurrent-collections/05-blocking-queues.md)
+> **后续**：[execute 流程与 Worker 生命周期](02-execute-worker.md)
 
-## 线程池先看什么
+## 先看一个最常见、也最容易把线程池理解成“线程数配置题”的误区
 
-`ThreadPoolExecutor` 的核心不是"开几个线程",而是把**运行状态、线程数量、任务队列、Worker 生命周期**组合成一套状态机。
+很多人第一次接触 `ThreadPoolExecutor`，会把它想成一个很朴素的结构：无非就是预先开几个线程，再挂一个任务队列，任务来了谁空闲谁处理。这个理解不是完全错，但它只看到了最表层的两个对象：线程和队列，却完全没看到线程池真正难管的那部分现实。
 
-## 1. "ctl 是什么?" — 一字段两用
+真实线程池面对的从来不只是“现在有几个线程”。它必须同时回答：还接不接新任务？队列里的旧任务要不要继续清？现在工人数还能不能涨？这些 worker 是真的活着在跑，还是已经该退出？最后一个 worker 走掉时，是不是应该切换到终止状态？
 
-### 1.1 打包布局
+你一旦把这些问题放在一起，就会发现线程池根本不是“线程数 + 队列”这么简单，而是一套不断流动的联合状态机。只看线程数量，根本无法解释为什么 `shutdown()` 后不收新任务却仍处理队列，为什么 `shutdownNow()` 又会中断在跑任务，为什么最后一个 worker 退出时还要再经历 `TIDYING → TERMINATED` 这样的收尾阶段。
 
-`ThreadPoolExecutor.java:380`:
+所以这篇文章的主线不是“线程池有哪些参数”，而是：**为什么 ThreadPoolExecutor 必须把运行状态、工人数、任务队列和 Worker 生命周期绑成同一套状态机，而不是让它们各自散着管。**
 
-```java
-// ThreadPoolExecutor.java:380-382(截取,逐字)
-    private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));
-    private static final int COUNT_BITS = Integer.SIZE - 3;
-    private static final int COUNT_MASK = (1 << COUNT_BITS) - 1;
+## 一、`ctl` 为什么是一字段两用：线程池经常要同时判断“现在什么状态”和“还有多少工人”
+
+### 先看最自然、也最容易读到中间态的失败方案
+
+假设你把线程池拆成两个独立共享字段：一个 `runState`，一个 `workerCount`。这看起来很直观：状态归状态，数量归数量。但线程池的许多决策恰恰需要同时检查和更新两者。比如我要不要新增 worker？这不仅取决于当前数量，也取决于当前是否还处在允许扩工的状态；我要不要进入终止？这不仅取决于状态迁移意图，也取决于 workerCount 是否已经归零。
+
+如果这两份事实拆成两个独立共享变量，线程就很容易在并发中读到交叉中间态：看见的是旧 runState + 新 workerCount，或者新 runState + 旧 workerCount。线程池这种状态机一旦在边界判断上读到混搭值，后面的扩线程、拒绝、终止收尾就会全变得不可靠。
+
+这就是 `ctl` 存在的真正动机：**把“当前运行状态”和“当前工人数”合并成一次可原子观察、可原子更新的联合事实。**
+
+### 源码里的高低位打包不是技巧秀，而是状态一致性设计
+
+JDK 11 中最关键的字段在这里：
+
+- `ctl`（`ThreadPoolExecutor.java:380`）
+- `COUNT_BITS`（`ThreadPoolExecutor.java:381`）
+- `COUNT_MASK`（`ThreadPoolExecutor.java:382`）
+- `runStateOf / workerCountOf / ctlOf`（`ThreadPoolExecutor.java:392-394`）
+
+这套布局的含义非常明确：高位编码线程池运行状态，低位编码当前 worker 数量。于是一个 `AtomicInteger ctl` 就能在一次 CAS 中同时保护“状态迁移”和“工人数变化”这两件原本会互相缠绕的事。
+
+这里真正值得记住的不是位运算公式，而是它解决的问题：**线程池的很多判断并不接受‘先读一个，再猜另一个’的松散一致性，它需要一份绑在一起的联合状态。**
+
+### 为什么线程池比普通计数器更需要这种联合事实
+
+在 AtomicInteger 那一域里，我们已经见过“单一共享事实”的价值。但线程池比单纯计数器更复杂：workerCount 的变化不仅是数字变化，它还会影响状态迁移资格；而状态迁移又会直接改变是否允许继续增减 worker。两者不是松散关联，而是彼此约束。
+
+因此，`ctl` 不是“节省一个字段”的小技巧，而是线程池状态机的地基。没有它，后面很多路径都只能依赖脆弱的多变量协调。
+
+## 二、五个运行状态为什么不是标签，而是立刻改变行为的策略开关
+
+### 先别把状态常量背成一张静态表
+
+JDK 11 在线程池类注释里把状态和迁移关系写得非常清楚（`ThreadPoolExecutor.java:346-367`），核心常量则定义在 `385-389`：
+
+- `RUNNING`
+- `SHUTDOWN`
+- `STOP`
+- `TIDYING`
+- `TERMINATED`
+
+如果只是背名字，这几个状态会像一张流程图标签表。但线程池里“状态”最大的价值，不是记录历史，而是**立刻改变线程池当下的行为策略**。
+
+### 每个状态真正决定了什么
+
+把这五个状态翻译成决策语义：
+
+- `RUNNING`：接收新任务，也处理队列中的旧任务
+- `SHUTDOWN`：不再接收新任务，但仍会清理队列里的旧任务
+- `STOP`：不接新任务，也不再处理队列，还会中断正在运行的 worker
+- `TIDYING`：所有任务都结束、workerCount 已归零，开始进入完全收尾
+- `TERMINATED`：终止收尾已经完成
+
+这也解释了为什么 `shutdown()` 和 `shutdownNow()` 看起来都像“关闭线程池”，语义却完全不同。前者把系统从“接新任务”切成“只清旧账”；后者则直接切到“别再处理、快中断、尽快清场”。
+
+所以线程池状态绝不是“当前阶段叫什么名字”，而是“**从这一刻起，新任务、队列任务和 worker 会按什么策略被处理**”。
+
+### 为什么终止阶段还要多出 `TIDYING`
+
+很多人会觉得，既然 workerCount 归零了，直接 `TERMINATED` 不就完了？多一层 `TIDYING` 像是形式主义。实际上，这一步是在告诉你：线程池除了把 worker 都清掉，还要有一个明确的“收尾线程正在做终态切换”的过程。状态机不是“工人没了就自然终止”，而是“工人没了之后，有一段终止交接逻辑，再宣布系统彻底结束”。
+
+这也是为什么本文必须先把状态讲成策略开关，而不是把它们当作生命周期单词表。
+
+## 三、Worker 为什么不能只是 Thread + Runnable：它是线程池可管理的工人实体
+
+### 先看“普通线程包装壳就够了”这个直觉为什么不够
+
+如果线程池只是“把任务交给线程去跑”，那一个 `Thread` 加一个 `Runnable` 包装好像就够了。问题在于线程池不只是在派活，它还要管理：这个工人现在空闲还是忙碌？它是不是带着一个首任务出生？它已经完成了多少任务？当前是不是适合被中断？这些都不是裸 Thread 对象自己愿意替你回答的问题。
+
+JDK 11 的 `Worker` 定义在 `ThreadPoolExecutor.java:596-611`，它至少把四种角色绑在一起：
+
+- 真实执行线程 `thread`
+- 创建时就携带的 `firstTask`
+- 已完成任务计数 `completedTasks`
+- 继承 AQS 而来的独占状态控制能力
+
+这已经说明 Worker 不是普通 runnable wrapper，而是线程池对“一个可被调度、可被统计、可被中断、可被区分空闲/忙碌状态的工人单元”的完整封装。
+
+### 为什么它要继承 AQS
+
+这里最容易被说成一句空话的是“Worker 继承 AQS 是为了互斥”。真正要讲透的，是这把互斥不是给业务任务用的，而是给**线程池管理自己工人的生命周期**用的。
+
+线程池经常要区分一个 worker 当前是在执行任务，还是已经空闲，是否适合在 shutdownNow 等路径上被中断。把这层状态收进 Worker 自己的 AQS 独占状态里，线程池就能用统一而便宜的方式判断和控制每个工人的内部生命周期，而不是额外再造一套锁或标志协议。
+
+这也解释了为什么 Worker 的 AQS 身份必须和 `thread`、`firstTask`、`completedTasks` 绑在一起：这些东西共同构成了线程池眼里“一个工人”的完整管理边界。
+
+### `firstTask` 和 `completedTasks` 为什么都挂在 Worker 上
+
+`Worker(Runnable firstTask)` 构造在 `ThreadPoolExecutor.java:620-628`，而 `completedTasks` 则直接是 Worker 自己持有的计数。这个设计看似琐碎，实际很有意思：线程池创建 worker 时，不一定是“先造线程，再让它空着等下一轮取任务”，它可以让 worker 带着第一份任务直接出生。反过来，任务完成统计也不是全局计数器每次都现算，而是在工人维度逐步积累，再在合适时机汇总回线程池总视图。
+
+这说明 Worker 承载的不是“某一刻正在跑什么”，而是“一个工人的整个任务生命周期切片”。
+
+## 四、为什么 core / max / workQueue 不是独立旋钮，而是同一条行为决策链上的约束
+
+### 先拆掉“参数一个个调就行”的误解
+
+线程池配置最容易犯的错，就是把 `corePoolSize`、`maximumPoolSize`、`workQueue`、`keepAliveTime`、`handler` 当成互不相关的参数清单。现实是，它们并不会各自独立生效，而是在提交任务时共同决定一条行为路径：先扩线程、还是先排队、还是再扩、还是直接拒绝。
+
+这一篇不展开 `execute()` 全流程，但至少要先把参数角色摆正：
+
+- `workQueue`（`ThreadPoolExecutor.java:447`）不是被动存储容器，而是决定任务是否先排队的重要开关
+- `corePoolSize` / `maximumPoolSize`（相关字段位宽说明在 `ThreadPoolExecutor.java:538-547`）不是单纯上限，它们和 queue 一起决定何时该继续增 worker
+- `keepAliveTime` 决定了非核心工人空闲时能否继续留在池里
+- `handler` 则是“扩不动、队列也放不下”后的最后行为分支
+
+这几个参数如果不放回同一条执行决策链里看，就会出现很多表面调大参数、实际效果完全不符合预期的情况。
+
+### 为什么 `workQueue` 经常比线程数更能决定系统气质
+
+线程数只决定“最多能同时有多少工人活着”，而队列则在决定“新任务是先积压，还是先推动扩线程”。这也是为什么线程池调优里，队列类型和容量常常比单独改 core/max 更能改变系统表现。
+
+有界阻塞队列、无界队列、零容量 `SynchronousQueue`，它们带来的不是简单的吞吐差异，而是完全不同的饱和路径。把这件事想清楚，后面再看 `execute` 的三段决策流程（core → queue → max → reject）就不会觉得它是“条件分支堆在一起”。
+
+### 本篇为什么要在 execute 之前先讲这些参数
+
+因为如果不先把线程池理解成联合状态机和 Worker 生命周期系统，后面 `execute()` 的每一个 if 都会显得像经验规则。只有先建立“状态 + 工人数 + 队列 + 工人实体”的总图，读者才知道下一篇到底在看什么决策链。
+
+## 收网：ThreadPoolExecutor 真正管理的不是“多少线程”，而是“多少工人能在什么状态下继续活着”
+
+回到开头那个误区，现在已经能看清为什么“线程池就是几个线程加一个队列”这个说法不够用了。线程池真正要管理的是一份联合状态：当前是否还接任务、队列里的旧任务是否还要处理、当前工人数是否还能变化、最后一个工人退出后是否应该终止收尾。这就是 `ctl` 必须把状态和 workerCount 打包在一起的原因。
+
+而 Worker 之所以不是普通 Thread 包装壳，也正是因为线程池管理的是“工人实体”而不是裸线程：它要知道工人带着什么首任务出生、已经完成了多少任务、当前是否忙碌、是否允许被中断。这些都得挂在 Worker 这个管理单元身上。
+
+把整篇压成一张总图，就是：
+
+```text
+ThreadPoolExecutor
+  → ctl = runState + workerCount
+  → 状态不是标签，而是提交/清理/中断策略
+  → Worker = thread + firstTask + completedTasks + AQS control state
+  → core / max / queue / keepAlive / handler 共同决定后续行为
 ```
 
-- 高 3 位编码 `runState`
-- 低 29 位编码 `workerCount`
-- `runStateOf`/`workerCountOf`/`ctlOf`(`:392-394`)负责拆包与重新组合
-
-`ctl` 是一个 `AtomicInteger`,所以状态和线程数可以通过一次 CAS 一起更新,避免两个独立变量之间出现中间态。
-
-面试"线程数上限": 29 位,约 5 亿;面试"ctl 为什么一个 int": 原子一致更新 + 更少的共享状态。
-
-关键设计(斜体):*"一字段两用"让状态与线程数共用一个原子字,状态迁移和线程计数可以一次 CAS 完成。*
-
-## 2. "生命周期状态" — 状态迁移
-
-### 2.1 五个运行状态
-
-源码定义五个状态(`ThreadPoolExecutor.java:385-389`):
-
-- `RUNNING`——接收新任务,处理队列任务
-- `SHUTDOWN`——不接收新任务,继续处理队列
-- `STOP`——不接收新任务,不处理队列,中断正在执行的任务
-- `TIDYING`——Worker 已清空,准备终止
-- `TERMINATED`——终止完成
-
-这里常被口头说成"7 态",但源码的**运行状态是 5 个**;另外 2 个通常来自把 RUNNING/SHUTDOWN 的入口和终止过程另行拆算,不应当当作独立常量。
-
-### 2.2 迁移
-
-- `shutdown()`推动 `RUNNING → SHUTDOWN`
-- `shutdownNow()`推动 `RUNNING/SHUTDOWN → STOP`
-- 最后一个 Worker 退出后进入 `TIDYING → TERMINATED`
-
-状态不是标签,而是策略: 每个状态都决定收不收任务、处理不处理队列、是否中断 Worker。
-
-关键设计(斜体):*"状态即策略"——状态迁移直接改变提交、排队、执行和中断行为。面试"shutdown vs shutdownNow": SHUTDOWN 继续排队任务,STOP 中断并清理。*
-
-## 3. "Worker 为什么继承 AQS?" — 任务互斥
-
-### 3.1 Worker 结构
-
-```java
-// ThreadPoolExecutor.java:596-611(截取,逐字)
-    private final class Worker
-        extends AbstractQueuedSynchronizer
-        implements Runnable
-    {
-        private static final long serialVersionUID = 6138294804551838833L;
-
-        final Thread thread;
-        Runnable firstTask;
-        volatile long completedTasks;
-```
-
-Worker 是三件东西的组合:
-
-- `thread`(`:607`)——实际执行任务的线程
-- `firstTask`(`:609`)——创建 Worker 时携带的首任务
-- `completedTasks`(`:611`)——已完成任务数
-- AQS 基类——提供 Worker 的独占互斥状态
-
-### 3.2 AQS 在这里做什么
-
-Worker 把 AQS 当作一个极简独占锁,用于表示"当前 Worker 是否空闲"。`shutdownNow`/中断控制可以据此区分正在运行的任务和空闲 Worker,避免把任务执行互斥误解成线程池全局锁。
-
-面试"Worker 为什么继承 AQS": 复用独占状态做任务互斥,并辅助中断控制。
-
-关键设计(斜体):*"Worker = 线程 + 首任务 + 互斥状态"——它不是普通 Runnable 包装,而是线程池控制 Worker 生命周期的载体。*
-
-## 4. "核心参数" — 五参数语义
-
-### 4.1 参数表
-
-| 参数 | 锚点 | 语义 |
-|------|------|------|
-| `corePoolSize` | `:541` | 核心线程数 |
-| `maximumPoolSize` | `:549` | 线程数上限 |
-| `workQueue` | `:447` | 任务队列 |
-| `keepAliveTime` | `:524` | 非核心空闲线程保留时间 |
-| `threadFactory` / `handler` | `:516` | 线程创建 / 拒绝处理 |
-
-参数不是独立旋钮: core 决定常驻规模,队列决定缓冲,maximum 决定峰值,keepAlive 决定回收节奏,handler 决定饱和后的处理方式。
-
-面试"线程池什么时候加线程": 取决于 execute 的 core/queue/maximum 三阶段决策。
-
-关键设计(斜体):*"参数组合决定行为"——core 决定常驻,队列决定缓冲,maximum 决定峰值。面试"线程池参数怎么选": 先定任务模型,再定队列容量与拒绝策略。*
-
-## 核心悬念
-
-参数知道了——**execute 怎么用**?先加线程还是先入队?`addWorker` 的双重检查、队列满的处理、拒绝的时机——下一篇: execute 流程与 Worker 生命周期。
-
-> → [02-execute-worker.md](02-execute-worker.md)
+这也是域 14 为什么要从 `ctl` 和 Worker 开始，而不是直接冲进 `execute()`。如果你不知道线程池先天就是一套联合状态机，后面所有扩线程、排队、回收和终止逻辑都会看起来像零散技巧。下一篇就沿着这条主线继续：任务真正提交进来时，为什么有时先建核心线程，有时先入队，有时再扩非核心线程，最后才轮到拒绝策略。

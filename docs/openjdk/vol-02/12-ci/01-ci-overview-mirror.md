@@ -1,174 +1,207 @@
-# 01. JIT 怎么看到 Java 类？— ciObject 镜像体系
+# 01. JIT 怎么看到 Java 类？— `ciObject` 镜像体系
 
-> **前置依赖**:[11-cds/02 — mmap 之后共享类怎么进 SystemDictionary？— mmap archive → shared spaces → 类就绪](openjdk/vol-02/11-cds/02-cds-load-shared.md):归档类恢复成"活的"InstanceKlass,本篇看 JIT 怎么消费它;[06-oops/02 — Klass — 对象到类的桥](openjdk/vol-02/06-oops/02-klass-hierarchy.md):被镜像的 VM 侧对象;[08-interpreter/03 — 解释器怎么安全地调 C++？— InterpreterRuntime](openjdk/vol-02/08-interpreter/03-interpreter-runtime.md):计数器与编译触发阈值——编译队列从哪来;[16-code-cache/02 — nmethod 结构](openjdk/vol-02/16-code-cache/02-nmethod-structure.md):编译产物,ci 镜像的消费终点;[07-classfile-classloader/04 — SystemDictionary — 类的"全球电话号码本"](openjdk/vol-02/07-classfile-classloader/04-system-dictionary.md):并发类加载是编译依赖要防的变化
-> → **后续**:[12-ci/02 — ciTypeFlow + bcEscapeAnalyzer — 类型流与逃逸分析](02-ci-typeflow-escape.md):编译器看到的类型从哪来——字节码类型流是内联与 devirtualize 的输入
-> 关联域: 25-gc(编译与 GC 并行)、22-deopt(依赖失效→nmethod 作废)、17-threads(编译线程进出 VM)
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64`。这里讨论的是 HotSpot C1/C2 共用的 `ci`（compiler interface）镜像层：编译器如何观察类、方法、字段和对象，而不直接把 VM 运行时对象搬进编译热路径。Graal/JVMCI、CompileBroker 调度细节、后续 IR 构建细节，不在本文展开。
+>
+> **前置依赖**：[11-cds/02 — mmap 之后共享类怎么进 `SystemDictionary`？— CDS Load 端的对位、接线与激活](../11-cds/02-cds-load-shared.md)、[06-oops/02 — `Klass` — 对象到类的桥](../06-oops/02-klass-hierarchy.md)、[16-code-cache/02 — `nmethod` 结构](../16-code-cache/02-nmethod-structure.md)、[07-classfile-classloader/04 — `SystemDictionary`](../07-classfile-classloader/04-system-dictionary.md)
+> → **后续**：[12-ci/02 — `ciTypeFlow + bcEscapeAnalyzer` — 类型流与逃逸分析](02-ci-typeflow-escape.md)
 
-## 编译器必须读元数据,但不能直接读
+JIT 编译器在做的事情，远比“把字节码翻成机器码”要具体得多。
 
-C2 编译 `CiDemo::work` 时,它需要知道: `String.length()` 的字节码有多大、`value` 字段在哪个偏移、`Square.area()` 是不是虚调用、有没有唯一实现者。这些信息都在 InstanceKlass/Method/fieldDescriptor 里——为什么编译器不直接读?
+它要判断一个调用是不是虚调用，某个接口有没有唯一实现者，`String.length()` 能不能内联，某个字段是不是编译期常量，某个类型检查能不能提前折叠。这些判断都离不开 HotSpot 运行时内部那套真正的类与方法对象：`InstanceKlass`、`Method`、`fieldDescriptor`、常量池、方法数据、类层级。
 
-[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/12-ci-inlining-demo.txt) `-XX:+PrintInlining` 展示了编译器真的拿到了这些信息: `java.lang.String::length (11 bytes)` 被内联,它的 `coder`、`isLatin1` 也被内联;接口调用 `ShapeHolder.shape()` → `Square.area()` 被内联,决策依据是 `\-> TypeProfile (87426/87426 counts) = CiDemo$Square`——调用点剖面显示 100% 是 Square,于是编译器把它当具体类型处理。这些"读元数据 + 做决策"的动作,都发生在一个叫 **ci(compiler interface)** 的镜像层上。为什么要有这层?三个理由:
+这就会逼出一个看起来很自然的问题：**既然 JIT 就跑在 HotSpot 里面，为什么不直接读这些 VM 对象？为什么还要多做一层 `ciObject`、`ciKlass`、`ciMethod` 的镜像？**
 
-1. **VM 侧对象太重**。`InstanceKlass` 是 C++ 类,内部是给 VM 用的: 锁、状态机(`_init_state`)、`ClassLoaderData` 关联、各种断言与检查。编译器热路径上的查询(这是接口吗?字段在哪个偏移?方法多大?)不该背着这些;
-2. **oop 会移动**。编译线程与 GC 是并发的: 编译在编译器线程上跑,GC 到 safepoint 时编译线程只是**阻塞**,编译状态要跨过 GC 存活。直接存 oop 指针,GC 一搬就悬空;
-3. **世界会变**。类可以被重定义(RedefineClasses)、类层次会被并发类加载改变。编译基于的假设(唯一实现者、final 不改、类不被替换)必须在事后可验证——否则编出来的代码可能是错的。
+这个问题如果没想透，后面的 `ciObjectFactory`、`ciEnv`、`ciField`、`Dependencies` 看起来都会像“又一层抽象封装”。但这层东西的真正目标，不是 API 好不好看，而是更硬的一件事：**给编译器提供一份在整个编译期间都足够稳定、足够便宜、足够安全的只读视图。**
 
-解法就是镜像 + 依赖: **ciObject 快照**元数据,编译全程只碰快照;**Dependencies 登记**假设,假设失效就作废产物。这一篇拆镜像层本身。
+JIT 缺的不是“拿到 VM 对象地址的入口”，而是这样一份视图。
 
-## 1. ciObject: 双通道的"编译器对象"
+先把这一句记住。因为 `ci` 层的所有设计——为什么 oop 走句柄，为什么 Metadata 走裸指针，为什么一编译一工厂，为什么普通类不跨编译共享，为什么还要有 Dependencies——都是从这个缺口里长出来的。
 
-ci 层把 VM 的 oop 与 Klass 两条层级(oopHierarchy 与 Klass 体系)合并成一条: 从 `ciBaseObject` 分出 `ciObject`(镜像 oop)与 `ciMetadata`(镜像 Klass/Method 等元数据)。看 `ciObject` 的类注释:
+## 先试三个最自然的办法，看看它们为什么都会把编译器带沟里去
 
-```cpp
-// ciObject.hpp:33-44(截取核心,逐字)
-// ciObject
-//
-// This class represents an oop in the HotSpot virtual machine.
-// Its subclasses are structured in a hierarchy which mirrors
-// an aggregate of the VM's oop and klass hierarchies (see
-// oopHierarchy.hpp).  Each instance of ciObject holds a handle
-// to a corresponding oop on the VM side and provides routines
-// for accessing the information in its oop.  By using the ciObject
-// hierarchy for accessing oops in the VM, the compiler ensures
-// that it is safe with respect to garbage collection; that is,
-// GC and compilation can proceed independently without
-// interference.
-```
+### 朴素方案一：直接把 `oop*`、`InstanceKlass*`、`Method*` 交给编译器长期拿着
 
-"GC and compilation can proceed independently"——这句话是 ci 层的地基,实现靠**双通道引用**(ciObject.hpp:55-59):
+这是最直觉的想法。编译器反正就在 VM 里，类和方法对象都现成地躺在那里，那就把指针传进去，后面每次要看字段偏移、方法大小、继承关系，直接读不就完了？
 
-- **oop(堆对象,会移动)→ JNI handle**: `ciObject::ciObject(oop o)` 里 `_handle = JNIHandles::make_local(o)`(ciObject.cpp:53-59)。JNI 句柄被 GC 跟踪,GC 搬对象时句柄跟着更新——编译线程恢复执行后,`get_oop()` 读到的是新地址;
-- **Metadata(Metaspace 对象,不移动)→ 直接指针**: ciKlass/ciMethod 的 `_metadata`(ciBaseObject)直接指向 Metaspace 里的 InstanceKlass/Method。Metaspace 不参与堆 GC 的搬移(10 域),所以裸指针安全,查询不用绕句柄。
+问题在于，这三类对象的稳定性根本不是一个级别。
 
-**关键设计 (斜体)**: *ciObject 本身不是 oop——它活在编译专属的 Arena 里(ciEnv 的 `_ciEnv_arena`,C 堆上、mtCompiler 内存类型,不是资源区),GC 不扫描它、也不管它的生命期;它的生命期随 `ciEnv`(一次编译的上下文)走,编译结束随 Arena 一起释放(well-known 类/符号的共享镜像例外,活在启动期就建好的长命 Arena 里,见第 2 节)。VM 侧的 oop 用句柄引用、Metadata 用裸指针引用——"移动的"绕一层,"不动的"直接用——这就是"编译与 GC 互不干扰"的全部秘密。*
+先看 `oop`。Java 堆对象会被 GC 搬动。编译线程在编译过程中并不独占世界，GC 来了，编译线程会被停下；GC 走完，编译线程再继续。如果它手里拿的是一个裸 `oop*`，GC 一搬，那个地址就悬了。`ciObject` 的类注释为什么专门强调 “GC and compilation can proceed independently without interference”，根就在这里：编译器不能依赖会被堆压缩和复制改写的裸地址。`share/ci/ciObject.hpp:35`、`share/ci/ciObject.hpp:40`、`share/ci/ciObject.hpp:41`
 
-还有个关键语义: **ci 对象可以"未加载"**。`is_loaded()` 的定义是 `handle() != NULL || is_classless()`(ciObject.hpp:138-140)——类还没解析、方法还没找到时,ci 层照样构造镜像(`get_unloaded_klass`/`get_unloaded_method`,ciObjectFactory.hpp:110-118),只是字段残缺。编译器必须能处理"这个类不存在"的情况: 编译期就发现链接错误,总比编出必崩的代码强(ciField::will_link 就是干这个的,第 5 节)。
+再看 `InstanceKlass*` 和 `Method*`。它们倒是不在 Java 堆里，不会像 oop 那样被 GC 搬家，但直接把 VM 内部对象交给编译器也有别的代价：这些对象是按 VM 运行时需要设计的，不是按编译器热路径查询设计的。类加载状态、`ClassLoaderData` 关联、各种访问检查、包与模块关系、JVMTI 与重定义边界，全都跟着进来了。编译器真正高频要问的问题，往往只是“这个类是不是接口”“这个字段偏移是多少”“这个方法字节码多大”“它能不能静态绑定”。如果每次都背着整桶 VM 语义往前走，编译路径会被 VM 的活对象复杂性拖得很重。
 
-## 2. ciObjectFactory: 一次编译一工厂,一份对象一份镜像
+最要命的是，世界本身会变。类可以被并发加载，方法可以被 RedefineClasses 影响，`CallSite` 目标可以失效。也就是说，就算你手里的指针本身没悬空，它所代表的“编译假设”也可能在编译过程中变旧。单靠“我能读到这个对象”远远不够，编译器还需要知道“我基于它做出的结论还能不能成立”。`share/ci/ciEnv.cpp:928`、`share/ci/ciEnv.cpp:933`、`share/ci/ciEnv.cpp:939`
 
-镜像从哪来?`ciObjectFactory`。它保证**同一个 oop/Metadata 在一次编译内至多对应一个 ciObject**(ciObjectFactory.hpp:35-37)——这个不变量让编译器可以放心用 `==` 比较 ci 对象。工厂在每次编译时新建(ciEnv 构造里 `_factory = new (_arena) ciObjectFactory(_arena, 128)`,ciEnv.cpp:131),持有两个缓存:
+所以第一条路的问题不是“做不到直接读”，而是“直接读不能给出一份编译期稳定语义”。
 
-- `_ci_metadata`: **按指针排序的 GrowableArray**(ciObjectFactory.hpp:49)——Metadata 在 Metaspace 不移动,地址是稳定排序键,`find_sorted` 二分查找。查 Klass/Method 走它;
-- `_non_perm_bucket[61]`:**oop 哈希桶**(:67-68)——oop 在堆里会移动,不能当排序键,用 61 个桶的哈希。
+### 朴素方案二：那就别长期持有，编译器每查一次都回 VM 现问现答
 
-查 Metadata 的路径(ciObjectFactory.cpp:305-334): 二分 `find_sorted` → 命中返回已有镜像;未命中 `create_new_metadata`(按 oop 类型分派: InstanceKlass→ciInstanceKlass、Method→ciMethod 等,ciObjectFactory.cpp:379-407)→ 按序插回数组。查 oop 的路径(:238-259)同样: `find_non_perm` 查桶 → 没有就 `create_new_object` + `insert_non_perm`。
+第二个想法听起来更稳健：既然长期拿 VM 对象不安全，那编译器干脆别缓存。每当它想知道某个类是不是接口、某个方法能不能静态绑定、某个字段是不是常量，就临时回 VM 问一次，问完就丢。
 
-```cpp
-// ciObjectFactory.cpp:305-334(截取核心,逐字)
-  int len = _ci_metadata->length();
-  bool found = false;
-  int index = _ci_metadata->find_sorted<Metadata*, ciObjectFactory::metadata_compare>(key, found);
+这条路当然更安全，但它会让编译器失去另一个很重要的东西：**本次编译内部的一致视图。**
 
-  if (!found) {
-    // The ciMetadata does not yet exist. Create it and insert it
-    // into the cache.
-    ciMetadata* new_object = create_new_metadata(key);
-    init_ident_of(new_object);
-    assert(new_object->is_metadata(), "must be");
+编译不是一次问一个问题就结束，而是在一连串决策之间反复依赖同一批对象。如果每次都现问现答，你就会遇到两个问题。
 
-    if (len != _ci_metadata->length()) {
-      // creating the new object has recursively entered new objects
-      // into the table.  We need to recompute our index.
-      index = _ci_metadata->find_sorted<Metadata*, ciObjectFactory::metadata_compare>(key, found);
-    }
-    assert(!found, "no double insert");
-    _ci_metadata->insert_before(index, new_object);
-    return new_object;
-  }
-  return _ci_metadata->at(index)->as_metadata();
-```
+第一，成本高。很多查询会被非常频繁地重复：类层级、方法属性、字段偏移、方法字节码大小、profile 数据、常量池解析结果。把这些都做成“每次跨墙回 VM 现取”，编译热路径就会被边界切换拖垮。
 
-**但有全局共享的一份**。`ciObjectFactory::initialize()` 只在 VM 启动时跑一次(ciObjectFactory.cpp:106): 用一个长命 Arena 建出**所有编译共享的镜像**——全部 vmSymbols 的 ciSymbol(`_shared_ci_symbols[]`,:130-136)、基本类型 ciType、ciNullObject、以及**全部 well-known 类的 ciInstanceKlass**(`WK_KLASSES_DO` 宏逐类 `get_metadata(SystemDictionary::name())`,:160-165,挂在 `ciEnv::_Object`/`_String` 这类静态成员上)。`_shared_ident_limit`(:204)把 ci 对象的 ident 编号切成两段: 小于它是全局共享的永久编号,大于它每次编译重新分配。
+第二，更难得到“同一时刻”的编译视图。假设你前半段编译看见某个方法可以静态绑定，后半段再问一次时，世界已经因为并发类加载而变了。这样一来，前后两段决策就不是基于同一份事实快照做的，编译器内部反而更难自洽。
 
-**关键设计 (斜体)**: *"工厂 per 编译"与"well-known 全局共享"的分界线是价值权衡: 每次编译都新建 java/lang/Object 的镜像毫无必要(它永远在、永远同一份)→ 全局共享省掉反复快照;而普通类每次编译新建,是因为它们的快照(字段表、方法表、子类关系)可能被类加载/重定义改变,不能跨编译缓存。大纲说"同一个 Klass 多次编译返回同一个 ciKlass"——只对 well-known 类成立。*
+所以 `ci` 层要做的不是“杜绝回 VM”，而是“把该快照的高频信息先快照下来，把不值得快照、或者天然应该交给 VM 算的部分再按需回问 VM”。这也是为什么 `ciKlass::is_subtype_of` 这样的操作仍然明确 `VM_ENTRY_MARK` 回到 VM，而很多 access flag、字段偏移、方法大小则会在镜像构造时就抄成标量。`share/ci/ciKlass.cpp:67`、`share/ci/ciKlass.cpp:77`、`share/ci/ciKlass.cpp:80`、`share/ci/ciMethod.cpp:76`、`share/ci/ciMethod.cpp:80`、`share/ci/ciField.cpp:246`、`share/ci/ciField.cpp:249`
 
-符号也分两档: `get_symbol`(ciObjectFactory.cpp:209)——vmSymbols 里有编号(SID)的符号直接返回共享 ciSymbol,不进主缓存;非 SID 的符号新建并记入 `_symbols`,编译结束时 `remove_symbols`(:223-229)对它们 `decrement_refcount` 归还。
+### 朴素方案三：那就做一个全局永久镜像池，所有编译共享同一份 `ciKlass`
 
-## 3. ciInstanceKlass: 快照 + 懒字段
+第三个想法更进一步：既然编译内部需要稳定视图、反复查值，那 HotSpot 不如做一个全局的镜像池。每个 `InstanceKlass`、每个 `Method`、每个 `oop` 永远只对应一份 `ci` 对象，所有编译会话都来复用它。
 
-`ciInstanceKlass` 是 InstanceKlass 的镜像。构造时从 Klass 一次性提取的**标量**(ciInstanceKlass.hpp:50-61):
+这对一小部分“永远不太变”的对象成立，比如 `java/lang/Object` 这样的 well-known 类、基本类型、VM 内置符号。它们确实值得在启动期就建成共享镜像。
 
-```cpp
-// ciInstanceKlass.hpp:46-61(截取核心,逐字)
-  InstanceKlass::ClassState _init_state;           // state of class
-  bool                   _is_shared;
-  bool                   _has_finalizer;
-  bool                   _has_subklass;
-  bool                   _has_nonstatic_fields;
-  bool                   _has_nonstatic_concrete_methods;
-  bool                   _is_anonymous;
+但对普通类来说，这条路会让缓存过期问题急剧恶化。编译 A 看见的类层级、字段布局、共享状态、实现者信息，未必还能安全地交给编译 B。只要把普通类的 `ci` 镜像做成长期全局缓存，你就得再设计一整套跨编译失效与刷新机制，复杂度几乎又把 `ci` 层拖回了“直接绑定 VM 活对象”的世界。
 
-  ciFlags                _flags;
-  jint                   _nonstatic_field_size;
-  jint                   _nonstatic_oop_map_size;
-```
+所以 HotSpot 选的是一条更克制的边界：**每次编译有自己的一份镜像工厂，保证本次编译内部对象唯一；只有 well-known 类与 vmSymbols 这种稳定度极高的东西，才放进全局共享镜像。** `share/ci/ciObjectFactory.hpp:32`、`share/ci/ciObjectFactory.hpp:35`、`share/ci/ciObjectFactory.cpp:106`、`share/ci/ciObjectFactory.cpp:111`、`share/ci/ciObjectFactory.cpp:117`、`share/ci/ciObjectFactory.cpp:160`、`share/ci/ciObjectFactory.cpp:199`
 
-[C++:] 注意 `_flags` 不是一堆 bool,而是 **ciFlags——打包的 access_flags 位图**。于是 `is_interface()` 只是 `flags().is_interface()`(ciInstanceKlass.hpp:231 → ciFlags.hpp:59 一次按位与),`is_final`/`is_abstract`/`is_public` 同理。严格说 `ciKlass::is_interface` 在基类里仍是 **virtual**(ciKlass.hpp:97)——编译器把镜像当具体 `ciInstanceKlass` 用时是内联位测试,只有当静态类型退化成基类 `ciKlass*` 才付出虚分派。这是镜像层的核心收益: VM 侧的同类查询(要经过 accessFlags 对象与各种断言)在这里被降级成一次快照后的位读。
+到这里，三个失败方案已经把正确答案围出来了：
 
-**懒字段是另一半**: `_super`、`_java_mirror`、`_field_cache`、`_nonstatic_fields`(ciInstanceKlass.hpp:63-68)都是 NULL 起步、首次访问才计算(`compute_nonstatic_fields` :105,递归父类合并非静态字段表)——因为字段表可能很大,编译没用到就不该建。快照 + 按需展开,是"镜像层"对"拷贝层"的取舍: 拷全了省心但贵,拷常用标量 + 懒展开大头。
+- 直接抓 VM 指针，稳定性和边界太差；
+- 每次都回 VM 现问，热路径太贵，也难保本次编译视图一致；
+- 做永久全局镜像池，普通类的快照又会跨编译过期。
 
-**共享类(CDS)有专门处理**: `update_if_shared`(ciInstanceKlass.hpp:109-113)——归档类的 `_init_state` 是 dump 时的旧值,**快照值与查询目标不一致时**现算(`is_initialized()` 查 fully_initialized、`is_linked()` 查 linked 都会触发 `compute_shared_init_state()`,11-cds 域: 归档类的状态要在 load 端重新推演)。`implementor()`(ciInstanceKlass.cpp:599)对共享接口干脆**假设没有唯一实现者**(:602-604,`is_shared()` 时 `impl = this` 返回"多个")——因为 CDS 没保证把所有子类都归档,保守才不会编错。
+这时 `ci` 层真正要提供的东西就清楚了：**一份“只对本次编译负责”的稳定视图。**
 
-**类层次查询其实转发回 VM**: `ciKlass::is_subtype_of(ciKlass* that)`(ciKlass.cpp:68)不是自己遍历继承链,而是 `VM_ENTRY_MARK` 进 VM 后调 `this_klass->is_subtype_of(that_klass)`(:80)——VM 侧的实现本身是 O(1) 的(super_check_offset 指针比较,06 域),不值得在 ci 层重造。镜像层只在"每次都要查、且能快照"的地方做缓存。
+## `ci` 层提供的不是一套别名对象，而是一份“编译期视图”
 
-**"唯一实现者"的真相**: 大纲说的 "unique_concrete_method / DFA / _implementors 列表" 都不存在。真实是两个东西: ① `implementor()`(接口的唯一实现类,三态指针 `_implementor`: NULL=无、某个 ciInstanceKlass=一个、自身=多个,ciInstanceKlass.hpp:70-74,`nof_implementors()` :165 据此返回 0/1/2);② `unique_concrete_subklass()`(ciInstanceKlass.cpp:370)——抽象类的唯一具体子类,实现是 `ik->up_cast_abstract()`(:376,Klass 侧算法)。两者都是**懒计算 + 备忘**——首次访问进 VM 算,结果缓存。它们支撑的优化是 devirtualize: 调用点只可能命中一个实现时,虚调用降级为直接调用。
+`ci` 层最容易被误解成“VM 对象的轻量包装”。但从类定义开始，它讲的就不是“包装”，而是“镜像”。
 
-## 4. ciMethod: 一次提取,按需展开
+`ciObject` 的注释写得很直白：它表示的是 HotSpot VM 里的一个 oop，而它的子类层级并不是简单复制 VM 的 oop/klass 双层体系，而是把两套层级折叠成编译器更方便消费的一套视图。`share/ci/ciObject.hpp:35`、`share/ci/ciObject.hpp:36`、`share/ci/ciObject.hpp:46`、`share/ci/ciObject.hpp:49`
 
-`ciMethod` 是 Method 的镜像。构造(ciMethod.cpp:67-155)把"编译需要、且容易算"的东西全部抄进标量:
+更底层的 `ciBaseObject` 也已经透露了另一个关键信号：这些镜像对象本身是 `ResourceObj`，带有自己的 `_ident`。也就是说，`ci` 对象不是 VM 管的对象，它有自己在编译期世界里的身份编号和生命周期。`share/ci/ciBaseObject.hpp:50`、`share/ci/ciBaseObject.hpp:55`、`share/ci/ciBaseObject.hpp:66`
 
-```cpp
-// ciMethod.cpp:76-96(截取核心,逐字)
-  // These fields are always filled in in loaded methods.
-  _flags = ciFlags(h_m()->access_flags());
+这个视角很重要。因为它意味着 `ci` 层从一开始就没有把自己设计成“随时同步 VM 实时状态”的二级表面，而是设计成“给一次编译用的、可持有的、对象身份稳定的编译器对象”。
 
-  // Easy to compute, so fill them in now.
-  _max_stack          = h_m()->max_stack();
-  _max_locals         = h_m()->max_locals();
-  _code_size          = h_m()->code_size();
-  _intrinsic_id       = h_m()->intrinsic_id();
-  _handler_count      = h_m()->exception_table_length();
-  _size_of_parameters = h_m()->size_of_parameters();
-  _uses_monitors      = h_m()->access_flags().has_monitor_bytecodes();
-  _balanced_monitors  = !_uses_monitors || h_m()->access_flags().is_monitor_matching();
-  _is_c1_compilable   = !h_m()->is_not_c1_compilable();
-  _is_c2_compilable   = !h_m()->is_not_c2_compilable();
-  _can_be_parsed      = true;
-  _has_reserved_stack_access = h_m()->has_reserved_stack_access();
-  // Lazy fields, filled in on demand.  Require allocation.
-  _code               = NULL;
-  _exception_handlers = NULL;
-  _liveness           = NULL;
-  _method_blocks = NULL;
-```
+后面我们会看到，这些镜像对象里有三类信息：
 
-值得注意的几点: `is_c1_compilable`/`is_c2_compilable` 不是"检查方法大小/MDO 是否充足"(大纲的说法),而是 **Method access_flags 里的两个位**(`is_not_c1_compilable`,method.hpp:949)——VM 侧(如 CompileBroker 失败、redefine 后)把"别再编它"记在方法自己的标志里,ciMethod 构造时抄过来。真正的大小信息是 `_code_size`(构造时已抄),内联/编译规模决策(MaxInlineSize 等,03 域)直接用这份快照。构造时还会做一次 **hotswap 检查**(ciMethod.cpp:102-110): JVMTI 可热替换时,`Dependencies::check_evol_method` 命中就立刻把两个 compilable 置 false——**被重定义过的方法不编译**。
+- 构造时立刻快照下来的高频标量；
+- 首次用到时才展开的懒字段；
+- 干脆不在 `ci` 层重复维护、而是按需回 VM 查询的关系计算。
 
-懒的部分: `_method_blocks`(基本块,02 篇的 ciTypeFlow 用)、`_method_data`(MDO 剖面,`ensure_method_data` ciMethod.cpp:961 按需创建)、`_exception_handlers`、`_code`。`_instructions_size` 初值 -1(ciMethod.cpp:149,首次调用才计算)。还有一份**计数快照**(:138-148): 解释器调用计数在构造时抄进 ciMethod——注释说得很直白: "Take a snapshot of these values, so they will be commensurate with the MDO"(:137),编译期间的计数变化不影响本次编译的决策。
+这三类分工，本质上就是对“什么值得变成编译期视图”的一次筛选。
 
-## 5. ciField: 偏移、类型与"常量"的判定
+## 第一根主梁：为什么 oop 走句柄，而 Metadata 走裸指针
 
-`ciField` 是字段的镜像,构造时从 `fieldDescriptor` 提取(ciField.cpp:246-248): `_offset = fd->offset()`——C2 编译 `String.length()` 需要的 `value` 字段偏移就是这里来的,之后全部内联读,零 VM 访问。但字段镜像最有意思的是 **is_constant 判定**(ciField.cpp:257-291)——"这个字段能不能当编译期常量用":
+`ci` 层最核心的安全设计，其实只在一句很朴素的话里：**会移动的，绕一层；不移动的，直接用。**
 
-- **static final(或 @Stable,`FoldStableValues` 开启时,:257-258)**: 是常量——除非它是 `System.in/out/err`(这三个"final"其实会被 System.setIn/Out/Err 改掉,:261-270 按偏移精确排除);
-- **非 static final**: 只有持有者"可信"才当常量——`trust_final_non_static_fields`(ciField.cpp:216)的信任名单: `java.lang.invoke`/`sun.invoke` 包(方法句柄是 VM 自己造的)、匿名类(Unsafe 私有 API)、**所有装箱类**、**String**、`Atomic*FieldUpdater` 的实现类,或 `TrustFinalNonStaticFields` 标志;否则不信任(反射/Unsafe 可能改写 final);
-- **CallSite.target** 特例: 即使非 final 也当常量(:281-286,方法句柄调用点缓存)。
+在 `ciObject` 里，真正保存 VM 对象引用的是一个 `jobject _handle`，也就是 JNI handle，而不是裸 `oop*`。构造函数里也写得非常明确：如果 `ciObjectFactory` 已经初始化，就用 `JNIHandles::make_local`；初始化阶段的共享对象则用 `make_global`。`share/ci/ciObject.hpp:55`、`share/ci/ciObject.hpp:56`、`share/ci/ciObject.cpp:53`、`share/ci/ciObject.cpp:55`、`share/ci/ciObject.cpp:56`、`share/ci/ciObject.cpp:68`、`share/ci/ciObject.cpp:71`
 
-`constant_value()`(ciField.cpp:297)真正读值: 静态字段的值在 **java_mirror** 里(VM 侧布局),进 VM 读一次后缓存进 `_constant_value`(T_ILLEGAL 是"未读"哨兵);非静态 final 用 `constant_value_of`(:317)从实例对象读。
+这条路的意义非常直接。GC 搬对象时，JNI handle 会被正确更新；编译线程在 safepoint 后恢复运行，再通过 handle 取 oop，就能拿到新地址。也就是说，编译器从此不需要自己承担“对象会不会被搬家”的问题。
 
-**will_link**(ciField.cpp:361)是"编译期链接预检": 字段查不到(offset=-1,构造时已标记)、访问权限不够(NoSuchFieldError/IllegalAccessError)时在编译期就发现,而不是让编译产出一段必抛异常的代码——大纲这个机制是对的。
+反过来，`Metadata` 这条路就不同了。`ciObject` 只负责 oop，而 `ciMetadata`/`ciKlass`/`ciMethod` 这批镜像对应的是 metaspace 里的 `Klass`、`Method`、`MethodData` 等对象。它们不参与 Java 堆对象那种搬移式 GC，所以工厂可以直接按 `Metadata*` 做排序和缓存。`ciObjectFactory::metadata_compare` 甚至就是直接拿 `constant_encoding()` 的地址做大小比较。`share/ci/ciObjectFactory.cpp:261`、`share/ci/ciObjectFactory.cpp:262`、`share/ci/ciObjectFactory.cpp:263`
 
-## 6. 依赖: 快照凭什么安全
+这就是为什么 `ciObjectFactory` 对 oop 用哈希桶，而对 metadata 用有序数组二分：前者地址会动，不适合拿来做稳定排序键；后者地址稳定，正好可以直接排序缓存。`share/ci/ciObjectFactory.hpp:67`、`share/ci/ciObjectFactory.cpp:243`、`share/ci/ciObjectFactory.cpp:257`、`share/ci/ciObjectFactory.cpp:305`、`share/ci/ciObjectFactory.cpp:307`、`share/ci/ciObjectFactory.cpp:331`
 
-快照解决"读得干净",但还差最后一块: 快照会过期。编译基于 `Square` 是唯一实现者、`String` 的布局、某类没被重定义这些假设——假设失效时,已产出的 nmethod 必须被撤销(not entrant → deopt,22 域)。这就是 **Dependencies**: `ciEnv` 持有一个 `Dependencies* _dependencies`(ciEnv.hpp:57/313),编译过程中编译器把每个"决定性的假设"登记进去;nmethod 安装时与后续的类加载/重定义对照校验(`validate_compile_task_dependencies`,ciEnv.cpp:933)——违反则编译产物作废。
+这里还可以顺手把“未加载镜像”这个概念也看清。`ciObject::is_loaded()` 的定义是 `handle() != NULL || is_classless()`。也就是说，`ci` 对象允许表示一种“语义上存在、但 VM 实体还没到位”的占位状态。比如未解析类、未找到方法、未创建的 `java.lang.Class` mirror，都可以先在编译期以未加载镜像出现。编译器并不要求所有东西都先变成 VM 里的活对象，才允许自己开始推理。`share/ci/ciObject.hpp:132`、`share/ci/ciObject.hpp:138`
 
-[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/12-ci-inlining-demo.txt) PrintCompilation 里反复出现的 `made not entrant` 是这条链的常见形态: tier3 的 `CiDemo::work` 被 tier4 版本替换(:32/39/40 行的三个 made not entrant);替换不是"删代码",而是把旧 nmethod 标记为不可再进入,正在执行的栈帧继续跑完,新的调用走新版本(依赖失效是它的另一种触发: 假设被违反时 nmethod 同样被作废,22 域)。
+到这里可以先收一个很关键的局部结论：**`ci` 层并不是把所有 VM 对象都“复制一份”，而是按对象稳定性选不同引用策略：oop 用 handle 隔离 GC，Metadata 用裸指针保留低成本访问。**
 
-## 核心悬念
+## 第二根主梁：为什么是一编译一工厂，而不是整个 JVM 一池到底
 
-镜像层拆完了: 编译器不直接读 InstanceKlass/Method/Field——原因(VM 对象太重、oop 会移动、世界会变)→ 双通道引用(oop 走句柄、Metaspace 走裸指针,GC 与编译互不干扰)→ 工厂保证同一次编译内镜像唯一(well-known 类与符号全局共享)→ 快照 + 懒字段(is_interface 是位测试,字段表按需展开)→ 常量判定(static final 排除 System.in/out/err,非 static final 要可信持有者)→ 依赖登记让快照过期时产物作废。一句话: **ci 层是"编译器的只读视图"——把 VM 的活对象降级成一份快照,把快照的保质期交给依赖体系。**
+理解了引用策略，再看对象生命周期就顺了。`ciEnv` 本身就是“一次编译的上下文”。构造时，它会把 `_arena` 指向自己的编译 Arena，并在这个 Arena 里 new 一份 `ciObjectFactory`。析构时，再把工厂里本次编译创建的符号引用计数减掉，并把当前线程上的 env 清空。`share/ci/ciEnv.cpp:130`、`share/ci/ciEnv.cpp:131`、`share/ci/ciEnv.cpp:190`、`share/ci/ciEnv.cpp:191`、`share/ci/ciEnv.cpp:215`、`share/ci/ciEnv.cpp:218`、`share/ci/ciEnv.cpp:221`
 
-但镜像只是"数据从哪来";编译器真正要的是"**每个字节码位置的类型是什么**"——`@ 29 CiDemo$Square::area` 那行内联,前提是编译器知道调用点接收者类型。类型从哪来?两条路: profile(解释器/低 tier 收集的 TypeProfile)与字节码静态推导。下一篇: ciTypeFlow。
+这说明普通 `ci` 对象的默认寿命，就是“一次编译”。不是跟线程同寿，也不是跟 JVM 同寿。
 
-> → [12-ci/02 — ciTypeFlow + bcEscapeAnalyzer — 类型流与逃逸分析](02-ci-typeflow-escape.md)
+在这个前提下，`ciObjectFactory` 的角色就很清楚了：它不是一个全局注册中心，而是“本次编译的镜像唯一性保证器”。类注释点得很死：对于每个 oop，至多创建一个 `ciObject`。这个不变量让编译器可以放心地用对象身份来比较镜像，而不用担心同一底层对象在一次编译里被包装成两份不同的 `ciObject`。`share/ci/ciObjectFactory.hpp:32`、`share/ci/ciObjectFactory.hpp:35`、`share/ci/ciObjectFactory.hpp:36`
+
+它内部的两套缓存结构也非常贴合前一节说的双通道引用：
+
+- `_non_perm_bucket[61]` 这套桶是给 oop 用的；
+- `_ci_metadata` 这套有序数组是给 Metadata 用的。`share/ci/ciObjectFactory.hpp:48`、`share/ci/ciObjectFactory.hpp:49`、`share/ci/ciObjectFactory.hpp:67`、`share/ci/ciObjectFactory.hpp:68`
+
+`get(oop key)` 的流程很简单：先按 oop 找桶，命中就返回旧镜像；没命中就 `create_new_object`，给它编号，再插进桶里。这样，同一个 oop 在本次编译里永远只对应一份 `ciObject`。`share/ci/ciObjectFactory.cpp:238`、`share/ci/ciObjectFactory.cpp:243`、`share/ci/ciObjectFactory.cpp:248`、`share/ci/ciObjectFactory.cpp:253`、`share/ci/ciObjectFactory.cpp:257`
+
+`get_metadata(Metadata* key)` 的逻辑也一样，只是底层容器换成了有序数组：先 `find_sorted` 二分查找，没找到就 `create_new_metadata`，必要时重算插入位置，再按序插回。这样，同一个 `Method*`、`Klass*`、`MethodData*` 在本次编译里也只会有一份镜像。`share/ci/ciObjectFactory.cpp:287`、`share/ci/ciObjectFactory.cpp:305`、`share/ci/ciObjectFactory.cpp:318`、`share/ci/ciObjectFactory.cpp:321`、`share/ci/ciObjectFactory.cpp:328`、`share/ci/ciObjectFactory.cpp:331`
+
+但 HotSpot 也不是把所有东西都做成 per-compilation。`ciObjectFactory::initialize()` 会在 VM 初始化期建立一份长命 Arena，借一个临时 `ciEnv initial(arena)` 来生成“所有编译共享的 ciObjects”。`init_shared_objects()` 里会创建 vmSymbols 对应的共享 `ciSymbol`、基本类型 `ciType`、`ciNullObject`，以及 well-known 类的 `ciInstanceKlass`。最后还把 `_shared_ident_limit` 定成共享对象 ident 的边界：这个边界以下的 ident 永久属于全局共享对象，以上的 ident 则由每个新 `ciEnv` 重新分配。`share/ci/ciObjectFactory.cpp:106`、`share/ci/ciObjectFactory.cpp:111`、`share/ci/ciObjectFactory.cpp:115`、`share/ci/ciObjectFactory.cpp:123`、`share/ci/ciObjectFactory.cpp:130`、`share/ci/ciObjectFactory.cpp:147`、`share/ci/ciObjectFactory.cpp:157`、`share/ci/ciObjectFactory.cpp:160`、`share/ci/ciObjectFactory.cpp:199`、`share/ci/ciObjectFactory.cpp:204`
+
+这条边界非常值得记住：**对永远稳定的对象，ci 层愿意全局共享；对普通类和方法，ci 层只承诺“本次编译内部唯一”，不承诺“跨编译永远同一份镜像”。**
+
+这正是它躲开“全局永久镜像池”那个陷阱的方法。
+
+## `ciInstanceKlass`：该快照的先快照，该懒算的先别碰
+
+理解了 `ci` 层的寿命与唯一性，再看具体镜像类就会顺很多。`ciInstanceKlass` 不是把 `InstanceKlass` 完整复制一份，而是把“编译最爱问、而且比较稳定”的那部分标量先抄下来。
+
+从字段定义就能看出来：`_init_state`、`_is_shared`、`_has_finalizer`、`_has_subklass`、`_has_nonstatic_fields`、`_has_nonstatic_concrete_methods`、`_is_anonymous`、`_flags`、`_nonstatic_field_size`、`_nonstatic_oop_map_size`，这些都是典型的“快照后直接位读/数值读”的字段。`share/ci/ciInstanceKlass.hpp:50`、`share/ci/ciInstanceKlass.hpp:51`、`share/ci/ciInstanceKlass.hpp:58`、`share/ci/ciInstanceKlass.hpp:59`、`share/ci/ciInstanceKlass.hpp:60`
+
+与此同时，`_super`、`_java_mirror`、`_field_cache`、`_nonstatic_fields` 这些更重的结构则保持懒加载。原因也很朴素：编译一个方法未必会真去看完整字段表或 `java_mirror`，没必要一上来就把整棵类信息树拷全。`share/ci/ciInstanceKlass.hpp:62`、`share/ci/ciInstanceKlass.hpp:63`、`share/ci/ciInstanceKlass.hpp:64`、`share/ci/ciInstanceKlass.hpp:66`、`share/ci/ciInstanceKlass.hpp:67`
+
+这里能看出镜像层很清晰的一条取舍：**高频小查询，做成快照；可能很大但不是总会用到的结构，做成懒字段。**
+
+但 `ciInstanceKlass` 也没有试图把一切都本地化。比如 `ciKlass::is_subtype_of` 就直接 `VM_ENTRY_MARK` 回到 VM，让真正的 `Klass::is_subtype_of` 来算。原因其实不复杂：类层级判定已经有成熟而高效的 VM 侧实现，没必要在 `ci` 层再维护一套并随时同步。`share/ci/ciKlass.cpp:68`、`share/ci/ciKlass.cpp:77`、`share/ci/ciKlass.cpp:80`
+
+这点特别能说明 `ci` 的哲学：它不追求“永不回 VM”，而追求“只在值得回的时候回”。
+
+共享类还有自己的特殊补丁逻辑。`ciInstanceKlass` 里 `update_if_shared()` 会在共享类的 `_init_state` 看起来和预期不一致时，重新计算共享初始化状态。也就是说，`ci` 层并不盲信构造时抄到的那份状态值，只要对象是共享类、而且状态问题和共享恢复语义有关，就按需更新。`share/ci/ciInstanceKlass.hpp:101`、`share/ci/ciInstanceKlass.hpp:108`、`share/ci/ciInstanceKlass.hpp:109`、`share/ci/ciInstanceKlass.hpp:117`、`share/ci/ciInstanceKlass.hpp:127`
+
+实现者信息也很保守。`_implementor` 的三态编码——`NULL`、唯一实现者、`this` 代表“多个实现者”——本质上也是一份“只在能安全保守回答时才缓存”的结果。`share/ci/ciInstanceKlass.hpp:70`、`share/ci/ciInstanceKlass.hpp:71`、`share/ci/ciInstanceKlass.hpp:74`、`share/ci/ciInstanceKlass.hpp:165`
+
+到这里可以先记一个结论：`ciInstanceKlass` 不是“把 `InstanceKlass` 缩写一下”，而是在给编译器造一个问答成本更低、寿命更合适的类视图。
+
+## `ciMethod`：把编译最常用的判定成本，提前摊平到构造期
+
+`ciMethod` 的味道和 `ciInstanceKlass` 很像，但它服务的是另一类高频问题：方法大小、参数规模、异常表长度、监视器使用、能不能编、能不能静态绑定、profile 计数快照。
+
+构造函数一开头就把这些“容易算、而且后面会反复用”的字段全抄进来：`_max_stack`、`_max_locals`、`_code_size`、`_intrinsic_id`、`_handler_count`、`_size_of_parameters`、`_uses_monitors`、`_balanced_monitors`、`_is_c1_compilable`、`_is_c2_compilable`、`_has_reserved_stack_access`。`share/ci/ciMethod.cpp:76`、`share/ci/ciMethod.cpp:80`、`share/ci/ciMethod.cpp:82`、`share/ci/ciMethod.cpp:83`、`share/ci/ciMethod.cpp:84`、`share/ci/ciMethod.cpp:88`、`share/ci/ciMethod.cpp:89`、`share/ci/ciMethod.cpp:91`
+
+与此同时，`_code`、`_exception_handlers`、`_liveness`、`_method_blocks` 这些需要额外分配、也未必总会用到的大块内容则先留空。也就是同样的节奏：先快照热路径最常问的标量，把真正重的东西延后到首次使用。`share/ci/ciMethod.cpp:92`、`share/ci/ciMethod.cpp:93`、`share/ci/ciMethod.cpp:94`、`share/ci/ciMethod.cpp:95`、`share/ci/ciMethod.cpp:96`
+
+这里还有两处很能说明 `ciMethod` 不是“傻拷贝”。
+
+第一处是 hotswap 检查。只要当前 JVMTI 状态允许热替换或断点，构造时就会在 `Compile_lock` 下跑 `Dependencies::check_evol_method`。只要这个方法已经演化过，`_is_c1_compilable`、`_is_c2_compilable` 和 `_can_be_parsed` 会被一起打成 false。也就是说，镜像层在构造时就已经开始替编译器把“这个方法还有没有资格编”这类运行期风险吸收进来了。`share/ci/ciMethod.cpp:102`、`share/ci/ciMethod.cpp:105`、`share/ci/ciMethod.cpp:106`、`share/ci/ciMethod.cpp:107`、`share/ci/ciMethod.cpp:109`
+
+第二处是计数快照。解释器调用次数和 throwout 次数会在构造时抄一份，源码注释明确说这是为了让这些值和 `MethodData` 的快照保持可比。编译期间计数继续增长没关系，本次编译决策看的就是这一刻的快照。`share/ci/ciMethod.cpp:136`、`share/ci/ciMethod.cpp:137`、`share/ci/ciMethod.cpp:138`、`share/ci/ciMethod.cpp:139`、`share/ci/ciMethod.cpp:147`
+
+这恰恰是“编译期视图”的典型味道：它不承诺永久真，只承诺对本次编译足够一致。
+
+## `ciField`：让“字段偏移、常量性、能不能链接”从运行时问题变成编译期问题
+
+字段镜像是另一个很好的例子。编译器看字段时最想知道的无非三件事：偏移是多少、字段类型是什么、这个字段值能不能当常量折叠、这次访问将来会不会链接出错。
+
+`ciField::initialize_from` 一开始就把 access flags、offset 和 canonical holder 抄出来。对编译器来说，`_offset` 几乎就是最值钱的信息之一，因为后面大量 field load/store 优化都围着它转。`share/ci/ciField.cpp:246`、`share/ci/ciField.cpp:248`、`share/ci/ciField.cpp:249`、`share/ci/ciField.cpp:252`
+
+更有意思的是常量性判断。`ciField` 并没有粗暴地把 “`final` 就是常量” 当规则，而是塞进了一整套细化判断：
+
+- `System.in/out/err` 这种虽然 `static final` 但语义上会变的字段，不信；
+- `java/lang/invoke`、`sun/invoke`、匿名类、装箱类、`String`、部分 `Atomic*FieldUpdater` 的非静态 final 字段，可以信；
+- `CallSite.target` 即便不是普通 final 语义，也被特殊当作可编译期常量。`share/ci/ciField.cpp:216`、`share/ci/ciField.cpp:219`、`share/ci/ciField.cpp:223`、`share/ci/ciField.cpp:227`、`share/ci/ciField.cpp:230`、`share/ci/ciField.cpp:233`、`share/ci/ciField.cpp:257`、`share/ci/ciField.cpp:261`、`share/ci/ciField.cpp:266`、`share/ci/ciField.cpp:281`、`share/ci/ciField.cpp:283`
+
+这说明 `ciField` 并不是只负责搬字段信息，它还承担了一层“把 VM 里分散的编译信任策略收成一个编译器可问答对象”的任务。
+
+真正取常量值时也不是随便读。静态字段要先确认 holder 已初始化，然后去 holder 的 `java_mirror` 上读；非静态 final 则从具体对象实例里读。`ci` 层把“从哪里取字段真值”的运行时细节吸收掉，给编译器暴露的是统一的 `constant_value` / `constant_value_of`。`share/ci/ciField.cpp:297`、`share/ci/ciField.cpp:299`、`share/ci/ciField.cpp:302`、`share/ci/ciField.cpp:305`、`share/ci/ciField.cpp:317`、`share/ci/ciField.cpp:320`
+
+还有一个很关键但容易被忽略的点是 `will_link()`。它会在编译期先判断：这个字段访问如果真的按当前字节码去执行，是否会触发静态/实例不匹配、访问权限错误、或者字段本身当初就没能解析出来。也就是说，编译器不是等生成代码后再把潜在链接错误留给运行时，而是尽量在 `ciField` 阶段就知道“这条路走不通”。`share/ci/ciField.cpp:357`、`share/ci/ciField.cpp:361`、`share/ci/ciField.cpp:368`、`share/ci/ciField.cpp:376`
+
+这又一次证明了 `ci` 层不是单纯的缓存，而是 **把编译最爱问、而且值得稳定下来的 VM 事实提前整理出来。**
+
+## 视图终究会过期，所以还需要 Dependencies 兜底
+
+到这里还有最后一个必须回答的问题：既然 `ci` 层是快照，那快照会不会在编译过程中变旧？
+
+当然会。并发类加载会改变类层级，hotswap 会让方法失去可编译资格，`CallSite` 目标值会变化，JVMTI 和 DTrace 状态也可能改变编译的前提。
+
+`ci` 层没有试图用“实时同步一切镜像”去对抗这件事，那样成本太高。它选的是另一种分工：**镜像负责给编译器一份稳定视图，Dependencies 负责在代码真正落地前检查这份视图赖以成立的假设是不是还在。**
+
+`ciEnv` 里直接挂着一个 `Dependencies* _dependencies`，编译结果注册时会先把依赖编码，再调用 `validate_compile_task_dependencies` 检查编译期间有没有发生并发类加载、方法演化、断点、调用点失效等变化。只要依赖被打破，就记录失败、放弃这次编译。`share/ci/ciEnv.hpp:313`、`share/ci/ciEnv.cpp:926`、`share/ci/ciEnv.cpp:928`、`share/ci/ciEnv.cpp:933`、`share/ci/ciEnv.cpp:935`、`share/ci/ciEnv.cpp:938`、`share/ci/ciEnv.cpp:1004`、`share/ci/ciEnv.cpp:1008`
+
+这条链路特别重要，因为它解释了 `ci` 镜像为什么不需要也不应该追求“永远跟 VM 完全同步”。编译器真正需要的不是一份永不变旧的世界模型，而是一份 **本次编译足够稳定的世界模型 + 在安装代码前验证这份模型没过期的保险丝**。
+
+这两件事，一件由 `ci` 做，一件由 Dependencies 做，分工非常清楚。
+
+## 收网：`ci` 层解决的不是“怎么访问 VM 对象”，而是“怎么得到一份编译期稳定视图”
+
+现在可以把整篇收成一张总图了。
+
+编译器当然需要知道 VM 里的类、方法、字段和对象长什么样，但它不能直接把 VM 活对象当自己的长期工作内存：oop 会被 GC 搬动，VM 对象太重，类层级与方法语义还会在编译期间变化。于是 HotSpot 在 `ciEnv` 里为每次编译准备一份独立的镜像工厂；工厂保证本次编译里一份 VM 实体最多对应一份 `ci` 镜像；对会移动的 oop，用 JNI handle 隔离 GC；对不移动的 Metadata，用直接指针保留低成本访问；对编译高频要问的标量，构造时快照；对大块但不一定用到的结构，首次访问再懒展开；对不值得本地维护的关系计算，再回 VM 现算；最后再用 Dependencies 把这份快照的保质期看住。`share/ci/ciEnv.cpp:130`、`share/ci/ciObjectFactory.hpp:35`、`share/ci/ciObject.cpp:53`、`share/ci/ciObjectFactory.cpp:292`、`share/ci/ciKlass.cpp:68`、`share/ci/ciMethod.cpp:80`、`share/ci/ciField.cpp:249`、`share/ci/ciEnv.cpp:930`
+
+所以，本篇最核心的一句话不是“`ciObject` 是编译器看到的 Java 对象”，而是：
+
+**`ci` 层把 VM 的活对象降成了编译器可持有、可重复查询、可跨 GC、并且只对本次编译负责的只读视图。**
+
+只要这个结论抓住了，下一篇 `ciTypeFlow` 就好理解了：镜像层回答的是“编译器能看到哪些对象与元数据”，而类型流回答的是“编译器如何沿着字节码一步步推导每个位置上可能出现的类型”。
+
+> → [12-ci/02 — `ciTypeFlow + bcEscapeAnalyzer` — 类型流与逃逸分析](02-ci-typeflow-escape.md)

@@ -1,238 +1,192 @@
-# 02. serialVersionUID 与自定义序列化 — 版本兼容、writeObject/readResolve
+# serialVersionUID 与自定义序列化：为什么兼容性不是靠运气，而是靠你显式管住协议边界
 
-> **前置依赖**: [18-serialization/01 — 序列化协议与流程](01-protocol-flow.md)(TC_ 标记与读写流程)、[04-reflection-annotation/01 — Class 与反射](../04-reflection-annotation/01-class-member-access.md)(getDeclaredMethod/setAccessible)
-> → **后续**:[18-serialization/03 — 反序列化安全](03-security-filter.md)
-> 关联: 域 32 Unsafe(对象创建);内部卷 41-zip-jimage(二进制格式)
+> 本文基于 JDK 11 `Serializable`、`ObjectStreamClass`、`ObjectOutputStream`、`ObjectInputStream`。讨论范围聚焦 `serialVersionUID`、默认 UID 计算、字段兼容规则、`writeObject/readObject/defaultWriteObject/defaultReadObject`、`writeReplace/readResolve` 与 `Externalizable` 对照；安全问题放下一篇。本文讨论的是 JDK 11 默认序列化兼容与扩展机制，不把这里的 UID 闸门、字段匹配和私有钩子方式外推成所有对象持久化框架都必须遵守的统一规范。
+> **前置依赖**：[序列化协议与流程](01-protocol-flow.md)、[反射与私有方法探测边界](../04-reflection-annotation/01-class-member-access.md)
+> **后续**：[反序列化安全](03-security-filter.md)
 
-## 数据存了一年,突然读不出来了
+## 先看一个最常见、也最容易被误解成“类小改动而已，怎么会读不出来”的事故
 
-生产最经典的序列化事故: 对象存进数据库/Redis,几个月后类加了个字段,再读老数据——`InvalidClassException: local class incompatible`。为什么?serialVersionUID 对不上。这一篇把版本指纹、字段兼容规则、四个私有钩子(writeObject/readObject/writeReplace/readResolve)讲透——写完你就知道"加字段为什么崩、怎么加才不崩"。
+对象存进数据库或 Redis 时一切正常，几个月后类只加了个字段，或者顺手改了下结构，再读老数据时却直接抛：`InvalidClassException: local class incompatible`。很多人第一次碰到这个错误时都会觉得不可思议：我又没改协议文件、也没改数据库内容，只是 Java 类演进了一点点，为什么老数据就像“坏掉”了一样？
 
-## 1. "serialVersionUID 是什么？" — 类的版本指纹
+真正的问题在于，Java 默认序列化并不是“只要类名还在就大概能读”，而是一套有明确兼容闸门的协议。第一道闸门就是 `serialVersionUID`：它先决定“双方还有没有资格继续谈”。只有这道闸门没拦住，后面字段怎么按名字匹配、哪些取默认值、哪些被忽略，才轮得到讨论。
 
-### 1.1 不匹配的后果
+也就是说，序列化兼容性从来不是靠运气自然发生的，而是靠你**显式管理 UID、字段演进和自定义钩子边界**。这篇就沿着这三条线来讲：为什么不写 UID 会把结构变化和兼容性绑死，为什么字段兼容不等于业务安全，为什么 `writeObject/readObject`、`writeReplace/readResolve`、`Externalizable` 是三组完全不同层级的协议插手点。
 
-`Serializable` 的类注释把规则写得很清楚(`Serializable.java:137-144`):
+## 一、serialVersionUID 为什么是第一道兼容闸门：它先决定双方能不能继续谈
 
-```java
-// Serializable.java:137-144(截取核心,逐字)
- * The serialization runtime associates with each serializable class a version
- * number, called a serialVersionUID, which is used during deserialization to
- * verify that the sender and receiver of a serialized object have loaded
- * classes for that object that are compatible with respect to serialization.
- * If the receiver has loaded a class for the object that has a different
- * serialVersionUID than that of the corresponding sender's class, then
- * deserialization will result in an {@link InvalidClassException}.  A
+### 先拆掉“它只是版本注释字段”的误解
+
+很多人知道 `serialVersionUID`，却把它理解成“给开发者看的版本号”——好像只要不去管它，JVM 也能大概自己凑合。JDK 11 的 `Serializable` 注释把规则写得非常直接：
+
+- `Serializable.java:137-166`
+
+它说得很清楚：序列化运行时会把发送方类和接收方类的 `serialVersionUID` 拿来比较，如果不一致，反序列化直接抛 `InvalidClassException`。这不是建议，而是协议闸门。JDK 里的实际检查逻辑也明确落在：
+
+- `ObjectStreamClass.java:553-562`
+
+也就是说，UID 不是最后才参考一下，而是**在字段恢复开始前就先决定“这两边的类描述到底算不算同一种协议对象”**。
+
+### 为什么这一步必须先发生在字段匹配之前
+
+这一点特别重要。很多人会自然觉得：就算类有变化，JVM 先试着按字段名对齐，实在不行再报错不也行吗？问题在于，字段兼容规则只能在“双方至少还属于同一版本系谱”的前提下讨论。UID 不匹配时，运行时宁可直接拒绝，也不愿继续猜后面的字段语义会不会已经彻底变味。
+
+这说明 `serialVersionUID` 真正扮演的，是一个**协议层身份闸门**，而不是“字段匹配失败后的附加提示”。
+
+## 二、为什么不显式写 UID 会把结构变化和兼容性绑死：默认 UID 本质上是一份类结构指纹
+
+### 先看默认 UID 为什么不是“稳定默认值”
+
+JDK 11 中，`ObjectStreamClass.getSerialVersionUID()` 位于 `ObjectStreamClass.java:251-264`。它的逻辑非常清楚：
+
+- 如果类显式声明了 `serialVersionUID`，优先用它；
+- 没声明时，就调用 `computeDefaultSUID(cl)` 去算默认 UID。
+
+显式声明探测入口在：
+
+- `ObjectStreamClass.java:1631-1644`
+
+这说明“不写 UID”并不等于“JVM 自动帮你填一个长期稳定值”，而是每次都根据当前类结构去算一份指纹。只要结构变化会影响这份指纹，老数据就可能因此被挡在闸门外。
+
+### 为什么加个 public 方法都可能让默认 UID 变掉
+
+`computeDefaultSUID()` 入口在 `ObjectStreamClass.java:1647`，最终摘要收尾在 `1774-1782`。旧稿已经把参与摘要的结构项梳理得很完整：类名、修饰符、接口、字段、构造器、方法、静态初始化器等都会被拼进哈希输入。也就是说，这不是“字段布局 hash 一下”这么简单，而是一份**类可观察结构指纹**。
+
+这会带来一个非常实际的后果：即使你没改序列化字段，只是新增了某些会进入默认 SUID 计算的结构成员，默认 UID 也可能变。于是“类结构改了一点点”和“老数据读不出来了”就被硬绑在了一起。
+
+这正是为什么生产规范几乎都会强调：**显式声明 `private static final long serialVersionUID = ...;`。** 真正的目的不是减少 IDE 警告，而是把“结构演进”与“兼容闸门值是否变化”这两件事解耦，让你自己来决定什么时候算同一协议代际，什么时候故意切断兼容。
+
+## 三、字段兼容为什么是“按名字匹配，不是按位置抄内存”，但这仍然不等于业务就安全
+
+### 先看字段匹配解决的是什么问题
+
+一旦 UID 通过，JVM 才会继续处理字段兼容。关键逻辑在：
+
+- `ObjectStreamClass.java:2161-2200` 的 `matchFields`
+
+它的核心不是“按顺序一一恢复”，而是**按字段名去对齐流里的字段描述和本地类的字段描述**。这说明默认协议从一开始就不是对象内存布局拷贝，而是一种“基于字段名的实例状态恢复”。
+
+### 新增字段、删除字段、改名改类型，哪些分别意味着什么
+
+按名字匹配带来的直接语义是：
+
+- **新增字段**：流里没有，本地类有 → 该字段取 Java 默认值；
+- **删除字段**：流里有，本地类没有 → 这部分数据会被读掉但被忽略；
+- **改字段名**：名字对不上 → 旧数据无法映射到新字段；
+- **改原始类型**：同名但类型不兼容 → 直接视为不兼容问题。
+
+这说明协议层的“兼容”其实很克制：它能处理的是“名字仍然代表同一含义，但有些字段多了/少了”的演进，而不是你任意改语义后还指望 JVM 自己猜得出来。
+
+### 为什么“协议上能读”不等于“业务上就没事”
+
+这一步特别值得提醒。很多人听到“加字段兼容、删字段也兼容”，会误以为演进只要闸门不炸就安全。实际上，字段缺失时默认值常常是 `null`、`0`、`false`。协议层能恢复出对象壳，不代表业务逻辑接受得了这个默认值。一个以前保证非空的字段如果被删掉，老代码哪怕能读，也可能在运行期立刻 NPE。
+
+所以“只加不删”的实践建议并不只是协议教条，而是因为：**协议兼容只是允许你把对象恢复出来，不替你保证业务语义仍然成立。**
+
+## 四、为什么 `writeObject/readObject` 是默认协议的扩展插口：它们改的是“字段怎么写”，不是“对象身份是什么”
+
+### 先看为什么它们不是接口方法，而是协议约定的私有方法
+
+JDK 11 用 `ObjectStreamClass.getPrivateMethod()`（`ObjectStreamClass.java:1447-1463`）来探测 `writeObject/readObject`，并在类描述缓存里保存下来（`380-386`）。这已经说明，它们不是通过接口继承暴露的，而是通过**一组约定签名的私有方法**插入到默认协议流程里。
+
+这条设计很重要：它让类可以在“不污染公共 API”的前提下，悄悄插手自己的序列化格式。也就是说，序列化协议扩展点并不是语言级特性，而是运行时按约定探测到的“私有钩子”。
+
+### 为什么 `defaultWriteObject/defaultReadObject` 才是这组钩子的真正分界线
+
+JDK 11 中：
+
+- `defaultWriteObject()` 位于 `ObjectOutputStream.java:430`
+- `defaultReadObject()` 位于 `ObjectInputStream.java:615`
+- 自定义 `writeObject` 被调用的关键时机在 `ObjectOutputStream.java:1485-1489`
+
+这组关系揭示了一个核心事实：你自定义 `writeObject/readObject` 时，并不是非黑即白。你可以：
+
+- 调 `defaultWriteObject/defaultReadObject`，保留默认字段协议，再在前后加自定义数据；
+- 也可以完全不调，自己从头定义这段对象的写入/恢复规则。
+
+这说明 `writeObject/readObject` 真正改写的是“字段内容怎么组织进协议”，而不是对象身份本身。它们更像**默认字段协议上的扩展插口**。
+
+## 五、为什么 `writeReplace/readResolve` 又是另一层：它们改的不是字段，而是“最后写/读的到底是不是这个对象”
+
+### 先看这组钩子和前一组最关键的不同
+
+`writeObject/readObject` 关注的是“这个对象怎么写字段”。`writeReplace/readResolve` 关注的则是另一个问题：**最终写出去的、以及最后还给调用方的，到底是不是当前这个对象本体。**
+
+JDK 11 在 `Serializable.java:117-135` 已经把这两组约定写得很清楚，而 `ObjectStreamClass` 对它们的探测在：
+
+- `ObjectStreamClass.java:392-395`
+- 实际调用点在 `1104-1106`（writeReplace）和 `1134-1136`（readResolve）
+
+### 为什么它们适合单例、脱敏 DTO、协议迁移
+
+一旦你理解了“它们可以替换对象身份”这一点，常见用途就都顺了：
+
+- **单例保护**：反序列化出一个临时对象后，用 `readResolve` 强制替换成全局唯一实例；
+- **脱敏/代理形态**：序列化前先用 `writeReplace` 换成另一个更适合持久化或传输的对象；
+- **格式迁移**：读回来后再通过 resolve 替换成新模型对象。
+
+所以这组钩子和 `writeObject/readObject` 不是同一层问题。前者改字段协议，后者改对象身份。把它们混在一起，很多面试题和生产 bug 都会答偏。
+
+## 六、为什么 Externalizable 是“我自己写整个协议”，而不是“更多钩子”的小扩展
+
+### 先看它和默认 Serializable 最大的差异
+
+`Externalizable` 接口定义在：
+
+- `Externalizable.java:66/82/96`
+
+它和前面几组钩子最本质的区别，不是“多两个方法”，而是**默认字段协议整个被拿掉了**。你不再拥有“默认字段 + 局部扩展”这条保底路，而是要自己全权决定写什么、按什么顺序写、怎么按同样顺序读回来。
+
+这也是为什么 `ObjectOutputStream` 在普通对象写入里会单独分支处理 externalizable（`ObjectOutputStream.java:1420-1421`）。它不是另一种 Serializable 小变体，而是明确要求“这段协议由对象自己说了算”。
+
+### 为什么它控制力更强，风险也更高
+
+更强的控制意味着：
+
+- 可以完全自定义紧凑格式；
+- 可以避开默认字段协议限制；
+- 也必须自己保证读写顺序、兼容规则和恢复语义不出错。
+
+所以 Externalizable 的真正定位不是“高级版 Serializable”，而是“**你确定要亲自接管整段协议了**”。这类控制力当然有用，但它不该被当成日常默认选项。
+
+## 七、五个最容易混掉的边界：UID 不是注释，默认 UID 不是稳定值，字段兼容不等于业务安全，writeObject 不改对象身份，Externalizable 也不是高级默认值
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`serialVersionUID` 不是给开发者看的注释版本号。它是反序列化继续往下走之前的第一道协议闸门；只要两边不一致，JVM 根本不会先帮你“尽量读读看”。
+
+第二，默认 UID 也不是某个天然稳定的保底值。它本质上是一份类结构指纹，只要参与计算的结构成员变了，闸门值就可能跟着变。把兼容性寄托在默认 UID 上，本质上就是把“类结构改动”和“老数据能不能读”硬绑在一起。
+
+第三，字段兼容更不等于业务安全。协议层允许“新增字段取默认值、删除字段被忽略”，只是说明对象壳还能被恢复出来；如果业务语义要求非空、非零、必须成对出现，这些默认值一样可能把程序推到运行期炸掉。
+
+第四，`writeObject/readObject` 也不是在改对象身份。它们真正改写的是字段协议：默认字段要不要先写、额外数据块放在哪、读回来时怎样补自定义恢复逻辑。真正会把“最后写出的/最后交付的对象不是原对象本体”这层语义改掉的，是 `writeReplace/readResolve`。
+
+第五，`Externalizable` 更不是“更高级、所以默认更好”的 Serializable 版本。它是把默认字段协议整段拿掉，换成你自己全权负责写和读。控制力更强，出错面也更大；如果你并不打算亲自维护整段二进制协议，它就不该是顺手就上的默认选项。
+
+把这五条边界记稳，序列化兼容就不会重新塌回“类改一改大多还能读”的侥幸印象。它真正依赖的是显式管理：先决定闸门值稳不稳定，再决定字段语义怎么演进，最后才决定哪些地方值得自己插手改协议、改对象身份，甚至整段协议都自己接管。
+
+## 收网：序列化兼容真正靠的是三层显式控制——UID、字段匹配和协议插手点
+
+回到开头那个事故，现在应该已经能看清为什么老数据“突然读不出来”从来不是偶然。因为 Java 默认序列化早就把兼容策略分成了三层明确机制：
+
+- 第一层是 `serialVersionUID`，先决定双方有没有资格继续谈；
+- 第二层是字段按名字匹配，决定默认状态怎么补默认值、怎么忽略多余字段、什么时候类型直接不兼容；
+- 第三层则是自定义插手点：`writeObject/readObject` 改字段协议，`writeReplace/readResolve` 改对象身份，`Externalizable` 直接接管整个协议。
+
+把整篇压成一张总图，就是：
+
+```text
+兼容闸门
+  → serialVersionUID
+  → 先决定能不能继续反序列化
+
+默认协议恢复
+  → 字段按名字匹配
+  → 新字段补默认值 / 多余字段忽略 / 类型不兼容即失败
+
+协议插手点
+  → writeObject/readObject：改字段写法
+  → writeReplace/readResolve：改对象身份
+  → Externalizable：全权自定义协议
 ```
 
-**UID 是"类的版本号"**: 序列化时写进流(写的是类描述符的一部分),反序列化时读方类要提供同一个值——对不上直接 `InvalidClassException`。检查在 `ObjectStreamClass.initNonProxy` 里(`ObjectStreamClass.java:555-562`):
-
-```java
-// ObjectStreamClass.java:553-562(截取核心,逐字)
-            if (model.serializable == osc.serializable &&
-                    !cl.isArray() &&
-                    suid != osc.getSerialVersionUID()) {
-                throw new InvalidClassException(osc.name,
-                        "local class incompatible: " +
-                                "stream classdesc serialVersionUID = " + suid +
-                                ", local class serialVersionUID = " +
-                                osc.getSerialVersionUID());
-            }
-```
-
-### 1.2 两个来源:显式声明 or 默认计算
-
-`getSerialVersionUID`(`ObjectStreamClass.java:258-270`)的取值逻辑: 类初始化时先试**显式声明**(`suid = getDeclaredSUID(cl)`,`ObjectStreamClass.java:367`),得到 null 则在 `getSerialVersionUID` 首次调用时**懒计算**默认值(存到 suid 字段,只算一次):
-
-```java
-// ObjectStreamClass.java:258-270(截取核心,逐字)
-public long getSerialVersionUID() {
-    // REMIND: synchronize instead of relying on volatile?
-    if (suid == null) {
-        suid = AccessController.doPrivileged(
-            new PrivilegedAction<Long>() {
-                public Long run() {
-                    return computeDefaultSUID(cl);
-                }
-            }
-        );
-    }
-    return suid.longValue();
-}
-```
-
-**显式声明**的检测在 `getDeclaredSUID`(`ObjectStreamClass.java:1631-1644`): 反射找名为 `serialVersionUID` 的字段,要求 **static + final**(`ObjectStreamClass.java:1634-1635` 的 mask 检查),满足才 `f.getLong(null)` 取值;否则返回 null 走默认计算。
-
-### 1.3 默认算法:类的结构指纹(SHA 摘要)
-
-`computeDefaultSUID`(`ObjectStreamClass.java:1647`)把**类的结构信息拼成一个字节流,做 SHA-1 摘要,取前 8 字节作 long**:
-
-```java
-// ObjectStreamClass.java:1774-1782(截取核心,逐字)
-            dout.flush();
-
-            MessageDigest md = MessageDigest.getInstance("SHA");
-            byte[] hashBytes = md.digest(bout.toByteArray());
-            long hash = 0;
-            for (int i = Math.min(hashBytes.length, 8) - 1; i >= 0; i--) {
-                hash = (hash << 8) | (hashBytes[i] & 0xFF);
-            }
-            return hash;
-```
-
-摘要输入(`ObjectStreamClass.java:1657-1772`)按固定顺序写入:
-
-1. **类名**(`writeUTF(cl.getName())`,`:1657`)
-2. **类修饰符**(PUBLIC/FINAL/INTERFACE/ABSTRACT 四位,`:1659-1661`,接口的 ABSTRACT 位有 javac bug 补偿 `:1663-1672`)
-3. **接口名**(排序后逐个 writeUTF,`:1681-1689`)
-4. **字段签名**(非 private,或 private 但非 static 非 transient 的字段——`:1708-1710` 的过滤规则;按名字排序 `:1697-1701`)
-5. **静态初始化器**(有 `<clinit>` 则写,`:1717-1721`)
-6. **构造器签名**(非 private,按签名排序,`:1733-1745`)
-7. **方法签名**(非 private,按名字+签名排序,`:1760-1772`)
-
-关键点: **private static/private transient 字段不参与**(`:1708-1710` 的过滤条件: private 且 (static 或 transient) 就跳过);**private 方法、private 构造器也不参与**(`:1740`/`:1767` 的 `(mods & Modifier.PRIVATE) == 0` 过滤)——因为 private 成员不影响序列化格式,也不影响外部可观察行为。其余任何一个元素变化(加 public 方法、改字段类型),摘要就变,UID 就变。
-
-### 1.4 面试点:不写 serialVersionUID 会怎样
-
-- 编译器警告(IDE 可配置强制)
-- 运行期按默认算法算——**类结构一变,UID 就变,老数据立刻 InvalidClassException**
-- 而"类结构"非常敏感: 加一个 public/protected 方法都变(非 private 方法签名参与摘要;private 方法、private static/private transient 字段不参与)。所以**一律显式声明**: `private static final long serialVersionUID = 1L;`——声明后,类怎么改,UID 不变,兼容性由字段匹配规则(§2)决定
-
-关键设计(斜体):*UID 是"类的结构指纹"——默认算法把类名/修饰符/字段/方法/构造器全部哈希进去,任何结构变化都导致旧数据失效;显式声明把"结构变化"与"数据失效"解耦,让可控演进成为可能。面试"为什么必须声明": 默认计算对编译器实现敏感、对结构变化敏感(加个方法都变),声明后 UID 恒定,兼容与否完全由字段规则决定。生产铁律: 显式声明 + 只加字段不删字段。*
-
-## 2. "版本兼容规则" — 字段按名匹配
-
-### 2.1 对齐规则:按名字,不按位置
-
-老数据用老类序列化,新类反序列化——字段怎么对齐?**按字段名匹配**。实现是 `matchFields`(`ObjectStreamClass.java:2161-2200`): 流字段 `f` 在本地字段里找同名 `lf`(`f.getName().equals(lf.getName())`,`:2184`),匹配规则:
-
-- **新类多出的字段**(本地有、流里没有)→ 赋默认值(null / 0 / false)——老数据里没有它的值
-- **新类少了的字段**(本地没有、流里有)→ **忽略**——流里的数据被读出后直接丢弃
-- **类型不匹配**(同名不同型)→ `InvalidClassException("incompatible types for field")`(`:2186-2189`;注意只有原始类型才查类型码,对象字段允许不同具体类)
-
-所以协议层面**加字段、删字段都是兼容的**——一个是补默认值,一个是丢弃多余数据。真正不兼容的只有三类: 字段改名、字段改类型、UID 不匹配。生产上"只加不删"的建议是**业务语义**考量: 删字段后,老代码读新数据时该字段取默认值(null),如果老代码假定它非空,照样 NPE——协议兼容,业务不兼容。
-
-### 2.2 readObjectNoData:类层次数据缺失的回调
-
-还有一种缺口: **类层次结构变了**——流里没有把某个父类列为序列化超类(典型: 老版本里父类不是 Serializable,新版本变成了;或父类从序列化层次里删掉)。`Serializable` 的 Javadoc 原话: "in the event that the serialization stream does not list the given class as a superclass of the object being deserialized"(`Serializable.java:101-104`)。`readObjectNoData`(`ObjectStreamClass.java:387-388` 探测,private 方法,签名 `readObjectNoData()`)在此时被回调——类自己决定怎么补(设默认值、抛异常)。
-
-### 2.3 生产兼容策略
-
-- **只加字段**: 新字段给业务默认值,老数据能读
-- **显式 UID 恒定**: 结构随便改,UID 不动
-- **必要时 readObject 迁移**: 老字段删了/改了,在 readObject 里做数据迁移(§3 的钩子)
-
-关键设计(斜体):*"字段名匹配 + 缺失补默认"是演进的基础——但"默认值"往往是 null/0,业务上可能无效,所以迁移逻辑要自己在 readObject 里补。面试"新增字段老数据能读吗": 能,新字段取默认值;"删除字段呢": 协议上也兼容(多余数据被忽略),但老代码读新数据时被删字段取 null,业务上可能 NPE——所以生产建议只加不删。真正的雷区: 字段改名、改类型、UID 不匹配。*
-
-## 3. "writeObject/readObject 私有方法" — 自定义钩子
-
-### 3.1 框架怎么"找到"私有方法:反射探测
-
-自定义序列化不靠接口,靠**协议约定的私有方法签名**。`ObjectStreamClass` 在初始化时用 `getPrivateMethod`(`ObjectStreamClass.java:1447-1463`)探测:
-
-```java
-// ObjectStreamClass.java:1447-1463(截取核心,逐字)
-    private static Method getPrivateMethod(Class<?> cl, String name,
-                                           Class<?>[] argTypes,
-                                           Class<?> returnType)
-    {
-        try {
-            Method meth = cl.getDeclaredMethod(name, argTypes);
-            meth.setAccessible(true);
-            int mods = meth.getModifiers();
-            return ((meth.getReturnType() == returnType) &&
-                    ((mods & Modifier.STATIC) == 0) &&
-                    ((mods & Modifier.PRIVATE) != 0)) ? meth : null;
-        } catch (NoSuchMethodException ex) {
-            return null;
-        }
-    }
-```
-
-三个硬条件: **非 static + private + 返回类型匹配**(writeObject 返回 void、readObject 返回 void)。探测到的结果缓存在 ObjectStreamClass 字段(`ObjectStreamClass.java:381-386`):
-
-```java
-// ObjectStreamClass.java:380-386(截取核心,逐字)
-                        cons = getSerializableConstructor(cl);
-                        writeObjectMethod = getPrivateMethod(cl, "writeObject",
-                            new Class<?>[] { ObjectOutputStream.class },
-                            Void.TYPE);
-                        readObjectMethod = getPrivateMethod(cl, "readObject",
-                            new Class<?>[] { ObjectInputStream.class },
-                            Void.TYPE);
-```
-
-### 3.2 调用时机:数据布局的两段式
-
-探测到 writeObject → 类描述符打上 **SC_WRITE_METHOD** 标志(域 18 第 1 篇 §1.3)→ 写入时框架只做一件事(`ObjectOutputStream.java:1485-1489`): **进入块数据模式,invoke 你的 writeObject,块尾写 TC_ENDBLOCKDATA**——方法内部先调 defaultWriteObject(写默认字段)再写自定义数据,是惯例而非框架强制(§3.3):
-
-```java
-// ObjectOutputStream.java:1485-1489(截取核心,逐字)
-curContext = new SerialCallbackContext(obj, slotDesc);
-bout.setBlockDataMode(true);
-slotDesc.invokeWriteObject(obj, this);
-bout.setBlockDataMode(false);
-bout.writeByte(TC_ENDBLOCKDATA);
-```
-
-自定义数据以 `TC_ENDBLOCKDATA` 结束(`ObjectStreamConstants.java:98`)。读侧对称: `readObject` 里先 `defaultReadObject()`(恢复默认字段)再读自定义数据。
-
-### 3.3 面试点:defaultWriteObject 调不调?
-
-- **调**:保留默认字段序列化(默认字段在前),自定义数据附加在后——最常见的"加密/压缩/版本迁移"模式: 敏感字段标 transient,writeObject 里加密写入,readObject 里解密恢复
-- **不调**:默认字段完全不写,所有字段自己 `writeInt/writeObject` 手写——完全自定义格式
-
-判断依据: SC_WRITE_METHOD 标志只表示"有 writeObject 方法",**不代表默认字段会写**——写不写取决于方法里调不调 defaultWriteObject。读侧对称: readObject 里调 defaultReadObject 才读默认字段。
-
-关键设计(斜体):*"默认机制 + 私有钩子"是序列化的扩展点设计——钩子不是接口方法而是**协议约定的私有签名**(反射查找,域 04),好处是: 不污染继承体系、子类可自由选择是否继承行为。面试"怎么加密敏感字段": transient + writeObject 手动加密 + readObject 解密恢复,三件套;再问"writeObject 必须调 defaultWriteObject 吗": 调=保留默认字段,不调=全自定义。*
-
-跨层标注: [域 04: 01-class-member-access——getDeclaredMethod/setAccessible 的反射机制,getPrivateMethod 是"按协议反射私有方法"的标准用例;域 32 Unsafe——反序列化对象创建(newConstructorForSerialization)与钩子的先后顺序]
-
-## 4. "writeReplace/readResolve 与 Externalizable" — 对象替换与完全自控
-
-### 4.1 替换钩子:序列化形态 ≠ 内存形态
-
-`writeReplace`/`readResolve`(`Serializable.java:117-135` 的签名约定,`ObjectStreamClass.java:392-395` 探测)是"对象级"钩子:
-
-- **`writeReplace`**(写前):返回一个**替换对象**去序列化——内存里的对象 A 变成流里的对象 B
-- **`readResolve`**(读后):返回一个**替换对象**给调用方——流里的对象 B 变成内存里的对象 C
-
-探测用的是 `getInheritableMethod`(`ObjectStreamClass.java:1411-1441`)——**沿继承链向上找**,且访问权限规则复杂(PUBLIC/PROTECTED 直接用、PRIVATE 只认本类、包私有要求同包)。
-
-最经典用途:**单例序列化安全**。单例类序列化再反序列化,默认会造一个新实例——违反单例。解法:
-
-```java
-// 用法示意(API 形式,非源码片段)
-private Object readResolve() throws ObjectStreamException {
-    return INSTANCE;   // 无论流里是什么,返回唯一的单例
-}
-```
-
-`readOrdinaryObject` 的调用时机(`ObjectInputStream.java:2233-2251`): 字段恢复完成后,若有 readResolve 方法则调用,返回值替换原对象(且会更新句柄表,后续引用保持一致)。
-
-### 4.2 Externalizable:完全自控协议
-
-`Externalizable`(`Externalizable.java:66`)extends Serializable,但语义完全不同(`Externalizable.java:82` 的 writeExternal/`:96` 的 readExternal): **没有默认字段机制**——所有字段都由你自己 `writeInt/writeObject` 手写,读方 `readExternal` 按相同顺序读回。写入侧判定在 `writeOrdinaryObject` 的 `desc.isExternalizable()` 分支(域 18 第 1 篇 §2.2,`ObjectOutputStream.java:1420-1421`),构造器则取 `getExternalizableConstructor`(`ObjectStreamClass.java:378`)。
-
-对比:
-
-| | Serializable 默认 | 私有 writeObject | Externalizable |
-|--|------|------|------|
-| 字段写入 | 自动(非 transient) | defaultWriteObject + 自定义 | 完全手写 |
-| 接口 | 无(标记) | 无(私有约定) | writeExternal/readExternal |
-| 灵活性 | 最低 | 中(两段式) | 最高(全自控) |
-| 类要求 | 无参构造 | 无参构造 | **public 无参构造** |
-
-### 4.3 生产组合:DTO 脱敏与迁移
-
-- **DTO 脱敏**: 内存 DTO 里放明文,writeReplace 换成脱敏 DTO 序列化,readResolve 再换回
-- **旧格式迁移**: 老版本类读老数据 → readObject 迁移到新字段 → 新版本写新格式
-- **枚举**: 枚举有 TC_ENUM 专用协议(域 18 第 1 篇),自带"按名字匹配"语义,天然防"反射造新实例"
-
-关键设计(斜体):*"替换钩子"是序列化的 AOP——writeReplace 在写前、readResolve 在读后,实现"序列化形态 ≠ 内存形态"(脱敏、单例、迁移);Externalizable 是"自己写协议"(紧凑/性能/完全控制)。面试"单例序列化安全": readResolve 返回单例必答,再加"枚举天然安全(TC_ENUM 按名匹配)"就是高分。*
-
-## 核心悬念
-
-协议、版本、钩子都讲完了——但序列化是 Java 最大的**攻击面**: 反序列化 RCE 漏洞怎么来的?一条精心构造的字节流怎么在你的 JVM 里执行任意代码(gadget 链)?`ObjectInputFilter` 怎么防?为什么白名单才是王道?——下一篇: 反序列化安全。
-
-> → [18-serialization/03 — 反序列化安全](03-security-filter.md)
+如果说上一篇解决的是“默认协议到底在写什么”，这一篇真正补上的就是：**类一旦演进，协议兼容到底由哪些显式闸门和钩子来控制。** 下一篇就该切到这套机制最危险的一面：既然反序列化能自动造壳、自动填字段、自动跑钩子，它为什么会成为 Java 生态最大的攻击面之一？ObjectInputFilter 又是怎样把这条默认便利路径重新拉回可控边界的。

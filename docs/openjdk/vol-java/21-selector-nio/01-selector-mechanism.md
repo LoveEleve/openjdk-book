@@ -1,12 +1,16 @@
 # 01. Selector 抽象与选择机制 — 三件套、注册、select 流程
 
-> **前置依赖**: [19-buffer-channel/01 — Buffer 状态机](../19-buffer-channel/01-buffer-state-machine.md)(就绪后读写的 Buffer 载体)
-> → **后续**: [21-selector-nio/02 — epoll 实现与平台分层](02-epoll-platform.md)
-> 关联: 域 19 BufferChannel(数据载体);内部卷 01-os(文件描述符与平台层)
+> 本文基于 JDK 11 `Selector`、`SelectionKey`、`SelectableChannel`、`SelectorImpl` 与 Linux `EPollSelectorImpl` 的唤醒骨架。本文聚焦注册/选择/消费三段式、interestOps/readyOps、selectedKeys、`wakeup()` 机制；epoll 细节平台层放下一篇。本文讨论的是 JDK 11 Selector 抽象机制，不把这里的 key 集合语义、自管道唤醒方式和 Linux 示例实现外推成所有平台、所有 NIO 框架都必须遵守的统一规范。
+> **前置依赖**：[19-buffer-channel/01 — Buffer 状态机](../19-buffer-channel/01-buffer-state-machine.md)(就绪后读写的 Buffer 载体)
+> **后续**：[21-selector-nio/02 — epoll 实现与平台分层](02-epoll-platform.md)
 
-## 一个线程怎么管上万连接
+## 为什么一个线程能管上万连接,关键不是它更忙,而是它不再替每个连接单独睡着等
 
-BIO 一连接一线程: 一万个连接就是一万个线程。NIO 的答案是把"等事件"从每个连接里抽出来集中到一处——`Selector`。一个线程把上万个通道注册进去,内核帮忙盯着,谁就绪通知谁。这一篇讲 Selector 的三件套角色、select 的骨架流程、selectedKeys 的消费循环,以及 wakeup 的唤醒机制。
+BIO 的直觉很简单: 一个连接配一个线程,线程阻塞在 read 上等数据。连接数一多,问题也跟着一比一膨胀——一万个连接就是一万个线程,大部分线程都在各自的阻塞点上睡着。NIO 真正改变的不是“一个线程突然变强了”,而是**把等待某个连接变得可读/可写这件事,从每个连接自己的阻塞 read 上剥离出来,集中外包给 Selector 统一处理**。
+
+这意味着应用线程不再负责“替每个连接等事件”,而是只负责两件事: 先声明自己对哪些事件感兴趣,再在 Selector 告诉它“这些连接已经就绪”之后去消费结果。真正盯着 fd 是否可读/可写、真正把海量等待合成一次阻塞的,是内核和 Selector 背后的平台实现。
+
+所以这一篇的主线不是 API 列表,而是沿着这个总问题展开: 为什么三件套(Selector/SelectionKey/SelectableChannel)要分工,为什么 `interestOps` 和 `readyOps` 不能混成一份状态,以及为什么 `wakeup()` 最终必须被翻译成一个内核可见的事件,才能把阻塞中的 `select` 叫醒。
 
 ## 1. "Selector 三件套" — 角色分工
 
@@ -146,8 +150,51 @@ fd0 可读 → epoll_wait 因这个事件返回 → `doSelect` 的 `processEvent
 
 跨层标注: [域 19 BufferChannel——就绪后读写的 Buffer 是数据载体;内部卷 01-os——fd 就绪语义是 select/poll/epoll 的统一抽象]
 
-## 核心悬念
+## 七、五个最容易混掉的边界：Selector 不是线程轮询器，interest 不等于 ready，selectedKeys 不是历史缓存，wakeup 不是 Java 标记，selectNow 也不是 wakeup
 
-骨架通了——**linux 上内核等待怎么实现**?`EPollSelectorImpl` 的 epfd、`EPoll.create/ctl/wait` 三个 native 调用、事件表在内核的 O(1) 就绪查询、与 select/poll 的差别——下一篇: epoll 实现与平台分层。
+在收网之前，先把这一篇最容易记错的五条边界压实。
 
-> → [21-selector-nio/02 — epoll 实现与平台分层](02-epoll-platform.md)
+第一，Selector 不是“一个线程自己轮询所有连接”。真正盯着 fd 是否可读/可写的不是应用线程，而是内核等待机制。应用线程只是把兴趣登记出去，再在就绪结果回来后消费 selectedKeys。
+
+第二，`interestOps` 也不等于 `readyOps`。前者表达的是“我长期关心什么”，后者表达的是“这一次真正发生了什么”。把这两套位图混成一份状态，就会把配置和结果搅在一起，后面事件循环一定会乱。
+
+第三，`selectedKeys` 也不是框架自动清理的历史缓存。它是这一轮已经就绪、等你消费的工作清单；不 remove，就等于告诉事件循环“这批活我还没处理完”，同一个 key 很容易被反复看见。
+
+第四，`wakeup()` 更不是改一个 Java 布尔位就能把阻塞中的 `select` 叫醒。阻塞发生在内核等待里，所以唤醒也必须制造一个内核可见事件；自管道的本质，就是把“我要你醒”翻译成“某个 fd 现在可读了”。
+
+第五，`selectNow()` 也不是 `wakeup()` 的另一种写法。`selectNow()` 是调用方主动选择“不等，立即看看现在有没有就绪事件”；`wakeup()` 则是别的线程在你已经阻塞等待时，强行把这次等待打断。一个是等待策略，一个是外部控制信号。
+
+把这五条边界记稳，Selector 这一篇就不会重新塌回“一个线程管很多连接”的口号印象。它真正讲的是：等待怎样从每个连接自己的阻塞点上被剥离出来，再通过兴趣登记、内核等待、就绪翻译和事件清单消费重新组织起来。
+
+## 收网：Selector 真正做的不是“替线程多干活”，而是把等待这件事集中外包给内核与选择器骨架
+
+回到开头那个问题，现在已经能看清为什么一个线程能管理很多连接，并不是因为它忽然获得了更多算力，而是因为它不再替每个连接单独睡下去。Selector 机制真正做的，是把“等连接什么时候可读/可写”这件事，从每个通道自己的阻塞调用里剥离出来，集中交给三件套与平台 `doSelect` 去完成。
+
+这也把整篇的主线收回来了：
+
+- `SelectableChannel` 负责声明兴趣；
+- `Selector` 负责统一等待；
+- `SelectionKey` 负责承载兴趣位与就绪位这份配对关系；
+- `selectedKeys` 则把本轮结果交回应用线程消费；
+- `wakeup()` 再把外部控制动作翻译成一个内核可见事件，保证阻塞等待能被安全打断。
+
+把整篇压成一张总图，就是：
+
+```text
+通道
+  → 声明 interestOps
+
+Selector
+  → 平台 doSelect 统一等待
+  → 把内核就绪翻译成 readyOps
+
+应用线程
+  → 遍历 selectedKeys
+  → 处理后主动 remove
+
+外部控制
+  → wakeup 制造自管道可读事件
+  → 打断阻塞中的 select
+```
+
+如果说这一篇解决的是“为什么等待能从每个连接自己的阻塞点上被集中剥离出来”，下一篇就会继续往 Linux 平台层走：`EPollSelectorImpl` 到底怎样把这套抽象焊到 epoll 的 create/ctl/wait 三调用上。

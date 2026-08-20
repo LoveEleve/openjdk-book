@@ -1,405 +1,561 @@
-# 07. javaClasses — 核心类的 JVM 内建镜像
+# 07. javaClasses：核心 Java 对象为什么要和 JVM 签一份“偏移契约”
 
-> **前置依赖**:[07-classfile-classloader/01 — ClassFile 解析](openjdk/vol-02/07-classfile-classloader/01-classfile-parser.md):injected fields 在 parse_fields 里注入,这一篇讲它们被谁定义、偏移怎么算;[07-classfile-classloader/03 — Symbol/StringTable](openjdk/vol-02/07-classfile-classloader/03-symbol-string-table.md):`create_from_unicode` 构造 String 的编码,这一篇读它;[07-classfile-classloader/04 — SystemDictionary](openjdk/vol-02/07-classfile-classloader/04-system-dictionary.md):well-known 类的加载与 `String_klass()` 从哪来;[07-classfile-classloader/06 — JPMS Modules](openjdk/vol-02/07-classfile-classloader/06-jpms-modules.md):ModuleEntry 的 `_module` 弱句柄就是"镜像"的第一个例子;[06-oops/02 — Klass 层次](openjdk/vol-02/06-oops/02-klass-hierarchy.md):Klass 的 `_java_mirror` 是镜像的另一端
-> → **后续**:[09-memory-core/01 — Universe + CollectedHeap](openjdk/vol-02/09-memory-core/01-universe-heap.md)(镜像对象分配在哪、堆怎么诞生)
-> 关联域: 06-oops(对象模型)、07-classfile-classloader(类加载)、09-memory-core(堆与镜像分配)、16-code-cache(JIT 生成代码直接嵌偏移)
+> 基于 `OpenJDK 11u / HotSpot / Linux / x86_64` 讨论。本文聚焦 `javaClasses` 这套 VM-side 核心镜像访问器，说明它怎样把少数 Java 对象升级成 JVM 可直接读写的协议对象。
+> **前置依赖**：[01 — ClassFile 解析](01-classfile-parser.md)：injected fields 与类布局在 parser 阶段如何进入元数据；[03 — Symbol 与 StringTable](03-symbol-string-table.md)：`String` 的 compact storage 与 `create_from_unicode` 背景；[04 — SystemDictionary](04-system-dictionary.md)：well-known 类如何被缓存；[06 — JPMS Modules](06-jpms-modules.md)：`ModuleEntry` 持有 `java.lang.Module` 镜像是第一条 mirror 边；[06-oops/02 — Klass 层次](../06-oops/02-klass-hierarchy.md)：`Klass::_java_mirror` 是镜像的反向入口
+> → **后续**：[09-memory-core/01 — Universe + CollectedHeap](../09-memory-core/01-universe-heap.md)
+> 关联域：06-oops、07-classfile-classloader、09-memory-core、16-code-cache
 
-## 一个 Java 对象,两个世界的握手
+## 为什么 JVM 不直接反射读取 `String.value`
 
-`Thread.currentThread()` 返回的 `Thread` 对象,jstack 能从它打出线程名、`#1` 这种线程 ID、`daemon`、`prio=5`、`java.lang.Thread.State: RUNNABLE`——这些信息不是反射读出来的,jstack 直接**按字段偏移**从对象里取: 名字是 obj_field、线程 ID 是 long_field、状态是 int_field。String 也一样: JIT 编译 `"hello".length()` 时,不需要任何反射——方法内联后就是读 `value` 数组长度、读 `coder` 字段,偏移直接编进机器码。支撑这一切的是一个叫 `javaClasses` 的 C++ 模块——每个核心 Java 类一个 `java_lang_XXX` 镜像类。这是 07 域的收官篇,类加载链路的最后一环: 类加载完了,核心类的**实例**怎么被 JVM 高频操作。
+如果只从 Java 语言的角度看，一个对象的字段访问有很多现成办法：
 
-## 1. 镜像模式: 预计算的字段偏移
+- 直接调用 Java 方法
+- 通过反射拿 `Field`
+- 通过类元数据按名字查字段
 
-### 每个核心类一个 C++ 镜像
+所以很自然会问：为什么 HotSpot 还要单独维护一套 `javaClasses` 模块，为 `String`、`Thread`、`Class` 这类核心对象缓存偏移，并提供 `java_lang_String::value(...)`、`java_lang_Thread::thread(...)` 这样的 native 访问器？
 
-核心 Java 类的布局信息全部收敛在 `share/classfile/javaClasses.hpp/cpp`(cpp 4586 行,本域最大文件之一)。每个类一个 `AllStatic` 的 C++ 类,名字与 Java 类一一对应——`java_lang_String` 镜像 `java.lang.String`、`java_lang_Class` 镜像 `java.lang.Class`、`java_lang_Thread` 镜像 `java.lang.Thread`(javaClasses.hpp:50-85 的 `BASIC_JAVA_CLASSES_DO` 宏列了全部 31 个镜像: PART1 的 Class/String + PART2 的 29 个)。镜像类里没有对象,只有**静态 int 偏移**和操作这些偏移的静态方法(javaClasses.hpp:93-99,截取核心,逐字):
+答案在于它们的使用频率和使用场景都已经高到不允许“每次访问时再想一遍字段在哪”。
 
-```cpp
-// javaClasses.hpp:93-99(截取核心,逐字)
-class java_lang_String : AllStatic {
- private:
-  static int value_offset;
-  static int hash_offset;
-  static int coder_offset;
+比如：
 
-  static bool initialized;
+- C2 优化 `"hello".length()` 时，不可能每次再去做反射或名字查找
+- String dedup 在 GC 路径上，需要快速拿到 `value` 数组、`coder` 和缓存 `hash`
+- `Thread.currentThread()` 和 `Thread.isAlive()` 的 VM 路径，必须直接把 Java `Thread` 对象与 `JavaThread*` 互相定位
+- `jstack` 打印线程信息时，需要在 safepoint/诊断路径上直接读 `name`、`tid`、`threadStatus`
+- `java.lang.Class` 自己还扮演着 mirror，对 JVM 来说它既是普通 Java 对象，又是类元数据的宿主
+
+这些路径有一个共同要求：
+
+```text
+启动时验证一次对象布局
+  → 之后高频路径直接按偏移访问
+  → 不再走 Java 反射或运行时字段查找
 ```
 
-`value_offset`/`hash_offset`/`coder_offset` 就是 `java.lang.String` 三个字段在堆对象里的字节偏移。任何 VM 代码想读 String 的 value 数组:`obj->obj_field(value_offset)`;想判断编码:`byte_field(coder_offset)`。VM 不调 Java 层的 `String.length()`,自己直接读。
+本文真正的问题是：
 
-### 偏移怎么算: 启动时 find_local_field 一次
+**为什么 HotSpot 不把这些高频对象继续当普通 Java 对象看待，而要给它们单独建立一套“启动期偏移契约 + native 镜像访问器”？这套契约为什么要先算 `String`/`Class`，后算其他类？`String`、`Thread`、`Class` 三类对象又各自暴露了哪种不同层次的镜像关系？**
 
-偏移不是硬编码的——JVM 不知道也不信任 javac 编出来的布局,它启动时用 `fieldDescriptor` 在类里**按名字和签名查找**(javaClasses.cpp:121-143,截取核心,逐字):
+先把全篇主线画出来：
 
-```cpp
-// javaClasses.cpp:121-144(截取核心,逐字)
-static void compute_offset(int &dest_offset,
-                           InstanceKlass* ik, Symbol* name_symbol, Symbol* signature_symbol,
-                           bool is_static = false) {
-  fieldDescriptor fd;
-  if (ik == NULL) {
-    ResourceMark rm;
-    log_error(class)("Mismatch JDK version for field: %s type: %s", name_symbol->as_C_string(), signature_symbol->as_C_string());
-    vm_exit_during_initialization("Invalid layout of well-known class");
-  }
-
-  if (!ik->find_local_field(name_symbol, signature_symbol, &fd) || fd.is_static() != is_static) {
-    ResourceMark rm;
-    log_error(class)("Invalid layout of %s field: %s type: %s", ik->external_name(),
-                     name_symbol->as_C_string(), signature_symbol->as_C_string());
-#ifndef PRODUCT
-    // Prints all fields and offsets
-    Log(class) lt;
-    LogStream ls(lt.error());
-    ik->print_on(&ls);
-#endif //PRODUCT
-    vm_exit_during_initialization("Invalid layout of well-known class: use -Xlog:class+load=info to see the origin of the problem class");
-  }
-  dest_offset = fd.offset();
-}
+```text
+核心 Java 对象（String / Thread / Class / ...）
+  │
+  ├─ Java class layout
+  │
+  ├─ 启动期 offset contract
+  │    ├─ PART1: String / Class 先算
+  │    ├─ PART2: 其余 well-known classes 后算
+  │    ├─ ordinary field -> find_local_field
+  │    └─ injected field -> InjectedField + AllFieldStream
+  │
+  ├─ `java_lang_Xxx` mirror helper
+  │    ├─ static int offset caches
+  │    ├─ inline obj/int/address/metadata field accessors
+  │    └─ mismatch -> startup fail fast
+  │
+  └─ Consumers
+       ├─ C2 / GraphKit
+       ├─ GC / StringDedup
+       ├─ Thread runtime / jstack
+       └─ Class mirror / static fields / Klass linkage
 ```
 
-字段名和签名来自 `vmSymbols` 表(String 的三个字段,javaClasses.cpp:195-198,截取核心,逐字):
+一句话先记住：
 
-```cpp
-// javaClasses.cpp:195-198(截取核心,逐字)
-#define STRING_FIELDS_DO(macro) \
-  macro(value_offset, k, vmSymbols::value_name(), byte_array_signature, false); \
-  macro(hash_offset,  k, "hash",                  int_signature,        false); \
-  macro(coder_offset, k, "coder",                 byte_signature,       false)
+**`javaClasses` 不是 JVM 版反射，而是 HotSpot 与少数核心 Java 对象之间的启动期偏移契约：启动时按真实类布局算偏移，运行时所有高频路径都只走 `java_lang_Xxx` 这套 native 访问器。**
+
+---
+
+## 一、三个看似更简单的方案，为什么都不够
+
+### 1.1 每次需要时再按名字查字段
+
+最自然的做法是：
+
+```text
+想读 String.value
+  → 通过 Klass / 字段表查 value
+  → 取 offset
+  → 再读对象
 ```
 
-然后 `compute_offsets` 把三个宏展开成三次 `compute_offset`(javaClasses.cpp:200-209): 拿 `SystemDictionary::String_klass()`(07-04 的 well-known 类缓存),逐个字段找偏移。**找不到就 `vm_exit_during_initialization`**——错误消息带着 JDK 版本不匹配的诊断提示。镜像偏移是 JVM 与 JDK 之间的契约: 布局不匹配不再是"运行时行为诡异",而是启动即失败、报错即定位。
+这在功能上当然可行，但对于高频路径来说代价太重：
 
-[C++: `vmSymbols` 是预 intern 的 Symbol 表(每个 Java 类/字段名一个枚举值,07-04 讲过 well-known classes 用它做快速解析)——名字不经过字符串比较,直接按枚举取 Symbol 指针。]
+- JIT 生成机器码时没法把偏移直接嵌成常量
+- GC 路径上每次还要走一遍名字匹配和字段描述查找
+- 线程系统里 `currentThread` / `isAlive` 这种极短路径会被元数据访问放大
 
-### 时机: 两个阶段,一个都不能早
+HotSpot 希望的是：
 
-偏移计算分两阶段,因为镜像类之间有依赖:
-
-- **String 和 Class 最先算**——在 `SystemDictionary::resolve_well_known_classes` 里,Object/String/Class 三个最基础类一加载完就立刻算(systemDictionary.cpp:2012-2015,截取核心,逐字):
-
-```cpp
-// systemDictionary.cpp:2012-2015(截取核心,逐字)
-  // Calculate offsets for String and Class classes since they are loaded and
-  // can be used after this point.
-  java_lang_String::compute_offsets();
-  java_lang_Class::compute_offsets();
+```text
+偏移在启动时算好
+  → 后续所有读写都像访问普通结构体字段一样直接
 ```
 
-String/Class 是"一切的基础"——它们是最早加载的 well-known 类(Object/String/Class 三兄弟),加载完就能用,所以立刻算: 这之后才有异常、类加载、反射等一切依赖 String 表示与 Class 镜像的操作。
+### 1.2 把所有偏移都硬编码进 VM
 
-- **其余 29 个镜像在 `javaClasses_init` 里算**——`JavaClasses::compute_offsets`(javaClasses.cpp:4463-4482)把 PART2 的类(System/Thread/Throwable/ClassLoader/…)全部算完,然后调 `AbstractAssembler::update_delayed_values()`。这最后一行揭示了一个时序问题: 模板解释器的机器码在 `interpreter_init`(init.cpp:117)就生成了,**早于** `javaClasses_init`(:125)算偏移——模板生成时若要用偏移,得先留占位,偏移算好后再 `update_delayed_values` 统一替换(jdk11u 的模板表代码没有实际使用这个延迟常量机制,但补丁通道保留着)。C2 则是另一条路: 编译方法时偏移早已算好,直接编进机器码——**不是每次运行时算,而是代码生成时把启动期算好的 int 直接嵌进去**。
+另一种极端是：既然这些核心类很重要，就把 `String.value`、`Thread.eetop`、`Class.klass` 的偏移全写死在 C++ 源码里。
 
-**关键设计 (斜体)**: *镜像模式的本质是"**启动时算一次,之后零反射**": 布局查找(find_local_field + 签名匹配)只发生在启动早期,运行期访问全是 `obj_field(offset)` 一次内存读。代价是 JVM 与 JDK 的类布局强耦合——所以失败模式设计成"启动即死",而不是运行时慢慢错。*
+这又会立刻产生另一个问题：VM 和 JDK class layout 紧耦合，但 layout 不是永远不变。只要 Java 侧字段次序、插入方式、注入字段或构建条件有变化，硬编码偏移就可能静默错读。
 
-## 2. String: 三个偏移撑起压缩编码
+这种错比“启动时报错”更可怕，因为它会变成运行时任意行为异常。
 
-### value/coder/hash: 一个对象三块信息
+### 1.3 统一走 Java 反射 API
 
-String 的堆布局: `value`(**永远是 byte[]**——Java 9 压缩字符串的存储端;Latin-1 每字符 1 字节,UTF-16 每字符 2 字节即数组长度翻倍,07-01 的解析与 07-03 的创建)、`coder`(1 字节编码标志)、`hash`(缓存的 hashCode)。编码标志两个值(javaClasses.hpp:107-111): `CODER_LATIN1 = 0`、`CODER_UTF16 = 1`——这就是 CompactStrings 的核心: 存 1 字节还是 2 字节,由 coder 决定。`is_latin1` 就是一次 `byte_field(coder_offset)` 比较(javaClasses.inline.hpp:67-73,截取核心,逐字):
+再退一步，既然 Java 本身有 `Field` 和反射，不如都通过 Java API 来访问。
 
-```cpp
-// javaClasses.inline.hpp:67-73(截取核心,逐字)
-bool java_lang_String::is_latin1(oop java_string) {
-  assert(initialized && (coder_offset > 0), "Must be initialized");
-  assert(is_instance(java_string), "must be java_string");
-  jbyte coder = java_string->byte_field(coder_offset);
-  assert(CompactStrings || coder == CODER_UTF16, "Must be UTF16 without CompactStrings");
-  return coder == CODER_LATIN1;
-}
+这对 `String`、`Thread`、`Class` 这样的对象尤其不合适：
+
+- 解释器、JIT、GC 和线程系统都在 C++ 世界
+- 很多路径发生在 JVM 启动早期或 safepoint/GC 期间
+- 反射自身还依赖 `Class` / `String` 等核心对象工作正常
+
+换句话说，**这些对象既是 Java 世界的普通对象，又是 VM 自己运行机制的一部分。** 这就要求 JVM 有一套不依赖 Java 反射的直接协议。
+
+所以 HotSpot 选的是中间路线：
+
+```text
+不在运行时每次动态查字段
+也不盲目永久硬编码所有偏移
+而是在启动时用真实类布局算偏移，算错即启动失败
 ```
 
-`length` 也靠它: 先读 `value` 数组长度,再按 coder 决定要不要除 2(javaClasses.inline.hpp:74-87)——UTF-16 时数组长度是字符数的两倍(`arr_length >>= 1`)。
+这就是 offset contract 的本质。
 
-### JIT 眼里没有 String.length(): 一次移位
+---
 
-C2 的字符串优化路径(拼接、长度计算)不调 `String.length()`——graphKit.cpp:3887-3893 的 `load_String_length` 直接按镜像偏移读:
+## 二、javaClasses 模式：不是 Java 反射，而是启动期偏移契约
 
-```cpp
-// graphKit.cpp:3887-3893(截取核心,逐字)
-Node* GraphKit::load_String_length(Node* ctrl, Node* str) {
-  Node* len = load_array_length(load_String_value(ctrl, str));
-  Node* coder = load_String_coder(ctrl, str);
-  // Divide length by 2 if coder is UTF16
-  return _gvn.transform(new RShiftINode(len, coder));
-}
-```
+### 2.1 每个核心类一个 `AllStatic` helper，不保存对象，只保存协议
 
-`load_String_value` 里,`java_lang_String::value_offset_in_bytes()` 直接作为偏移参与地址计算(:3895)——机器码层面就是带立即数偏移的访存(`mov rax, [rdx + offset]`)。`value` 数组长度读出来,右移 coder 位: Latin-1 移 0 位原样返回,UTF-16 移 1 位正好除 2。有意思的是 Java 层的 `String.length()` 也是同一套逻辑(String.java:658 `value.length >> coder()`)——**一次移位替代了整个 Java 方法调用**,这正是 §1 镜像模式给 JIT 的礼物。
+`javaClasses.hpp:50-87` 定义了 well-known Java classes 的列表，分成两批：
 
-### 字符串去重: 全程只用镜像访问器
+- `BASIC_JAVA_CLASSES_DO_PART1`：`java_lang_Class`、`java_lang_String`
+- `BASIC_JAVA_CLASSES_DO_PART2`：其余 29 个左右的核心镜像类
 
-G1 的字符串去重(StringDeduplication)在 GC 并发阶段扫描 String,用镜像访问器拿 value 数组、算 hash、替换数组——一个 Java 方法都不调(stringDedupTable.cpp:345-393,截取核心,逐字):
+这些 helper 都是 `AllStatic` 风格，不保存实例对象，而是保存：
 
-```cpp
-// stringDedupTable.cpp:345-393(截取核心,逐字)
-void StringDedupTable::deduplicate(oop java_string, StringDedupStat* stat) {
-  assert(java_lang_String::is_instance(java_string), "Must be a string");
-  NoSafepointVerifier nsv;
+- 若干个 `static int offset`
+- 一组静态访问器
+- 一些初始化状态位
 
-  stat->inc_inspected();
-
-  typeArrayOop value = java_lang_String::value(java_string);
-  if (value == NULL) {
-    // String has no value
-    stat->inc_skipped();
-    return;
-  }
-
-  bool latin1 = java_lang_String::is_latin1(java_string);
-  unsigned int hash = 0;
-
-  if (use_java_hash()) {
-    // Get hash code from cache
-    hash = java_lang_String::hash(java_string);
-  }
-
-  if (hash == 0) {
-    // Compute hash
-    hash = hash_code(value, latin1);
-    stat->inc_hashed();
-
-    if (use_java_hash() && hash != 0) {
-      // Store hash code in cache
-      java_lang_String::set_hash(java_string, hash);
-    }
-  }
-
-  typeArrayOop existing_value = lookup_or_add(value, latin1, hash);
-  if (existing_value == value) {
-    // Same value, already known
-    stat->inc_known();
-    return;
-  }
-
-  // Get size of value array
-  uintx size_in_bytes = value->size() * HeapWordSize;
-  stat->inc_new(size_in_bytes);
-
-  if (existing_value != NULL) {
-    // Existing value found, deduplicate string
-    java_lang_String::set_value(java_string, existing_value);
-    stat->deduped(value, size_in_bytes);
-  }
-}
-```
-
-细节都在镜像访问器上: `value()`(javaClasses.inline.hpp:52-56)读数组、`is_latin1()` 定编码、`hash()` 用**缓存的 hash 字段**(:62-66——`private int hash` 本是 Java 层 `String.hashCode()` 的缓存(String.java:156),VM 去重时先查缓存、算完写回,一个字段两个世界共用)、找到相同数组后 `set_value()` 把原数组替换掉(去重数组本身,多个 String 共享同一个 value 数组)。
-
-[C++: `lookup_or_add` 把 value 数组本身(而非 String)作为去重 key——两个内容相同的 "hello" 的 value 数组内容相同,hash 相同,后到的被替换成先到的数组。]
-
-**关键设计 (斜体)**: *String 是 JVM 里被读写频率最高的对象,所以它的镜像访问器全部 inline、偏移启动时算好、编码判断一次 byte 读——从解释器到 GC 到 JIT,所有路径走同一套访问器。存储端(Latin-1 压成 1 字节)与读取端(一个 coder 位)是同一枚硬币的两面: 07-03 讲创建时怎么选编码,这一篇讲读取时怎么知道编码。*
-
-## 3. Thread: eetop 存的是 JavaThread*,不是 OS 线程 ID
-
-### 11 个偏移里,最特别的一个叫 eetop
-
-`java_lang_Thread` 的镜像有 11 个偏移(javaClasses.cpp:1614-1626,截取核心,逐字):
+例如 `java_lang_String` 只声明了：
 
 ```cpp
-// javaClasses.cpp:1614-1626(截取核心,逐字)
-#define THREAD_FIELDS_DO(macro) \
-  macro(_name_offset,          k, vmSymbols::name_name(), string_signature, false); \
-  macro(_group_offset,         k, vmSymbols::group_name(), threadgroup_signature, false); \
-  macro(_contextClassLoader_offset, k, vmSymbols::contextClassLoader_name(), classloader_signature, false); \
-  macro(_inheritedAccessControlContext_offset, k, vmSymbols::inheritedAccessControlContext_name(), accesscontrolcontext_signature, false); \
-  macro(_priority_offset,      k, vmSymbols::priority_name(), int_signature, false); \
-  macro(_daemon_offset,        k, vmSymbols::daemon_name(), bool_signature, false); \
-  macro(_eetop_offset,         k, "eetop", long_signature, false); \
-  macro(_stillborn_offset,     k, "stillborn", bool_signature, false); \
-  macro(_stackSize_offset,     k, "stackSize", long_signature, false); \
-  macro(_tid_offset,           k, "tid", long_signature, false); \
-  macro(_thread_status_offset, k, "threadStatus", int_signature, false); \
-  macro(_park_blocker_offset,  k, "parkBlocker", object_signature, false)
+static int value_offset;
+static int hash_offset;
+static int coder_offset;
+static bool initialized;
 ```
 
-注意 javaClasses.hpp:349-350 的注释: Thread 的布局在 JDK 1.2 和 1.3 之间改过,所以镜像**必须**运行时计算偏移而不能硬编码。其中 `eetop` 声明在 Java 源码里但只给 JVM 用(Thread.java:158,上方注释 "Fields reserved for exclusive use by the JVM")——它存的不是流传说法里的"pthread_t(OS 线程 ID)",而是 **JavaThread\* 指针**(javaClasses.cpp:1641-1648,截取核心,逐字):
+这就说明 `javaClasses` 的目标从来不是“建一份 Java 对象副本”，而是建立一份 VM 可直接消费的访问协议。
+
+### 2.2 `compute_offset` 是启动时一次性验证真实布局
+
+普通字段偏移不是盲写常量，而是在启动期用已加载类的元数据查出来。`compute_offset` 在 `javaClasses.cpp:118-143` 中：
+
+- 要求拿到 `InstanceKlass*`
+- 用 `find_local_field(name, signature, &fd)` 找本地字段
+- 校验 static/non-static 是否符合预期
+- 成功则取 `fd.offset()`
+- 失败直接 `vm_exit_during_initialization`
+
+所以这里的合同不是：
+
+```text
+“我猜 String 的 coder 在 offset N”
+```
+
+而是：
+
+```text
+“启动时我用真实类布局核一次；核不通，整个 VM 拒绝继续跑”
+```
+
+这就是为什么这套设计更像“启动期偏移契约”，而不是“反射查字段”。
+
+### 2.3 ordinary fields 与 injected fields 有两条不同路径
+
+不是所有字段都能靠 `find_local_field` 找到。`java.lang.Class` 等核心类有 injected fields，它们在 parser 阶段被 JVM 注入，不是普通 Java 源码字段。
+
+因此 `javaClasses` 有两套 offset 发现路径：
+
+```text
+ordinary field
+  → compute_offset
+  → find_local_field(name, signature)
+
+injected field
+  → InjectedField::compute_offset
+  → AllFieldStream + internal-field filtering
+```
+
+这再次说明 `javaClasses` 不是一层统一“字段查找工具”，而是一套专门处理 well-known class layout 契约的工具箱。
+
+### 2.4 有些偏移运行时算，有些偏移仍然硬编码验证
+
+头文件注释已经点得很清楚：most offsets are hardwired for performance，而部分偏移会在启动时计算。
+
+所以不能把这套系统写成任何一边的绝对命题：
+
+- 不是“所有偏移都动态发现”
+- 也不是“所有偏移都硬编码在 VM 里”
+
+更准确是：**HotSpot 对少数布局敏感的核心字段建立了经启动验证的偏移缓存，并保留少量硬编码/验证路径以满足 bootstrap 和性能需求。**
+
+### 2.5 failure mode 设计成“启动即死”，而不是运行时慢慢错
+
+`compute_offset` / `InjectedField::compute_offset` 找不到字段或静态性不匹配时，直接 `vm_exit_during_initialization`。
+
+这不是粗暴，而是有意设计的失败模式。对于这类核心契约，HotSpot 宁愿在启动期明确失败，也不接受“运行了半小时之后某个 GC/线程/JIT 路径突然按错偏移”的隐蔽错误。
+
+---
+
+## 三、为什么 `String` 和 `Class` 要先算，其他镜像后算
+
+### 3.1 PART1 与 PART2 不是为了排版，而是时序依赖
+
+`SystemDictionary::resolve_well_known_classes()` 在 `systemDictionary.cpp:2012-2015` 中明确：
 
 ```cpp
-// javaClasses.cpp:1641-1648(截取核心,逐字)
-JavaThread* java_lang_Thread::thread(oop java_thread) {
-  return (JavaThread*)java_thread->address_field(_eetop_offset);
-}
-
-
-void java_lang_Thread::set_thread(oop java_thread, JavaThread* thread) {
-  java_thread->address_field_put(_eetop_offset, (address)thread);
-}
+java_lang_String::compute_offsets();
+java_lang_Class::compute_offsets();
 ```
 
-`eetop` 的名字没有官方解释,内容却是清楚的: Java Thread 对象 ↔ 原生线程的双向指针——每个 `JavaThread` 有 `threadObj()`(Java 对象),每个 Java Thread 对象有 eetop(C++ 线程)。两个世界通过这一对指针握手,类似 07-06 的 ModuleEntry._module。
-
-### 绑定时机: 构造器调用之前
-
-初始线程的绑定在 `create_initial_thread`(thread.cpp:1088-1102,截取核心,逐字):
+紧接着才是：
 
 ```cpp
-// thread.cpp:1088-1102(截取核心,逐字)
-// Creates the initial Thread
-static oop create_initial_thread(Handle thread_group, JavaThread* thread,
-                                 TRAPS) {
-  InstanceKlass* ik = SystemDictionary::Thread_klass();
-  assert(ik->is_initialized(), "must be");
-  instanceHandle thread_oop = ik->allocate_instance_handle(CHECK_NULL);
-
-  // Cannot use JavaCalls::construct_new_instance because the java.lang.Thread
-  // constructor calls Thread.current(), which must be set here for the
-  // initial thread.
-  java_lang_Thread::set_thread(thread_oop(), thread);
-  java_lang_Thread::set_priority(thread_oop(), NormPriority);
-  thread->set_threadObj(thread_oop());
-
-  Handle string = java_lang_String::create_from_str("main", CHECK_NULL);
+Universe::initialize_basic_type_mirrors();
+Universe::fixup_mirrors();
 ```
 
-注释点破因果: **Java 的 Thread 构造器内部调 `Thread.current()`**(Thread.java:258 的 native 方法 → `JVM_CurrentThread`,jvm.cpp:3139-3144,直接返回 `thread->threadObj()`),所以必须先绑定 eetop 再执行 Java 构造器——否则 `current()` 拿不到自己。名字 "main" 也是这里用 `java_lang_String::create_from_str`(javaClasses.cpp:298)造的——String 镜像的创建路径(07-03)在启动时首次亮相。
+也就是说，`String` 和 `Class` 的偏移不是随便先算，而是它们后面马上会被大量使用：
 
-线程退出时反向操作(thread.cpp:1885-1890): `set_thread_status(TERMINATED)` 写状态,`set_thread(threadObj(), NULL)` 清 eetop——清空后 `is_alive` 判定立刻变 false,join() 得以完成。
+- `String` 是异常、日志、类加载等路径的基础对象
+- `Class` 是 mirror 建立和修复的基础对象
 
-### jstack 的每一列: 全是从镜像访问器读的
+### 3.2 bulk compute 只覆盖 PART2
 
-`Thread.isAlive()`(Java,Thread.java:1051 native)的链路全程是镜像访问器: JNI 表里的 `isAlive`(Thread.c:46)→ `JVM_IsThreadAlive`(jvm.cpp:2987-2992)→ `java_lang_Thread::is_alive`(javaClasses.cpp:1687-1690)——**没有 Java 调用**,直接判 eetop 是否非空:
+`JavaClasses::compute_offsets()` 在 `javaClasses.cpp:4475-4482` 中明确写着：String 和 Class 已经在 `resolve_well_known_classes()` 里算过，这里只对 `PART2` 批量执行 `DO_COMPUTE_OFFSETS`。
+
+这说明整体时序是：
+
+```text
+先保证 String/Class 可以安全被 VM 高频使用
+再把其余 well-known classes 的 offset contract 一次性补齐
+```
+
+### 3.3 `update_delayed_values()` 的意义主要在解释器/assembler 侧
+
+bulk compute 完成后立刻调用：
 
 ```cpp
-// javaClasses.cpp:1687-1690(截取核心,逐字)
-bool java_lang_Thread::is_alive(oop java_thread) {
-  JavaThread* thr = java_lang_Thread::thread(java_thread);
-  return (thr != NULL);
-}
+AbstractAssembler::update_delayed_values();
 ```
 
-javaClasses.hpp:386-387 的注释说得很直白: "Alive (NOTE: this is not really a field, but provides the correct definition without doing a Java call)"。jstack 的线程信息也全部来自镜像访问器——`JavaThread::print_on`(thread.cpp:3011-3026,截取核心,逐字):
+这说明至少有一部分早生成的解释器/assembler 常量需要在 offset 最终就绪后补丁/刷新。
+
+这里要谨慎表述：它能证明“生成的解释器代码关注这些 offset 并允许延迟补值”，但不应该被夸张成“所有 JIT 机器码都会在这里统一重写”。本文最好把这个意义限定在**启动时序与延迟常量补丁**上。
+
+---
+
+## 四、String：三个偏移为什么能撑起编码、去重和 JIT
+
+### 4.1 `value`、`coder`、`hash` 就是 String mirror contract 的核心
+
+`java_lang_String` 最核心的三个偏移是：
+
+- `value_offset`
+- `hash_offset`
+- `coder_offset`
+
+它们对应的是：
+
+```text
+value  -> backing byte[]
+hash   -> Java String 的缓存 hash
+coder  -> LATIN1 / UTF16 选择位
+```
+
+这里要特别强调一个 JDK 9+ 之后的事实：**String 的 backing store 永远是 `byte[]`。** Latin-1 时一个字符一字节，UTF-16 时数组长度翻倍，逻辑长度要再按 `coder` 缩回去。
+
+### 4.2 `length()` 的核心其实就是“数组长度右移 coder 位”
+
+`javaClasses.inline.hpp:74-87` 的 `java_lang_String::length` 逻辑很直接：
+
+- 先取 `value` 数组长度
+- 若 `coder == UTF16`，右移一位
+- 否则原样返回
+
+这不是“模拟 Java `String.length()` 方法”，而是 mirror 协议本身已经把长度计算缩成了：
+
+```text
+array.length >> coder
+```
+
+### 4.3 C2 直接消费的是 `value` / `coder` 这套 contract
+
+`GraphKit::load_String_length()` 在 `graphKit.cpp:3887-3893` 中直接：
+
+- 读 `String.value`
+- 取数组长度
+- 读 `String.coder`
+- 用右移处理 UTF-16
+
+这就是 offset contract 给 JIT 的真正礼物：**在代码生成时直接把偏移嵌进去，把 Java 方法调用和字段查找都消掉。**
+
+这里表述要收紧到“value/coder 等关键偏移被 C2 直接消费”。不要泛化成“JIT 对 String 的所有字段都做同等直读”。当前最直接、最清楚的证据是长度和字符串优化路径对 `value`/`coder` 的直接使用。
+
+### 4.4 String dedup 也只走镜像访问器
+
+String dedup 路径在 `stringDedupTable.cpp:345-393` 中只通过：
+
+- `java_lang_String::value`
+- `java_lang_String::is_latin1`
+- `java_lang_String::hash`
+- `java_lang_String::set_hash`
+- `java_lang_String::set_value`
+
+来完成 dedup 工作。
+
+也就是说，GC 并不是“看懂 Java String 类”，而是消费了 `java_lang_String` 这套已经启动校验好的 offset contract。
+
+这进一步说明 `javaClasses` 的价值：**同一组字段偏移被解释器、JIT 和 GC 共享。**
+
+---
+
+## 五、Thread：为什么 `eetop` 是 `JavaThread*`，而不是 OS 线程 ID
+
+### 5.1 `eetop` 的名字最容易误导人
+
+`THREAD_FIELDS_DO` 把很多 Thread 相关字段都列了出来，其中最特别的是：
+
+```text
+eetop
+tid
+threadStatus
+```
+
+这三个字段最容易被误混成“一堆线程 id”。
+
+### 5.2 `eetop` 的真实语义是 `JavaThread*`
+
+`java_lang_Thread::thread()` / `set_thread()` 在 `javaClasses.cpp:1641-1648` 里的定义非常直接：
 
 ```cpp
-// thread.cpp:3011-3026(截取核心,逐字)
-void JavaThread::print_on(outputStream *st, bool print_extended_info) const {
-  st->print_raw("\"");
-  st->print_raw(get_thread_name());
-  st->print_raw("\" ");
-  oop thread_oop = threadObj();
-  if (thread_oop != NULL) {
-    st->print("#" INT64_FORMAT " ", (int64_t)java_lang_Thread::thread_id(thread_oop));
-    if (java_lang_Thread::is_daemon(thread_oop))  st->print("daemon ");
-    st->print("prio=%d ", java_lang_Thread::priority(thread_oop));
-  }
-  Thread::print_on(st, print_extended_info);
-  // print guess for valid stack memory region (assume 4K pages); helps lock debugging
-  st->print_cr("[" INTPTR_FORMAT "]", (intptr_t)last_Java_sp() & ~right_n_bits(12));
-  if (thread_oop != NULL) {
-    st->print_cr("   java.lang.Thread.State: %s", java_lang_Thread::thread_status_name(thread_oop));
-  }
+return (JavaThread*)java_thread->address_field(_eetop_offset);
+...
+java_thread->address_field_put(_eetop_offset, (address)thread);
 ```
 
-- `"main"`: 线程名(String 对象,`get_thread_name`);
-- `#1`: **`thread_id`(javaClasses.cpp:1753-1760)读的是 `tid` 字段**(JDK 5 起引入),不是 eetop——流传的"jstack 的 tid 来自 eetop"是把镜像的"能读"与"读哪个字段"混淆了;
-- `daemon`/`prio=5`: `is_daemon`(:1693-1695)、`priority`(:1661-1663);
-- `java.lang.Thread.State: RUNNABLE`: `thread_status_name`(:1773-1785)把 `threadStatus` 字段的数值翻译成名字。
+所以 `eetop` 不是 native OS thread id，也不是 Java 层的 `long tid`。它就是：
 
-jstack 行尾还有两列 ID(Thread::print_on,thread.cpp:900-926): `tid=0x...` 是 **JavaThread 对象地址**(`p2i(this)`,:923),`nid=0x...` 才是 OS 线程 ID(`OSThread::print_on`,osThread.cpp:41-42,`thread_id()` 即 pthread_t)。[实证] 里 `"main" #1 prio=5 ... tid=0x00007f9d88025a50 nid=0x1165a3`(materials/commands/42-process-reaper-thread.txt:13)——**一行三个 ID,三种身份**: `#1` 是 Java 层 `tid` 字段、`tid` 是 C++ JavaThread 地址、`nid` 才是 OS 层的 pthread_t。这也再次坐实: eetop 与线程 ID 没有任何关系,它只是对象与 JavaThread 之间的指针。
+```text
+Java Thread 对象 <-> VM JavaThread* 的镜像握手指针
+```
 
-`threadStatus` 的值是 JVMTI 状态位组合(javaClasses.hpp:407-434 的 `ThreadStatus` 枚举): RUNNABLE = `JVMTI_THREAD_STATE_ALIVE | JVMTI_THREAD_STATE_RUNNABLE`,SLEEPING = ALIVE|WAITING|WAITING_WITH_TIMEOUT|SLEEPING,BLOCKED_ON_MONITOR_ENTER 只有 ALIVE|BLOCKED_ON_MONITOR_ENTER……Java 层 `Thread.getState()` 返回的 `Thread.State` 枚举就是在 Java 侧再翻译一层这些位。VM 写这个字段的时机在状态转换处(如退出时写 TERMINATED,:1887)。
+### 5.3 为什么必须在 Java Thread 构造器前绑定 `eetop`
 
-**关键设计 (斜体)**: *Thread 镜像的教训是"命名别猜"——`eetop` 听着像 OS 层的东西,实际存的是 JavaThread\*;jstack 的 `#tid` 又是另一个字段。镜像字段的语义以 C++ 访问器为准,不看名字。而 `is_alive` 这种"不是字段的字段"证明了镜像模式的另一个用途: 把跨世界的判断(isAlive 需要访问 JavaThread 状态)压缩成一次指针判空。*
+`create_initial_thread` 的注释在 `thread.cpp:1088-1102` 中已经把因果说透了：不能先走普通 Java `Thread` 构造流程，因为构造器内部会调用 `Thread.currentThread()`。
 
-## 4. Class: 注入的字段与双向镜像
+因此 VM 必须先：
 
-### CLASS_INJECTED_FIELDS: Java 层不存在的 7 个字段
+- 分配 Thread 对象
+- `set_thread(thread_oop, JavaThread*)`
+- `thread->set_threadObj(thread_oop)`
 
-`java.lang.Class` 是镜像模式的极端案例: 它有一批**Java 层根本不存在的字段**——`klass`、`array_klass`、`oop_size`、`static_oop_field_count`、`protection_domain`、`signers`、`source_file`(javaClasses.hpp:216-223,截取核心,逐字):
+然后才让 Java 侧构造逻辑继续。
+
+这说明 `eetop` 不是一个“附加诊断字段”，而是 Thread 对象进入 JVM 运行协议的前提。
+
+### 5.4 `is_alive()` 的语义其实就是 `eetop != NULL`
+
+`java_lang_Thread::is_alive` 直接实现成：
 
 ```cpp
-// javaClasses.hpp:216-223(截取核心,逐字)
-#define CLASS_INJECTED_FIELDS(macro)                                       \
-  macro(java_lang_Class, klass,                  intptr_signature,  false) \
-  macro(java_lang_Class, array_klass,            intptr_signature,  false) \
-  macro(java_lang_Class, oop_size,               int_signature,     false) \
-  macro(java_lang_Class, static_oop_field_count, int_signature,     false) \
-  macro(java_lang_Class, protection_domain,      object_signature,  false) \
-  macro(java_lang_Class, signers,                object_signature,  false) \
-  macro(java_lang_Class, source_file,            object_signature,  false) \
+JavaThread* thr = java_lang_Thread::thread(java_thread);
+return (thr != NULL);
 ```
 
-宏参数最后一个 `false` 是 `may_be_java`——表示这些字段**不是** Java 源文件里的字段,是 JVM 在解析 `java.lang.Class` 时**注入**的(07-01 的 `parse_fields` 调 `JavaClasses::get_injected`,classFileParser.cpp:1563-1566,注入后它们和其他字段一样参与布局——所以 Java 层的 `Class` 对象比 `java.lang.Class` 的 Java 源码里看到的字段多)。整个注入字段家族在 `ALL_INJECTED_FIELDS`(javaClasses.hpp:1562-1569): Class 7 个 + ClassLoader 1 个 + ResolvedMethodName 2 个 + MemberName/CallSiteContext/StackFrameInfo/Module 各 1 个,共 14 个。
+这也是现稿最应该强调的一个“不是字段的字段”：`isAlive` 在 VM 侧不是去分析 Java 层 `threadStatus`，而是直接看 mirror 中是否还绑定着一个 `JavaThread*`。
 
-注入字段的偏移不走 `find_local_field`(那查不到)而是查 `_injected_fields` 表(javaClasses.cpp:85-87),真正的查找在 `InjectedField::compute_offset`(javaClasses.cpp:4558-4568,截取核心,逐字):
+线程退出时，VM 先把状态设成 `TERMINATED`，再 `set_thread(threadObj(), NULL)`。一旦 `eetop` 清空，`is_alive()` 立刻翻成 false。
+
+### 5.5 `#id`、`tid=`、`nid=` 是三种完全不同的身份
+
+`JavaThread::print_on()` 在 `thread.cpp:3011-3026` 中输出线程头时，三种常见 ID 的来源完全不同：
+
+- `#<n>`：`java_lang_Thread::thread_id(thread_oop)`，即 Java 层 `tid` 字段
+- `tid=0x...`：VM `Thread*` / `JavaThread*` 自身地址（来自 `Thread::print_on`）
+- `nid=0x...`：OS/native thread id（来自 `OSThread::thread_id()`）
+
+所以一定要把最常见的误解拆开：
+
+```text
+eetop != tid != nid
+```
+
+- `eetop` 是 mirror 中的 `JavaThread*`
+- Java `tid` 是 Java 层线程 id 字段
+- `nid` 是 OS/native 线程 id
+
+这也是为什么“命名别猜”在 Thread 镜像上尤其重要。
+
+---
+
+## 六、Class：镜像为什么是 injected fields + 双向指针 + 可变大小对象
+
+### 6.1 `java.lang.Class` 是镜像模式里最特别的对象
+
+`String` 和 `Thread` 主要是“按偏移快速访问已有字段”。`Class` 则进一步承担了 VM 元数据的镜像宿主角色。
+
+这让它同时具备三种额外复杂性：
+
+1. 有一批 Java 源码里没有的 injected fields
+2. 与 `Klass` 有双向指针绑定
+3. 其对象大小本身还是 variable-sized 的
+
+### 6.2 injected fields 不是普通 Java 源码字段
+
+`CLASS_INJECTED_FIELDS` 在 `javaClasses.hpp:216-223` 中列出了 `klass`、`array_klass`、`oop_size`、`static_oop_field_count`、`protection_domain`、`signers`、`source_file` 等字段。
+
+它们全部是 `may_be_java=false`。这意味着：
+
+- parser 会为这些字段注入 internal field metadata
+- `InjectedField::compute_offset` 会忽略普通 Java 字段，只看 internal field
+- 这些字段不是“恰好同名的 Java 源码字段”在 VM 中被顺手利用
+
+所以文章绝不能把它们写成“Class 里本来就有这些 Java 字段，只是 VM 也在用”。对 JDK 11u 的 `java.lang.Class`，这不对。
+
+### 6.3 `mirror -> Klass` 与 `Klass -> mirror` 是两条不同方向的链
+
+镜像关系有两个方向：
+
+- `java_lang_Class::as_Klass` / `set_klass`：从 Java mirror 到 HotSpot `Klass`
+- `Klass::_java_mirror`：从 `Klass` 到 Java mirror
+
+这两条链不能合并成“Class 对象头里就有个 Klass 指针”。
+
+特别要纠偏的一点是：`java_lang_Class::klass` 这个 injected field是通过 `metadata_field` 访问的镜像字段，不是普通对象头中的 Klass 指针槽位。对象头的 Klass 指针决定“这个对象本身是 `java.lang.Class` 的实例”；而 injected `klass` 字段决定“这个 mirror 代表哪个类”。
+
+这两个位置和语义完全不同。
+
+### 6.4 `create_mirror` 的发布顺序是一种事务协议
+
+`create_mirror` 先：
+
+- 分配 `java.lang.Class` mirror 对象
+- `set_klass(mirror, k)` 建立 mirror -> Klass
+- 计算 `static_oop_field_count`
+- 初始化普通/静态/安全相关字段
+
+只有在可能抛异常的步骤都成功后，才：
 
 ```cpp
-// javaClasses.cpp:4558-4568(截取核心,逐字)
-int InjectedField::compute_offset() {
-  InstanceKlass* ik = InstanceKlass::cast(klass());
-  for (AllFieldStream fs(ik); !fs.done(); fs.next()) {
-    if (!may_be_java && !fs.access_flags().is_internal()) {
-      // Only look at injected fields
-      continue;
-    }
-    if (fs.name() == name() && fs.signature() == signature()) {
-      return fs.offset();
-    }
-  }
+k->set_java_mirror(mirror);
 ```
 
-`may_be_java=false` 时要求字段带 `JVM_ACC_FIELD_INTERNAL` 标志(fieldInfo.hpp:240)——注入字段用这个标志标记,Java 反射 API 看不到它,GC 扫描、布局计算却照常处理。所以镜像类分两种字段来源: 普通字段(Java 源码里就有)走 `find_local_field`,注入字段走 `AllFieldStream`——最后都变成同一套静态偏移,`compute_offsets` 里两部分都算(javaClasses.cpp:1545-1561): CLASS_FIELDS_DO(classRedefinedCount/classLoader/componentType/module/name,5 个 Java 字段,:1538-1544)+ CLASS_INJECTED_FIELDS(7 个注入)。注意 :1555-1558 的一个巧妙设计: `_init_lock_offset`(类初始化锁)与 `_component_mirror_offset`(数组的镜像)共用同一个偏移——普通类镜像用 init_lock,数组类镜像用 component_mirror,一个 C union。
+如果中途初始化 mirror 字段失败，代码会把 mirror 中的 `klass` 清掉，避免 GC 通过这个半成品 mirror 跟到一个将被回滚的 `Klass`。
 
-### 双向镜像: klass 字段 ↔ Klass._java_mirror
+所以 `Class` 镜像的双向绑定不是“顺手互相设个指针”，而是带着发布顺序要求的事务式协议。
 
-镜像关系是双向的:
+### 6.5 variable-sized mirror 指的是“固定头 + inline trailing static-field storage”
 
-- **Klass → 镜像**: `Klass::_java_mirror`(klass.hpp:139,`OopHandle`),06-02 讲过——`getClass()` 的"最后一步";
-- **镜像 → Klass**: `java_lang_Class::as_Klass`(javaClasses.cpp:1390-1396,截取核心,逐字):
+`InstanceMirrorKlass::instance_size(k)` 会在 base `java.lang.Class` 对象大小之外，再加上目标类的 `static_field_size()`。这说明 mirror 大小不是统一常量。
 
-```cpp
-// javaClasses.cpp:1390-1396(截取核心,逐字)
-Klass* java_lang_Class::as_Klass(oop java_class) {
-  //%note memory_2
-  assert(java_lang_Class::is_instance(java_class), "must be a Class object");
-  Klass* k = ((Klass*)java_class->metadata_field(_klass_offset));
-  assert(k == NULL || k->is_klass(), "type check");
-  return k;
-}
+这里最常见的误解是把它讲成：“Class 有个数组字段保存静态字段”。
+
+更准确的是：
+
+```text
+base java.lang.Class 布局
+  +
+inline trailing storage for represented class's static fields
 ```
 
-`klass` 注入字段存的是 **Klass\* 指针本身**(`metadata_field` 直接读指针宽度)——不是流传说法里的"压缩 Klass* 再 decode"。压缩类指针(UseCompressedClassPointers)是另一套机制(对象头与 Metaspace 里类型指针的窄化),不作用于镜像字段——`metadata_field` 走 HeapAccess 一次加载即可(oop.hpp:163)。
+也就是说，静态字段区是紧跟在 mirror 对象后面的内联对象空间，不是另一个单独分配的数组对象。GC 通过 `static_oop_field_count` 只扫描这段 trailing 区里的 oop 部分；`oop_size` 记录整个 mirror 对象的最终大小。
 
-`getClass()` 的完整链路正好把两个方向串起来(Object.java:72 的 native 声明 → JNI 的 `GetObjectClass`,jni.cpp:1292-1300): `obj->klass()` 拿 Klass,再 `k->java_mirror()` 拿镜像——两个方向,四个访问器,一次 Java 方法调用都没有。
+### 6.6 fixup list 与 basic type mirrors 说明镜像也有启动时序问题
 
-### mirror 是"可变大小对象": 静态字段就藏在 Class 对象后面
+在 `java.lang.Class` 自己还没准备好之前，有些类已经先被加载出来了。这些类没法立刻分配 mirror，只能先挂进 `_fixup_mirror_list`。
 
-`java.lang.Class` 对象的特别之处: **静态字段住在镜像里**(06-02 的 InstanceMirrorKlass)。所以镜像大小是动态的——创建时按目标类的静态字段数计算(javaClasses.cpp:894-914,截取核心,逐字):
+等 `String` / `Class` offset 先算完、basic type mirrors 初始化好之后，`Universe::fixup_mirrors()` 再统一回填之前积压的普通 class mirrors。
 
-```cpp
-// javaClasses.cpp:894-914(截取核心,逐字)
-void java_lang_Class::create_mirror(Klass* k, Handle class_loader,
-                                    Handle module, Handle protection_domain, TRAPS) {
-  assert(k != NULL, "Use create_basic_type_mirror for primitive types");
-  assert(k->java_mirror() == NULL, "should only assign mirror once");
+这解释了为什么 `String` / `Class` 必须先算偏移：**mirror 自己就是后续镜像修复与静态字段布局的基础设施。**
 
-  // Use this moment of initialization to cache modifier_flags also,
-  // to support Class.getModifiers().  Instance classes recalculate
-  // the cached flags after the class file is parsed, but before the
-  // class is put into the system dictionary.
-  int computed_modifiers = k->compute_modifier_flags(CHECK);
-  k->set_modifier_flags(computed_modifiers);
-  // Class_klass has to be loaded because it is used to allocate
-  // the mirror.
-  if (SystemDictionary::Class_klass_loaded()) {
-    // Allocate mirror (java.lang.Class instance)
-    oop mirror_oop = InstanceMirrorKlass::cast(SystemDictionary::Class_klass())->allocate_instance(k, CHECK);
-    Handle mirror(THREAD, mirror_oop);
-    Handle comp_mirror;
+---
 
-    // Setup indirection from mirror->klass
-    java_lang_Class::set_klass(mirror(), k);
+## 七、消费者视角：为什么这套镜像访问器必须是一套统一协议
+
+到这里，把 `String`、`Thread`、`Class` 放在一起看，会发现它们的共同点不是“都是核心类”，而是：它们都被多条 VM 子系统共享消费。
+
+```text
+String
+  → JIT / GraphKit
+  → StringDedup / GC
+  → string creation / hash cache
+
+Thread
+  → currentThread / isAlive
+  → thread bootstrap / attach / teardown
+  → jstack / diagnostics
+
+Class
+  → Klass ↔ mirror 双向关系
+  → static field storage
+  → protection_domain / signers / module 等 VM 私有状态
 ```
 
-`instance_size`(instanceMirrorKlass.cpp:40-46)按目标类的静态字段数算镜像大小——`size_helper() + static_field_size()`;`allocate_instance`(:48-56)按这个大小分配,注释说得很清楚: "Since mirrors can be variable sized because of the static fields, store the size in the mirror itself."——**镜像把自己的大小存进注入字段 `oop_size`**,`set_oop_size`(javaClasses.cpp:1279-1281)/`set_static_oop_field_count`(:1289-1291)在创建时写入,GC 读 `InstanceMirrorKlass::oop_size`(:58-60)时再取出来。一个对象自己报告自己的大小,这是 JVM 里少数几个"自描述大小"的对象。静态字段的初始值也在这里统一写入(`initialize_static_field`,javaClasses.cpp:744-789,按字段类型写镜像偏移)。
+如果这些子系统各自按名字查字段、各自缓存偏移、各自维护一套 mirror 语义，布局变化时会形成多份不一致契约。`javaClasses` 的价值就在于：**用一套启动校验好的 offset/access contract，让 JIT、GC、线程系统和类镜像全都站在同一组偏移之上。**
 
-镜像创建后还有补丁列表: `_fixup_mirror_list`——某些类加载太早(Class 还没就绪),镜像先挂在待补丁列表,`resolve_well_known_classes` 里 `Universe::fixup_mirrors`(systemDictionary.cpp:2023)统一补齐;基本类型的镜像(int.class 等)由 `create_basic_type_mirror` 特造。模块字段则由 `set_mirror_module_field` 写入——07-06 那个"ModuleEntry 握着 java.lang.Module 弱句柄"的镜像在这里完成另一头: Class 对象也握着它的 Module。
+这也解释了为什么它的失败模式必须是启动即死。因为一旦 contract 不一致，受影响的不是单个 API，而是多个 VM 子系统的共同基础。
 
-**关键设计 (斜体)**: *Class 镜像把"类"这个抽象折叠成一个普通对象: 双向指针(klass↔mirror)让两个世界互相可达,注入字段让 JVM 私有的元数据(大小、静态字段数、Klass 指针)藏在普通对象里而不污染 Java API,可变大小让静态字段白住镜像的房子。jmap -histo 里每个类的静态字段都算在 Class 对象头上——就是这套布局的外在表现。*
+---
 
-## 核心悬念
+## 八、误解澄清：八个最容易写过头的判断
 
-07 域以 javaClasses 收官: 镜像模式把核心 Java 类的实例变成"偏移已知的普通堆对象"——String 的 value/coder/hash 三个偏移撑起压缩编码与去重,C2 把 `value_offset` 直接编进机器码;Thread 的 eetop 是 JavaThread* 双向指针,is_alive/jstack 全靠镜像访问器零反射读取;Class 的 7 个注入字段与可变大小镜像把 Klass 元数据藏进普通对象。你大概注意到了本节反复出现的词——`allocate_instance`、`oop_size`、`Universe::fixup_mirrors`: 镜像的创建与修复挂在**堆**上,`Class_klass` 的实例、静态字段、空数组都分配在 Universe 管理的堆里。但堆本身是谁、在什么时候创建的?答案是启动早期的 `universe_init` 建堆、`Universe::genesis` 在堆上造第一批对象——JVM 的"宇宙大爆炸"。下一篇: Universe 与 CollectedHeap——堆怎么诞生、第一批对象是什么。
+1. **javaClasses 是否等于“JVM 版反射”？** 不是。它不是运行时动态字段查询，而是启动期偏移契约和 native 访问器集合。
+2. **所有 offset 是否都运行时动态查找？** 不是。有运行时计算的 cached offset，也有硬编码并做验证的路径。
+3. **所有 offset 是否都完全硬编码？** 也不是。像 `String`、`Thread`、`Class` 这类关键字段明确通过 startup lookup + validation 缓存。
+4. **`eetop` 是否是 OS/native 线程 id？** 不是。它是 `JavaThread*` 镜像指针。
+5. **`jstack` 里的 `#id`、`tid=`、`nid=` 是否是一回事？** 不是。分别对应 Java `tid` 字段、VM thread 对象地址、OS 线程 id。
+6. **`java_lang_Class::klass` 是否就是对象头里的 Klass 指针？** 不是。对象头里的 Klass 指针说明“这个对象是 `java.lang.Class` 实例”；injected `klass` 字段说明“它代表哪个类”。
+7. **injected fields 是否等价于普通 Java 源码字段？** 不是。对 `may_be_java=false` 的字段，VM 用的是内部注入字段，不是普通源字段。
+8. **variable-sized mirror 是否等于“Class 里有个数组字段存静态字段”？** 不是。它是 base mirror 布局后跟的 inline trailing static-field storage。
 
-> → [09-memory-core/01 — Universe + CollectedHeap](openjdk/vol-02/09-memory-core/01-universe-heap.md)
+---
+
+## 九、收网：核心镜像的本质，是一次启动期校验，换来全 VM 的零反射访问
+
+回到开头的问题：为什么 HotSpot 要给少数核心 Java 类单独建立 `javaClasses` 这一层？
+
+因为这些对象不是普通业务对象，它们同时处在两套世界的交界面：
+
+```text
+Java heap object
+  <->
+VM metadata / thread runtime / GC / JIT consumer
+```
+
+而这类交界面如果每次都靠名字查找、Java 反射或临时推断，会把最核心的高频路径拖慢，甚至在布局漂移时悄悄错读。
+
+所以 HotSpot 选的是一条很明确的路线：
+
+```text
+启动时用真实类布局校验偏移
+  → 成功则缓存到 `java_lang_Xxx` helper
+  → 运行时所有高频路径只走这套访问器
+  → 失败则启动即死，不留隐患
+```
+
+三句话收束全文：
+
+- **`javaClasses` 不是 JVM 版反射，而是 JVM 与少数核心 Java 对象之间的启动期 offset/access 契约。**
+- **`String`、`Thread`、`Class` 三个例子分别代表了压缩编码/JIT、线程镜像桥接、以及 injected fields + 双向 mirror + 可变大小对象三种契约复杂度。**
+- **这套契约的真正价值不是“字段访问更快”这么简单，而是让 JIT、GC、线程系统和类镜像共用同一套经过启动验证的对象布局事实。**
+
+下一篇进入这条镜像链更底层的舞台：这些 mirror 对象、基础类型镜像、空数组和最早的一批核心对象，最终都是在 `Universe` 和 `CollectedHeap` 诞生之后才可能出现。也就是 JVM 启动里的“宇宙大爆炸”阶段。
+
+> → [09-memory-core/01 — Universe + CollectedHeap](../09-memory-core/01-universe-heap.md)

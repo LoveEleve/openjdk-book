@@ -1,12 +1,16 @@
 # 02. epoll 实现与平台分层 — EPollSelectorImpl、native 三调用、与 select 对比
 
-> **前置依赖**: [21-selector-nio/01 — Selector 抽象与选择机制](01-selector-mechanism.md)(骨架、selectedKeys、wakeup)
-> → **后续**: [21-selector-nio/03 — SocketChannel 与阻塞/非阻塞](03-socketchannel-blocking.md)
-> 关联: 内部卷 01-os(平台层 fd 语义);域 19 BufferChannel(就绪后的数据读写)
+> 本文基于 JDK 11 Linux 平台 `EPollSelectorImpl`、`EPoll` 封装与 `SelectorProvider` 分层。本文聚焦 create/ctl/wait 三调用、事件表在内核、水平触发默认选择、自管道唤醒与 provider 分层；socket/channel 行为留到下一篇。本文讨论的是 JDK 11 Linux 上的 Selector 平台实现，不把这里的 epoll 路径、自管道唤醒和水平触发取舍外推成所有平台、所有 NIO 实现都必须遵守的统一规范。
+> **前置依赖**：[21-selector-nio/01 — Selector 抽象与选择机制](01-selector-mechanism.md)(骨架、selectedKeys、wakeup)
+> **后续**：[21-selector-nio/03 — SocketChannel 与阻塞/非阻塞](03-socketchannel-blocking.md)
 
-## Selector.open() 在 linux 上是什么
+## 为什么 Selector 到了 Linux 上,真正值钱的不是 Java API,而是内核里那张事件表
 
-上一篇看了共享骨架 `SelectorImpl`——平台层只实现一个"内核等待"的 `doSelect`。这一篇看 linux 上这个 doSelect 的实体: `EPollSelectorImpl` 怎么包装 epoll 的三个系统调用、事件表为什么在内核、水平触发与边缘触发的差别、以及 wakeup 的自管道在 epoll 下怎么落地。
+上一篇已经把 Selector 的抽象骨架立住了：通道声明兴趣、选择器统一等待、SelectionKey 承载结果。但如果继续追问一句——`Selector.open()` 到了 Linux 上到底开出了什么?为什么它能让上万连接的等待成本不再和连接总数一比一膨胀?答案其实已经不在 Java 代码表面,而在平台层的 epoll 机制上。
+
+真正改变游戏规则的不是 `select()` 这个方法名,而是 **“谁在维护事件表、谁在筛选就绪项、谁在把阻塞中的等待叫醒”** 这三件事被下沉到了内核。Java 层的 `EPollSelectorImpl` 做的,不是重写一套等待器,而是把 epoll 的 create/ctl/wait 三个系统调用和 Java 的 key/readyOps/selectedKeys 语义焊在一起。
+
+所以这一篇的主线不是 epoll 名词解释,而是沿着这个问题展开: 为什么事件表常驻内核会改变复杂度,为什么 JDK 默认水平触发,以及为什么 `wakeup()` 最终必须被翻译成一个 fd 可读事件,才能把阻塞中的 `epoll_wait` 自然叫醒。
 
 ## 1. "linux 上的 Selector 是什么" — EPollSelectorImpl
 
@@ -122,8 +126,48 @@ unix 通用层是 `PollSelectorImpl`(`unix/classes/sun/nio/ch/PollSelectorImpl.j
 
 跨层标注: [内部卷 01-os——fd 就绪语义与平台层;域 19 BufferChannel——就绪事件触发后,读写的载体是 Buffer]
 
-## 核心悬念
+## 七、五个最容易混掉的边界：epoll 不是 Java 轮询优化，事件表不在用户态，水平触发不是低级模式，wakeup 不是信号，wait 也不是返回所有 fd 状态
 
-选择器能"知道"哪个通道就绪了——但**通道本身怎么读写**?`SocketChannel` 的阻塞/非阻塞切换、connect 的三次握手、accept 的连接建立——BIO 和 NIO 的线程模型差异在哪?——下一篇: SocketChannel 与阻塞/非阻塞。
+在收网之前，先把这一篇最容易记错的五条边界压实。
 
-> → [21-selector-nio/03 — SocketChannel 与阻塞/非阻塞](03-socketchannel-blocking.md)
+第一，epoll 不是 Java 自己把轮询写得更聪明了。真正改变复杂度的，是事件表和就绪队列都下沉进了内核；Java 层只是把这套内核结果翻译回 `SelectionKey` 语义。
+
+第二，所谓“事件表在内核”，也不是一句口号。它直接意味着 `ctl` 维护的是一张常驻内核的兴趣表，`wait` 拿回的是这一刻真正就绪的那些 fd，而不是每次把全量 fd 集合重新搬进内核再扫一遍。
+
+第三，水平触发更不是“比边缘触发低级”。它代表的是另一种默认取舍：重复通知换取更简单、更不容易漏事件的应用语义。JDK 默认站在这里，不是因为不会做边缘触发，而是因为它优先要和 select/poll 的心智保持一致。
+
+第四，`wakeup()` 也不是靠信号或 Java 线程中断把 `epoll_wait` 叫醒。真正起作用的是自管道制造出的一个 fd 可读事件：对 epoll 来说，它醒来的原因仍然是“有事件到了”，只是这个事件是 Selector 自己伪造出来的控制信号。
+
+第五，`epoll_wait` 也不是“把所有 fd 当前状态都返回给你”。它只返回本轮已经就绪的事件项；这正是 epoll 能把总连接数和当前处理成本解耦的关键。如果把它想成状态全量快照，就会看不懂为什么大多数空闲连接几乎不增加 wait 的返回处理成本。
+
+把这五条边界记稳，epoll 这一篇就不会重新塌回“Linux 上的更快 Selector”这种表面印象。它真正讲的是：Java 选择器抽象怎样借 create/ctl/wait 三调用，把等待与就绪维护这件事扎扎实实地下沉到了内核事件表里。
+
+## 收网：Linux 上真正值钱的不是 Java API 名字，而是 epoll 把“谁就绪了”这件事长期留在了内核里
+
+回到开头那个问题，现在已经能看清为什么 Selector 到了 Linux 上之后，真正值钱的不是 `select()` 这个方法名，而是 epoll 这套平台机制。它把“谁被监听”“谁刚就绪”“谁该把阻塞中的等待叫醒”这三件事拆成 create/ctl/wait 三步，并让事件表常驻内核，避免每次等待都从用户态重新搬一份全量 fd 集合进去。
+
+这也把整篇的主线收回来了：
+
+- provider 分层负责把统一 Selector 抽象落到 Linux 的 `EPollSelectorImpl`；
+- create/ctl/wait 负责事件表生命周期；
+- 水平触发决定默认的就绪通知哲学；
+- 自管道 wakeup 则把外部控制动作翻译成 epoll 能看见的可读事件。
+
+把整篇压成一张总图，就是：
+
+```text
+epoll 平台层
+  → create：建内核事件表
+  → ctl：增删改兴趣 fd
+  → wait：只返回当前就绪项
+
+JDK 桥接层
+  → EPollSelectorImpl 维护 epfd / pollArray / wakeup pipe
+  → 把内核事件翻译回 readyOps / selectedKeys
+
+控制路径
+  → wakeup 通过自管道制造可读事件
+  → 让阻塞中的 epoll_wait 自然返回
+```
+
+如果说上一篇解决的是“为什么等待能从每个连接自己的阻塞点上被集中剥离出来”，这一篇真正补上的就是：**这件事在 Linux 上具体是怎样靠内核事件表被做成 O(就绪项) 语义的。** 下一篇就会把镜头从等待器转回通道本身：`SocketChannel` 在阻塞和非阻塞两种模式下，到底怎样改写 connect、accept 和 read 的语义。

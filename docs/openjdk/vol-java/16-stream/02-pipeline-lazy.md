@@ -1,351 +1,183 @@
-# 02. 流水线结构与惰性机制 — Pipeline 链、Sink 链、求值时机
+# 流水线结构与惰性机制：为什么中间操作不碰数据，直到终端操作把两条链焊在一起
 
-> **前置依赖**: [16-stream/01 — Stream 接口全景与函数式接口](01-stream-api-lambda.md)(中间/终端分类、lambda 机制)、[08-collections/01 — ArrayList](../08-collections/01-arraylist.md)(集合数据源)
-> → **后续**: [16-stream/03 — 中间操作实现](03-intermediate-ops.md)
-> 关联: 域 08 集合(数据源);域 04 反射(indy 引导);内部卷 13-jit-framework(分层编译)
+> 本文基于 JDK 11 `AbstractPipeline`、`ReferencePipeline`、`Sink`、`ReduceOps`、`ForEachOps`。讨论范围聚焦 Pipeline 链、Sink 链、`evaluate`、`wrapSink`、`copyInto` / `copyIntoWithCancel`、`opWrapSink` 与终端触发；并行路径和具体中间/终端实现细节放到后续篇章。
+> **前置依赖**：[Stream 接口全景与函数式接口](01-stream-api-lambda.md)、[集合与数据源基础](../08-collections/01-arraylist.md)
+> **后续**：[中间操作实现](03-intermediate-ops.md)
 
-## 一行链式调用,内存里是什么形状
+## 先看一个最容易让人嘴上说“Stream 是惰性的”，心里却仍当成立刻执行的疑问
 
-`list.stream().filter(x -> x > 0).map(x -> x * 2).collect(toList())`——上一篇把操作分成了中间/终端两类。这一篇回答下一个问题: 这条链在内存里到底是什么?答案是**两条链**: 构建期的 **Pipeline 链**(静态结构,描述"有哪些操作"),求值期的 **Sink 链**(运行时消费管道,描述"数据怎么流过")。中间操作惰性的秘密就在这里: 链构建不触碰数据,求值才把两条链焊在一起。
+上一章已经把最表层的事实立住了：中间操作惰性，终端操作触发求值。可如果继续追问一句——`list.stream().filter(...).map(...).sorted()` 这串调用在内存里到底长什么样？为什么它明明调用了这么多方法，却在 `collect()` 之前完全没扫一遍数据？如果答不上来，那“Stream 惰性”这句话其实还只是口号。
 
-## 1. "filter() 返回了什么" — Pipeline 链: 挂节点
+真正的答案不是“JVM 很聪明，先忍着不执行”，而是 Stream 从设计上就把构建期和执行期拆成了两套不同结构：
 
-### 1.1 链的四个字段
+- 构建期是一条 **Pipeline 链**，它只记录“有哪些操作、前后关系是什么、标志怎么合成”；
+- 执行期则是一条 **Sink 链**，它才负责“元素来了以后，怎样一层层过滤、映射、消费”。
 
-`AbstractPipeline`(`AbstractPipeline.java`,712 行)是 Pipeline 链的基类,链由三个引用串起来(行内注释为解释):
+这就是 Stream 惰性的真正秘密：**前半段连环调用只是挂节点，真正按元素流动要等终端操作把这张静态图翻译成一条运行时消费管道。**
 
-```java
-// AbstractPipeline.java:82 + 88 + 101(字段声明截取,逐字,省略前置 @SuppressWarnings 注解行;行内注释为解释)
-    private final AbstractPipeline sourceStage;      // 回溯到链头(自身即源时 = this)
-    private final AbstractPipeline previousStage;    // 上游节点(源节点为 null)
-    private AbstractPipeline nextStage;              // 下游节点(链接时被填充)
-```
+所以这篇不只是继续证明它“惰性”，而是要把惰性拆开成一个可见结构：Pipeline 链像图纸，Sink 链像管道；终端操作一来，两者才被焊在一起。
 
-外加三个状态字段:
+## 一、为什么中间操作只是“挂节点”：Pipeline 链本质上是一张静态图纸
 
-- `depth`(`:108`): 距源的中间操作数——`filter` 是 1,`map` 是 2
-- `combinedFlags`(`:115`): 源与之前所有操作的标志合成(短路标记靠它传播,§4)
-- `linkedOrConsumed`(`:135`): 本节点是否已被"链接或消费"
+### 先看它到底记了什么，而不是做了什么
 
-`list.stream()` 创建的是 `ReferencePipeline.Head`(`StreamSupport.java:67-72`): 头节点构造时用 `StreamOpFlag.fromCharacteristics(spliterator)` 从 Spliterator 的特性里提取源标志。
+`AbstractPipeline` 是整条 Stream 流水线的骨架，定义在 `AbstractPipeline.java:72`。最关键的几个字段是：
 
-### 1.2 构造器: 链接即消费
+- `sourceStage`（`AbstractPipeline.java:82`）
+- `previousStage`（`88`）
+- `nextStage`（`101`）
+- `sourceSpliterator`（`123`）
+- `linkedOrConsumed`（`135`）
 
-每次中间操作都会 new 一个节点。节点构造器:
+这组字段看起来很像普通链表，但它们真正表达的不是“元素已经在流动”，而是“**这条流从哪来、前后有哪些阶段、源还在不在、这条管线是不是已经被接上或消费掉了**”。
 
-```java
-// AbstractPipeline.java:201-214(逐字)
-    AbstractPipeline(AbstractPipeline<?, E_IN, ?> previousStage, int opFlags) {
-        if (previousStage.linkedOrConsumed)
-            throw new IllegalStateException(MSG_STREAM_LINKED);
-        previousStage.linkedOrConsumed = true;
-        previousStage.nextStage = this;
+也就是说，Pipeline 链更像一张数据处理图纸，而不是一条已经开始输送元素的管道。
 
-        this.previousStage = previousStage;
-        this.sourceOrOpFlags = opFlags & StreamOpFlag.OP_MASK;
-        this.combinedFlags = StreamOpFlag.combineOpFlags(opFlags, previousStage.combinedFlags);
-        this.sourceStage = previousStage.sourceStage;
-        if (opIsStateful())
-            sourceStage.sourceAnyStateful = true;
-        this.depth = previousStage.depth + 1;
-    }
-```
+### 为什么构造器只做连接，不碰元素
 
-三个动作: ① 前驱若已被链接/消费,直接抛 `IllegalStateException`("stream has already been operated upon or closed",消息常量在 `:74`);② 把前驱标记为已链接,并把**前驱的** `nextStage` 指向自己;③ 算自己的 `depth`/`combinedFlags`/`sourceStage`。
+中间阶段节点构造器在 `AbstractPipeline.java:201-213`。它最重要的动作是：
 
-这解释了经典报错:
+- 检查前驱是否已经 `linkedOrConsumed`
+- 把前驱标成已链接
+- 把前驱的 `nextStage` 指向当前新节点
+- 计算 `combinedFlags`、`depth`、`sourceStage`
+
+这里最值得停下来看的是：**它完全没有读取源 Spliterator 的元素。** 也就是说，`filter()`、`map()` 这些方法在构造期真正做的，并不是处理数据，而是把“后面要做这个操作”登记到链上，并顺便维护一些和执行策略相关的元信息。
+
+这就解释了为什么下面这种代码会抛异常：
 
 ```java
-// 用法示意(API 形式,非源码片段)
 Stream<String> s = list.stream();
-s.filter(x -> x.length() > 0);   // 首次: 把 s(头节点)标记为已链接
-s.filter(x -> x.length() > 0);   // 第二次: 构造器检查到 s 已链接 → IllegalStateException
+s.filter(x -> x.length() > 0);
+s.filter(x -> x.length() > 0);
 ```
 
-链式写法 `list.stream().filter(...).map(...)` 没问题——每次操作的是**上一个操作返回的新节点**,而不是已被消费的头节点。
+因为在第一次 `filter` 时，头节点就已经被标记为 `linkedOrConsumed`，你不能再拿同一条原始流去重新挂另一条链。这不是防御式小细节，而是在明确告诉你：**一条 Stream 不是一个可反复随意拼装的容器，它是一张一旦接线就不可回头重布的图纸。**
 
-### 1.3 filter: 只 new 一个节点
+### `filter` / `map` 为什么证明了“节点注册”而不是“数据处理”
 
-`filter` 的实现(`ReferencePipeline.java:162-182`)——除了参数判空和 new 一个 `StatelessOp`,什么都没干(操作配方省略,§2.3 全量展示):
+看 `ReferencePipeline.filter()`（`ReferencePipeline.java:162-167`）和 `map()`（`186-191`），你会发现构造阶段最重要的动作就是 new 一个新的 `StatelessOp` 节点，再把当前阶段 `this` 作为前驱传进去。逻辑函数虽然已经作为参数传入，但它此刻并没有作用在任何元素上。
 
-```java
-// ReferencePipeline.java:162-165(构造部分截取,逐字)
-    public final Stream<P_OUT> filter(Predicate<? super P_OUT> predicate) {
-        Objects.requireNonNull(predicate);
-        return new StatelessOp<P_OUT, P_OUT>(this, StreamShape.REFERENCE,
-                                     StreamOpFlag.NOT_SIZED) {
-            ...
-        };
-    }
+这说明中间操作调用时完成的，主要是两件事：
+
+- 把“要做什么逻辑”存进新节点；
+- 把节点接到前一阶段后面。
+
+而不是“现在就把所有元素过滤一遍再保存结果”。
+
+这一层必须讲透，因为它让读者真正接受一个反直觉事实：**Stream 链的大部分方法调用发生时，数据根本还没开始流动。**
+
+## 二、为什么 Pipeline 链还不够：执行期必须再生成一条真正消费元素的 Sink 链
+
+### 先看为什么“图纸”不能直接执行
+
+Pipeline 链记录了有哪些阶段，但它还不直接告诉你：当一个元素真的来到这里，应该先做什么、后做什么、有没有必要提前停下。静态节点描述和运行时逐元素消费，是两件事。
+
+这就是 `Sink` 要解决的问题。`Sink` 在 `Sink.java` 的 Javadoc 一开头就把协议讲得很清楚：一个 sink 在真正接收元素前，会先 `begin(size)`；元素进来时不断 `accept()`；结束后再 `end()`；必要时还可以通过 `cancellationRequested()` 提前要求停流。
+
+默认方法锚点也很清楚：
+
+- `begin`（`Sink.java:128`）
+- `end`（`138`）
+- `cancellationRequested`（`147`）
+
+这说明 Sink 不是“另一个 Consumer 接口”而已，而是一份完整的**运行时消费协议**。
+
+### 为什么 ChainedReference 正好说明了它是一条管道
+
+`Sink.ChainedReference` 位于 `Sink.java:244-263`。它的关键在于持有 `downstream`，并把 `begin/end/cancellationRequested` 默认委托给下游。这就意味着：每个中间操作都可以把自己的逻辑包在下游外面，形成一层套一层的消费链。
+
+也就是说，Pipeline 链记录“这一步存在”；Sink 链才定义“这一步对元素做什么”。两者并不是同义重复，而是分别回答结构和行为两种问题。
+
+### `opWrapSink` 为什么是从“中间操作”变成“真正行为”的转换点
+
+真正把静态节点翻译成消费行为的，是每个节点的 `opWrapSink`。看 `ReferencePipeline` 里的 filter 和 map：
+
+- filter 的 `opWrapSink` 在 `ReferencePipeline.java:167-180`
+- map 的 `opWrapSink` 在 `191-199`
+
+这两段代码恰好说明了 Stream 的惰性秘密：构造期只是保存谓词和映射函数；执行期才通过 `opWrapSink` 生成真正的 sink，把 `predicate.test(u)` 或 `mapper.apply(u)` 放进 `accept()` 路径里。
+
+换句话说，**中间操作在构造期只是“配方”，到了执行期才被烹饪成真正会对元素生效的行为。**
+
+## 三、为什么终端操作一来，Pipeline 链才会被“反向包裹”成 Sink 链
+
+### 先看 evaluate 为什么是总开关
+
+`evaluate()` 位于 `AbstractPipeline.java:226-234`。它最重要的职责不是返回一个结果，而是宣布：从现在起，这条之前还只是描述的流水线，要正式进入求值阶段了。
+
+一旦进入 evaluate：
+
+- 流会被标记为已消费，不能再反复跑；
+- 会从 `sourceSpliterator(...)` 取出真正的数据源；
+- 会根据串行/并行路径选择具体执行分支；
+- 最终把前面积累的 Pipeline 描述翻译成实际消费动作。
+
+所以终端操作真正做的第一件事，不是“最后收个结果”，而是**按下整条流水线的执行开关**。
+
+### 为什么 `wrapSink` 是反向组装，而不是顺着 nextStage 正向拼接
+
+`wrapSink()` 位于 `AbstractPipeline.java:518-522`。它从当前终端 sink 出发，沿着 `previousStage` 一路往前，把每个中间阶段的 `opWrapSink` 反向包在外面。这个顺序特别值得记住，因为它说明：
+
+- 构建期链条是从源到终端逐段长出来的；
+- 执行期消费链则是从终端 sink 往回包，最后得到一个最外层 sink，让源元素一进来就能穿过整条逻辑。
+
+这就是为什么我们需要两条链：一条适合描述“有哪些阶段”，另一条适合真正承载“元素怎么经过这些阶段”。
+
+### `wrapAndCopyInto` / `copyInto` 为什么证明了“单遍消费”这件事不是口号
+
+一旦 sink 链组好，`wrapAndCopyInto()`（`AbstractPipeline.java:473-476`）会调用 `copyInto()`（`479-490`）正式驱动源数据流过这条链。关键点在于：这里并不是“每个中间操作自己各扫一遍源”，而是由同一个源 Spliterator 把元素单遍送进最外层 sink，然后一层层往下传。
+
+也就是说，常见的无状态 Stream 链条之所以高效，不是因为 JVM 后面帮你神奇优化，而是因为内部结构本来就是：**一次遍历，元素穿过整条 sink 管道。**
+
+## 四、为什么终端操作的区别，不在“前面链怎么建”，而在“谁来当链底 sink”
+
+### collect / reduce / forEach 真正分歧发生在最底端
+
+Pipeline 的前半段构建方式对大多数终端操作来说都差不多，差别主要在最后一层 sink 上是谁承担最终消费语义。
+
+例如：
+
+- `collect` 对应 `ReferencePipeline.java:568`，底层会通过 `ReduceOps.makeRef(...)`（`ReduceOps.java:156`）构造归约 sink；`evaluateSequential` 关键锚点在 `911`。
+- `forEach` 对应 `ForEachOps.ForEachOp`（`ForEachOps.java:132`），其顺序执行入口在 `148`。
+
+这说明终端操作真正不同的，不是“前面链条怎样描述”，而是“**最后由哪种 sink 来收口整个流，并决定最终怎么消费元素、怎么产出结果**”。
+
+所以终端操作不是被动结果读取器，而是这条执行管道真正的收口设计者。
+
+## 五、为什么短路能在执行期真正停下：因为 Sink 协议本来就允许取消请求往上冒
+
+### 先看短路不是构建期就停，而是执行期判断“够了”
+
+上一章已经从 API 分类上区分了短路中间操作和短路终端操作。但真正把“短路”从概念变成行为的，是执行期的取消协议。
+
+在 `copyInto()` 里，如果管线标记中带着短路语义，执行路径会转向 `copyIntoWithCancel()`（`AbstractPipeline.java:494+`），而不再是简单地 `forEachRemaining` 一把到底。这说明短路不是“链构建时就知道只要前几个元素”，而是**在运行时根据 sink 的取消请求决定是不是继续往后消费**。
+
+### 这正好把上一章的短路分类和本章的执行骨架接起来
+
+所以短路并不是 API 表面的语法便利，而是 Sink 协议里 `cancellationRequested()` 这一层真正发挥作用的结果。也正因为此，`limit`、`takeWhile`、`anyMatch`、`findFirst` 才不只是名字不同，而是在执行控制流上真的能让源数据提前停下。
+
+这一层最后把前后两章真正接通了：上一章讲“哪些操作语义允许短路”，这一章讲“这些语义在内部怎样通过执行协议真正停流”。
+
+## 收网：Stream 的惰性不是“先不执行”这么简单，而是“先建图纸，终端再焊管道”
+
+回到开头那个问题，现在已经能看清为什么中间操作在终端操作之前什么都没做了。因为它们在构建期的职责，本来就不是处理元素，而是搭一张 Pipeline 图纸：节点有哪些、前后怎么连、源头在哪、这条流是否还能继续链接或已经被消费。真正会碰元素的行为，则要等到终端操作通过 evaluate 按下开关，再把这些节点反向包成一条 Sink 消费管道。
+
+把整篇压成一张总图，就是：
+
+```text
+构建期
+  → Pipeline 链
+  → previousStage / nextStage / sourceStage
+  → 只登记操作，不碰数据
+
+执行期
+  → 终端操作调用 evaluate
+  → 反向 wrapSink 组装 Sink 链
+  → copyInto 单遍驱动源数据流过整条管道
+  → 短路时通过取消协议提前停流
 ```
 
-谓词此刻**一次都没执行**。链的形状(以 `filter → map → collect` 为例):
+如果说上一章解决的是“Stream 看起来像链式 API，但为什么前半段没有立刻执行”，这一章真正补上的就是：**这些看似静态的 API 链，内部到底怎样在终端操作来临时变成一条真正会逐元素消费的运行时管道。**
 
-```
- list.stream()          filter()             map()               collect()
-      │                    │                    │                    │
-   Head 节点  ──next──▶ filter 节点 ──next──▶ map 节点 ──(终端不进链)──▶ TerminalOp
-      ▲                    ▲                    ▲
-      └────── sourceStage/previousStage 回溯指针(每个节点都指回源头)
-```
-
-终端操作(collect/toList)不创建 Pipeline 节点——它是另一个体系(TerminalOp,§3)。
-
-关键设计(斜体):*中间操作 = 往链上挂节点——每次调用只 new 一个 Pipeline 节点、链上指针、O(1) 构建,不触碰任何数据。面试"为什么说 Stream 是懒的": 链构建期零执行,元素直到终端操作才流动;面试画"链条"图(源 → op1 → op2 → 终端),能画出双向指针 + depth 计数就是完整答案。*
-
-## 2. "数据怎么穿过每个操作" — Sink 链: 消费管道
-
-### 2.1 Sink 协议: begin → accept × N → end
-
-Pipeline 链是"静态图纸",真正让元素流动的是 **Sink**——一个带生命周期协议的 Consumer。契约写在 `Sink.java:33-51` 的 Javadoc 里(摘录): 调 `accept` 前必须先调 `begin(size)`(数据要来了,可选告知数量),全部数据送完后调 `end()`;Sink 有 initial ↔ active 两个状态,`begin` 进入 active、`end` 回到 initial 可复用。
-
-接口默认实现(三个方法分散,行内注释标注行号):
-
-```java
-// Sink.java:128 + 138 + 147-149(逐字;行内注释标注对应行号)
-    default void begin(long size) {}      // :128  数据到来前回调
-    default void end() {}                 // :138  数据送完回调
-    default boolean cancellationRequested() {   // :147  默认不取消
-        return false;
-    }
-```
-
-### 2.2 ChainedReference: 把下游攥在手里
-
-中间操作的 Sink 都继承 `Sink.ChainedReference`(`Sink.java:244` 起): 构造时接收下游 Sink 存进 `downstream` 字段,`begin/end/cancellationRequested` 全部委托给下游——链式结构就是这么来的:
-
-```java
-// Sink.java:244-249(逐字)
-    abstract static class ChainedReference<T, E_OUT> implements Sink<T> {
-        protected final Sink<? super E_OUT> downstream;
-
-        public ChainedReference(Sink<? super E_OUT> downstream) {
-            this.downstream = Objects.requireNonNull(downstream);
-        }
-```
-
-### 2.3 操作 → Sink: opWrapSink
-
-每个中间操作在自己的 Pipeline 节点里实现 `opWrapSink(flags, sink)`——把"下游 sink"包成"带本操作语义的 sink"。filter 的:
-
-```java
-// ReferencePipeline.java:167-180(逐字)
-            Sink<P_OUT> opWrapSink(int flags, Sink<P_OUT> sink) {
-                return new Sink.ChainedReference<P_OUT, P_OUT>(sink) {
-                    @Override
-                    public void begin(long size) {
-                        downstream.begin(-1);
-                    }
-
-                    @Override
-                    public void accept(P_OUT u) {
-                        if (predicate.test(u))
-                            downstream.accept(u);
-                    }
-                };
-            }
-```
-
-过滤语义就藏在 `accept` 里: 谓词通过才传给下游。`begin(-1)` 是向下游传"大小未知"——过滤后剩几个元素只有天知道。
-
-map 的:
-
-```java
-// ReferencePipeline.java:191-199(逐字)
-            Sink<P_OUT> opWrapSink(int flags, Sink<R> sink) {
-                return new Sink.ChainedReference<P_OUT, R>(sink) {
-                    @Override
-                    public void accept(P_OUT u) {
-                        downstream.accept(mapper.apply(u));
-                    }
-                };
-            }
-```
-
-### 2.4 wrapSink: 反向包裹,拼出整条消费链
-
-组装发生在终端求值时——`wrapSink` 从**最深处的 Pipeline 节点**出发,沿 previousStage 一路反向,每步把自己的 Sink 包在现有链条外面:
-
-```java
-// AbstractPipeline.java:518-525(逐字)
-    final <P_IN> Sink<P_IN> wrapSink(Sink<E_OUT> sink) {
-        Objects.requireNonNull(sink);
-
-        for ( @SuppressWarnings("rawtypes") AbstractPipeline p=AbstractPipeline.this; p.depth > 0; p=p.previousStage) {
-            sink = p.opWrapSink(p.previousStage.combinedFlags, sink);
-        }
-        return (Sink<P_IN>) sink;
-    }
-```
-
-反向包裹的结果——**先构造下游、再包上游**,最外层的 sink 就是链头的第一个操作:
-
-```
-终端 sink(collect 容器) ←─ map 的 accept 包一层 ←─ filter 的 accept 包一层
-                                                          │
-                源 Spliterator.forEachRemaining(最外层 filter sink) 驱动数据流
-```
-
-关键设计(斜体):*"操作 → Sink"是惰性 → 执行的转换点: 中间操作只提供 opWrapSink 的"配方",终端触发时才按配方把整条 Sink 链反向组装;数据从源头 Spliterator 单遍流过每条 Sink——无状态链不建任何中间集合(空间 O(1))。面试"数据被处理几次": 单遍;面试"Sink 和 Pipeline 的关系": Pipeline 描述结构(有哪些操作),Sink 描述消费行为(数据怎么流)。*
-
-## 3. "求值时机" — 终端按下开关
-
-### 3.1 evaluate: 终端入口
-
-绝大多数终端操作最终都调 `evaluate(terminalOp)`——唯一例外是 `toArray`,它走 `evaluateToArrayNode`(`AbstractPipeline.java:244-262`),串行分支最终同样落在 `wrapAndCopyInto` 上(`:550`):
-
-```java
-// AbstractPipeline.java:226-235(逐字)
-    final <R> R evaluate(TerminalOp<E_OUT, R> terminalOp) {
-        assert getOutputShape() == terminalOp.inputShape();
-        if (linkedOrConsumed)
-            throw new IllegalStateException(MSG_STREAM_LINKED);
-        linkedOrConsumed = true;
-
-        return isParallel()
-               ? terminalOp.evaluateParallel(this, sourceSpliterator(terminalOp.getOpFlags()))
-               : terminalOp.evaluateSequential(this, sourceSpliterator(terminalOp.getOpFlags()));
-    }
-```
-
-串行分支: `terminalOp.evaluateSequential(this, sourceSpliterator(...))`——`sourceSpliterator` 从链头取出数据源,取完置 null(`AbstractPipeline.java:397-410`,源只被消费一次)。
-
-终端操作自己提供链底的 sink: collect 走 `ReduceOps.makeRef(collector)`(`ReduceOps.java:155-156`),求值时先 `makeSink()` 建容器 sink 再灌:
-
-```java
-// ReduceOps.java:911-914(逐字)
-        public <P_IN> R evaluateSequential(PipelineHelper<T> helper,
-                                           Spliterator<P_IN> spliterator) {
-            return helper.wrapAndCopyInto(makeSink(), spliterator).get();
-        }
-```
-
-ForEachOps 更极端——`ForEachOp` 自己就是 Sink(`ForEachOps.java:127-128`,`implements TerminalOp<T, Void>, TerminalSink<T, Void>`),`evaluateSequential` 直接把 `this` 塞进去(`:146-149`)。
-
-### 3.2 wrapAndCopyInto: 组装 + 单遍遍历
-
-`wrapAndCopyInto`(`AbstractPipeline.java:473-476`)两步走: wrapSink 组装 → copyInto 驱动:
-
-```java
-// AbstractPipeline.java:473-476(逐字)
-    final <P_IN, S extends Sink<E_OUT>> S wrapAndCopyInto(S sink, Spliterator<P_IN> spliterator) {
-        copyInto(wrapSink(Objects.requireNonNull(sink)), spliterator);
-        return sink;
-    }
-```
-
-`copyInto` 就是完整生命周期——**begin → forEachRemaining → end**,短路标志决定走不走取消路径:
-
-```java
-// AbstractPipeline.java:479-490(逐字)
-    final <P_IN> void copyInto(Sink<P_IN> wrappedSink, Spliterator<P_IN> spliterator) {
-        Objects.requireNonNull(wrappedSink);
-
-        if (!StreamOpFlag.SHORT_CIRCUIT.isKnown(getStreamAndOpFlags())) {
-            wrappedSink.begin(spliterator.getExactSizeIfKnown());
-            spliterator.forEachRemaining(wrappedSink);
-            wrappedSink.end();
-        }
-        else {
-            copyIntoWithCancel(wrappedSink, spliterator);
-        }
-    }
-```
-
-### 3.3 全景: collect(toList()) 按下开关后
-
-```
-collect(toList())                        // ReferencePipeline.java:568
-  └─ ReduceOps.makeRef(collector)        // 建 TerminalOp(ReduceOps.java:155)
-  └─ evaluate(op)                        // AbstractPipeline.java:226
-      └─ evaluateSequential              // ReduceOps.java:911
-          └─ makeSink()                  // 终端 sink(链底,collect 容器)
-          └─ wrapAndCopyInto            // AbstractPipeline.java:473
-              ├─ wrapSink               // 反向组装 filter/map 的 Sink
-              └─ copyInto               // begin(大小) → forEachRemaining → end
-                  └─ 源 Spliterator.tryAdvance 逐个拉元素 → 灌进最外层 Sink
-```
-
-类注释的原话(`AbstractPipeline.java:57-65`,摘录): "the source data is not consumed until a terminal operation begins"——数据在终端操作开始前从未被消费。顺带一提: 绕开终端操作直接 `stream.iterator()` 也是惰性的——非头节点走 `wrap(...)`(`:366-368`)包一个惰性 Spliterator,元素照样按需拉取。
-
-关键设计(斜体):*求值 = "链组装 + 单遍遍历"——中间操作构建期零执行成本,全部成本在终端。面试"collect 前发生了什么": 只有链构建,直到 evaluate 数据才流动;面试"惰性有什么好处": 短路(§4)、无限流、免中间集合。*
-
-## 4. "惰性的收益" — 短路与无限流
-
-### 4.1 SHORT_CIRCUIT: 短路标记
-
-`StreamOpFlag`(`StreamOpFlag.java`,753 行)里定义了一个特殊标志:
-
-```java
-// StreamOpFlag.java:326-328(逐字)
-    // 12, 0x01000000
-    SHORT_CIRCUIT(12,
-                  set(Type.OP).set(Type.TERMINAL_OP));
-```
-
-`IS_SHORT_CIRCUIT`(`:628-630`)是注入位。谁注入它:
-
-- **中间**: limit 系(`SliceOps.java:543-545`)——注意是**带 limit 才注入**,纯 skip 不注入;takeWhile(`WhileOps.java:50`)
-- **终端**: anyMatch/allMatch/noneMatch(`MatchOps.java:218-219`)、findFirst/findAny(`FindOps.java:130`)
-
-标志沿构造器里的 `combineOpFlags`(`AbstractPipeline.java:209`)一路合成进每个节点的 `combinedFlags`;终端标志在 `evaluate` 时经 `sourceSpliterator(terminalOp.getOpFlags())` 并入最后一段(`AbstractPipeline.java:447-450`)。
-
-### 4.2 取消传播: 每轮拉取前先问一句
-
-`copyInto` 检查到短路标志就走 `copyIntoWithCancel`(`AbstractPipeline.java:492-505`)——沿 previousStage 走回头节点,调 `forEachWithCancel`:
-
-```java
-// ReferencePipeline.java:125-129(逐字)
-    final boolean forEachWithCancel(Spliterator<P_OUT> spliterator, Sink<P_OUT> sink) {
-        boolean cancelled;
-        do { } while (!(cancelled = sink.cancellationRequested()) && spliterator.tryAdvance(sink));
-        return cancelled;
-    }
-```
-
-**每拉一个新元素之前,先问 Sink 链要不要取消**。`cancellationRequested()` 默认 false(`Sink.java:147-149`),`ChainedReference` 委托下游(`:262-264`),终点是各操作的 Sink: limit 的切片 Sink 计数归零即取消(`SliceOps.java:186-208` 区间,截取):
-
-```java
-// SliceOps.java:186-187 + 206-208(截取,逐字;行内注释标注对应行号)
-                    long n = skip;
-                    long m = limit >= 0 ? limit : Long.MAX_VALUE;   // 186-187
-...
-                    @Override
-                    public boolean cancellationRequested() {        // 206
-                        return m == 0 || downstream.cancellationRequested();
-                    }
-```
-
-findFirst 的 `FindSink` 拿到值就取消(`FindOps.java:185-188`):
-
-```java
-// FindOps.java:185-188(逐字)
-        @Override
-        public boolean cancellationRequested() {
-            return hasValue;
-        }
-```
-
-### 4.3 无限流为什么不死循环
-
-`Stream.iterate(seed, f)`(`Stream.java:1214`)返回的是 `Spliterators.AbstractSpliterator(Long.MAX_VALUE, ORDERED|IMMUTABLE)`——一个**按需生成**的 Spliterator,`tryAdvance` 才计算下一个值:
-
-```java
-// 用法示意(API 形式,非源码片段)
-Stream.iterate(0, n -> n + 1)     // 惰性序列: 不被拉就不生成
-    .filter(x -> x % 2 == 0)      // 谓词在 accept 里,拉一个测一个
-    .limit(3)                     // 注入 SHORT_CIRCUIT;m 归零请求取消
-    .findFirst()                  // FindSink 有值即取消
-```
-
-`forEachWithCancel` 的循环保证: 拉→测→findFirst 命中→`cancellationRequested` 返回 true→循环终止。三个要素缺一不可——**惰性生成(iterate)+ 标志传播(combinedFlags)+ 每轮检查(forEachWithCancel)**。
-
-关键设计(斜体):*短路 = "提前终止传播"——短路操作注入 SHORT_CIRCUIT 标志,combinedFlags 合成后,遍历循环每轮检查 cancellationRequested,任一环节请求取消即停。面试"无限流为什么不死循环": 惰性 + 短路;面试"短路操作有哪些": limit/takeWhile(中间)、findFirst/anyMatch/allMatch/noneMatch(终端,分类见 01 篇 §1.2)。*
-
-跨层标注: [域 08 集合——数据源是集合的 Spliterator,`Collection.stream()` 直接走 `StreamSupport.stream(spliterator, false)`(`Collection.java:710-712`);域 04 反射 / 域 01 字符串(03-build-concat)——filter/map 的谓词与函数是 invokedynamic 引导的 lambda,执行期可被 JIT 内联]
-
-## 核心悬念
-
-链与惰性通了——**每个中间操作怎么实现**?filter 包装 Sink 已经看过,那 sorted 为什么"有状态"(要缓存全部元素再排序)?distinct 用什么去重?limit 怎么精确切片?takeWhile 怎么靠 SHORT_CIRCUIT 停住?——下一篇: 中间操作实现。
-
-> → [16-stream/03 — 中间操作实现](03-intermediate-ops.md)
+下一篇继续顺着这条执行骨架往下走：既然 filter/map 等中间操作本质上是在提供 `opWrapSink` 配方，那无状态操作、有状态操作、短路操作各自在封装什么不同的行为？这就进入 `16-stream/03-intermediate-ops.md` 的主线。

@@ -1,422 +1,310 @@
-# 02. 应用还在跑——你怎么知道谁活着？— 并发标记 + SATB
+# 02. 应用线程还在改图，G1 为什么还敢并发标记？— 并发标记 + SATB
 
-> **前置依赖**:[26-g1-gc/01 — 堆被切成 2048 块](01-heapregion.md):Region 模型与 §1.1 尺寸公式,本篇的 bitmap/region 语义都建立在它上面;[25-gc-framework/01 — BarrierSet + Access API](openjdk/vol-02/25-gc-framework/01-barrier-access.md):pre-write barrier 的挂载点与"GC 在每次 oop 访问旁听"的机制,本篇把 G1 那道 SATB pre-barrier 讲透;[25-gc-framework/02 — CollectedHeap + 分配路径](openjdk/vol-02/25-gc-framework/02-collected-heap.md):分配路径与暂停语义
-> → **后续**:[26-g1-gc/03 — RSet + CardTable](03-rem-set.md)
-> 关联域: 01-oops(对象访问)、15-c2(C2 barrier 节点优化)、08-interpreter(解释器模板)
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64 / G1`。这里讨论的是 G1 并发标记的主协议：SATB pre-barrier、`G1ConcurrentMarkThread`、双 bitmap、remark 与 cleanup 怎样协作，保证在应用线程仍然运行并修改对象图时，G1 仍能得到一份“标记开始时”的活对象快照。RSet/card table 的细节放下一篇展开。
+>
+> **前置依赖**：[01 — 为什么 G1 要把堆切成一张网格？— `HeapRegion` 与 `G1CollectedHeap`](01-heapregion.md)、[25-gc-framework/01 — `BarrierSet` + Access API](../25-gc-framework/01-barrier-access.md)、[25-gc-framework/02 — `CollectedHeap` + 分配路径](../25-gc-framework/02-collected-heap.md)
+> → **后续**：[03 — RSet + CardTable](03-rem-set.md)
 
-经典 GC 标记是 STW 的: 全停,安全。G1 说"标记在你跑着的时候做"——应用在改引用,标记线程怎么知道"我还没扫到的那个对象被另一个线程改掉了"?三件事: SATB 快照保证不丢对象(§1);并发标记循环的状态机与实测(§2);remark 补漏 + liveness 入账(§4,把存活字节数记入每个 Region 的 `_next_marked_bytes`,26-01 §1.3 见过它)。
+一说“并发标记”，最容易冒出来的直觉问题其实非常朴素：
 
----
+**你还在跑应用线程，它还在改引用、分配对象、把旧边改成新边，标记线程凭什么还能说自己最终知道‘谁活着’？**
 
-## 1. 快照: 先拍照,后追踪 — SATB
+如果把这个问题压得更尖一点，就是：在 stop-the-world 标记里，GC 能看到的是一个静止世界；而在 G1 并发标记里，对象图本身在不断动。你不可能一边拍照，一边又要求被拍对象永远别动。
 
-### 丢失的场景
+这就逼出本篇最该回答的问题：**应用线程在并发标记期间还在不断改引用，G1 为什么还敢说自己最终能知道‘标记开始时谁活着’？它为什么不追当前世界，而要坚持追‘旧世界快照’？SATB、TAMS、双 bitmap、remark 各自到底在补哪一个漏洞？**
 
-假设不做任何记录。应用先把 A.b 从 B 改成 C——然后标记线程才扫到 A,它读到的是 C,B 永远没机会被扫描。而 B 只有 A 这一条入边,在标记开始那一刻是活的。B 在对象图里消失了。回收一个活对象 = 崩溃。
+先把答案压成一句话：**G1 并发标记的关键不是“标得多快”，而是“先冻结旧世界，再允许应用继续改图”。SATB pre-barrier 记录的是被覆盖掉的旧引用，不是新引用；`_next_top_at_mark_start` 划出本轮该看的对象边界；并发线程只往 `_next_mark_bitmap` 里画本轮结果，remark 再在 STW 下把剩余 SATB buffers 和线程根补齐，最后把这轮 bitmap 与每个 Region 的 `_next_marked_bytes` 一起安装成下一轮 pause 的决策依据。**
 
-**解决: 在写引用之前,把旧值先保存下来。** 标记线程拿到"标记开始时所有引用的快照",旧的引用指向的对象一定被补扫,绝不会丢。
+## 先试两个最自然的办法，看看为什么都不行
 
-### pre-write barrier
+### 朴素方案一：并发标记只要足够快，就能追上当前对象图
 
-`write_ref_field_pre`(g1BarrierSet.inline.hpp:36-46):
+这是最自然的第一反应。
 
-```cpp
-// g1BarrierSet.inline.hpp:36-46(截取核心,逐字)
-inline void G1BarrierSet::write_ref_field_pre(T* field) {
-  if (HasDecorator<decorators, IS_DEST_UNINITIALIZED>::value ||
-      HasDecorator<decorators, AS_NO_KEEPALIVE>::value) {
-    return;
-  }
+既然应用线程会改图，那标记线程就追着它跑：你改一条边，我尽快看到；你分配一个对象，我尽快扫描它；只要速度足够快，最终总能跟上当前世界。
 
-  T heap_oop = RawAccess<MO_VOLATILE>::oop_load(field);
-  if (!CompressedOops::is_null(heap_oop)) {
-    enqueue(CompressedOops::decode_not_null(heap_oop));
-  }
-}
+这个想法的问题在于，它把并发标记当成了一个“追最新状态”的赛车游戏，而对象图并不是一个有终点的赛道。
+
+因为 mutator 的修改不是单调的：
+
+- 某条旧边可以被删掉；
+- 新边可以被加上；
+- 同一个对象可能在标记线程赶到之前就已经被改过好几轮。
+
+如果标记目标定义成“始终追当前世界”，你就会遇到一个根本问题：**当前世界没有稳定截面。** 你永远不知道“这一轮标记到底算完成在哪个时间点的图”。
+
+所以 G1 并没有试图去追一个不断变化的“现在”，而是把目标先改写成：“给我一份标记开始那一刻的逻辑快照，只要当时活着的对象别丢就行。”
+
+也就是说，并发标记的第一个关键选择不是算法，而是**目标定义**。
+
+### 朴素方案二：既然要保快照，那写引用后把新值记下来就行
+
+第二个也很自然的想法是：好，我接受不追当前世界，只要保住一个快照。那写引用时是不是应该把“新值”记下来？毕竟新值代表修改后的图，记录新值似乎比记录旧值更直觉。
+
+这个想法正好踩中了 SATB 最反直觉、也最精妙的地方。
+
+并发标记要保的不是“修改后世界长什么样”，而是“**修改前、标记开始时的世界里哪些对象原本还连着**”。如果某条边从 `A -> B` 改成 `A -> C`，真正危险的是：标记线程稍后再来扫 A 时，只看到 C，而把 B 永远漏掉。
+
+换句话说，**快照会丢失的不是新边，而是被覆盖掉的旧边。**
+
+所以要保住快照，你必须在写入发生前先把旧值记下来。多记一些新边无伤大雅，漏掉旧边则可能直接把“标记开始时本来活着的对象”错回收掉。
+
+这就是为什么 G1 选择 SATB（Snapshot-At-The-Beginning）：它追的不是新边，而是旧边。
+
+所以第二种方案失败，不是因为新值不重要，而是因为**对“保旧世界快照”这件事来说，被覆盖掉的旧值才是不能丢的那部分信息。**
+
+这两个失败方案合起来，正好引出本篇主线：**G1 并发标记不是在追当前世界，而是在 mutator 继续改图的同时，尽力保住标记开始时那份旧世界快照。**
+
+## SATB：为什么 pre-write barrier 记的是旧值
+
+先看这套快照协议最核心的一层：SATB pre-write barrier。
+
+### `write_ref_field_pre`：真正拦的是“旧边即将被覆盖”
+
+G1 的 pre-barrier 在 `write_ref_field_pre` 里。逻辑很短：
+
+- 如果目标位置还没初始化，或者这次访问不需要 keepalive，就直接返回；
+- 否则先从 field 里读出旧值；
+- 旧值非空，就 `enqueue(decode_not_null(old_value))`。`src/hotspot/share/gc/g1/g1BarrierSet.inline.hpp:36`
+
+这段代码最值得记住的一点是：它不是在写完之后看“新引用是谁”，而是在写之前先把“旧引用是谁”拎出来。
+
+这就是 SATB 的全部灵魂：**先拍下旧边，再允许你改图。**
+
+### 为什么 `IS_DEST_UNINITIALIZED` 和 `AS_NO_KEEPALIVE` 可以跳过
+
+这里的两个早退条件也很有信息量。
+
+- `IS_DEST_UNINITIALIZED` 说明这是新对象或未初始化目的地，没有“被覆盖掉的旧值”可保；
+- `AS_NO_KEEPALIVE` 则说明这次访问语义上不该因此额外延长对象活性。
+
+这说明 pre-barrier 不是“凡是写引用都记一笔”，而是在非常精确地回答：**这次写操作会不会让某条旧边从快照里消失。**
+
+### `enqueue`：为什么队列还要区分 Java 线程本地和共享队列
+
+真正入队在 `G1BarrierSet::enqueue()` 里。这里又有两个特别关键的点：
+
+- 如果 `_satb_mark_queue_set` 当前不 active，直接返回；
+- 如果当前线程是 JavaThread，就进自己的线程本地 SATB 队列；否则才走共享队列并加锁。`src/hotspot/share/gc/g1/g1BarrierSet.cpp:61`
+
+这说明 SATB 不只是正确性协议，还是一套非常刻意的**开销控制协议**：
+
+- 并发标记没开时，pre-barrier 基本等于不存在；
+- 标记期开启时，大头成本压到线程本地 buffer，尽量避免共享锁。
+
+所以本节最该记住的一句话是：**SATB pre-barrier 的本体不是“有个队列”，而是“只在并发标记期，为每条即将消失的旧边留一张快照存根”。**
+
+## 并发标记线程：为什么 root region 必须先扫完再进入常规并发循环
+
+有了 SATB，还不够。GC 还得真的有一条并发线程去消费这些旧边，并把活性结果画进位图里。
+
+### `run_service`：不是“后台一直标”，而是按阶段睡醒一轮轮干
+
+`G1ConcurrentMarkThread::run_service()` 的骨架非常清楚：
+
+- 平时睡在 `sleep_before_next_cycle()`；
+- 被唤醒后把 phase 切到 `CONCURRENT_CYCLE`；
+- 然后一轮轮推进 clear claimed marks、scan root regions、mark from roots、remark、cleanup 这些子阶段。`src/hotspot/share/gc/g1/g1ConcurrentMarkThread.cpp:247`
+
+也就是说，G1 并发标记线程不是“永远在后台一点点扫”，而是一轮并发标记周期里的多阶段状态机；其中 `mark_from_roots()` 只是这整轮 cycle 里最核心、但不是唯一的并发工作段。
+
+### 为什么 root region 扫描必须在后续 evacuation 前先完成
+
+`run_service()` 里有一段注释非常重要：root regions 的扫描必须在下一次 GC 前完成，否则后续 pause 可能在 root region 还没扫完的情况下就先把对象拷走，导致正确性问题。`src/hotspot/share/gc/g1/g1ConcurrentMarkThread.cpp:279`
+
+这一步说明并发标记不是“所有阶段都可以随便和暂停交织”。相反，它有一段非常刚性的先后关系：**某些起始根区域必须先补标完成，后面的 evacuation pause 才敢继续照常搬对象。**
+
+所以并发标记线程不是一个“自由后台线程”，它其实在不断和暂停路径做正确性对齐。
+
+## `mark_from_roots` 与 `make_reference_grey`：为什么 below-finger 才入灰栈
+
+真正的大头并发工作从 `mark_from_roots()` 开始。`src/hotspot/share/gc/g1/g1ConcurrentMark.cpp:973`
+
+### `mark_from_roots`：它干的不是单线程 DFS，而是 worker gang 的时间片协作
+
+`mark_from_roots()` 先算 active workers 数，再构造 `G1CMConcurrentMarkingTask`，最后让 concurrent workers 跑这份任务。`src/hotspot/share/gc/g1/g1ConcurrentMark.cpp:973`
+
+所以这里的并发标记不是“一个后台线程独自 DFS 堆”，而是 worker gang 共同消费一份图遍历工作。
+
+### `make_reference_grey`：先在 next bitmap 里原子置位，再决定要不要入灰栈
+
+最关键的对象标记入口在 `make_reference_grey()`：
+
+- 先调 `_cm->mark_in_next_bitmap(_worker_id, obj)`；
+- 如果这次 CAS 置位失败，说明别人已经抢先标过，直接返回；
+- 置位成功后，再看这个对象是不是在 global finger 之下；
+- 只有已经被 bitmap 扫描面“越过去”的区域，才需要把对象压灰栈补扫。`src/hotspot/share/gc/g1/g1ConcurrentMark.inline.hpp:213`
+
+这一步特别值得讲清楚，因为它说明并发标记并不是“凡是新发现对象都一律压队列”，而是非常在意“这个对象当前位于扫描进度线的哪一侧”。
+
+- 如果对象还在 finger 前面，后面的位图扫描迟早会自然遇到它；
+- 如果对象已经落在 finger 后面，那说明扫描指针可能已经越过它了，这时不压灰栈就真有可能漏掉它的出边。
+
+所以 below-finger 的判断，本质上是在补“**位图扫描面已经扫过去，而 SATB/引用遍历刚把你补标出来**”这种时序漏洞。
+
+### 为什么 typeArray 甚至不入栈
+
+`make_reference_grey()` 里对 `typeArray` 还有一条专门分支：直接 `process_grey_task_entry<false>(entry)`，不走正常灰栈压入。原因也写得很清楚：primitive array 没有引用字段，不值得为了它再走一圈 mark stack。`src/hotspot/share/gc/g1/g1ConcurrentMark.inline.hpp:213`
+
+这再次说明并发标记的重点不是“统一把所有标记对象都做成同一种任务”，而是**在正确性成立前提下尽量减少无意义工作。**
+
+## 双 bitmap 与 TAMS：为什么本轮结果不能直接覆盖上一轮结果
+
+并发标记的第二个容易被想简单的点，是位图。
+
+很多读者第一次看双 bitmap 时会想：两张位图是不是只是实现方便，多一张做中转？
+
+G1 这里不是这样。
+
+### `_prev_mark_bitmap` / `_next_mark_bitmap`：分别代表“上一轮世界结论”和“本轮正在画的结论”
+
+G1ConcurrentMark 里明确有：
+
+- `_mark_bitmap_1`
+- `_mark_bitmap_2`
+- `_prev_mark_bitmap`
+- `_next_mark_bitmap`。`src/hotspot/share/gc/g1/g1ConcurrentMark.hpp`（对应实现见字段引用）
+
+这套结构的关键不在“有两张位图”，而在它们的角色分工：
+
+- `_prev` 代表上一轮已经完成、可被后续回收/策略路径当作稳定基准消费的标记结果；
+- `_next` 代表本轮并发标记正在构造中的结果。
+
+如果你一边并发标记，一边直接覆盖上一轮结果，那么后续依赖“上一轮稳定结论”的路径就会失去基准。所以下一轮结果必须先在 next 上独立生长，直到 remark 完成、确认补漏结束，才整体安装成新的 prev。
+
+### TAMS 为什么是位图语义的边界线
+
+上一章留下的 TAMS 双指针在这里终于接上了：`note_start_of_marking()` 记下 `_next_top_at_mark_start = top()`，`note_end_of_marking()` 再把它转存到 `_prev_top_at_mark_start`。`src/hotspot/share/gc/g1/heapRegion.inline.hpp:243`
+
+这意味着本轮位图要描述的，不是“当前 Region 里现在所有对象”，而是“**标记开始那一刻之前已经存在于 Region 里的对象**”。标记开始后新分配的对象位于 TAMS 之上，它们不属于这一轮快照统计范围。
+
+所以 TAMS 和双 bitmap 其实是在共同回答一个问题：**本轮活性结果到底是对哪一时刻的世界做出的判断。**
+
+## remark 与 cleanup：为什么最后仍然必须 STW 补漏和入账
+
+并发标记真正最容易被低估的一步，是最后那两个很短的暂停：remark 和 cleanup。
+
+如果只看总时间，它们常常很短；但从正确性上说，它们是整轮并发标记真正落地的关键关门动作。
+
+### `remark`：不是“最后扫一下”，而是关闭快照窗口
+
+`remark()` 一开始就要求 `assert_at_safepoint_on_vm_thread()`。`src/hotspot/share/gc/g1/g1ConcurrentMark.cpp:1139`
+
+随后最关键的动作包括：
+
+- `finalize_marking()`
+- 把所有线程的 SATB active 统一关掉；
+- `flush_all_task_caches()`
+- `swap_mark_bitmaps()`
+- `Update Remembered Set Tracking Before Rebuild`
+- `Reclaim Empty Regions()`。`src/hotspot/share/gc/g1/g1ConcurrentMark.cpp:1139`
+
+这说明 remark 不是“并发标记的尾声日志”，而是**正式宣布‘旧世界快照窗口现在关闭，本轮结果要安装了’** 的阶段。
+
+### `finalize_marking()`：必须保证剩余 SATB buffers 真正清空
+
+`finalize_marking()` 里有一个非常强的保证：如果没有 overflow，那么 `completed_buffers_num()` 必须为 0。`src/hotspot/share/gc/g1/g1ConcurrentMark.cpp:1858`
+
+这句话特别关键，因为它说明 remark 的职责之一就是：**把并发期间 mutator 留下的那些 SATB 存根真正消化干净。**
+
+并发阶段可以边跑边攒 buffer，但如果 remark 结束时 completed buffers 还没清光，那这一轮快照就还没真正闭合。
+
+### `swap_mark_bitmaps` 与 liveness 入账为什么在这里发生
+
+remark 里真正把本轮结果“安装”出来的动作，就是 `swap_mark_bitmaps()`，再配合 `Update Remembered Set Tracking Before Rebuild` 这一步，把 Region 层面的 liveness 统计和 rebuild 前的 RSet tracking 状态一起收口进去。`src/hotspot/share/gc/g1/g1ConcurrentMark.cpp:1178`
+
+这一步特别重要，因为它说明：**并发循环本身不是想什么时候记 `_next_marked_bytes` 就什么时候记。** 真正让本轮活性结果成为“下一轮策略可消费数据”的，是 remark 关门后的安装过程；而这个阶段名字虽然叫 `RemSetTracking`，实际做的不只是 RSet tracking policy 切换，还包含 marked bytes 与 TAMS 的收尾。
+
+### cleanup：不是重算活性，而是收尾和后续准备
+
+`cleanup()` 同样要求 safepoint。它做的是：
+
+- `Update Remembered Set Tracking After Rebuild`
+- 可选的 liveness 打印
+- 统计和阶段收尾。`src/hotspot/share/gc/g1/g1ConcurrentMark.cpp:1356`
+
+这说明 cleanup 不是“再算一遍活性”，而是**把 remark 之后还需要补的一些 tracking/cleanup 状态做完，给下一轮 GC 或 marking 准备好场地。**
+
+所以本节最该记住的一句话是：**remark 负责关门并安装结果，cleanup 负责收尾并把舞台整理给下一轮。**
+
+## 到这里为止，主线其实只发生了四件事
+
+如果前面细节很多，这里先把整件事压回四步：
+
+1. G1 一开始就放弃追“当前世界”，改为追“标记开始时的旧世界快照”；
+2. SATB pre-barrier 负责在旧边消失前把它们先记下来；
+3. 并发线程负责把这份旧世界快照逐步画进 `_next_mark_bitmap`；
+4. remark 再在 STW 下把剩余 SATB、线程根和 Region liveness 一起收口，并把本轮结果安装成新的稳定基准。
+
+只要这四步还在脑子里，并发标记就不会再像一堆 barrier、bitmap 和 remark 阶段名的拼盘。
+
+## 常见误解澄清
+
+### 误解一：SATB 记录的是新引用
+
+不是。
+
+SATB pre-barrier 关心的是“即将被覆盖掉的旧值”，因为快照真正会丢的是旧边，不是新边。`src/hotspot/share/gc/g1/g1BarrierSet.inline.hpp:36`
+
+### 误解二：并发标记是在追当前最新对象图
+
+不对。
+
+它追的是标记开始时的旧世界快照；当前世界的变化被容忍，只要不会把那张快照里的活对象漏掉。TAMS 和 SATB 都是在为这个目标服务。
+
+### 误解三：双 bitmap 只是实现方便，多一张做缓存
+
+不是。
+
+`_prev` 和 `_next` 代表两轮不同时间语义的活性结果：一张稳定可消费，一张正在构建。没有这层分工，remark/cleanup 和下一轮策略都失去稳定基准。
+
+### 误解四：remark 只是日志里一个很短的 STW 尾声
+
+也不是。
+
+remark 是关闭快照窗口、清空剩余 SATB、swap 位图并安装 liveness 结果的关键关门阶段。时间短不代表职责轻。`src/hotspot/share/gc/g1/g1ConcurrentMark.cpp:1139`
+
+### 误解五：cleanup 负责重新计算全部 liveness
+
+不对。
+
+主要的 mark 完成与位图安装发生在 remark；cleanup 更偏 tracking 收尾和下一轮准备。`src/hotspot/share/gc/g1/g1ConcurrentMark.cpp:1356`
+
+## 收网：G1 并发标记的本质，不是追当前世界，而是守住旧世界快照
+
+现在再回头看最开头那个问题，答案已经能收成一张总图了。
+
+```text
+标记开始前
+  initial-mark pause
+    └─ 记录 TAMS / 打开 SATB 队列
+
+并发期间
+  mutator 写引用
+    └─ pre-write barrier 把旧值 enqueue 到 SATB queues
+  G1ConcurrentMarkThread
+    └─ drain SATB -> 扫灰对象 -> 在 next bitmap 置位
+
+remark (STW)
+  ├─ 重扫线程根
+  ├─ drain 剩余 SATB buffers
+  ├─ swap_mark_bitmaps
+  └─ 把 liveness 入账到 Region
+
+cleanup
+  └─ 主要做回收空 Region 与后续 tracking 收尾，不重新计算整轮活性
 ```
 
-`IS_DEST_UNINITIALIZED`(新对象 TLAB 用,不需旧值)和 `AS_NO_KEEPALIVE`(弱引用的 load 不触发 keepalive)直接返回。其他情况 enqueue 旧值。真正的逻辑在 enqueue(g1BarrierSet.cpp:61-73):
+把它再压成三句话：
 
-```cpp
-// g1BarrierSet.cpp:61-73(截取核心,逐字)
-void G1BarrierSet::enqueue(oop pre_val) {
-  // Nulls should have been already filtered.
-  assert(oopDesc::is_oop(pre_val, true), "Error");
+- G1 并发标记真正冻结的不是线程，而是“标记开始时的旧世界快照”。
+- SATB、TAMS、双 bitmap 和 remark 各自补的是不同漏洞：旧边会消失、新对象会继续分配、本轮结果不能直接覆盖上一轮、线程根和剩余 buffers 最后必须关门清空。
+- 只有当这些协议一起成立时，G1 才敢让应用线程继续跑着，而自己并发地算出“这一轮到底谁活着”。
 
-  if (!_satb_mark_queue_set.is_active()) return;
-  Thread* thr = Thread::current();
-  if (thr->is_Java_thread()) {
-    G1ThreadLocalData::satb_mark_queue(thr).enqueue(pre_val);
-  } else {
-    MutexLockerEx x(Shared_SATB_Q_lock, Mutex::_no_safepoint_check_flag);
-    _satb_mark_queue_set.shared_satb_queue()->enqueue(pre_val);
-  }
-}
-```
+所以这一篇真正该记住的，不是 barrier 名字和 phase 名字。
 
-两个要点:
+真正该记住的是：**G1 并发标记的核心从来不是“边跑边标”，而是“先定义要保的那一刻，再用一整套协议保证那一刻不会被改图行为撕裂”。** 这就是它能一边让应用继续跑、一边又敢在下一次 pause 时拿存活度做决策的根本前提。
 
-1. **`is_active()` 门控** — 队列只在并发标记进行中打开。标记没在跑时 pre-barrier 等于不存在,0 开销。
-2. **线程本地** — Java 线程写自己的 `satb_mark_queue`(per-thread buffer),从 buffer 尾部递减写 `_index`(25-gc-framework/05 的 PtrQueue 语义),无锁。buffer 写满才整块交给 completed buffer 列表——常规开销 ~15-20 cycles(推断值,无源码直证),仅 SATB active 期间。非 Java 线程(编译器线程)进共享队列(Shared_SATB_Q_lock)。
+下一篇就顺着这套快照协议继续往下走。并发标记已经知道“谁活着”，但 evacuation pause 还要知道“老年代里谁指向我要搬的年轻对象”。那就轮到 G1 的另一根支柱：RSet 和 CardTable 了。
 
-### queue 的设计
-
-SATBMarkQueue(satbMarkQueue.hpp:45-88) 继承 PtrQueue: 每线程一个 buffer,buffer 里的 oop 是"标记开始时存活的引用"——它们可能已经过期(对象已死),但标记时按存活处理。多的标记无害,漏的标记致命。
-
----
-
-## 2. 并发标记循环 — 状态机
-
-### run_service: 循环骨架
-
-`G1ConcurrentMarkThread::run_service`(g1ConcurrentMarkThread.cpp:247-265):
-
-```cpp
-// g1ConcurrentMarkThread.cpp:247-265(截取核心,逐字)
-void G1ConcurrentMarkThread::run_service() {
-  _vtime_start = os::elapsedVTime();
-
-  G1CollectedHeap* g1h = G1CollectedHeap::heap();
-  G1Policy* g1_policy = g1h->g1_policy();
-
-  G1ConcPhaseManager cpmanager(G1ConcurrentPhase::IDLE, this);
-
-  while (!should_terminate()) {
-    // wait until started is set.
-    sleep_before_next_cycle();
-    if (should_terminate()) {
-      break;
-    }
-
-    cpmanager.set_phase(G1ConcurrentPhase::CONCURRENT_CYCLE, false /* force */);
-
-    GCIdMark gc_id_mark;
-```
-
-while + sleep: 平时睡在 CGC_lock 上。年轻代 GC 检查后发现占用超 IHOP(或 humongous 分配)→ `Concurrent Start`→ 唤醒此线程 → set_phase → 开始 cycle。整个循环的阶段序列如下:
-
-### 实测: 完整 Concurrent Cycle
-
-**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/26-g1-gc-concurrent-mark-demo.txt)**: 512KB 数组在 1MB region 下含 16B 头共 512KB+16B → humongous 分配触发 Concurrent Start。-Xms32m -Xmx64m -XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=30,-Xlog:gc -Xlog:gc+marking=info:
-
-```
-GC(0) Pause Young (Concurrent Start) (G1 Humongous Allocation) 9M->8M(34M) 2.188ms
-GC(1) Concurrent Cycle
-GC(1) Concurrent Clear Claimed Marks 0.004ms
-GC(1) Concurrent Scan Root Regions 0.301ms
-GC(1) Concurrent Mark (0.027s)
-GC(1) Concurrent Mark From Roots 1.094ms
-GC(1) Concurrent Preclean 0.076ms
-GC(1) Concurrent Mark (0.027s, 0.028s) 1.181ms
-GC(1) Pause Remark 18M->18M(34M) 0.168ms
-GC(1) Concurrent Rebuild Remembered Sets 0.163ms
-GC(1) Pause Cleanup 20M->20M(34M) 0.021ms
-GC(1) Concurrent Cleanup for Next Mark 0.215ms
-GC(1) Concurrent Cycle 2.541ms
-```
-
-整个 cycle 2.541ms,两次 STW 暂停(Remark 0.168ms + Cleanup 0.021ms = 0.189ms)不到总时间的 8%,92% 的时间标记与应用并行。
-
-### Root Regions: 为什么 survivor 要优先扫?
-
-G1CMRootRegions 的注释(g1ConcurrentMark.hpp:228-240):
-
-```cpp
-// g1ConcurrentMark.hpp:228-240(截取核心,逐字)
-// Root Regions are regions that are not empty at the beginning of a
-// marking cycle and which we might collect during an evacuation pause
-// while the cycle is active. Given that, during evacuation pauses, we
-// do not copy objects that are explicitly marked, what we have to do
-// for the root regions is to scan them and mark all objects reachable
-// from them. According to the SATB assumptions, we only need to visit
-// each object once during marking. So, as long as we finish this scan
-// before the next evacuation pause, we can copy the objects from the
-// root regions without having to mark them or do anything else to them.
-//
-// Currently, we only support root region scanning once (at the start
-// of the marking cycle) and the root regions are all the survivor
-// regions populated during the initial-mark pause.
-```
-
-根 region = initial-mark 暂停时存活的 survivor 区域。为什么它们必须最先扫完? 并发标记进行中,Evacuation Pause 照常在跑——会把 survivor 区的对象拷走。如果 root region 里的对象没被标记就拷走了,标记就漏了。所以 cycle 一开始就抢在下一个暂停前把 survivor 扫完;scan 不能进 STS(必须一口气完成,不能被暂停打断)。scan 完后,下一次 Evacuation Pause 就能正常拷贝 survivor 而不担心遗漏。
-
-### mark_from_roots: 并发 gang 主入口
-
-`mark_from_roots`(g1ConcurrentMark.cpp:973-992):
-
-```cpp
-// g1ConcurrentMark.cpp:973-992(截取核心,逐字)
-void G1ConcurrentMark::mark_from_roots() {
-  _restart_for_overflow = false;
-
-  _num_concurrent_workers = calc_active_marking_workers();
-
-  uint active_workers = MAX2(1U, _num_concurrent_workers);
-
-  active_workers = _concurrent_workers->update_active_workers(active_workers);
-  log_info(gc, task)("Using %u workers of %u for marking", active_workers, _concurrent_workers->total_workers());
-
-  set_concurrency_and_phase(active_workers, true /* concurrent */);
-
-  G1CMConcurrentMarkingTask marking_task(this);
-  _concurrent_workers->run_task(&marking_task);
-  print_stats();
-}
-```
-
-calc_active_marking_workers 动态计算并行度(不超过 ConcGCThreads);G1CMConcurrentMarkingTask 继承 AbstractGangTask,在 G1CMConcurrentMarkingTask::work 里对每个 worker 调 `task->do_marking_step(G1ConcMarkStepDurationMillis, ...)`——时间片轮转,到就让出。
-
-### do_marking_step: 标记主循环
-
-G1CMTask::do_marking_step(g1ConcurrentMark.cpp:2592 起):
-
-1. **drain_satb_buffers()** — 先把 completed SATB buffer 里的旧值标记完,保证快照全部被消费。
-2. **drain_local_queue(true) + drain_global_stack(true)** — 局部队列 + 全局 mark stack,把灰对象扫完。
-3. **bitmap 迭代** — 持有 region,从 `_finger` 开始扫 bitmap 里的已标对象,通过 G1CMBitMapClosure 对每个标记过的对象遍历引用字段,未标的新对象进 make_reference_grey。
-4. **claim_region()** — 当前 region 扫完,通过 CAS 全局 `_finger` 认领下一个 region。
-5. **do_stealing** — 本地没工作时偷别人的队列(work stealing)。
-
-do_marking_step 是可中断的(G1ConcMarkStepDurationMillis 默认 10ms): 到时间就置本 task 的 abort 标志让出 CPU;worker 循环(task->has_aborted() 且标记未中止)接着再来一个时间片。SATB buffer 与灰队列在每次调用内被逐步清空,全部清空后各 worker 经终止协议同步退出,一轮 mark_from_roots 完成。
-
-### make_reference_grey: 对象标记入口
-
-`make_reference_grey`(g1ConcurrentMark.inline.hpp:213-253):
-
-```cpp
-// g1ConcurrentMark.inline.hpp:213-253(截取核心,逐字)
-inline bool G1CMTask::make_reference_grey(oop obj) {
-  if (!_cm->mark_in_next_bitmap(_worker_id, obj)) {
-    return false;
-  }
-
-  // No OrderAccess:store_load() is needed. It is implicit in the
-  // CAS done in G1CMBitMap::parMark() call in the routine above.
-  HeapWord* global_finger = _cm->finger();
-
-  ...
-
-  if (is_below_finger(obj, global_finger)) {
-    G1TaskQueueEntry entry = G1TaskQueueEntry::from_oop(obj);
-
-    ...
-
-      process_grey_task_entry<false>(entry);
-    } else {
-      push(entry);
-    }
-  }
-  return true;
-}
-```
-
-`mark_in_next_bitmap` → par_mark → CAS 原子 set bit。`is_below_finger`: 全局 finger 以下是已扫描区域,如果新标到的对象在已扫描区域——它还没被扫到引用,必须入灰栈;如果在未扫描区域(≥ finger),bitmap 迭代自然会走到它,不重复入栈。typeArray 没引用,直接记账不入栈。
-
-### work stealing
-
-G1CMTask 的 _task_queue 由 G1CMTaskQueueSet 管理。每个 worker 有自己的本地队列,本地空了就从别人的队列偷。`ParallelTaskTerminator`(g1ConcurrentMark.hpp:327): 所有 worker 用 barrier 同步终止(termination protocol)。
-
----
-
-## 3. 双 bitmap — 两轮标记互不干扰
-
-### G1ConcurrentMark 成员
-
-G1ConcurrentMark 的 bitmap 相关字段(g1ConcurrentMark.hpp:304-310):
-
-```cpp
-// g1ConcurrentMark.hpp:304-310(截取核心,逐字)
-  G1CMBitMap              _mark_bitmap_1;
-  G1CMBitMap              _mark_bitmap_2;
-  G1CMBitMap*             _prev_mark_bitmap; // Completed mark bitmap
-  G1CMBitMap*             _next_mark_bitmap; // Under-construction mark bitmap
-```
-
-双 bitmap: `_prev_mark_bitmap` = 上一轮完成的标记结果,cleanup/reclaim 用它判断对象生死;`_next_mark_bitmap` = 本轮标记填充的目标。并发标记期间,bitmap 迭代扫 next bitmap 的 marked 对象,对每个引用字段调 make_reference_grey → CAS 标 next bitmap。
-
-### G1CMBitMap: par_mark + CAS
-
-G1CMBitMap::par_mark(g1ConcurrentMarkBitMap.inline.hpp:81-85):
-
-```cpp
-// g1ConcurrentMarkBitMap.inline.hpp:81-85(截取核心,逐字)
-inline bool G1CMBitMap::par_mark(HeapWord* addr) {
-  check_mark(addr);
-  return _bm.par_set_bit(addr_to_offset(addr));
-}
-```
-
-`addr_to_offset`: pointer_delta(obj, _covered.start()) >> LogMinObjAlignment(=3)。8 字节粒度 → 1 bit/8 bytes。
-
-par_set_bit 的 CAS 循环(bitMap.inline.hpp:41-57):
-
-```cpp
-// bitMap.inline.hpp:41-58(截取核心,逐字)
-inline bool BitMap::par_set_bit(idx_t bit) {
-  verify_index(bit);
-  volatile bm_word_t* const addr = word_addr(bit);
-  const bm_word_t mask = bit_mask(bit);
-  bm_word_t old_val = *addr;
-
-  do {
-    const bm_word_t new_val = old_val | mask;
-    if (new_val == old_val) {
-      return false;     // Someone else beat us to it.
-    }
-    const bm_word_t cur_val = Atomic::cmpxchg(new_val, addr, old_val);
-    if (cur_val == old_val) {
-      return true;      // Success.
-    }
-    old_val = cur_val;  // The value changed, try again.
-  } while (true);
-}
-```
-
-CAS 保证: 一个 bit 被标且仅被标一次;多个线程同时标同一对象,只有一个成功,其余跳过(不重复入栈,不重复遍历)。bitmap 读写无锁——lock-free。
-
-### 开销
-
-1 个 bitmap 覆盖整个堆,每 8 字节 1 bit → 开销 = 1/64 = 1.5625% ≈ 1.6% per bitmap。两个 bitmap 共约 3.2%。用 G1RegionToSpaceMapper 按需 commit(26-01 §2.3 讲过)。
-
-### swap + clear
-
-remark 结束时 `swap_mark_bitmaps()`(g1ConcurrentMark.cpp:1179): next→prev(安装本轮结果为"上一轮"),clear 旧 bitmap 为下一轮准备。cleanup_for_next_mark: 用 WorkGang 并行 clear next bitmap 里的 marked bit,为下一轮做准备。
-
----
-
-## 4. Remark — 最后补漏
-
-remark() 在 STW 内执行(g1ConcurrentMark.cpp:1139-1158):
-
-```cpp
-// g1ConcurrentMark.cpp:1139-1158(截取核心,逐字)
-void G1ConcurrentMark::remark() {
-  assert_at_safepoint_on_vm_thread();
-
-  if (has_aborted()) {
-    return;
-  }
-
-  G1Policy* g1p = _g1h->g1_policy();
-  g1p->record_concurrent_mark_remark_start();
-
-  double start = os::elapsedTime();
-
-  verify_during_pause(G1HeapVerifier::G1VerifyRemark, VerifyOption_G1UsePrevMarking, "Remark before");
-
-  {
-    GCTraceTime(Debug, gc, phases) debug("Finalize Marking", _gc_timer_cm);
-    finalize_marking();
-  }
-```
-
-### finalize_marking
-
-finalize_marking(g1ConcurrentMark.cpp:1858-1890):
-
-```cpp
-// g1ConcurrentMark.cpp:1858-1890(截取核心,逐字)
-void G1ConcurrentMark::finalize_marking() {
-  ResourceMark rm;
-  HandleMark   hm;
-
-  _g1h->ensure_parsability(false);
-
-  uint active_workers = _g1h->workers()->active_workers();
-  set_concurrency_and_phase(active_workers, false /* concurrent */);
-
-  {
-    StrongRootsScope srs(active_workers);
-
-    G1CMRemarkTask remarkTask(this, active_workers);
-    _g1h->workers()->run_task(&remarkTask);
-  }
-
-  SATBMarkQueueSet& satb_mq_set = G1BarrierSet::satb_mark_queue_set();
-  guarantee(has_overflown() ||
-            satb_mq_set.completed_buffers_num() == 0,
-            "Invariant: has_overflown = %s, num buffers = " SIZE_FORMAT,
-            BOOL_TO_STR(has_overflown()),
-            satb_mq_set.completed_buffers_num());
-}
-```
-
-G1CMRemarkTask::work(g1ConcurrentMark.cpp:1828-1855)在 STW 内并行做两件事: 先 `Threads::threads_do` 把全部 Java 线程的根(栈/寄存器/nmethod 常量池里的引用)扫进标记——线程根在 Concurrent Start 暂停里已被扫过一遍,但并发期间栈引用一直在变,SATB 只记录被覆盖的旧值,remark 在 STW 下重扫当前值才能保证不漏;并发循环本身只扫 root regions,不碰线程根;再以极大超时(`1000000000.0`)调 do_marking_step,其第一步 `drain_satb_buffers()` 把剩余 SATB buffer 全部消费,然后反复走到本地与全局队列清空。全部完成才能返回;若标记栈溢出则中止 remark、`_restart_for_overflow` 走溢出重启。`completed_buffers_num() == 0` 确认没有残留。
-
-### remark 内部阶段
-
-**[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/26-g1-gc-concurrent-mark-demo.txt)**: 同一程序,-Xlog:gc+phases=debug:
-
-```
-GC(1) Finalize Marking 0.032ms
-GC(1) Reference Processing 0.014ms
-GC(1) Weak Processing 0.002ms
-GC(1) ClassLoaderData 0.005ms
-GC(1) ProtectionDomainCacheTable 0.001ms
-GC(1) Class Unloading 0.080ms
-GC(1) Flush Task Caches 0.014ms
-GC(1) Update Remembered Set Tracking Before Rebuild 0.021ms
-GC(1) Reclaim Empty Regions 0.024ms
-GC(1) Purge Metaspace 0.000ms
-GC(1) Report Object Count 0.000ms
-GC(1) Update Remembered Set Tracking After Rebuild 0.002ms
-GC(1) Finalize Concurrent Mark Cleanup 0.022ms
-```
-
-阶段名与源码函数一一对应:
-
-- **Finalize Marking**: G1CMRemarkTask 并行处理剩余 SATB buffer + drain 灰栈
-- **Reference/Weak Processing**: 弱引用处理(JNI Global/Weak Global 等)
-- **Class Unloading + Purge Metaspace**: 并发标记模式下的类卸载
-- **Flush Task Caches**: 把 worker 本地 mark stats cache 汇总到全局
-- **Update Remembered Set Tracking Before Rebuild**: 本轮的核心 — 把 bitmap 上的存活字节数记入每个 Region 的 `_next_marked_bytes`(26-01 §1.3 的字段)。这就是 liveness 入账: 每个 Region 有多少字节存活,Mixed GC 的 CSet 选择直接从这里读
-- **Reclaim Empty Regions**: 把全空的 Region 回收到 freelist
-
-**注意: Update Remembered Set Tracking Before Rebuild 在 remark 内(上面的 phases 日志清楚地显示它在 "Finalize Marking" 之后、"Reclaim Empty Regions" 之前),Rebuild Remembered Sets 是 remark 之后的并发阶段(素材 A 日志: "GC(1) Concurrent Rebuild Remembered Sets 0.163ms")。**
-
-### 溢出重启
-
-如果标记栈溢出: `has_overflown()=true` → restart_for_overflow=true → swap_mark_bitmaps 被跳过 → reset_marking_for_restart → 下一轮 mark_from_roots 重启。remark:1214-1220:
-
-```cpp
-// g1ConcurrentMark.cpp:1214-1220(截取核心,逐字)
-    _restart_for_overflow = true;
-
-    verify_during_pause(G1HeapVerifier::G1VerifyRemark, VerifyOption_G1UsePrevMarking, "Remark overflow");
-
-    // Clear the marking state because we will be restarting
-    // marking due to overflowing the global mark stack.
-    reset_marking_for_restart();
-```
-
----
-
-## 5. Cleanup — 收尾
-
-cleanup()(g1ConcurrentMark.cpp:1356-1369):
-
-```cpp
-// g1ConcurrentMark.cpp:1356-1369(截取核心,逐字)
-void G1ConcurrentMark::cleanup() {
-  assert_at_safepoint_on_vm_thread();
-
-  if (has_aborted()) {
-    return;
-  }
-
-  G1Policy* g1p = _g1h->g1_policy();
-  g1p->record_concurrent_mark_cleanup_start();
-
-  double start = os::elapsedTime();
-
-  verify_during_pause(G1HeapVerifier::G1VerifyCleanup, VerifyOption_G1UsePrevMarking, "Cleanup before");
-```
-
-cleanup 非常短(0.021ms): 它不再计算 liveness(liveness 在 remark 的 Update Remembered Set Tracking Before Rebuild 已完成),只做 Update Remembered Set Tracking After Rebuild(收尾) + liveness 日志(可选) + 增计数。真正的"选择 collection set"在 G1Policy,由 _next_marked_bytes 驱动——那是 05-mixed-gc-policy 的故事。
-
----
-
-## 核心悬念
-
-**liveness 数据进了每个 Region 的 _next_marked_bytes,remark 结束就位。但 Mixed GC 怎么知道老年代哪些 Region 被年轻代对象引用了?** 答案: RSet——一个只记录"我这个 Region 被谁引用"的反向索引。G1 的 Evacuation Pause 不需要扫描整个老年代,只需要扫脏 card 指向的 RSet。写 barrier 的第二道(post-write barrier)在每次引用更新时默默记账,卡片在 GC 间按需重建——这些都是并发的,下次 STW 暂停时直接查 RSet 就知道"年轻代需要拷哪些"。RSet 的结构与 CardTable 的关系,是 G1 性能的第二根支柱。
-
-> → [03-rem-set.md](03-rem-set.md)
+> → [03 — RSet + CardTable](03-rem-set.md)

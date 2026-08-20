@@ -1,96 +1,208 @@
-# 04. ForkJoinTask 与分治 — 任务状态机、fork/join、CountedCompleter
+# ForkJoinTask 与分治：为什么分治任务不能只是一个 Runnable
 
-> **前置依赖**: [15-async/03 — ForkJoinPool work-stealing](03-forkjoinpool.md)(执行引擎)、[14-threadpool/04 — FutureTask](../14-threadpool/04-futuretask-scheduled.md)(Future 状态对照)
-> 关联: [16-stream/06 — Spliterator 与并行](../16-stream/06-spliterator-parallel.md)(并行分治)
+> 本文基于 JDK 11 `ForkJoinTask`、`RecursiveTask`、`RecursiveAction` 与 `CountedCompleter`。讨论重点是 `status` 位状态、`fork/join/invoke`、`doExec/setDone/setExceptionalCompletion`、RecursiveTask/Action 分治骨架，以及 CountedCompleter 的 pending 完成传播；ForkJoinPool 执行引擎已在上一篇展开。本文讨论的是 JDK 11 Java 层任务抽象，不把这里的任务状态位、join 路径和 completer 传播方式外推成所有分治框架都必须照搬的统一规范。
+> **前置依赖**：[ForkJoinPool work-stealing](03-forkjoinpool.md)、[FutureTask 对照](../14-threadpool/04-futuretask-scheduled.md)
+> **后续**：域 16 Stream 与函数式、域 14 线程池应用深化
 
-## ForkJoin 任务怎么写
+## 先看一个最容易把“分治任务”误写成普通线程池任务的直觉
 
-`ForkJoinPool` 只是执行引擎,`ForkJoinTask` 才是分治任务的抽象。这一篇看状态、fork/join、RecursiveTask 与 CountedCompleter。
+如果你已经习惯了普通线程池，很容易自然地觉得：任务无非就是一个 `Runnable` 或 `Callable`，线程池负责把它拿去跑，结果或异常由 `FutureTask` 那套状态机兜住就行。这个模型对“一次提交、一次执行”的任务完全成立，但一到分治场景就开始露出缺口。
 
-## 1. "ForkJoinTask 的状态" — status 位标记
+设想一个任务会递归拆成左右两半，再继续拆，再继续等子结果回来合并。这里的任务不再只是“跑完一个函数就结束”，而是必须自己知道：我怎么 fork 子任务、怎么 join 等结果、我现在算不算完成、如果子任务异常了我要怎么把异常向上抛、如果我自己就在 ForkJoinPool 的 worker 线程里等待时，是不是只能傻等，还是还能顺手帮助推进别的任务。
 
-### 1.1 状态布局
+这说明分治任务和普通线程池任务的本质差别，不在“会不会并行”，而在“**任务对象自己要不要理解分而后合的协议**”。普通 Runnable 并不关心这些，它只知道 run 一次就结束；ForkJoinTask 则必须把状态、等待和合并语义一起带在身上。
 
-`ForkJoinTask`(`ForkJoinTask.java:206`)实现 `Future<V>`;核心字段是 `volatile int status`(`:237`)。
+所以这篇真正要回答的问题是：为什么 ForkJoinPool 之外，还必须有一个专门的 ForkJoinTask 体系来承载分治任务；以及 RecursiveTask / RecursiveAction / CountedCompleter 这些抽象，究竟是在表达哪几种不同的“完成”语义。
 
-状态位定义(`:239-243`):
+## 一、ForkJoinTask 为什么首先是一套完成状态机：分治任务不只是“执行了没”
 
-- `DONE = 1 << 31`——完成标志
-- `ABNORMAL = 1 << 18`——取消或异常
-- `THROWN = 1 << 17`——记录异常
-- `SIGNAL = 1 << 16`——存在等待者
-- `SMASK = 0xffff`——短标签位
+### 先拆掉“done / not-done 就够了”的想法
 
-### 1.2 异常完成
+普通任务模型里，一个布尔 done 往往已经足够表达很多事：没完成就是没完成，完成了就取结果。可分治任务里，线程不只关心“有没有结束”，还关心：
 
-`abnormalCompletion`(`:267`)用 CAS 设置异常完成状态。`join` 检查 `DONE/ABNORMAL`,必要时把异常重新抛给调用方。
+- 是正常完成，还是异常完成；
+- 有没有取消；
+- 有没有别的 join 者正在等它；
+- 完成之后是否要唤醒等待者。
 
-关键设计(斜体):*"状态 = int 位标记"——完成、异常/取消、等待者和标签共用一个状态字。面试"ForkJoinTask 状态": 正常完成、异常完成、取消完成三类。*
+这就是为什么 `ForkJoinTask` 在 JDK 11 中一开始就不是简单布尔状态，而是一个 `volatile int status`（`ForkJoinTask.java:237`），再配上若干位标记：
 
-## 2. "fork/join 的语义" — 分治骨架
+- `DONE`（`239`）
+- `ABNORMAL`（`240`）
+- `THROWN`（`241`）
+- `SIGNAL`（`242`）
 
-### 2.1 fork
+这些状态位合在一起表达的不是“完成没完成”这么朴素，而是“**这是哪一种完成，以及有没有等待者需要被唤醒**”。
 
-`fork()`(`ForkJoinTask.java:699`)把任务提交到当前 ForkJoinPool 的 WorkQueue(`:704`),本身不等待任务完成。
+### 为什么 `SIGNAL` 在这里特别重要
 
-### 2.2 join
+在 FutureTask 那一篇里，我们已经见过结果状态机如何把完成、异常、取消串起来。但 ForkJoinTask 比 FutureTask 还多出一个更贴近池内协作的问题：join 者可能不是外部调用线程，而是当前池里的另一个 worker，甚至就是当前 worker 在不同任务分支间来回切换时自己在等。
 
-`join()`(`:719`)通过 `doJoin()`等待结果;如果当前线程属于 ForkJoinPool,等待过程中可以帮助执行其他任务,避免纯阻塞浪费并行度。
+于是状态机除了要表达正常/异常，还要表达“有人在等我”。`SIGNAL` 位就是在为这种等待关系服务。任务一旦完成，如果发现等待者存在，就不能只是默默改一个完成标记结束，还必须推进唤醒路径。
 
-经典骨架:
+这也解释了为什么 ForkJoinTask 不能简化成“一个任务函数 + 一个结果槽位”：分治任务的完成，从来都不只是把值算出来，而是要把**结果结局和等待协作语义**一起发布出去。
 
-```java
-ForkJoinTask<Integer> left = ...;
-ForkJoinTask<Integer> right = ...;
-left.fork();
-int rightResult = right.invoke();
-int leftResult = left.join();
-return rightResult + leftResult;
+## 二、为什么 `fork/join/invoke` 不是 submit/get 的改名：它们在表达“分而后合”的任务协议
+
+### 先看普通提交模型哪里不够
+
+在普通线程池里，最自然的动作是：把任务 submit 进去，然后在外部 Future 上 get。这个模式假设“提交者”和“等待者”往往是分开的，而且等待方大多只是一个旁观调用者。分治任务不是这样。
+
+一个任务在自己的 `compute()` 里 fork 出子任务，再在后面 join 子结果时，等待者往往仍然是池里的 worker 线程本身。它不是站在池外等答案，而是这棵分治树的内部节点在等子问题完成。
+
+所以它需要的不是“把任务交给线程池执行，再从外部阻塞取回结果”那套模型，而是一组更贴近递归拆分语义的方法：
+
+- `fork()`（`ForkJoinTask.java:699`）
+- `join()`（`719-721`）
+- `invoke()`（`734-736`）
+
+### fork 真正做的是什么
+
+`fork()` 的价值不是“立刻开一个新线程”，而是把任务送进当前 ForkJoinPool 的工作体系，让它进入本地队列 / 窃取体系，被当前或其他 worker 后续消费。也就是说，它表达的是“把这个子问题放出去”，而不是“马上开始独立线程执行”。
+
+这一点和普通直觉特别容易错位。很多人一看到 fork 就脑补“新线程诞生”，实际 FJP 更关心的是任务进入本地 WorkQueue 的哪一端、之后由谁继续吃它，而不是立刻膨胀出更多线程实体。
+
+### join 为什么不是 Future.get 的池内翻版
+
+`join()` 的关键不在于“等待结果”，而在于它发生在一个可能仍身处 FJP 内部的 worker 线程中。JDK 11 的 `join()` 最终会走到 `doJoin` 和若干池内/池外等待路径（相关锚点如 `ForkJoinTask.java:381-412`、`322` 的 `externalAwaitDone`）。这说明：
+
+- 对外部线程来说，等待可以更接近普通阻塞；
+- 对池内 worker 来说，join 不是单纯睡着等，而是会尽量配合池的推进策略，避免白白浪费并行度。
+
+所以 `join` 和 Future.get 的差异，不在“一个返回值不同”，而在“**谁在等、等的时候还能不能继续帮池里做事**”。
+
+### invoke 为什么像“自己先干，再拿结果”的快捷组合
+
+`invoke()` 则可以看成是“马上开始执行，并最终拿到结果”的便捷组合。它不是另一个全新语义，而是把 fork/join 的任务协议收成更适合调用方的一步入口。
+
+这一层真正要记住的是：ForkJoinTask 的核心不是多出三个名字，而是把“任务拆出去”“当前节点等回来”“当前线程自己先继续推进”这些动作编成了一套适合分治树的协议。
+
+## 三、为什么“先 fork 一边，当前线程算另一边”是分治骨架的典型写法
+
+### 这不是风格偏好，而是在利用本地局部性和窃取机制
+
+ForkJoinTask 类注释在 `127-128` 一带就提示过：任务拆分时，通常更适合先 fork 一边，再在当前线程里继续做另一边，而不是两边都一口气扔出去自己立刻等待。`RecursiveTask` 的示例也直白写着这一点（`RecursiveTask.java:47-53`）：
+
+- 一个子任务 fork 出去
+- 当前线程继续 `compute()` 另一边
+- 最后再 `join()` 已经被并行推进的那一边
+
+这套骨架的价值非常具体：当前线程手里刚拆出来的另一半任务最接近当前上下文，本地执行最顺；被 fork 的那一半则有机会被别的空闲 worker 窃走。这样，本地连续性和全局并行性同时都被照顾到了。
+
+### 为什么 RecursiveTask / RecursiveAction 正好服务这种树形任务
+
+`RecursiveTask` 定义在 `RecursiveTask.java:68`，它要求你实现 `compute()`（`80`），而 `exec()`（`93-94`）只是把这个计算结果接入 ForkJoinTask 的完成状态机。`RecursiveAction` 在 `RecursiveAction.java:165`，结构完全类似，只是没有返回值。
+
+这说明它们的真正抽象点不是“有返回值 / 无返回值”这么表面，而是：**我要把一个树形拆分、局部计算、最终合并的协议，包装成一个可 fork、可 join、可被窃取的任务对象。**
+
+所以标准分治骨架才会反复出现：
+
+1. 小任务直接算
+2. 大任务拆成左右
+3. fork 一侧
+4. 当前线程算另一侧
+5. join 并合并
+
+这不是模板代码装样子，而是 FJP 与 WorkQueue 结构天然配合出来的最合理执行姿势。
+
+## 四、CountedCompleter 为什么不是“更复杂的 RecursiveTask”，而是在改写‘完成’的定义
+
+### 先看 RecursiveTask 隐含的任务形状
+
+RecursiveTask 很适合一类非常清晰的任务：结果沿着一棵树往上回收。左右子任务都完成了，父任务把两边结果合起来；再往上，形成更大的结果。这种模型里，join 是天然的，因为“我完成”几乎就等同于“我的子结果已经都回来了”。
+
+但现实中并不是所有并行任务都长成这样。有些任务更像 DAG，有些更像事件驱动汇聚，有些根本不想沿返回值树收集，而是只关心“还有多少子动作没做完，做完之后触发某个完成动作”。
+
+这就是 `CountedCompleter` 出场的原因。
+
+### pending 计数为什么是在改写“任务何时算完成”
+
+`CountedCompleter` 定义在 `CountedCompleter.java:426`，核心字段是：
+
+- `pending`（`432`）
+
+再加上：
+
+- `tryComplete()`（`588-595`）
+- `onCompletion(...)`（`482`）
+
+它的核心思想和 RecursiveTask 完全不同：不是靠“我 join 到子结果了，所以我能完成”，而是靠“我的 pending 计数已经归零，所以我可以触发完成并继续向 completer 传播”。
+
+这意味着它把“任务完成”的定义，从基于返回值汇总，改写成了基于显式计数传播。也就是说，它更像在管理一张依赖图里的完成条件，而不只是管理一棵返回值树。
+
+### 为什么这不是性能微调，而是另一种编排哲学
+
+很多人第一次看 CountedCompleter，会把它误解成“更高级的 RecursiveTask”。这会把真正的差异讲偏。它并不只是优化版，而是在表达另一种任务组织方式：
+
+- RecursiveTask：我关心返回值怎样沿树往上合并
+- CountedCompleter：我关心还有多少子动作没收尾，收尾后该触发谁
+
+因此它特别适合那些“完成比结果本身更重要”的场景，例如某些遍历、搜索、图形任务、事件驱动补全等。你如果拿“join 结果树”的思路去理解它，就很容易觉得它绕；可一旦承认它解决的本来就不是同一种任务形状，这种 pending 完成传播就会显得非常自然。
+
+## 五、域 15 收官：异步编排、执行引擎和任务抽象终于闭环了
+
+### 把前几篇真正串成一条链
+
+到这里，异步域的四篇内容终于可以收成一条完整主线了。
+
+- 开始先把编排对象立住：`CompletableFuture` 为什么要同时携带结果状态、依赖节点和回调执行模型；
+- 接着把编排复杂度展开：单链之外，多源汇合、异常接管和超时护栏怎样继续建立在这套传播模型上；
+- 然后把视角切到执行引擎：这些细粒度异步任务最终落到怎样一种本地双端队列 + 工作窃取 + commonPool 的调度体系上；
+- 到这一篇，再把镜头收回任务对象本身：任务为什么要自带完成状态、自带 fork/join 协议、自带 pending 完成语义。
+
+这说明异步编排从来不是“写几个 then”这么简单。它至少有三层要同时成立：
+
+```text
+编排层
+  → CompletableFuture 负责结果与依赖传播
+
+执行层
+  → ForkJoinPool 负责本地优先和工作窃取调度
+
+任务层
+  → ForkJoinTask / RecursiveTask / CountedCompleter 负责分治与完成协议
 ```
 
-先 fork 一边,当前线程处理另一边,最后 join——这是工作窃取模型下常见的局部顺序。
+### 为什么这是并发体系里非常独立的一条线
 
-关键设计(斜体):*"fork = 分,join = 合"——fork 把子任务放入池,当前线程继续做本地工作,join 时再等待/协助。面试"fork/join 为什么高效": 子任务可被其他 Worker 窃取。*
+前面线程池域更多是在讲“外部任务如何被线程池接住并执行”；异步域在这里已经明显换了问题：任务不再只是被动提交，而是会继续裂变、继续组合、继续沿图传播。也正因为如此，这一域和普通 TPE 的直觉差别很大。你如果只会用“提交一个 Runnable”去理解它，就很难真正吃透 why fork/join、why commonPool、why Completion 图。
 
-## 3. "RecursiveTask/RecursiveAction" — 分治写法
+## 六、五个最容易混掉的边界：ForkJoinTask 不是 Runnable 加两招，fork 不是起线程，join 不是纯睡眠，RecursiveTask 不只是有返回值，CountedCompleter 不是升级版 RecursiveTask
 
-### 3.1 两种抽象
+在收网之前，先把这一篇最容易记错的五条边界压实。
 
-- `RecursiveTask.compute()`(`RecursiveTask.java:80`)——有返回值;`exec`(`:93`)负责把计算接入 ForkJoinTask 状态机
-- `RecursiveAction`(`RecursiveAction.java:165`)——无返回值;适合数组填充、树遍历等副作用任务
+第一，ForkJoinTask 不是普通 Runnable 多长了几个方法。它真正多出来的是分治任务协议：状态位要表达正常完成、异常完成和等待者存在；任务对象自己还要理解“我什么时候算完成”“我怎么把完成向等待者或 completer 传播”。
 
-### 3.2 标准分治
+第二，`fork()` 也不是“立刻新起一个线程”。它更接近“把这个子问题送进当前分治池的工作体系里”，之后可能由当前 worker 继续处理，也可能被别的空闲 worker 窃走。把 fork 误解成线程创建，会直接看错 FJP 为什么强调本地队列和窃取，而不是无限膨胀线程数。
 
-1. 判断区间是否小于阈值
-2. 小任务直接计算
-3. 大任务拆成左右子任务
-4. fork 一侧,当前线程计算另一侧
-5. join 并合并结果
+第三，`join()` 也不是 Future.get 的池内翻版，更不是单纯睡着等。尤其当等待者自己就是池里的 worker 时，join 的目标不是让这条并行算力白白躺平，而是尽量在等待过程中继续帮助推进池里工作，把“等结果”这件事和“别浪费并行度”同时兼顾。
 
-关键设计(斜体):*"分治 = 阈值 + 拆分 + 合并"——阈值太小会产生大量任务管理开销,太大则并行不足。生产: 大数组计算/树遍历需要压测选择粒度。*
+第四，`RecursiveTask` 和 `RecursiveAction` 的差别也不只是“一个有返回值，一个没有返回值”。它们真正共同表达的是树形分治骨架：拆分、fork、一侧本地继续算、最后 join 回来。返回值差异只是最终合并形式不同，不是设计主线本身。
 
-## 4. "CountedCompleter" — 计数完成
+第五，`CountedCompleter` 更不是“更高级的 RecursiveTask”。它改写的不是性能档位，而是完成定义：不是等 join 结果树自然往上回收，而是靠 pending 计数归零时触发完成和向 completer 继续传播。两者服务的任务形状本来就不一样。
 
-### 4.1 pending 计数
+把这五条边界记稳，ForkJoinTask 这一篇才不会重新塌回“FJP 专用任务 API 总览”这种说明书印象。它真正补上的，是分治任务对象自己的语义：不是只会被执行一次，而是知道怎样裂变、怎样等待、怎样合并、怎样把完成条件向上游继续传递。
 
-`CountedCompleter` 用 pending count 表示尚未完成的子任务数量。子任务完成时调用 `tryComplete()`(`CountedCompleter.java:588`):
+## 收网：ForkJoinTask 让分治任务不只是会跑，还知道什么时候算真正完成
 
-- pending 非零 → 减少计数
-- 计数归零 → 调用 `onCompletion`
-- 再向 completer 父节点传播完成
+回到开头那个问题：为什么分治任务不能只是一个 Runnable？答案已经很清楚了。因为分治任务面对的不只是“执行一次”，还包括：怎样把子任务放出去、怎样等待它们回来、怎样在池内等待时尽量不浪费并行度、怎样把异常和等待者状态一起编码进任务对象、以及什么时候应该靠结果合并完成，什么时候应该靠 pending 计数传播完成。
 
-它不要求像 RecursiveTask 那样返回一个树形结果,更适合依赖关系复杂的 DAG。
+这就是 ForkJoinTask 体系真正补上的东西：**它给分治任务本身带上了完成协议。**
 
-### 4.2 选型
+把整篇压成一张总图，就是：
 
-- 结果需要递归汇总: `RecursiveTask`
-- 无返回值的递归动作: `RecursiveAction`
-- 完成依赖由计数表达: `CountedCompleter`
+```text
+ForkJoinTask
+  → status 记录完成/异常/等待者状态
+  → fork 把子任务放进池
+  → join / invoke 负责等待与继续推进
 
-关键设计(斜体):*"CountedCompleter = 显式完成计数"——计数归零触发完成回调并向父节点传播。面试"RecursiveTask vs CountedCompleter": 前者偏树形返回值,后者偏计数驱动的依赖图。*
+RecursiveTask / RecursiveAction
+  → 适合树形拆分 + 结果汇总/动作执行
 
-## 本域收官
+CountedCompleter
+  → 用 pending 计数表达完成条件
+  → 适合 DAG 或事件驱动式完成传播
+```
 
-域 15 把异步链与并行执行引擎接通: CompletableFuture 负责编排, ForkJoinPool 负责调度, ForkJoinTask/RecursiveTask 负责分治。它与原子、锁、集合、线程池共同组成并发体系的完整链路。
-
-后续按路线进入下一阶段的写作顺序。
+如果说上一篇讲的是“分治池怎么调度任务”，这一篇真正讲清的是：**任务对象自己为什么也必须理解分治。** 到这里，域 15 的异步编排、执行引擎和任务抽象才算真正闭环。

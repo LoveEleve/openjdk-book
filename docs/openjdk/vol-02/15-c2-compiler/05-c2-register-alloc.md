@@ -1,122 +1,163 @@
-# 05. Chaitin — 图着色寄存器分配 O(n²)
+# 05. 为什么 C2 不用 LinearScan？— `Chaitin + IFG + spill-split-recycle`
 
-> **前置依赖**:[15-c2-compiler/04 — Loop Optimization + SuperWord: 循环变换与向量化](openjdk/vol-02/15-c2-compiler/04-c2-loops.md):循环优化后的图进入 RA;向量节点需要多寄存器对齐分配;[15-c2-compiler/01 — C2 Ideal Graph: Node + Type + IGVN](openjdk/vol-02/15-c2-compiler/01-c2-ideal-graph.md):RA 消费的是经过 Matcher 的机器节点;[14-c1-compiler/03 — LinearScan + LIR → x86 码](openjdk/vol-02/14-c1-compiler/03-c1-register-codegen.md):C1 的线性扫描分配,本篇的对照系
-> → **后续**:[15-c2-compiler/06 — Matcher + Code Generation: DFA 指令选择 → x86 机码](openjdk/vol-02/15-c2-compiler/06-c2-codegen.md)
-> 关联域: 14-c1(LinearScan 对照)、16-code-cache(nmethod)、24-frame(帧布局)
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64`。这里讨论的是 C2 的寄存器分配：`PhaseChaitin`、LRG、IFG、coalesce、select、split 以及它们如何把 Matcher 之后的机器节点放进有限寄存器。Matcher/指令选择与最终发码放到下一篇。
+>
+> **前置依赖**：[15-c2-compiler/04 — 为什么循环要单独优化？— `CountedLoop + PhaseIdealLoop + SuperWord`](04-c2-loops.md)、[15-c2-compiler/01 — 为什么 C2 要换世界观？— `Ideal Graph = Node + Type + IGVN`](01-c2-ideal-graph.md)、[14-c1-compiler/03 — 虚拟值怎么落到机器？— `LinearScan + LIR → x86` 码](../14-c1-compiler/03-c1-register-codegen.md)
+> → **后续**：[15-c2-compiler/06 — `Matcher + Code Generation`：DFA 指令选择 → x86 机码](06-c2-codegen.md)
 
-## 把图塞进 16 个寄存器
+C1 到了后端，会把值压成 Interval，然后用 LinearScan 单趟把它们安置进寄存器或栈槽。对 C1 来说，这非常合理：它要低延迟，前面做的优化也偏局部，寄存器分配最好别再把编译时间拉长。
 
-优化结束的理想图经过 Matcher 变成机器节点,但"用哪个寄存器"还没定。C2 用 **Chaitin 图着色**: 每个值的存活区间(Live Range Group, LRG)是图的顶点,两个 LRG 若在某时刻同时存活则连一条**干涉边**(IFG, Interference Graph);给图着色 = 让相邻顶点不同色 = 让同时存活的值用不同寄存器;颜色不够就 **spill** 到栈。这与 C1 的线性扫描(14-c1/03)是两种哲学: 线性扫描沿指令序列单遍分配(O(n)),图着色全局建图再约简(号称 O(n²))——精度换成本。顺带纠正大纲三处: `_hint_color` 不存在(真实是 `_copy_bias` + `bias_color`);Simplify/Select/split 的行号全错(Simplify 在 chaitin.cpp:1199 而非 200-330);"Chaitin-Briggs 一定终止"的证明不存在,真实是 `_trip_cnt` 工程上限。
+但 C2 到这里不满足了。
 
-## 1. IFG 与 LRG — 谁和谁不能同色
+原因不是“图着色听起来更高级”，而是前面那整套全局优化已经把值关系做得更复杂、更值得精打细算：
 
-`Register_Allocate`(chaitin.cpp:336)是总入口。第一步是 **liveness + 干涉图**: `PhaseLive` 算活性,`build_ifg_virtual`(ifg.cpp:311)建图——注意它不是大纲说的"计算每个 LRG 的 [first_use, last_use) 区间",而是**对每个基本块做一次逆向扫描**(注释 "The IFG is built by a single reverse pass over each basic block",ifg.cpp:317-319):
+- 值会跨块、跨 Phi、跨循环、跨向量节点活很久；
+- coalesce、EA、loop opts、vector packs 已经尽量把图压得更紧凑，后端如果再用太粗糙的分配，很容易把前面赢回来的局部性和寄存器重用率又还给 spill；
+- 某些值的 spill 代价差别极大：热路径上的 load/store、copy 链、向量值、基指针，都不是“一 spill 了之”能公平处理的。
 
-```cpp
-// ifg.cpp:311-333(截取核心,逐字)
-void PhaseChaitin::build_ifg_virtual( ) {
-  Compile::TracePhase tp("buildIFG_virt", &timers[_t_buildIFGvirtual]);
+所以，这一篇真正的问题不是“图着色算法怎么教科书化地工作”，而是：**为什么 C2 愿意在寄存器分配阶段付出更高编译成本，用全局干涉图、着色、spill-split-recycle 来换更好的寄存器利用率？**
 
-  // For all blocks (in any order) do...
-  for (uint i = 0; i < _cfg.number_of_blocks(); i++) {
-    Block* block = _cfg.get_block(i);
-    IndexSet* liveout = _live->live(block);
+先把答案压成一句话：**C2 不用 LinearScan，不是因为它嫌单遍扫描不够时髦，而是因为它前面已经把图优化到了值得认真安排资源的位置。于是它先把值压成 LRG，再把“同时活着”的关系编码成 IFG，用 simplify/select 着色；颜色不够时也不满足于永久 spill，而是 split live range、重建 liveness/IFG、再来一轮，直到全局活跃关系能塞进有限寄存器。**
 
-    // The IFG is built by a single reverse pass over each basic block.
-    // Starting with the known live-out set, we remove things that get
-    // defined and add things that become live (essentially executing one
-    // pass of a standard LIVE analysis). Just before a Node defines a value
-    // (and removes it from the live-ness set) that value is certainly live.
-    // The defined value interferes with everything currently live.  The
-    // value is then removed from the live-ness set and it's inputs are
-    // added to the live-ness set.
-    for (uint j = block->end_idx() + 1; j > 1; j--) {
-      Node* n = block->get_node(j - 1);
+## 先试两个最自然的办法，看看为什么都不够
 
-      // Get value being defined
-      uint r = _lrg_map.live_range_id(n);
-```
+### 误解一：C2 完全可以沿用 C1 的 LinearScan
 
-从块尾的 live-out 集出发倒走: 一条指令**定义**的值在被移出 live 集的那一刻,与**当前一切存活值**干涉(`interfere_with_live`,ifg.cpp:291);然后指令的输入加入 live 集。有一个关键豁免——**Copy 指令不产生干涉**(ifg.cpp:350-352 "Copies do not define a new value and so do not interfere"),这正是合并不了时插入 copy 的合法性来源: copy 的 src/dst 可以同色。
+这是最直接的想法。C1 已经证明了线性扫描可以工作，而且很快。C2 既然最后也要把值放进寄存器，那为什么不继续沿用同一种分配器？
 
-LRG 携带分配决策所需的度量(chaitin.hpp:50-67):
+问题在于，C2 的值关系已经不再像 C1 那么局部。
 
-```cpp
-// chaitin.hpp:56-67(截取核心,逐字)
-  double _cost;                 // 2 for loads/1 for stores times block freq
-  double _area;                 // Sum of all simultaneously live values
-  double score() const;         // Compute score from cost and area
-  ...
-  uint _risk_bias;              // Index of LRG which we want to avoid color
-  uint _copy_bias;              // Index of LRG which we want to share color
-```
+前面那些全局优化把程序重写得更紧：
 
-- `_cost`: 2(loads)/1(stores)×块频率——**热路径里的 LRG 代价高,spill 它更疼**;
-- `_area`: 同时存活值之和——**面积大的 LRG spill 掉能释放更多寄存器**;
-- `score()` = `raw_score(_cost, _area)`(chaitin.cpp:99/:103,注释 "Bigger area lowers score, encourages spilling this live range. Bigger cost raise score, prevents spilling")——**cost/area 比值越小越先被 spill**;
-- `_copy_bias`: 希望与谁同色(来自 copy 的另一端)——**偏置着色**(`bias_color`,chaitin.hpp:689 "Helper function which implements biasing heuristic")让 copy 两端尽量同色,减少 spill code。大纲的 `_hint_color` 不存在。
+- 值可能跨越更长的控制流范围；
+- Phi 合并和图改写会让“同一个逻辑值”的生存区域更破碎、更交叠；
+- 向量化和复杂 matcher 结果又会引入多寄存器需求和更高的局部压力；
+- coalesce 的收益也更大，因为 copy 链一旦压掉，后端的 move 和 spill 量会一起下降。
 
-`Register_Allocate` 的后续编排(:373-570): `de_ssa`(:373,注释 "Come out of SSA world to the Named world"——Phi 的输入与输出要同寄存器,先以"虚拟 copy"占位,:366-372)→ `gather_lrg_masks` + `live.compute`(:386-387)→ 基指针存活区间延伸到 GC 点(:397)→ `build_ifg_virtual`(:409)→ **aggressive coalesce**(PhaseAggressiveCoalesce,coalesce.cpp:447,:425-426)→ `insert_copies`(:429)→ 重建 live + `build_ifg_physical`(:450,物理寄存器约束 + **寄存器压力计算**——int/float 两路 Pressure 统计每块峰值压力(`INTPRESSURE` x86_64=13 等,c2_globals_x86.hpp:51,非 16——含保留寄存器),超可用数就返回 `must_spill` 计数,:823-836)→ 若 `must_spill` 先预分裂(:462)。
+LinearScan 当然仍然能分配，但它更擅长“沿指令顺序做局部决策”，不那么擅长在一张已经被全局优化扭曲过的活跃关系图上，做尽量全局的寄存器重用安排。
 
-*关键设计: 干涉图是"同时存活"关系的一次性编码——逆向扫描天然得到每个定义点与存活集的干涉,无需显式区间;copy 不干涉 + 偏置着色是"图着色消除拷贝"的支点: 能合则合(消 copy),不能合则偏置同色(消 spill code)。*
+所以 C2 不是不能用 LinearScan，而是**觉得这张图值得花更多分配时间。**
 
-## 2. Simplify + Coalesce — 图约简与拷贝合并
+### 误解二：寄存器不够就 spill，spill 了就住栈，没必要再折腾 split
 
-`Simplify`(chaitin.cpp:1199)把 IFG 约简成一个栈: **度数低于可用寄存器数的 LRG 必然可着色**,入栈并从 IFG 摘除(邻居度数随之下降,可能连锁进低度列表,:1206-1261);当低度列表为空(剩下的都是高度数)时,选 **score() 最小**的 LRG 作为"潜在 spill 候选"入栈(:1266-1274,注释 "Time to pick a potential spill guy")——注意它是**乐观**的: 候选只是先入栈,**不保证真 spill**,等 Select 阶段看有没有颜色。这就是大纲说的"Briggs Optimistic Coloring"的实质——但源码里没有 Briggs 命名,"Chaitin 原版无限循环"的对比也无从考证。
+另一个常见误解是：既然寄存器不够，spill 本来就是合理结局，那值一旦 spill 到栈上，后面就认命待在栈里，没必要再 split/recycle 一轮又一轮。
 
-```cpp
-// chaitin.cpp:1263-1274(截取核心,逐字)
-    // Check for got everything: is hi-degree list empty?
-    if( !_hi_degree ) break;
+这听起来节省编译时间，但它会直接损耗前面全局优化的收益。
 
-    // Time to pick a potential spill guy
-    uint lo_score = _hi_degree;
-    double score = lrgs(lo_score).score();
-    double area = lrgs(lo_score)._area;
-    double cost = lrgs(lo_score)._cost;
-    bool bound = lrgs(lo_score)._is_bound;
-```
+一个值的生命周期往往不是整段都紧张：
 
-**coalesce 在 Simplify 之前与之后各跑一轮**: `PhaseAggressiveCoalesce`(chaitin.cpp:425-426,按块频率从高到低,coalesce.cpp:128-134)在 SSA 出局的虚拟 copy 上激进合并——src/dst 无干涉就并成一个 LRG,合并失败才落成真 copy(`insert_copies`,chaitin.cpp:429);spill 分裂后的 `PhaseConservativeCoalesce`(chaitin.cpp:492/:566,保守合并——只有当合并后 LRG 度数仍低于可用寄存器数才合)收敛出 final 图。`OptoCoalesce` 是 develop flag(c2_globals.hpp:244)——release 下合并策略不可调。
+- 它可能只在循环热点内部需要寄存器；
+- 过了某个 call 或 merge 之后，短时间内再也用不到；
+- 某些路径上密集使用，另一些路径上几乎闲置。
 
-*关键设计: Simplify 的"低度必可着色"是图着色的核心引理——度数 < N 的顶点总能找到空颜色,所以约简栈里越靠下的 LRG 越"难"染;spill 候选的选择用 score(cost/area)而不是裸 cost——热路径保护(高 cost)与全局利益(高 area 释放寄存器)的权衡。coalesce 的激进/保守两档对应"多消拷贝"与"保证可着色"的取舍。*
+如果一 spill 就永久住栈，你等于把“局部寄存器压力太高”升级成“整个方法都不再值得用寄存器保存这个值”。这通常过于保守。
 
-## 3. Select + Split — 逆序着色与 spill-split-recycle
+所以 C2 的真正补救方式不是“spill 后就认输”，而是**把 live range 拆短，允许它在某段时间住栈，在别的段落重新抢回寄存器。** 这正是 split/recycle 存在的理由。
 
-`Select`(chaitin.cpp:1447)把约简栈逆序弹出,重新插入 IFG(:1469),**从邻居已占的颜色里排除**(`lrg->SUBTRACT(nlrg.mask())`,:1503),`choose_color` 挑一个空闲色(:1529)。栈槽也有"颜色"——`RegMask::CHUNK_SIZE` 分块,全栈 LRG(AllStack)在当前块无颜色时**滚动到下一块**(:1538-1541,注释 "Bump register mask up to next stack chunk")。选不到色的 LRG 标记 spill,`Select` 返回 spill 数。
+## LRG 与 IFG：为什么先要把“同时活着”编码成图
 
-真正的 spill 在 **`Split`**(reg_split.cpp:496)与**外层 while 循环**里:
+C2 后端不是直接对 Node 或 MachNode 染色，而是先把它们压缩成 LRG（Live Range Group）。你可以把 LRG 理解为“后端眼里应该共同分配资源的一组活跃关系单元”。
 
-```cpp
-// chaitin.cpp:515-534(截取核心,逐字)
-  // Select colors by re-inserting LRGs back into the IFG in reverse order.
-  // Return whether or not something spills.
-  uint spills = Select( );
+要给 LRG 分寄存器，先得知道谁和谁不能同色。这就是 IFG（Interference Graph）的职责。
 
-  // If we spill, split and recycle the entire thing
-  while( spills ) {
-    if( _trip_cnt++ > 24 ) {
-      DEBUG_ONLY( dump_for_spill_split_recycle(); )
-      if( _trip_cnt > 27 ) {
-        C->record_method_not_compilable("failed spill-split-recycle sanity check");
-        return;
-      }
-    }
+`build_ifg_virtual()` 的注释把建图方式写得非常清楚：它对每个基本块做一次逆向扫描，从 live-out 集出发，遇到定义就让“当前定义值”与“此刻 live 集里的所有值”产生干涉，然后把定义移出 live 集，把输入加入 live 集。`share/opto/ifg.cpp:311`、`share/opto/ifg.cpp:317`、`share/opto/ifg.cpp:325`、`share/opto/ifg.cpp:329`
 
-    if (!_lrg_map.max_lrg_id()) {
-      return;
-    }
-    uint new_max_lrg_id = Split(_lrg_map.max_lrg_id(), &split_arena);  // Split spilling LRG everywhere
-```
+这个过程特别值得理解，因为它说明 IFG 不是“额外造一张图”而已，而是把寄存器冲突这个动态时间问题静态编码成图边：**两个 LRG 只要在某个点同时活着，就不能拿同一个寄存器颜色。**
 
-大纲说"split 后重新 Simplify"只对了一半——真实是 **spill-split-recycle 全循环**: 每轮 Select 有 spill → `Split` 把 spill 的 LRG 拆短(按 def/use 拆分,`split_DEF` reg_split.cpp:148 / `split_USE` :190,每个分裂点插 spill 拷贝;另有 `split_Rematerialize` :318——**能重算的值不 spill 到栈,直接重物化**)→ `compact`(:542)重编号 → **重建 liveness 与 IFG**(:546-558)→ conservative coalesce(:566)→ 再 Simplify/Select。循环终止靠的不是"数学证明"而是**工程上限**: `_trip_cnt` 超过 24 警告、27 报错放弃编译(:523-529,"failed spill-split-recycle sanity check")+ 每轮 `check_node_count` 节点预算(:537)。每次分裂后 LRG 更短、干涉更少,下一轮更容易着色——这正是"拆 live range 比永久 spill 更优"的设计: 短区间在热路径外可以重新进寄存器。
+更重要的是，IFG 比“单个区间的首尾”更贴合 C2 的值关系。C2 前面经历过 Phi 合并、循环变换、向量打包、matcher 重写，真正需要保护的是“谁会与谁同时活着”，而不只是“这个值从哪到哪活着”。IFG 把这种全局重叠关系直接变成邻接边，后面 simplify/select 看到的是资源冲突图，而不是一串线性区间。
 
-**实证**([素材](openjdk/planning/outlines/00-jvm-tools/materials/commands/15-c2-register-alloc-demo.txt)第 1 段): 高寄存器压力方法(32 个局部变量交叉运算)的 CITime 阶段树完整列出 RA 全流程——`Regalloc: 0.001s` 下依次是 `Ctor Chaitin`/`Build IFG (virt)`/`Build IFG (phys)`/`Compute Liveness`/`Regalloc Split`/`Postalloc Copy Rem`/`Fixup Spills`/`Coalesce 1-3`/`Simplify`/`Select`(01 篇素材第 6 段的 Regalloc 段同构,可对照)。`VerifyRegisterAllocator` 是 notproduct(c2_globals.hpp:285)、`OptoCoalesce` 是 develop(:244)——release 下 RA 内部既不能验证也不能调参,阶段计时是唯一直接观察;寄存器分配的正确性只能通过运行结果(heavy 方法算得对)与阶段存在性来间接确认。
+还有一个关键特例：copy 不定义新值，因此不产生新的干涉。这恰恰为后面的 coalesce 提供了空间——如果 copy 两端没有真正冲突，后端就有机会把它们染成同色，连这条 copy 本身都省掉。现稿已经抓住这一点，它是整套 C2 RA 哲学的支点之一。
 
-*关键设计: 整个 RA 是"约简-重建"的迭代——Simplify 押注低度可着色,Select 兑现颜色,spill 不落地为永久栈槽而是**拆短后重来**;每轮重建 liveness/IFG 的成本高(O(n) 扫描),但换来的是下一轮更小的干涉图。工程终止(24/27 次上限)替代了理论证明——这是 C2 里少见的"靠预算而不是靠证明"的算法。*
+## 为什么 LRG 里不仅有“谁干涉我”，还要记 `_cost/_area/_copy_bias`
 
-## 核心悬念
+寄存器分配不只是一个纯图问题，还是一个代价问题。
 
-寄存器分配收官: **IFG**(逆向块扫描建干涉图,LRG 带 cost/area/score 与 copy_bias)→ **Simplify**(低度入栈、score 选 spill 候选)→ **Coalesce**(aggressive/conservative 两档消拷贝)→ **Select**(逆序选色,chunk 滚动处理栈槽)→ **Split**(拆短 + 重物化 + spill-split-recycle 全循环,24/27 次工程上限)。每个 LRG 拿到了寄存器或栈槽,但图还没变成机器码——**Matcher** 把理想节点按 .ad 文件的规则匹配成 x86 指令(向量节点在这里变成 movdqu/paddd),**调度器**排出指令顺序,**发码器**输出字节。下一篇: 指令选择与代码生成。
+`LRG` 里最重要的几个字段已经把这种代价意识暴露出来了：
 
-> → [15-c2-compiler/06 — Matcher + Code Generation: DFA 指令选择 → x86 机码](openjdk/vol-02/15-c2-compiler/06-c2-codegen.md)
+- `_cost`：spill 这个值有多疼；
+- `_area`：它同时占住寄存器资源的面积有多大；
+- `_copy_bias`：它最好和谁同色，以便消掉 copy；
+- `score()`：用 `cost/area` 之类的折中决定潜在 spill 候选。
+
+这一步的意义很重要：C2 并不是盲目追求“图能染上色就行”，而是在问**哪个值最适合被牺牲、哪个值最值得保住寄存器、哪对值合并同色收益最大**。这和 C1 的“下次使用位置最晚者先挤走”相比，已经是一种更全局的价值排序。
+
+所以 IFG 给的是约束，`score()` 给的是代价偏好，两者一起才构成后面的 simplify/select 决策基础。
+
+## Simplify：为什么低度节点天然适合先压栈
+
+`Simplify()` 的核心思想其实很朴素：如果某个 LRG 的干涉度数已经低到小于可用寄存器数，那它在最终着色时天然更容易找到颜色。所以先把这种“低度节点”摘掉压到 `_simplified` 栈里，再让剩余图继续缩小。`share/opto/chaitin.cpp:1199`、`share/opto/chaitin.cpp:1202`、`share/opto/chaitin.cpp:1206`、`share/opto/chaitin.cpp:1217`、`share/opto/chaitin.cpp:1229`、`share/opto/chaitin.cpp:1232`
+
+当低度列表空了，而高干涉节点还没处理完时，算法才开始挑“潜在 spill 候选”。源码写得很坦白：这时候是 `Time to pick a potential spill guy`。也就是说，它不是宣布“这个值已经必 spill”，而是先在约简栈里把它当作最可能被牺牲的对象压下去，等 Select 阶段再看是不是真的走到那一步。`share/opto/chaitin.cpp:1263`、`share/opto/chaitin.cpp:1266`、`share/opto/chaitin.cpp:1267`、`share/opto/chaitin.cpp:1273`
+
+这就是图着色寄存器分配最值得抓住的直觉：**先靠图约简找出“容易染色”的顺序，再在真正分颜色时回头做决定。**
+
+所以 simplify 的作用，不是“已经决定谁 spill”，而是把难题推迟到“图已经尽量被削薄”的那一刻。
+
+## coalesce：为什么寄存器分配还要顺手消 copy
+
+如果寄存器分配只管着色，不管 copy，那么很多虚拟 copy 会在后端变成真 move。这会让前面好不容易压缩好的数据流关系再次膨胀成机器级搬运。
+
+所以 C2 在 simplify/select 之外，还会专门跑 aggressive 和 conservative 两档 coalesce。前者更激进，优先尽量消 copy；后者更保守，避免为了消 copy 把图挤到不可着色。它们的存在说明一件事：**寄存器分配在 C2 里不是“先分完再说”，而是和 copy 结构一起联动优化。**
+
+这和 `_copy_bias` 的存在是同一套哲学：如果两个 live range 没有真正冲突，那后端当然希望它们共用一个颜色，这样等价于把 copy 关系在分配阶段就消掉。
+
+所以 coalesce 不是可有可无的小修饰，而是“减少 move、减少 spill 压力、提高寄存器利用率”的关键配套动作。
+
+## Select：真正分颜色时在做什么
+
+`Select()` 会从 `_simplified` 栈顶逆序弹出 LRG，重新把它插回 IFG，再从邻居已占颜色中扣掉不可用色，然后调用 `choose_color()` 选一个还能用的寄存器颜色。`share/opto/chaitin.cpp:1447`、`share/opto/chaitin.cpp:1452`、`share/opto/chaitin.cpp:1468`、`share/opto/chaitin.cpp:1482`、`share/opto/chaitin.cpp:1503`、`share/opto/chaitin.cpp:1528`、`share/opto/chaitin.cpp:1529`
+
+这里有一个很容易被忽略的细节：栈槽本身也被当作一种“颜色空间”，而且 `AllStack` live range 还会按 chunk 滚动到下一块 stack color 区域。这说明在 C2 RA 里，“着色失败”的含义不是只有“寄存器没了”，还包括“退到另一个资源池里找位置”。`share/opto/chaitin.cpp:1471`、`share/opto/chaitin.cpp:1536`、`share/opto/chaitin.cpp:1538`、`share/opto/chaitin.cpp:1540`
+
+所以 Select 的任务不是简单地给每个值填一个寄存器号，而是：**在图约简顺序已经确定后，尽可能把值放回最好的颜色空间；实在不行，再把问题交给 split。**
+
+## Split：为什么 C2 不接受“一 spill 就长期住栈”
+
+真正体现 C2 风格的地方，在 spill 之后。
+
+`Register_Allocate()` 里第一次 `Select()` 如果有 spill，不是直接收工，而是进入 `while (spills)` 的 `spill-split-recycle` 大循环。每轮都会：
+
+- `Split()` 把需要 spill 的 LRG  everywhere 拆短；
+- `compact()` 重新压缩 LRG 编号；
+- 重建 liveness；
+- 重建 IFG；
+- 必要时再做一轮保守 coalesce；
+- 再 `Simplify()`、再 `Select()`。 `share/opto/chaitin.cpp:517`、`share/opto/chaitin.cpp:519`、`share/opto/chaitin.cpp:521`、`share/opto/chaitin.cpp:534`、`share/opto/chaitin.cpp:542`、`share/opto/chaitin.cpp:544`、`share/opto/chaitin.cpp:558`、`share/opto/chaitin.cpp:566`、`share/opto/chaitin.cpp:578`、`share/opto/chaitin.cpp:582`
+
+这条链的含义非常重要：**C2 不接受“寄存器不够，那这个值以后都住栈”的粗糙结局。**
+
+它更愿意做的是：把这个活跃关系拆短，让部分使用点重新有机会拿回寄存器，或者让某些段干脆重物化，而不是长期背着一个高频 spill 值。
+
+这也是为什么 split/recycle 是整套算法的关键，而不是后补救火。没有它，图着色分配就会在第一次颜色不够时迅速退化成大量永久 spill，前面全局优化获得的好处会被后端粗糙分配吞掉。换句话说，split 不是单纯为了“让算法继续跑下去”，而是为了守住前面 IGVN、EA、循环优化和向量化已经替代码赢回来的寄存器局部性与访存质量。
+
+源码里 `_trip_cnt` 的 24/27 次上限，也很能说明它的工程味：算法并不是理论上无限重试，而是靠一条工程预算线防止 spill-split-recycle 发疯。`share/opto/chaitin.cpp:521`、`share/opto/chaitin.cpp:523`、`share/opto/chaitin.cpp:525`、`share/opto/chaitin.cpp:526`
+
+所以 Split 的真正角色可以压成一句话：**它让 spill 从“终身判决”变成“阶段性让位”。**
+
+## 这套高成本 RA，为什么仍然符合 C2 的总体哲学
+
+看到这里，可能会反过来问：既然 spill-split-recycle 这么重，C2 为什么愿意花这笔时间？
+
+答案其实和前面所有 C2 章节一致：因为它前面已经花大力气把图优化到了“值得认真安排资源”的地步。
+
+- Parse + GraphKit 已经把语义织进图；
+- IGVN / CCP / EA 已经把图收得更小、更窄；
+- 循环与 SuperWord 又让热点路径更密、更宽。
+
+到这个阶段，如果后端还用过于粗糙的寄存器分配，很多前期全局优化换来的局部性、值合并和向量 pack 优势，都会在 spill 和 move 里漏掉。
+
+所以 C2 愿意在 RA 阶段付出更多时间，本质上是在贯彻它一以贯之的哲学：**既然前面已经做了全局优化，那后面也值得做更全局的资源安排。**
+
+## 收网：C2 的 RA 不是单遍扫描，而是全局活跃关系图上的着色与拆分
+
+现在可以把整篇压成一张总图了。
+
+Matcher 之后，C2 先用 `PhaseLive` 算出值在图上的活跃关系，再用 `build_ifg_virtual`/`build_ifg_physical` 把“同时活着”编码成 IFG；LRG 里保存 `cost/area/copy_bias/score` 这些分配偏好；`Simplify` 先把低度节点压栈、把高干涉节点延后；`Select` 再逆序着色；若颜色仍不够，就不接受永久住栈，而是进入 `spill-split-recycle`：拆短 live range、重建 liveness 和 IFG、再跑一轮 coalesce/simplify/select，直到图终于能塞进有限寄存器。`share/opto/chaitin.cpp:336`、`share/opto/ifg.cpp:317`、`share/opto/chaitin.cpp:360`、`share/opto/chaitin.cpp:409`、`share/opto/chaitin.cpp:425`、`share/opto/chaitin.cpp:515`、`share/opto/chaitin.cpp:519`、`share/opto/chaitin.cpp:521`、`share/opto/chaitin.cpp:578`
+
+所以，这一篇最核心的一句话不是“C2 用 Chaitin 图着色寄存器分配”，而是：
+
+**C2 的寄存器分配已经不再是局部顺序问题，而是全局活跃关系图上的着色与拆分问题；spill 也不是终局，而是通过 split/recycle 反复换空间。**
+
+只要这句抓住了，下一篇 `Matcher + Code Generation` 就好理解了：寄存器终于安排妥当，C2 才能把这些机器节点和寄存器结果真正落成 x86 指令与 nmethod。
+
+> → [15-c2-compiler/06 — `Matcher + Code Generation`：DFA 指令选择 → x86 机码](06-c2-codegen.md)

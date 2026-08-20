@@ -1,166 +1,707 @@
-# 03. InstanceKlass 与数组 — 元数据仓库与 GC 的两副面孔
+# 03. 为什么 `InstanceKlass`、`ObjArrayKlass`、`TypeArrayKlass` 不能合并？— 三种不同的运行时仓库
 
-> **前置依赖**:[01 — 对象头](01-markoop-oopdesc.md):对象头 union 的"多余"4 字节在这里派上用场;[02 — Klass](02-klass-hierarchy.md):InstanceKlass/ArrayKlass 家族挂在 Klass 层次树上
-> → **后续**:[04 — 常量池与解析](04-constantpool-method.md)
-> 关联域: 25-gc(数组遍历/引用处理)、09-memory-core(数组分配)
+> 基于 `OpenJDK 11u / HotSpot / Linux / x86_64` 讨论
+> **前置依赖**：[01 — 一个 `markOop`，为什么能装下对象的五种身份？](01-markoop-oopdesc.md)：对象头和数组长度槽位的前提；[02 — 为什么一个 `Klass*` 就够了？](02-klass-hierarchy.md)：`klass()` 已经是统一入口
+> → **后续**：[04 — 常量池与解析](04-constantpool-method.md)：`anewarray #5` 这类常量池符号如何变成真实 `Klass*`
+> 关联域：09-memory-core、25-gc
 
-## 从类的仓库到数组的两副面孔
+## 统一入口之后，为什么仓库内部还要继续分家
 
-`new int[10]` 和 `new String[10]` 在 Java 层面都是"数组",JVM 内部却是**两种不同的 Klass**——`int[]` 是 TypeArrayKlass,`String[]` 是 ObjArrayKlass。差别不在语法,在元素: `int` 是裸值,GC 看一眼就可以走;`String` 是引用,GC 必须逐个检查、逐个搬移。这篇先把 02 篇留下的 InstanceKlass 仓库补齐(字段表、方法表、引用对象的特殊 Klass),再拆开数组的两半: 头部怎么省出一个长度字段、维度链怎么串起来、以及 GC 为什么对两种数组态度完全不同。
+上一章已经解释了：对象头第二个槽位给出的 `Klass*`，不是一个简单的“类名指针”，而是大小、类型判断、调用分派、初始化和 mirror 的统一入口。
 
-## 1. 头部: 长度字段塞进"多余"的 4 字节
+但统一入口不等于内部完全统一。
 
-上一篇(01)说过: 压缩模式下对象头的类指针只用 4 字节,union 的高 4 字节对普通对象是纯填充。**数组把这个"浪费"利用了**——`_length` 根本不是一个 C++ 字段,它被塞进那个 4 字节里:
+Java 代码里这几种对象看起来都很自然：
 
-```cpp
-// arrayOop.hpp:73-79(注释+函数,逐字)
-  // The _length field is not declared in C++.  It is allocated after the
-  // declared nonstatic fields in arrayOopDesc if not compressed, otherwise
-  // it occupies the second half of the _klass field in oopDesc.
-  static int length_offset_in_bytes() {
-    return UseCompressedClassPointers ? klass_gap_offset_in_bytes() :
-                               sizeof(arrayOopDesc);
-  }
+```java
+new Foo()
+new String[10]
+new int[10]
 ```
 
-- 压缩模式(`UseCompressedClassPointers`): length 在 offset 12——就是 union 的高 4 字节,和压缩类指针合用一个 word;
-- 非压缩模式: length 排在 `sizeof(arrayOopDesc)`(16 字节)之后。
+可 JVM 真正关心的不是它们在语法上都长得像“new 一个东西”，而是它们分别会给运行时带来什么成本：
 
-读长度就是一次带偏移的整型读(arrayOop.hpp:108-110,逐字):
+- 普通类实例要回答字段、方法、常量池和初始化状态
+- `String[]` 里的每个元素都是引用，读写要走 barrier，GC 还得逐个过问
+- `int[]` 里的元素永远不是引用，GC 完全没必要扫描元素区
+- 数组对象还有一个普通实例没有的问题：length 到底放哪，数组头怎么对齐，多维数组的类型链怎么长出来
 
-```cpp
-// arrayOop.hpp:108-110(逐字)
-  int length() const {
-    return *(int*)(((intptr_t)this) + length_offset_in_bytes());
-  }
+如果只看 Java 语法，很容易会想：
+
+```text
+数组不就是“对象 + 一个 length + 一堆元素”吗？
+普通类和数组都已经有了 Klass，继续分成那么多子类是不是过度设计？
 ```
 
-所以压缩模式下数组头是 **16 字节**: mark(8)+ 压缩类指针(4)+ length(4)。`arraylength` 字节码的实现也印证——null 检查后直接读这个偏移(templateTable_x86.cpp:4164-4168,逐字):
+这篇要回答的不是“数组有哪些实现细节”，而是：
 
-```cpp
-// templateTable_x86.cpp:4164-4168(逐字)
-void TemplateTable::arraylength() {
-  transition(atos, itos);
-  __ null_check(rax, arrayOopDesc::length_offset_in_bytes());
-  __ movl(rax, Address(rax, arrayOopDesc::length_offset_in_bytes()));
-}
+**既然 `klass()` 已经是统一入口，为什么 HotSpot 还要继续把普通类、对象数组、基本类型数组拆成三种不同的运行时仓库？这些仓库各自提前把什么成本编码好了？**
+
+先把总图画出来：
+
+```text
+klass()
+  ├─ InstanceKlass
+  │    ├─ methods / fields / constants / init state
+  │    └─ 普通类运行时仓库
+  └─ ArrayKlass
+       ├─ 公共数组事实：length、header、维度链、mirror
+       ├─ ObjArrayKlass
+       │    └─ 元素是 oop：访问走 Access API，GC 逐元素闭包
+       └─ TypeArrayKlass
+            └─ 元素是裸值：按类型读写，GC 不扫元素区
 ```
 
-**关键设计 (斜体)**: *普通对象把 union 高 4 字节当填充,数组把它当长度字段——同一个 word,两种用途,谁也不多占。代价是 length 的偏移依赖压缩开关,所有读长度的代码都得走 `length_offset_in_bytes()` 而不是写死;换来的是每个数组对象省 4 字节。*
+一句话先记住：
 
-- [C++: header 大小是算出来的: `header_size_in_bytes()` 把 length 偏移 + 4 对齐到堆粒度(arrayOop.hpp:53-63);`long[]`/`double[]` 的 header 还要再对齐到 8 字节,保证元素天然 8 对齐(`header_size` 按元素类型决定,:122-127;`element_type_should_be_aligned` 在 :68-70)]
+**`Klass` 统一的是入口，不是成本模型。`InstanceKlass` 提前编码普通类仓库，`ObjArrayKlass` 提前编码“元素是引用”的访问与 GC 成本，`TypeArrayKlass` 则把“元素绝不可能是引用”的事实固化进类型本身。**
 
-## 2. 数组的 Klass: 一张维度链
+---
 
-### 2.1 三个字段串起所有维度
+## 一、如果不继续分家，JVM 会被迫在热路径上现猜
 
-数组 Klass 的家族关系不是树,是**维度链**(arrayKlass.hpp:41-43,逐字):
+在看源码前，先把几种直觉方案拆掉。
 
-```cpp
-// arrayKlass.hpp:41-43(逐字)
-  int      _dimension;         // This is n'th-dimensional array.
-  Klass* volatile _higher_dimension;  // Refers the (n+1)'th-dimensional array (if present).
-  Klass* volatile _lower_dimension;   // Refers the (n-1)'th-dimensional array (if present).
+### 1.1 方案一：数组长度就是一个普通字段
+
+最容易想到的是：
+
+```text
+数组也是对象
+  → 那就给所有对象统一预留一个 length 字段
+  → 普通对象不用时填 0
 ```
 
-`int[]` 的 Klass 指向 `int[][]` 的 Klass(higher),后者指向 `int[][][]`…… `int[][]` 再指回 `int[]`(lower)。基本类型数组的**最低维**是全局单例: `Universe::intArrayKlassObj()`(universe.hpp:276),启动时由 `TypeArrayKlass::create_klass` 逐个创建(universe.cpp:334-337)。`int[]` 的 Klass 全 JVM 只有一份,所有 `int[]` 实例共享。
+这在概念上最省事，但代价非常直接：
 
-高维数组 Klass 在需要时**沿链原子创建**: `array_klass_impl`(objArrayKlass.cpp:331-370)先 acquire 无锁读 higher_dimension,空则拿 `MultiArray_lock` 锁再查一遍,仍空才创建并 `release_set_higher_dimension` 挂链(注释 "Ensure atomic creation of higher dimensions",:345)——`int[][][]` 的 Klass 建立时,`int[][]` 和 `int[]` 的链早已就位(或当场补齐)。
+- 每个普通对象都要为根本不存在的 length 支付空间
+- 普通实例对象和数组对象的头部布局被强行统一变大
+- 运行时还得反过来记住“这个对象上的 length 字段到底有没有语义”
 
-- [C++: 数组类型是 Object、Cloneable、Serializable 的子类型——数组 Klass 的 secondary 接口表直接指向全局共享的 `the_array_interfaces_array()`(arrayKlass.cpp:122),`int[] instanceof Serializable` 的快速子类型检查在这里命中]
+HotSpot 不愿意让 `new Foo()` 为 `new int[10]` 的需求买单。
 
-### 2.2 数组 Klass 也是完整 Klass
+### 1.2 方案二：所有数组共用一个统一数组类，运行时再看元素类型分支
 
-数组 Klass 创建时走 `complete_create_array_klass`(arrayKlass.cpp:102-112): 初始化父类链、初始化 vtable(数组不引入新方法,02 篇说过 vtable 长度 = 父类)、再创建自己的 `java.lang.Class` 镜像。所以 `int[].class` 是合法的——数组也有 mirror。
+第二种直觉是：
 
-## 3. InstanceKlass 的仓库: 字段表与方法表
-
-02 篇介绍了 InstanceKlass 的指针字段;这里看它装的两张核心表。
-
-### 3.1 字段表: 每个字段 12 字节
-
-`_fields` 不是结构体数组,是 `Array<u2>`——每 6 个 u2 描述一个字段(FieldInfo,fieldInfo.hpp:38-90):
-
-- 槽 0-3: access_flags、name_index、signature_index、initval_index(后三个是常量池下标);
-- 槽 4-5: 打包的偏移与类型——低 2 位是 tag: `01` 纯字段偏移、`10` 带类型的字段、`11` 带类型和争用组(fieldInfo.hpp:55-62)。
-
-- [C++: 为什么用平铺的 u2 数组而不是 struct?ClassFile 的字段表就是这种紧凑布局,内存连续、按序遍历方便;FieldInfo 只是这个数组的"视窗",提供各槽位的访问器]
-
-### 3.2 方法表: 声明顺序即数组顺序
-
-`_methods` 是 `Array<Method*>`,按 class 文件顺序排列——`<init>`/`<clinit>` 也在其中(它们不进 vtable,02 篇说过)。每个 Method 对象装着字节码、异常表、行号表与调用计数;vtable index 在类链接时写进 Method(02 篇的归位)。方法与常量池的关系,下一篇(04)展开。
-
-## 4. InstanceRefKlass: 引用对象的特殊 Klass
-
-`SoftReference`/`WeakReference`/`PhantomReference` 的实例是普通对象,但它们的 Klass 是 InstanceRefKlass——因为 **referent 字段必须由 GC 特殊处理**: 对象是否还"活着"取决于 referent 指向谁,以及它该不该进 ReferenceQueue。`update_nonstatic_oop_maps`(instanceRefKlass.cpp:31-70)把 referent 和 discovered 从普通 oop-map 里剔掉(注释 "They are treated specially by the garbage collector",:33-35)——普通字段遍历时不再碰它们,发现/入队逻辑由 GC 按引用语义单独驱动。细节在 25-gc 域。
-
-**关键设计 (斜体)**: *引用类必须独占一个 Klass 子类,因为"普通对象遍历"的规则对它们失效——referent 不是普通引用,它决定引用队列的入队;把特殊语义放进 Klass 类型里,GC 按类型分发,不用给每个引用对象打标记。*
-
-## 5. ObjArrayKlass: 元素是引用,GC 逐个过问
-
-对象数组的 Klass 多一个字段: `_element_klass`(objArrayKlass.hpp:44)——元素类型。布局是 `[16B 头][元素 × n]`,压缩模式下每个元素 4 字节(narrowOop)。
-
-读写元素不是裸指针运算,而是走 Access API(objArrayOop.inline.hpp:47-57,截取核心,逐字):
-
-```cpp
-// objArrayOop.inline.hpp:47-57(截取核心,逐字)
-inline oop objArrayOopDesc::obj_at(int index) const {
-  assert(is_within_bounds(index), "index %d out of bounds %d", index, length());
-  ptrdiff_t offset = UseCompressedOops ? obj_at_offset<narrowOop>(index) : obj_at_offset<oop>(index);
-  return HeapAccess<IS_ARRAY>::oop_load_at(as_oop(), offset);
-}
-
-inline void objArrayOopDesc::obj_at_put(int index, oop value) {
-  assert(is_within_bounds(index), "index %d out of bounds %d", index, length());
-  ptrdiff_t offset = UseCompressedOops ? obj_at_offset<narrowOop>(index) : obj_at_offset<oop>(index);
-  HeapAccess<IS_ARRAY>::oop_store_at(as_oop(), offset, value);
-}
+```text
+String[] 和 int[] 不都叫数组吗？
+那就只保留一个 ArrayKlass：
+  访问时再看元素类型
+  GC 时再看元素类型
 ```
 
-**`obj_at_put` 写引用会经过 GC barrier**——这是关键: 数组里的引用和其他字段引用一样,写之前要通知 GC(比如 G1 记录跨 region 引用)。`obj_at` 读引用同理,`HeapAccess` 层把 barrier 插入,调用方不感知。
+这个方案的问题不是“做不到”，而是会把本可以提前固化的成本，推迟到每次访问和每次 GC 遍历时临场判断：
 
-GC 遍历对象数组时,每个元素都必须过一遍闭包(objArrayKlass.inline.hpp:39-46,逐字):
+- 取元素前先判断它是 oop 元素还是裸值元素
+- 写元素前再决定要不要走 barrier
+- GC 扫数组时再决定要不要逐元素遍历
+- 计算对象大小时再现算 header 和元素大小
 
-```cpp
-// objArrayKlass.inline.hpp:38-46(逐字)
-template <typename T, class OopClosureType>
-void ObjArrayKlass::oop_oop_iterate_elements(objArrayOop a, OopClosureType* closure) {
-  T* p         = (T*)a->base_raw();
-  T* const end = p + a->length();
+也就是说，数组类型的关键差异本来在创建类型时就知道，却被拖到了所有后续操作里。
 
-  for (;p < end; p++) {
-    Devirtualizer::do_oop(closure, p);
-  }
-}
+HotSpot 更想做的是：
+
+```text
+一旦数组类型被建立
+  → 后续每次访问、每次 GC、每次算大小都尽量少分支
 ```
 
-从首元素到末元素,逐个交给闭包——标记、搬移、更新指针,全部发生在这里。
+### 1.3 方案三：GC 对所有数组都逐元素扫描，宁可多做一点
 
-## 6. TypeArrayKlass: 元素是裸值,GC 直接路过
+还可以想得更“统一”一点：
 
-基本类型数组的遍历实现是**空函数**(typeArrayKlass.inline.hpp:36-40,逐字):
-
-```cpp
-// typeArrayKlass.inline.hpp:36-40(逐字)
-inline void TypeArrayKlass::oop_oop_iterate_impl(oop obj, OopIterateClosure* closure) {
-  assert(obj->is_typeArray(),"must be a type array");
-  // Performance tweak: We skip processing the klass pointer since all
-  // TypeArrayKlasses are guaranteed processed via the null class loader.
-}
+```text
+别区分对象数组和基本类型数组了
+所有数组都从头扫到尾
 ```
 
-注释和头文件都点明了原因(typeArrayKlass.hpp:89-90): "Since there are no oops in TypeArrayKlasses, these functions only return the size of the object"——**基本类型数组里不可能有引用**,GC 的遍历闭包直接空转,元素区一个引用都不需要处理。这是"元素是引用还是裸值"在 GC 路径上的直接分岔。
+这在正确性上当然没问题，但会把 `int[]`、`byte[]`、`double[]` 这种完全不含 oop 的数组也拖进对象引用遍历协议。
 
-读写则是对应类型的裸访问: `byte_at` 读 1 字节(typeArrayOop.inline.hpp:92)、`int_at` 读 4 字节(:125)、`long_at` 读 8 字节(:158)——底层 `HeapAccess<IS_ARRAY>::load_at`(以 int_at 为例,typeArrayOop.inline.hpp:125-129),无引用所以无 oop barrier。元素偏移按类型定: `element_offset = base_offset_in_bytes + sizeof(T) * index`(typeArrayOop.hpp:65-69)。
+如果一个 10MB 的 `byte[]` 被 GC 当成“有可能每个元素都是引用”，它就要为不存在的引用语义付完整的扫描成本。
 
-**关键设计 (斜体)**: *同一个"数组"概念,GC 的成本差了一个量级——对象数组 O(n) 逐个处理元素,基本类型数组 O(1) 只看头。把"不可能含引用"编码进 Klass 类型里,GC 遍历时一次类型判断就免掉整个数组的扫描;Java 层无感知,性能差全在布局与遍历的纪律里。*
+这不是“多做一点判断”，而是把整块元素区的访问复杂度抬高了一个量级。
 
-## 7. 边界检查: 每个访问都在栅栏内
+### 1.4 真正要提前编码的是什么
 
-数组访问(aaload/iaload/astore/istore)与 `arraylength` 不同,都要先做**边界检查**——index 在 [0, length) 内才放行,越界抛 `ArrayIndexOutOfBoundsException`。解释器模板里 `index_check` 与访问同处(templateTable_x86.cpp:769 起);JIT 编译后边界检查仍在,但 C2 的 Range Check Elimination 会在能证明 index 必然在界内时消除检查,循环里不变的检查被提升到循环外只做一次。这条"永远存在"的栅栏,是数组与普通字段访问最根本的行为差异。
+这三个失败方案暴露出同一个核心：
 
-## 核心悬念
+```text
+运行时最怕的不是信息少
+而是明明创建类型时就知道的信息，后面每次访问都还要重猜
+```
 
-数组的两副面孔到此分明: 长度字段塞进 union 的"多余"4 字节、维度链沿 higher_dimension 原子延伸、对象数组逐元素过 GC、基本类型数组的遍历是空函数——加上 InstanceKlass 的字段表(每字段 12 字节)与方法表、引用对象的特殊 Klass,对象模型的两大支柱(类与数组)都过了一遍。但数组访问的字节码里藏着下一个问题——`new String[10]` 编译后字节码是 `anewarray #5`,这个 `#5` 是**常量池符号引用**,运行时怎么变成真实的 ObjArrayKlass?下一篇: 常量池与解析——字节码里的编号怎么变成直接指针。
+HotSpot 因此把三类不同成本提前写进三种仓库：
+
+1. 普通类仓库：字段、方法、常量池、初始化状态
+2. 对象数组仓库：元素是 oop，访问和 GC 都按引用协议处理
+3. 基本类型数组仓库：元素绝不含 oop，GC 直接跳过元素区
+
+这就是这篇的主线。下面先看普通类仓库到底在保存什么。
+
+---
+
+## 二、`InstanceKlass`：普通类为什么需要一座自己的运行时仓库
+
+### 2.1 `Klass` 解决统一入口，`InstanceKlass` 接住普通类细节
+
+上一章讲的 `Klass` 已经能回答：
+
+- 这是实例还是数组
+- 类型关系怎么判
+- 分发表从哪里取
+- mirror 在哪里
+
+但一个普通类真正进入运行时之后，仍有大量“只对普通类成立”的问题：
+
+- 这个类声明了哪些方法
+- 字段表如何编码
+- 常量池指针在哪里
+- 默认方法、局部接口、传递接口信息放哪
+- 初始化状态由谁维护
+
+这些东西如果全部塞进 `Klass` 基类，会让数组类型也背着一大堆无意义字段。
+
+所以 HotSpot 的做法是：
+
+```text
+Klass
+  → 公共类型能力入口
+
+InstanceKlass
+  → 普通类运行时仓库
+```
+
+### 2.2 `_fields` 为什么不是结构体数组，而是 `Array<u2>`
+
+`instanceKlass.hpp:290-303` 注释已经说得很清楚：字段信息最终存成 `Array<u2>`，而 `fieldInfo.hpp:45-69` 说明每个字段用 6 个 `u2` 槽位描述。
+
+也就是说，HotSpot 最终保存的不是：
+
+```cpp
+struct FieldInfo { ... } fields[];
+```
+
+而更接近：
+
+```text
+u2, u2, u2, u2, u2, u2,  u2, u2, u2, u2, u2, u2, ...
+```
+
+每 6 个短整型表示一个字段。
+
+这背后的动机不是“写法古怪”，而是仓库压缩：
+
+- class file 里的字段描述本来就更接近紧凑记录
+- 运行时大量时候只需要顺序扫字段信息
+- 紧凑数组比一组带更多对齐和 padding 的 C++ 结构体更省空间
+
+`FieldInfo` 更像一个“视窗”，而不是最终物理布局本体。
+
+### 2.3 方法表为什么按 class file 顺序保留
+
+`_methods` 是 `Array<Method*>`。它保存的是“本类声明的方法集合”，而不是上一章讲的 vtable 最终分派顺序。
+
+这意味着两件事必须分开：
+
+```text
+_methods
+  → 仓库视角：本类声明了什么方法
+
+vtable / itable
+  → 分派视角：运行时应该跳到哪一个实现
+```
+
+如果把这两件事混成一张表，就会让“声明顺序、class file 结构”和“运行时分派结果”互相污染。
+
+HotSpot 保留它们分层：
+
+- `_methods` 保存类自己的方法仓库
+- vtable/itable 在链接/初始化阶段再组织分派结果
+
+这样运行时仓库和分派快路径各司其职。
+
+### 2.4 `_constants` 和初始化状态为什么也在这座仓库里
+
+普通类仓库里还包括：
+
+- `_constants`
+- `_init_state`
+- `_init_thread`
+
+这说明 `InstanceKlass` 不只是“字段和方法清单”，而是：
+
+```text
+普通类一旦进入运行时
+  需要反复查询和维护的类级状态中心
+```
+
+这里要特别守住一个边界：字段和方法的**解析动作**来自 class file 解析流程，而 `InstanceKlass` 是这些解析结果的**运行时承载仓库**。正文不能把“谁构建它”和“谁长期保存它”混成一句。
+
+### 2.5 普通类仓库想解决的不是语法，而是复用成本
+
+到这里收一个结论：`InstanceKlass` 的意义不是“普通类字段比较多”，而是它把只对普通类有意义、又会被反复使用的运行时信息集中起来，避免数组和其他特殊类型为这些字段付成本。
+
+这就是第一种成本模型：
+
+```text
+普通类成本模型
+  → 仓库重点在字段/方法/常量池/初始化状态
+```
+
+接下来转到数组。数组仓库的第一个特殊点，不是 GC，而是头部本身就和普通对象不一样。
+
+---
+
+## 三、数组头为什么单独长这样：length 不是普通字段
+
+### 3.1 数组最特别的地方不是“元素很多”，而是“对象大小不固定”
+
+普通实例对象的大小通常由类布局决定，创建对象后不再变化。
+
+数组不一样：
+
+```text
+int[10]   和 int[1000]
+同一个 Klass
+不同对象大小
+```
+
+所以数组对象头必须让运行时立刻回答两个问题：
+
+- 长度是多少
+- 头部后第一个元素从哪开始
+
+如果 length 只是一个普通 Java 字段，解释器、JIT、GC 和对象大小计算都得把它当普通字段访问路径的一部分来处理。HotSpot 不这么做。
+
+### 3.2 `arrayOopDesc` 的 `_length` 根本不是 C++ 非静态字段
+
+`arrayOop.hpp:73-79` 明说了：
+
+- `_length` 并没有声明成 C++ 非静态字段
+- 在压缩类指针模式下，它占用的是 `oopDesc` 的 `_klass` 槽位后半部分
+
+这句话最容易被误解成“length 是某种魔法隐藏字段”。更准确地说：
+
+```text
+length 是对象头布局里的一段约定位置
+不是 C++ 类声明里一个独立成员
+```
+
+所以运行时访问长度不是 `obj->_length`，而是：
+
+```text
+obj 起始地址 + length_offset_in_bytes()
+```
+
+### 3.3 为什么压缩类指针模式下正好能塞进那 4 个字节
+
+在压缩类指针模式下：
+
+- `mark word` 仍是 8 字节
+- `narrowKlass` 只占 4 字节
+- 紧接着就留下了 4 字节位置
+
+数组正好把这块位置拿来放 `length`。
+
+这不是“顺手利用一下 padding”这么简单，它改变了数组头的常见形态：
+
+```text
+[ mark 8 ][ narrowKlass 4 ][ length 4 ]
+```
+
+于是压缩类指针模式下常见数组头部就是 16 字节，然后再按元素类型决定元素起始对齐。
+
+### 3.4 为什么不能把 length 偏移写死
+
+看到上面的 16 字节布局，很容易直接写出一个结论：
+
+```text
+数组 length 永远在 offset 12
+```
+
+这在当前常见配置下常常成立，但源码故意把访问写成 `length_offset_in_bytes()`，因为它依赖：
+
+- 是否启用压缩类指针
+- 当前数组头布局定义
+- 是否是数组而不是普通实例对象
+
+运行时不想把这种版本/配置相关事实散落成一堆写死的数字。
+
+因此 `length()` 的实现是带偏移整型读，而 `arraylength` 字节码模板也是 null check 后按这个偏移去读。
+
+### 3.5 头部大小为什么还要看元素类型
+
+数组头解决了 length 位置问题后，还没结束。
+
+`arrayOop.hpp:122-127` 又说明：
+
+- `long[]`
+- `double[]`
+
+这类元素本身要求更强对齐，于是 header size 还要按元素类型进一步对齐。
+
+也就是说，“数组头多了个 length”只是第一层事实；更深一层是：
+
+**数组头不是固定常量，而是长度位置、基本头大小和元素对齐要求共同决定的。**
+
+到这里先收一个结论：数组仓库的第一项提前编码，不是 GC 语义，而是对象头布局与元素起点规则。
+
+---
+
+## 四、`ArrayKlass`：所有数组先共享哪些事实
+
+### 4.1 数组分家之前，先有一层共性仓库
+
+虽然 `String[]` 和 `int[]` 最终要走不同路径，但它们仍然共享一批事实：
+
+- 这是一维、二维还是更高维数组
+- 更高维/更低维对应哪个数组类型
+- 它的 mirror 在哪
+- 它作为数组，如何接入 `Object` / `Cloneable` / `Serializable` 这套类型关系
+
+这些共性由 `ArrayKlass` 先接住。
+
+### 4.2 维度链为什么不是树，而是双向链
+
+`arrayKlass.hpp:41-43` 里三个字段非常关键：
+
+- `_dimension`
+- `_higher_dimension`
+- `_lower_dimension`
+
+这意味着数组类型族的组织方式更像：
+
+```text
+int[] <-> int[][] <-> int[][][] <-> ...
+```
+
+而不是“每次重新算一遍更高维类型”。
+
+这样做的好处是：
+
+- 已有低维数组类型可以快速找到更高维兄弟
+- 更高维数组类型创建出来后也能反向连回低维
+- JVM 不必为每次多维数组相关操作都重新拼类型描述
+
+### 4.3 高维数组为什么要惰性创建
+
+不是每个程序都会用到 `int[][][][]`。如果 JVM 启动时就把所有高维数组 `Klass` 全部预建好，绝大多数都白白占内存。
+
+因此 `higher_dimension` 的建立是惰性的：
+
+```text
+先读 higher_dimension
+  → 已有就直接用
+  → 没有再在锁保护下创建并挂链
+```
+
+这里的重点不是锁本身，而是数组类型链的生命周期策略：
+
+**只为真正出现过的维度支付类型仓库成本。**
+
+### 4.4 数组也是完整的类型，不只是“某类的附属品”
+
+数组拥有自己的 mirror，也有自己的子类型语义。
+
+特别是：数组天然还是 `Object`、`Cloneable`、`Serializable` 的子类型。这说明数组类型不是“临时附在元素类型上的一个补丁”，而是 JVM 里一等公民的运行时类型。
+
+所以本篇要把 `ArrayKlass` 看成“数组共同仓库”，不是“两个具体数组类之间的过渡节点”。
+
+接下来真正的分叉才开始：元素如果是 oop，整个访问和 GC 语义都变了。
+
+---
+
+## 五、`ObjArrayKlass`：元素一旦是引用，访问和 GC 成本就完全变了
+
+### 5.1 `String[]` 的问题不是“多一个元素类型字段”，而是“每个元素都是 oop”
+
+对象数组和基本类型数组在 Java 语法里都长这样：
+
+```java
+a[i]
+```
+
+但运行时真正面对的区别是：
+
+```text
+String[]
+  → 元素本身是对象引用
+  → 读写元素等于读写 oop
+  → GC 也必须把每个元素当潜在引用处理
+```
+
+这不是一个小标志位能轻轻带过的区别，而是整个访问协议和扫描协议都不同。
+
+### 5.2 `_element_klass` 为什么是对象数组仓库必须保存的事实
+
+`ObjArrayKlass` 比公共数组仓库多出来的关键事实，是元素类型本身：`_element_klass`。
+
+这不仅用于反射或类型查询，更关系到：
+
+- 数组协变的子类型语义
+- 运行时数组存储检查
+- GC 和访问路径对元素语义的理解
+
+所以对象数组仓库不是“数组 + 一个 oop 标志”，而是“数组 + 元素本身就是一个运行时类型”。
+
+### 5.3 对象数组访问为什么走 `HeapAccess<IS_ARRAY>`
+
+`objArrayOop.inline.hpp:47-57` 里的 `obj_at` / `obj_at_put` 不是裸指针读写，而是：
+
+- 先根据压缩 oop 与否算元素偏移
+- 再通过 `HeapAccess<IS_ARRAY>` 执行 oop load/store
+
+这表示对象数组元素访问从一开始就按“引用字段访问”协议走。调用方不需要自己记住：
+
+```text
+这是个数组元素，所以可能需要 barrier
+```
+
+仓库和 Access API 已经把这条成本模型编码好了。
+
+### 5.4 为什么写一个元素也要当成 GC 事件看待
+
+对对象数组来说：
+
+```java
+arr[i] = value;
+```
+
+不是简单的“往内存里写个指针”。对 GC 来说，它可能意味着：
+
+- 新增了一条对象引用边
+- 需要记录跨 region / 跨代引用
+- 某些 barrier 或 remembered set 需要更新
+
+这就是为什么对象数组的**单元素写入路径**不能按裸值数组那样理解，而要走 `HeapAccess<IS_ARRAY>::oop_store_at` 这套 oop 存储协议。它和后面 `TypeArrayKlass::copy_array` 这种整段裸值拷贝路径不是一回事。
+
+所以对象数组仓库提前编码的第二项成本是：
+
+**元素写入本身就是引用写入协议。**
+
+### 5.5 GC 为什么必须逐元素过对象数组
+
+`objArrayKlass.inline.hpp:38-46` 的遍历逻辑很朴素：
+
+```text
+从 base_raw() 到 base_raw() + length
+  逐元素交给 closure
+```
+
+但这段循环的含义非常重：
+
+- 标记阶段：每个元素都可能是新边
+- 搬移阶段：每个元素都可能要被更新成新地址
+- 压缩/更新指针阶段：每个元素都得逐个修正
+
+也就是说，对象数组的 GC 成本天然是：
+
+```text
+O(length)
+```
+
+因为 JVM 不能跳过任何一个元素。
+
+到这里可以收一个结论：`ObjArrayKlass` 提前编码的，不只是元素类型信息，而是“每个元素都是 oop，因此访问和扫描都必须走引用协议”的整套成本模型。
+
+这就是第二种成本模型：
+
+```text
+对象数组成本模型
+  → 元素是 oop
+  → 访问走引用协议
+  → GC 逐元素闭包
+```
+
+---
+
+## 六、`TypeArrayKlass`：元素绝不可能是引用时，GC 为什么可以整个元素区都不看
+
+### 6.1 `int[]` 和 `byte[]` 最重要的事实：元素不可能是 oop
+
+基本类型数组仓库真正抓住的，不是“元素大小不同”这么简单，而是更根本的一条：
+
+```text
+元素绝不可能是对象引用
+```
+
+这条事实一旦在类型层面成立，很多运行时成本就直接消失：
+
+- 读写不需要 oop barrier
+- GC 不需要逐元素扫描
+- 元素区可以被当作纯裸数据块看待
+
+### 6.2 为什么 GC 遍历实现几乎是空的
+
+`typeArrayKlass.inline.hpp:36-50` 的 `oop_oop_iterate_impl` 基本是空实现。它并不是“忘了写”，而是明确表达：
+
+```text
+这个对象里没有需要按 oop 语义遍历的元素区
+```
+
+因此 GC 在基本类型数组上主要只需要关心对象头和类型对象本身，不需要对元素区逐个调用 closure。
+
+这和对象数组形成了最鲜明的分叉：
+
+```text
+ObjArrayKlass   → 元素逐个过 closure
+TypeArrayKlass  → 元素区不进 oop 遍历
+```
+
+### 6.3 基本类型数组的访问协议也不是“普通数组通用读写”
+
+`typeArrayOop.hpp` / `typeArrayOop.inline.hpp` 中的访问器按具体元素类型分开：
+
+- `byte_at`
+- `int_at`
+- `long_at`
+- ...
+
+底层偏移遵循：
+
+```text
+base_offset_in_bytes(type) + sizeof(T) * index
+```
+
+这和对象数组的关键差别是：这里的 load/store 不承担 oop 语义，只承担裸值数组访问语义。
+
+所以 `TypeArrayKlass` 提前编码的不只是“没有 oop”，也是“访问协议是按基础类型宽度直接读写”。
+
+### 6.4 为什么 `long[]` / `double[]` 连头部对齐都不同
+
+基本类型数组内部还继续体现出元素类型影响布局的事实。
+
+`arrayOop.hpp:65-69, 122-127` 说明：
+
+- `long`
+- `double`
+
+这类元素要求更强对齐，因此 header size 本身也要按元素类型进一步调整。
+
+这再次说明 JVM 不想在每次访问时才现猜布局，而是提前把：
+
+- 头部大小
+- 元素大小
+- 对齐要求
+
+编码进数组对象模型和对应 `Klass` 协议里。
+
+### 6.5 `copy_array` 为什么体现出另一种优化边界
+
+`TypeArrayKlass::copy_array` 的意义也很典型：
+
+- 它面对的是裸值元素块
+- 不需要逐元素触发 oop barrier
+- 更适合走批量字节/机器字拷贝路径
+
+这不是说对象数组就完全不能优化，而是说：
+
+**基本类型数组从类型定义上已经保证“这里没有引用语义包袱”，因此大块复制和跳过扫描都更容易成立。**
+
+到这里，第三种成本模型也清楚了：
+
+```text
+基本类型数组成本模型
+  → 元素区是纯值块
+  → 访问按具体类型宽度进行
+  → GC 不扫元素区
+```
+
+---
+
+## 七、`InstanceRefKlass`：为什么某些普通实例对象也要换仓库
+
+### 7.1 这不是数组专有问题，而是“遍历协议变了就该换子类”
+
+前面我们已经看到：
+
+- 对象数组之所以分叉，是因为元素扫描协议变了
+- 基本类型数组之所以再分叉，是因为元素根本不进 oop 协议
+
+普通实例对象里也有类似情况：引用对象。
+
+`SoftReference`、`WeakReference`、`PhantomReference` 在 Java 语法上仍然是普通实例对象，但它们的 referent 字段并不能完全按普通 oop 字段处理。
+
+### 7.2 `InstanceRefKlass` 要解决的不是“字段更多”，而是“普通遍历协议失效”
+
+`instanceRefKlass.cpp:31-70` 的核心不是数据结构，而是规则：
+
+- referent
+- discovered
+
+这些字段不应该在普通 nonstatic oop-map 遍历里按常规对象引用处理。
+
+也就是说，这里换子类不是为了表示“它长得不一样”，而是为了表示：
+
+```text
+这个实例对象的遍历/引用处理协议和普通实例类不同
+```
+
+这和对象数组/基本类型数组的分叉逻辑其实是一致的。
+
+### 7.3 本篇为什么只把它当证据，不深入展开
+
+`InstanceRefKlass` 的完整故事会很自然地把正文带去：
+
+- 可达性判断
+- ReferenceQueue
+- GC 发现与入队时机
+
+这些都不是本篇的中心。
+
+本篇只需要它来证明一条更大的模式：
+
+**一旦访问或遍历协议发生稳定变化，HotSpot 倾向于换一个更具体的 `Klass` 子类，把成本模型编码进类型，而不是在所有对象路径里临时加分支。**
+
+---
+
+## 八、收网：统一入口之后，真正分家的其实是成本模型
+
+现在把整篇压回最开始的问题：为什么 `InstanceKlass`、`ObjArrayKlass`、`TypeArrayKlass` 不能合并成一种通用仓库？
+
+因为它们想提前编码的不是同一类成本。
+
+```text
+统一入口：klass()
+  → 先把对象带到正确类型仓库
+
+仓库一：InstanceKlass
+  → 字段、方法、常量池、初始化状态
+  → 面向普通类的运行时仓库成本
+
+仓库二：ObjArrayKlass
+  → 元素是 oop
+  → 访问走引用协议
+  → GC 逐元素闭包
+
+仓库三：TypeArrayKlass
+  → 元素是裸值
+  → 访问按基础类型宽度
+  → GC 不扫元素区
+```
+
+数组头的 `length` 布局、维度链、多维数组惰性创建，只是这条设计思路在数组世界里的第一层体现；更关键的差异在于：
+
+- 元素是不是引用
+- 访问是不是引用访问协议
+- GC 是不是必须逐元素扫描
+
+最后澄清六个最容易混淆的点：
+
+1. 数组 length 不是普通 Java 字段，也不是 C++ 声明里的普通成员；它是对象头布局里的约定槽位
+2. `String[]` 和 `int[]` 不是同一个数组类上挂不同标签；它们最终落在不同的 `Klass` 分叉上
+3. 对象数组和基本类型数组的 GC 成本不是“一个稍微慢一点”，而是是否需要逐元素 oop 协议的根本差异
+4. `InstanceKlass` 负责承载普通类的运行时仓库，不等于它自己完成 class file 解析
+5. 压缩类指针模式下数组头常见是 16 字节，但具体偏移和头大小不能脱离配置/元素类型写死
+6. `InstanceRefKlass` 并不表示引用对象不是普通实例对象，而是它们的遍历协议不能再用普通实例类那套默认规则
+
+如果压缩成三句话：
+
+- `Klass` 统一了对象进入类型世界的入口
+- `InstanceKlass`、`ObjArrayKlass`、`TypeArrayKlass` 则继续把不同运行时成本固化成不同仓库
+- 真正被分开的不是“语法上的类和数组”，而是字段访问、长度读取、元素访问和 GC 扫描这些成本模型
+
+下一篇顺着这个仓库继续往前走：字节码里像 `anewarray #5`、`getfield #12` 这种编号，运行时是怎么从常量池符号引用解析成这些真实 `Klass*`、`FieldInfo` 和 `Method*` 的。
 
 > → [04-constantpool-method.md](04-constantpool-method.md)

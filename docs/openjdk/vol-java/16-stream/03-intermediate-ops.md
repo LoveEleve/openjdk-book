@@ -4,10 +4,13 @@
 > → **后续**: [16-stream/04 — 终端求值](04-terminal-eval.md)
 > 关联: 域 08 集合(ArrayList/Arrays.sort 底层);域 09 Map(LinkedHashSet);内部卷 13-jit-framework(分层编译)
 
-## 中间操作的两大阵营
+## 为什么有些中间操作能边来边过,有些却必须先攒住全局状态
 
-第 2 篇看了 filter 包装 Sink 的过程——每个中间操作都只提供一个 opWrapSink"配方"。这一篇把全部 9 个中间操作过一遍,第一分类:**无状态 vs 有状态**。基类已经分好(`ReferencePipeline.java:683` 起 `StatelessOp`、`:713` 起 `StatefulOp`),差别就一个布尔方法 `opIsStateful()`。无状态 = 每个元素独立处理、处理完即抛,内存 O(1);有状态 = 必须攒批(缓存或计数),内存 O(n)。面试"sorted 为什么慢""distinct 用什么结构""limit 怎么知道停"全部从这个分类出发。
+上一篇已经把 Stream 的惰性骨架立住了：构建期只有 Pipeline 链,终端操作到来时才会把它反向包成 Sink 链开始真正消费元素。接下来最关键的问题就变成了：既然所有中间操作最后都会变成 `opWrapSink` 里的 `accept` 逻辑,为什么 `filter`、`map` 可以一边读一边往下传,而 `sorted`、`distinct`、`limit`、`takeWhile` 却经常要缓存、计数,甚至让前面的短路失效?
 
+真正的分水岭不是 API 名字,而是**处理当前元素时,需不需要知道全局或前序状态**。如果一个操作只看当前元素本身就能决定去留,它就能流式地边来边过;如果它必须先知道已经见过谁、总共有多少、排序后的全局顺序或截断条件是否满足,那它就天然会变成有状态操作。
+
+JDK 11 在基类层面已经把这件事写死了：`ReferencePipeline.java:683` 起是 `StatelessOp`,`:713` 起是 `StatefulOp`,两者只差一个 `opIsStateful()` 的返回值。但这个布尔值背后决定的,其实是整条流水线的空间复杂度、短路语义和并行切段方式。后面无论看 `sorted` 为什么必须全量攒批,还是看 `limit`/`takeWhile` 怎么请求停流,都要回到这条统一判断轴上。
 ## 1. "为什么 filter/map 是无状态" — 每元素独立处理
 
 ### 1.1 无状态 Sink: 只持函数,不留字段
@@ -117,7 +120,7 @@ StatefulOp 还强制实现 `opEvaluateParallel`(`ReferencePipeline.java:734-737`
         }
 ```
 
-大小未知版 `RefSortingSink` 同理(`SortedOps.java:384-392`): begin 建 `ArrayList`(预估大小),end 里 `list.sort(comparator)`。
+大小未知版 `RefSortingSink` 走的是同一条生命周期(`SortedOps.java:384-392`): begin 建 `ArrayList`(预估大小),end 里 `list.sort(comparator)`。
 
 ### 2.3 sorted 短路失效: cancellationRequested 被吞
 

@@ -1,80 +1,187 @@
-# 05. 组合类型 — ZonedDateTime/OffsetDateTime 与 DST 重叠
+# 组合时间类型：为什么 `LocalDateTime` 还不够，而 `OffsetDateTime` 和 `ZonedDateTime` 又不能互换
 
-> **前置依赖**: [24-time-date/03 — 时区体系](03-zone-rules.md)(ZoneRules/GAP/Overlap)、[24-time-date/01 — 核心值类型](01-core-value-types.md)(Instant/LocalDateTime)
-> → **后续**: 按写作顺序进入 Clock 与时间最佳实践
+> 本文基于 JDK 11 `LocalDateTime`、`OffsetDateTime`、`ZonedDateTime`。本文聚焦本地时间如何落到时间点、偏移与区域规则的分工、DST overlap/gap 下的歧义与类型选型；Clock 放到下一篇。本文讨论的是 JDK 11 `java.time` 组合时间类型设计，不把这里的 offset/zone 分工、gap/overlap 处理方式和 Instant 枢纽路径外推成所有日期时间库都必须遵守的统一规范。
+> **前置依赖**：[核心值类型](01-core-value-types.md)、[时区体系](03-zone-rules.md)
+> **后续**：Clock 与时间最佳实践
 
-## 本地时间怎样变成时间点
+## 先看一个最容易误导人的事实：年月日时分秒都齐了，为什么还不是唯一时间点
 
-`LocalDateTime` 只有墙上时间。要把它变成可比较、可存储的时间点,必须补上偏移或时区规则。
+很多人第一次接触 `LocalDateTime` 时都会有一种直觉：既然年、月、日、时、分、秒都已经齐了，那这个时间应该已经足够完整，至少可以直接比较、直接存储、直接跨系统传输。
 
-## 1. "ZonedDateTime 里有什么?" — 三字段组合
+问题在于，这种“完整”只是本地钟表意义上的完整，不是时间线定位意义上的完整。`2026-03-29 02:30:00` 这样的本地时间，如果你不说它属于哪个偏移、哪个地区规则，它在 UTC 时间线上到底落在哪一刻，其实根本还没定下来。
 
-### 1.1 三件套
+这也是为什么 `java.time` 不会把 `LocalDateTime` 当成最终答案。它只负责表示本地墙上时间；如果你想把这个值落到可比较、可排序、可跨系统交换的唯一时间点，就必须再补一层定位信息：要么给它一个固定偏移，要么给它一个地区规则来源。
 
-`ZonedDateTime` 保存三个核心字段:
+所以这一篇真正要讲的，不是“几个类的字段差异”，而是：**本地时间怎样才算真正落到了时间线。**
 
-- `dateTime`(`ZonedDateTime.java:175`)——本地日期时间
-- `offset`(`:179`)——当前有效偏移快照
-- `zone`(`:183`)——区域 ID 与规则
+## 一、为什么 `LocalDateTime` 只停在墙上时间：它本身并不知道自己在 UTC 时间线上哪儿
 
-`of(LocalDateTime, ZoneId)`(`:292`)委托 `ofLocal`(`:366`),由 zone 规则决定有效 offset;`preferredOffset` 可参与重叠时的选择。
+### 先看它能做什么，不能做什么
 
-关键设计(斜体):*offset 是“此刻采用的偏移快照”,zone 是“未来计算的规则来源”。两者都保存,才能同时表达当前时间点与所属区域。*
+JDK 11 里：
 
-## 2. "不存在的时刻怎么办?" — Gap 与 Overlap
+- `LocalDateTime` 类定义在 `LocalDateTime.java:135`
+- `atOffset(...)` 在 `LocalDateTime.java:1765`
+- `atZone(...)` 在 `1799`
 
-### 2.1 Gap
+这几个入口连在一起看，结论很清楚：`LocalDateTime` 自己并不携带 offset 或 zone。正因为它没有这些定位信息，所以才需要通过 `atOffset` 或 `atZone`，把本地时间投射到更完整的组合类型上。
 
-DST 向前跳时,一段本地时间根本不存在。`ZonedDateTime.of` 的默认本地解析策略会把 Gap 中的本地时间向前调整到 Gap 之后的有效时间。
+### 为什么这不是“信息缺失”，而是语义克制
 
-### 2.2 Overlap
+`LocalDateTime` 的价值恰恰在于，它明确只表达“本地日历 + 本地钟表”的组合结果，而不假装自己已经知道这是哪个地区、哪种偏移、哪条时间线上的哪一刻。
 
-DST 向后拨时,一段本地时间对应两个有效偏移。默认策略选择较早的偏移,也可以显式调用:
+这让它很适合表达：
 
-- `withEarlierOffsetAtOverlap()`(`ZonedDateTime.java:891`)
-- `withLaterOffsetAtOverlap()`(`:919`)
+- 用户输入的本地预约时间；
+- UI 上展示的本地日期时间；
+- 还没绑定地区规则的业务计划时间。
 
-面试"DST 切换日 02:30 是什么": 可能不存在,也可能有两个对应时间点;不要把本地字符串当成唯一时间点。
+但也正因为如此，它不能直接承担“全局唯一时间点”的职责。没有 offset 或 zone，本地时间只是一个候选描述，不是最终定位。
 
-关键设计(斜体):*“时间点唯一,本地时间可歧义”是 DST 的本质。生产存储优先使用 Instant/UTC,展示时再转换到区域时间。*
+## 二、为什么 `OffsetDateTime` 能把本地时间锚定到唯一时间点：固定偏移已经足够落到 `Instant`
 
-## 3. "OffsetDateTime vs ZonedDateTime" — 选型
+### 先看它的定位方式
 
-### 3.1 两件套与三件套
+JDK 11 里：
 
-`OffsetDateTime` 保存:
+- `OffsetDateTime` 类定义在 `OffsetDateTime.java:128`
+- `ofInstant(...)` 在 `OffsetDateTime.java:323`
+- `toInstant()` 在 `1760`
 
-- `dateTime`(`OffsetDateTime.java:192`)——本地日期时间
-- `offset`(`:196`)——固定偏移
+这说明 `OffsetDateTime` 的核心语义非常直接：它不是只保存本地时间，而是保存“本地时间 + 固定偏移”。一旦偏移确定，这个值在时间线上就能唯一落到一个 `Instant`。
 
-它没有区域规则,不会根据未来日期自动推导 DST。`ZonedDateTime` 才保存 ZoneId 与 ZoneRules。
+### 为什么它适合传输和接口边界
 
-### 3.2 选型规则
+如果你的需求是：
 
-- 只需要明确偏移(日志时间戳、API 传输) → `OffsetDateTime`
-- 需要按区域规则计算未来时间 → `ZonedDateTime`
-- 持久化绝对时间点 → `Instant`
-- 用户展示 → `ZonedDateTime`
+- 把一个事实发生时间清楚传输出去；
+- 在日志、协议、API 中保留“当时采用的偏移”；
+- 跨系统比较时间先后；
 
-生产 JSON/协议可使用 ISO-8601 带偏移表示;数据库具体 TIMESTAMP WITH TIME ZONE 语义仍需按数据库实现确认,不能简单等同某一个 Java 类型。
+那么 `OffsetDateTime` 往往已经够用了。因为对这些场景来说，最重要的是唯一时间点能被恢复出来，而不是继续保留一整套地区规则语义。
 
-关键设计(斜体):*选型先问“需要偏移还是需要规则”: OffsetDateTime 表示带偏移的值,ZonedDateTime 表示带区域规则的值,Instant 表示时间线上的点。*
+### 为什么它又不能替代 `ZonedDateTime`
 
-## 4. "转换链路" — 时间类型互转
+偏移能唯一定位当前这一刻，但它不能说明“这个值所属地区未来该怎么走规则”。如果你只知道 `+08:00`，你并不知道这是上海、香港，还是某个别的当前同偏移地区；更不知道如果时间推进到未来某天，是否会发生规则变化。
 
-### 4.1 Instant 枢纽
+所以 `OffsetDateTime` 解决的是“当前这一下怎么落到时间线”，不是“这个时间值背后遵循哪套区域规则”。
 
-- `Date ↔ Instant`: `Date.from`(`java/util/Date.java:1358`) / `toInstant`(`:1376`)
-- `Instant.atZone(zone)` → `ZonedDateTime`
-- `ZonedDateTime.toLocalDateTime()` → `LocalDateTime`
-- `LocalDateTime.atZone(zone)`(`LocalDateTime.java:1799`) → `ZonedDateTime`
+## 三、为什么 `ZonedDateTime` 要同时保存本地时间、当前偏移快照和区域 ID：它既要表达现在，又要保留规则来源
 
-### 4.2 转换原则
+### 先看它保存了什么
 
-`LocalDateTime → Date` 不能直接完成: 必须先 `atZone(zone)`→`toInstant()`→`Date.from(...)`。缺少 ZoneId 就缺少把本地时间定位到时间线的规则。
+旧稿已经抓住了 `ZonedDateTime` 的三个核心字段：
 
-关键设计(斜体):*Instant 是转换矩阵的时间点枢纽。“本地时间”必须先补时区/偏移才能成为可比较的时间点。生产把转换集中在工具层,统一 UTC 与区域规则。*
+- `dateTime`（`ZonedDateTime.java:175`）
+- `offset`（`179`）
+- `zone`（`183`）
 
-## 核心悬念
+构造入口则包括：
 
-`LocalDate.now()` 的“现在”从哪来?——**Clock**。它比直接调用系统时间更适合测试与注入吗?tick 时钟怎么用?下一篇: Clock 与时间最佳实践。
+- `of(LocalDateTime, ZoneId)` 在 `ZonedDateTime.java:292`
+- 真正落本地时间的 `ofLocal(...)` 在 `366`
+- 从时间点反推地区时间的 `ofInstant(...)` 在 `406` / `432`
+
+这套结构很值得细看，因为它解释了一个初看多余、实际上非常关键的设计：既然有 `zone` 了，为什么还要再单独保存 `offset`？
+
+### 为什么 `zone` 和 `offset` 必须并存
+
+因为它们回答的是不同问题：
+
+- `zone` 表示“这属于哪套地区规则”；
+- `offset` 表示“在当前这一刻，这套规则实际算出来的偏移是多少”。
+
+如果只存 zone，不存当前 offset，那么这个值在某些规则边界场景下就缺少“此刻到底落在哪个时间点”的快照信息；如果只存 offset，不存 zone，又失去了“未来继续按哪套地区规则解释”的来源。
+
+所以 `ZonedDateTime` 的价值就在这里：**它同时保留当前定位结果和未来规则语义。** 这也是它比 `OffsetDateTime` 更重、但也更适合业务地区时间的原因。
+
+## 四、为什么 Gap / Overlap 会把“本地时间加个时区就完了”的直觉彻底打碎
+
+### 先看 `atZone` / `ofLocal` 真正在做什么
+
+JDK 11 里：
+
+- `LocalDateTime.atZone(...)` 在 `LocalDateTime.java:1799`
+- `ZonedDateTime.ofLocal(...)` 在 `ZonedDateTime.java:366`
+- 处理重叠偏移选择的 `withEarlierOffsetAtOverlap()` / `withLaterOffsetAtOverlap()` 在 `ZonedDateTime.java:891` / `919`
+
+如果你把 `atZone` 理解成“给本地时间贴一个 zone 字符串”，就会完全低估它的工作量。它实际上是在问：这个本地日期时间，在这套地区规则下，到底有没有合法偏移？如果有多个，该选哪一个？如果没有，又该如何调整？
+
+### 为什么这说明本地时间到时间点的映射不是直线
+
+上一章已经看到，DST 切换会造成两类关键场景：
+
+- `Gap`：某段本地时间根本不存在；
+- `Overlap`：同一本地时间可以对应两个不同时间点。
+
+这意味着“本地时间 + 区域名”到“唯一时间点”的映射，并不是始终一对一。有时这条路会断掉，有时这条路会分叉。
+
+也正因为如此：
+
+- `Gap` 场景下，某些本地时间必须被修正到后续有效时刻；
+- `Overlap` 场景下，才需要 `withEarlierOffsetAtOverlap()` 和 `withLaterOffsetAtOverlap()` 明确选边。
+
+这不是极端边角行为，而是 `ZonedDateTime` 之所以必须保留 zone 与 offset、并让规则参与构造的核心证据。
+
+## 五、为什么 `Instant` 是所有转换的真正枢纽：先落到时间线，再重新投影回本地表示
+
+### 先看几个关键入口
+
+JDK 11 里：
+
+- `LocalDateTime.atOffset(...)` 在 `LocalDateTime.java:1765`
+- `LocalDateTime.atZone(...)` 在 `1799`
+- `OffsetDateTime.toInstant()` 在 `OffsetDateTime.java:1760`
+- `ZonedDateTime.ofInstant(...)` 在 `ZonedDateTime.java:406`
+
+把这些入口连起来看，会发现一个很稳定的模式：不同时间类型之间的大多数可靠转换，本质上都是先落到 `Instant`，再从 `Instant` 重新投影到另一种本地表示。
+
+### 为什么 `LocalDateTime -> Date` 不能直接做
+
+`Date` 本质上站在时间线这一边，它要的是一个绝对时间点。如果你手里只有 `LocalDateTime`，那你还没有告诉系统“这到底在 UTC 时间线上是哪一刻”。
+
+所以从 `LocalDateTime` 去 `Date`，必须先补：
+
+- `atOffset(offset)`，或者
+- `atZone(zone)`
+
+然后再 `toInstant()`，最后才能交给旧类型去承接。缺少这一步，不是 API 故意麻烦，而是语义上根本没法直接完成。
+
+### 为什么这也解释了类型选型规则
+
+一旦把 `Instant` 看成时间线枢纽，很多选型就会变得非常清楚：
+
+- 只要唯一时间点最重要，优先考虑 `Instant`；
+- 需要把当前偏移一起带出去，考虑 `OffsetDateTime`；
+- 需要继续保留地区规则语义，考虑 `ZonedDateTime`；
+- 只是表达还未定位的本地计划时间，才用 `LocalDateTime`。
+
+## 六、五个最容易混掉的边界：LocalDateTime 不是唯一时间点，OffsetDateTime 不是地区规则时间，ZonedDateTime 不是只是多存个 ZoneId，atZone 不是贴标签，Instant 才是转换枢纽
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`LocalDateTime` 不是唯一时间点。它只是本地墙上时间的完整外观：年月日时分秒都齐了，但没有告诉你这是哪个偏移、哪套地区规则下的这一个时刻，所以它还没真正落到 UTC 时间线上。
+
+第二，`OffsetDateTime` 也不是地区规则时间。它解决的是“现在这一刻用哪个固定偏移才能唯一落点”，而不是“未来继续按哪套地区规则解释”。一旦离开当前这一下的 offset，它就不再替你保留地区历史和未来规则语义。
+
+第三，`ZonedDateTime` 更不是“比 OffsetDateTime 多存个 ZoneId”这么表面。它真正同时携带的是：本地时间、当前偏移结果、以及这份偏移背后的规则来源。少了其中任何一层，业务上要么失去唯一定位，要么失去未来规则解释能力。
+
+第四，`atZone()` 也不是机械贴一个时区标签。它真正做的是把本地时间拿去和地区规则对账：这个时刻是否存在、有没有歧义、当前应选哪个偏移。只要遇到 DST 的 gap/overlap，本地时间到时间点的落点就不再是直线映射。
+
+第五，`Instant` 才是这些组合类型互转时最稳定的枢纽。很多看似复杂的转换，真正可靠的做法都是先落到时间线，再从时间线重新投影回需要的本地表示。离开这一层枢纽去直接互转，语义很容易被悄悄抹平。
+
+把这五条边界记稳，组合时间类型这一篇就不会重新塌回“谁字段多一点、谁信息更全一点”的表面印象。它真正想讲的是：本地时间怎样被锚定到时间线，以及固定偏移和地区规则在这件事上各自承担哪一层职责。
+
+## 收网：时间组合类型的关键，不是谁字段更多，而是谁真正把本地时间落到了时间线
+
+现在可以把整篇压成一条主线：
+
+- `LocalDateTime` 只表示本地墙上时间，不保证唯一时间点；
+- `OffsetDateTime` 用固定偏移把本地时间锚定到 `Instant`；
+- `ZonedDateTime` 同时保存当前 offset 快照和 zone 规则来源；
+- Gap / Overlap 证明本地时间到时间点的映射可能断裂或分叉；
+- `Instant` 是最稳定的转换枢纽。
+
+所以 `OffsetDateTime` 和 `ZonedDateTime` 不是“一个轻量版、一个完整版”这么简单。前者强调当前偏移下的唯一定位，后者强调地区规则语义下的当前定位与后续解释。看起来都像“带时区的时间”，但它们服务的是不同问题。
+
+下一步自然会进入这整个域最贴近工程实践的一层：既然时间对象这么依赖“现在”，那 `now()` 里的“现在”到底从哪来？为什么很多业务代码不该直接写死 `LocalDateTime.now()`，而要把 `Clock` 注入进来？这就是 `06-clock-best-practice.md` 要接着回答的问题。

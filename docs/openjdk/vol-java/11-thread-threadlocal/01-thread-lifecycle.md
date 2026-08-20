@@ -1,121 +1,151 @@
-# 01. 线程的生命周期与调度原语 — start/run、join、sleep、中断
+# 线程的生命周期与调度原语：一个 Thread 对象什么时候才真的开始跑
 
-> **前置依赖**: [03-object-system/02 — System 与 Runtime](../03-object-system/02-system-runtime.md)(join 的超时计算用 currentTimeMillis)、[03-object-system/01 — 对象生命周期](../03-object-system/01-object-contract-references.md)(守护线程/线程组概念)
-> → **后续**:[11-thread-threadlocal/02 — ThreadLocal 的完整解剖](02-threadlocal.md)
-> 关联: 内部卷 17-threads(线程对象与状态机);JVM TI GetThreadState 规范
+> 本文基于 JDK 11 `java.lang.Thread`。讨论范围聚焦 `start`/`run`、`sleep`、`join`、`interrupt`、`interrupted`/`isInterrupted` 与线程状态视图。底层 OS 线程创建与 HotSpot 线程调度只解释到 Java/native 边界，不展开完整 JVM 内部实现。
+> **前置依赖**：[System 与 Runtime 门面](../03-object-system/02-system-runtime.md)、[对象生命周期与引用边界](../03-object-system/01-object-contract-references.md)
+> **后续**：[ThreadLocal 的完整解剖](02-threadlocal.md)
 
-## 从 start 到 interrupt,一条时间线
+## 先看一个最常见、也最容易把“线程”误会成普通方法调用的错误
 
-面试从 "start 和 run 的区别" 开始,一路问到 "interrupt 之后线程还活着吗""join 是怎么等的""jstack 里的 BLOCKED 和 WAITING 有什么区别"——每一个问题背后都是 Thread 类里的一道 native 边界。这篇把四条线拆开: start 的启动流水线、sleep/yield/join 三个调度原语、interrupt 的协作式中断语义、以及线程状态的位标志解析。
-
-## 1. "start() 到底做了什么" — synchronized + native start0
-
-### 1.1 synchronized 的启动入口
-
-`Thread.start()`(`Thread.java:780-807`):
+很多人第一次写并发代码时，都会写出这样一段看似没毛病的代码：
 
 ```java
-// Thread.java:780-807(截取核心,逐字)
+// 用法示意(API 形式,非源码片段)
+new Thread(task).run();
+```
+
+`task` 里的逻辑确实执行了，日志也打印了，程序却没有任何并发效果。再往下问，很多人会说“那就改成 `start()`”，但如果继续追问：“为什么 `run()` 不算启动线程？为什么 `start()` 只能调一次？为什么 `join()` 不会傻等烧 CPU？为什么 `interrupt()` 经常不让线程立刻死掉？” 这时就会发现，这几个 API 表面都在“控制线程”，本质却站在完全不同的边界上。
+
+真正的分界线不是“有没有一个 `Thread` 对象”，而是：**这个对象什么时候才被 JVM 接管，背后长出真实的可调度线程；以及这个真实线程在等待、唤醒、中断和退出时，到底通过什么协议和 Java 代码协作。**
+
+所以这篇不把 `start`、`join`、`sleep`、`interrupt` 当成四道面试题拆开，而是沿着一条更统一的主线来讲：一个 `Thread` 对象如何从普通对象变成真实线程，它在等待时究竟在等什么，中断又为什么只是“请求”而不是“命令”。
+
+## 一、`start()` 才是分界线：`new Thread()` 只是对象，`start()` 才把它交给 JVM
+
+### 为什么直接调 `run()` 没有并发
+
+先把最容易混淆的地方讲透。`run()` 在 JDK 11 里就是一个普通实例方法（`Thread.java:827`）。如果你直接在当前线程里调用它，本质上只是当前调用栈多压了一层方法帧，和调用任何普通方法没有区别。它不会让 JVM 新建一个线程，也不会获得新的线程栈，更不会让操作系统调度器多看到一个执行实体。
+
+这解释了为什么“直接调 `run()`”这类代码会让逻辑执行，却没有并发：**你只是让当前线程顺手执行了一个回调方法，并没有触发线程创建边界。**
+
+### `start()` 为什么是唯一真正的启动入口
+
+真正的分界线在 `start()`，入口位于 `Thread.java:780`：
+
+```java
+// Thread.java:780
 public synchronized void start() {
-    ...
-    if (threadStatus != 0)
-        throw new IllegalThreadStateException();
+```
 
-    /* Notify the group that this thread is about to be started
-     * so that it can be added to the group's list of threads
-     * and the group's unstarted count can be decremented. */
-    group.add(this);
+这个方法最重要的不是 `synchronized` 四个字，而是它在 Java 对象和 native 线程之间划出了一道明确门槛。它先做 Java 侧的校验与簿记，然后才跨到 `start0()`：
 
-    boolean started = false;
-    try {
-        start0();
-        started = true;
-    } finally {
-        try {
-            if (!started) {
-                group.threadStartFailed(this);
-            }
-        } catch (Throwable ignore) {
-            ...
-        }
-    }
-}
-
+```java
+// Thread.java:812
 private native void start0();
 ```
 
-四件事:
+也就是说，`new Thread()` 得到的是一个 Java 层对象；`start()` 才把“请创建真实线程并让它去跑”的请求交给 JVM 和底层运行时。这个边界一旦跨过去，讨论的就不再只是对象方法调用，而是线程栈、调度资格、线程组登记、生命周期管理这些运行时问题。
 
-1. **`synchronized`**:整个方法加锁——防止两个线程并发 start 同一个 Thread 对象(同一把对象锁,第二个必然等第一个完成)
-2. **`threadStatus != 0` 校验**(`Thread.java:788-789`):threadStatus 初值 0 对应 NEW 状态,一旦 start 过就不再是 0——**"只能启动一次"的保证**(已启动再调抛 `IllegalThreadStateException`)
-3. **`group.add(this)`**(`Thread.java:794`):加入线程组、递减未启动计数——线程组簿记
-4. **`start0()`**(`Thread.java:798`)→ native(`Thread.java:812`):真正的启动
+### 为什么一个 Thread 只能启动一次
 
-`start0` 失败时的处理也值得看: `threadStartFailed`(`Thread.java:803`)通知线程组"启动失败",finally 里兜住——即使 start0 抛异常,线程组状态也要回滚。
+`start()` 里有一个非常关键的检查：线程状态一旦不再是初始值，就不能再次启动，否则抛 `IllegalThreadStateException`。这不是人为规定的奇怪限制，而是这个对象和背后真实线程的一次性绑定关系决定的。
 
-### 1.2 native 边界:OS 线程的诞生
+因为 `start()` 不是“重放一次 run 方法”，而是“为这个 Thread 对象背后的执行实体办理出生手续”。当它已经出生、运行过、甚至退出过之后，再对同一个对象重复调用 `start()`，就不是一次普通重试，而是在要求 JVM 复活一个已经走过完整生命周期的线程身份。JDK 不允许这么做，所以用状态检查把它挡住。
 
-`start0`(`Thread.java:812`)是 native——**JVM 在这里创建 OS 线程**: 分配线程栈(`-Xss` 控制大小)、创建 pthread(Linux)、新线程的入口回调 `run()`。**线程栈的分配时机是 start,不是 new**——`new Thread()` 只是 Java 对象,`start()` 才是"这个对象背后真的长出一个内核线程"的时刻。
+再加上 `start()` 自身是 `synchronized` 的，这样就能避免两个线程并发地同时尝试启动同一个 `Thread` 对象。一个负责完成状态检查和 native 启动，另一个则只能看到“这个对象已经不是未启动状态了”。
 
-### 1.3 run():一个普通方法
+### Java 侧到底在做什么，native 侧又接管了什么
 
-`run()`(`Thread.java:827`)就是普通方法——**直接调 `run()` 等于在当前线程里执行一次方法调用**,没有新线程、没有新栈。这就是"为什么必须 start 不能直接 run"的机制答案: run 是回调目标,start 才是创建线程的动作。
+从源码角度看，`start()` 负责三件事：
 
-关键设计(斜体):*Java 侧只做校验与簿记(synchronized/threadStatus/group),真正的工作在 native——OS 线程创建、栈分配、调度器登记。面试答"start 是 native 创建线程,run 只是回调"是入门;能说出"synchronized + threadStatus 检查双保险防重复启动"和"线程栈在 start 时分配"才是源码级。*
+- 保证启动动作只发生一次
+- 做线程组簿记与失败回滚
+- 把真正的线程创建交给 `start0()`
 
-跨层标注: [内部卷: 17-threads 01-thread-hierarchy——JavaThread 对象与 OS 线程的绑定;os::create_thread → pthread_create]
+`start0()` 是 native，说明“真实线程的诞生”这一步已经超出普通 Java 方法能独立表达的范围。JVM 需要为它准备底层线程实体、线程栈、调度登记和回调入口。这里不必把 HotSpot 细节一层层打穿，本文只要立住一个边界：**Java 侧负责对象身份和生命周期校验，native 侧负责让这个身份真的拥有可调度执行体。**
 
-## 2. "sleep/yield/join 谁让出 CPU" — 调度原语三兄弟
+这一层的顿悟是：`Thread` 对象和真实线程不是同义词；`start()` 才是两者正式绑在一起的时刻。
 
-### 2.1 sleep:让出 CPU,不释放锁
+## 二、为什么“等待”不能混成一个词：sleep、join、wait 各在等不同的东西
 
-`sleep(long, int)`(`Thread.java:319-337`):
+### 先把三个问题分开
+
+很多并发误用，都是从把 sleep、join、wait 统称为“让线程停一下”开始的。但线程为什么停下来，决定了它会不会释放锁、谁能唤醒它、恢复后该检查什么条件。至少要先把这三类等待拆开：
+
+- `sleep`：我只是在等一段时间过去
+- `join`：我在等另一个线程结束
+- `wait`：我在等某个对象监视器条件成立
+
+如果不先把这三种等待对象分开，后面关于锁、中断、状态的很多结论都会混淆。
+
+### `sleep()` 等的是时间，不是对象条件
+
+`sleep(long)` 是 native 方法，定义在 `Thread.java:295`：
 
 ```java
-// Thread.java:319-337(截取核心,逐字)
-public static void sleep(long millis, int nanos)
-throws InterruptedException {
-    if (millis < 0) {
-        throw new IllegalArgumentException("timeout value is negative");
-    }
+// Thread.java:295
+public static native void sleep(long millis) throws InterruptedException;
+```
 
-    if (nanos < 0 || nanos > 999999) {
-        throw new IllegalArgumentException(
-                            "nanosecond timeout value out of range");
-    }
+它最重要的语义不是“暂停线程”，而是“**让当前线程在时间边界上等待**”。这立刻带来一个很关键的后果：`sleep` 跟某个对象监视器根本没有内建关系，所以它不会因为等待而释放你手里正持有的 `synchronized` 锁。
 
-    if (nanos >= 500000 || (nanos != 0 && millis == 0)) {
-        millis++;
-    }
+这也是为什么“持锁线程 sleep，别人还是进不来”经常成为线上卡死的来源。调用者以为自己只是“休息一下”，实际上它把时间等待和监视器占有叠在了一起：自己不运行了，但锁也没让出来。
 
-    sleep(millis);
+所以别把 `sleep` 当成轻量版 `wait`。它等的是时间，不是条件；暂停的是当前线程的执行，不是监视器所有权。
+
+### `join()` 等的是另一个线程的死亡事件
+
+`join(long)` 入口在 `Thread.java:1289`：
+
+```java
+// Thread.java:1289
+public final synchronized void join(long millis)
+```
+
+它的核心不是“等一会儿再看看”，而是围绕 `isAlive()` 做事件等待：线程还活着，我就 wait；线程结束了，我就继续往下走。也就是说，`join` 等的不是时钟，而是**目标线程完成生命周期**这件事。
+
+这也是为什么它必须和 `wait/notify` 关系更近，而不是和 `sleep` 关系更近。时间只是 join 的可选边界；真正的触发条件是“目标线程已经死了”。
+
+### `wait()` 等的是对象监视器条件
+
+虽然本文不展开 `Object.wait()` 的完整机制，但在这里必须点明它和前两者的根本差异：`wait` 不是等时间，也不是专门等另一个线程结束，而是等某个对象监视器上的条件变化。调用它之前必须先持有对应监视器，调用时还会释放该监视器，让别的线程有机会进来改变条件再唤醒你。
+
+所以三者真正的对照不是“哪个更高级”，而是：
+
+```text
+sleep  → 等时间，不释放监视器
+join   → 等目标线程死亡事件，本质靠 wait/notify
+wait   → 等对象条件，调用时释放监视器
+```
+
+这一层先立住，后面 `join()` 和 `interrupt()` 的语义才能真正站稳。
+
+## 三、`join()` 为什么不用 while 轮询：线程结束是事件，不是忙等目标
+
+### 先看最朴素但很差的方案
+
+如果你要等另一个线程结束，最朴素的办法就是这样：
+
+```java
+while (t.isAlive()) {
+    // 反复检查
 }
 ```
 
-两个关键语义:
+这个方案的问题不是“逻辑错误”，而是“浪费得太蠢”。等待线程明明什么有用工作都做不了，却一直占着 CPU 反复检查一个结果。目标线程越久不结束，等待线程越长时间空转。
 
-- **让出 CPU 但不释放锁**:sleep 是 `Thread` 的静态方法,与对象的监视器毫无关系——持锁线程 sleep,锁照持,别的线程进不来。这就是"sleep vs wait"的本质区别: wait 必须持锁调用、会释放锁;sleep 与锁无关
-- **纳秒进位**:nanos >= 500000(半毫秒)时进位成 1 毫秒(`Thread.java:336` 的 `millis++`)——底层 `sleep(long)`(`Thread.java:295`)只接受毫秒,native 实现转 OS 定时器
+这正是 `join()` 没选这条路的原因。JDK 把线程死亡当成一个事件，而不是一个适合忙等的布尔值。目标线程只会从 alive 变成 dead 一次，与其让等待者不断追问“你死了没”，不如让等待者直接休眠，直到死亡事件到来时被唤醒。
 
-### 2.2 yield:纯提示
+### 源码里的关键并不是 `while`，而是 `wait`
 
-`yield()`(`Thread.java:276`)是 native,语义只有一句:**提示调度器当前线程愿意让出 CPU**——纯提示,调度器可以无视。适合自旋等待时的"喘息",不保证任何时序。
-
-### 2.3 join:wait/notify 模型,不是轮询
-
-`join()`(`Thread.java:1374`)转调 `join(long)`(`Thread.java:1289`):
+`join(long)` 的核心代码很简单，但一定要从“事件等待”角度看：
 
 ```java
-// Thread.java:1289-1300(截取核心,逐字)
+// Thread.java:1289-1300
 public final synchronized void join(long millis)
 throws InterruptedException {
     long base = System.currentTimeMillis();
     long now = 0;
-
-    if (millis < 0) {
-        throw new IllegalArgumentException("timeout value is negative");
-    }
-
+    ...
     if (millis == 0) {
         while (isAlive()) {
             wait(0);
@@ -124,135 +154,125 @@ throws InterruptedException {
         ...
 ```
 
-核心是 **wait 模型**: `while (isAlive()) wait(0)`——**无条件等待直到被唤醒**。谁唤醒?JVM 在**线程死亡路径**上对等待该线程的所有 wait 者调用 `notifyAll`(内部卷 17-threads 的线程退出流程)。所以:
+很多人会盯着 `while (isAlive())` 看，误以为 join 还是轮询。真正关键的是里面的 `wait(0)`：等待线程并不是不停跑循环，而是在每轮检查后挂起自己，直到被唤醒才回来再看一次条件。
 
-- **join 不是轮询**:等待线程挂起在 wait 上,零 CPU 开销;`isAlive()` 是循环条件,被唤醒后重新检查
-- **join 用 currentTimeMillis 算超时**(`Thread.java:1289-1290`):超时版 `wait(delay)` 逐次等待剩余时间
+所以 `while` 在这里的职责不是“忙等”，而是“**防止虚假唤醒或非目标唤醒后直接误判线程已结束**”。它和条件变量循环检查是同一种思路：醒了不代表条件一定真成立，还要再确认一次 `isAlive()`。
 
-关键设计(斜体):*join 不用自旋而用 wait——线程死亡是"事件"不是"轮询目标",wait/notify 让等待者零开销挂起、事件到来再唤醒。对比自旋: 自旋是忙等(烧 CPU),wait 是休眠等(零开销)。面试"join 怎么实现"答出"while(isAlive()) wait(0) + JVM 死亡时 notifyAll"就过关;再补一句"sleep 不释放锁,wait 释放锁"就是高分。*
+### 为什么这条路必须和线程退出事件连起来看
 
-## 3. "interrupt 是中断线程吗" — 中断标志语义
+Thread 源码里还有一个值得顺手记住的入口：`exit()`，位于 `Thread.java:837`。本文不展开它的整个内部清理过程，但它足够作为“线程死亡路径确实存在专门收尾逻辑”的证据入口。
 
-### 3.1 interrupt:设置标志 + 唤醒阻塞
+真正的理解顺序应该是：
 
-`interrupt()`(`Thread.java:979-999`):
+- 等待线程通过 `join()` 在目标 Thread 对象监视器上 wait
+- 目标线程走向退出路径
+- JVM 在线程终止时推进这条死亡事件链，让等待 join 的线程有机会被唤醒
+- 醒来的等待者重新检查 `isAlive()`，确认条件真变了才返回
+
+这也是 `join` 和“自己 while 检查是否结束”的根本差别：**它让等待者把 CPU 让出去，把“线程结束”当成事件来等。**
+
+## 四、`interrupt()` 为什么不是杀线程：它只负责立标志和请求协作响应
+
+### 先把“中断 = 强制终止”这个误解拆掉
+
+很多人一听到“中断线程”，脑中立刻联想到“把线程停掉”。但 `interrupt()` 在 JDK 11 里的语义并不是强制终止。入口位于 `Thread.java:979`：
 
 ```java
-// Thread.java:979-999(截取核心,逐字)
+// Thread.java:979
 public void interrupt() {
-    if (this != Thread.currentThread()) {
-        checkAccess();
-
-        // thread may be blocked in an I/O operation
-        synchronized (blockerLock) {
-            Interruptible b = blocker;
-            if (b != null) {
-                interrupt0();  // set interrupt status
-                b.interrupt(this);
-                return;
-            }
-        }
-    }
-
-    // set interrupt status
-    interrupt0();
-}
 ```
 
-**interrupt 不是"杀死线程"**——它只做两件事:
+它做的事情可以压成两步：
 
-1. **设置中断标志**(`interrupt0()`@991/native `Thread.java:2086`)
-2. **唤醒阻塞中的线程**:如果目标线程阻塞在 `wait/sleep/join`(或可中断锁 `Lock.lockInterruptibly`),被唤醒并抛 `InterruptedException`;`blocker` 分支(`Thread.java:984-993`)处理的是 **NIO 可中断 IO**(`InterruptibleChannel`——域 19)——`interrupt0` 先设标志,再调 `b.interrupt(this)` 关闭底层通道唤醒 IO 阻塞
+- 设置目标线程的中断标志
+- 如果线程正阻塞在某些可响应中断的点上，协助把它从阻塞里唤醒出来
 
-**注意 synchronized 锁等待不可中断**:阻塞在 `synchronized` 上的线程,interrupt 只设标志,线程要等拿到锁后才在代码里自己检查标志——这就是"不可中断锁"语义。
+这和“立刻杀死线程”有本质区别。线程是否真正退出，仍然取决于代码有没有检查中断、有没有把 `InterruptedException` 往外传、有没有在 catch 后恢复标志并做退出决策。
 
-### 3.2 两个读取方法:清除 vs 只读
+### 为什么它经常表现得“有时能打断，有时又不行”
 
-```java
-// Thread.java:1015-1016 + 1032-1033(截取核心,逐字)
-public static boolean interrupted() {
-    return currentThread().isInterrupted(true);
-}
+原因就在于：不是所有等待都站在同一条协议上。
 
-public boolean isInterrupted() {
-    return isInterrupted(false);
-}
+- 如果线程阻塞在 `sleep`、`join` 这类可中断等待上，中断会促使它从阻塞中返回，并以异常或状态变化暴露给上层
+- 如果线程只是在普通代码里忙跑，中断只会把标志立在那里，等代码自己检查
+- 如果线程卡在某些不响应中断的竞争点上，中断也不会神奇地替你把所有底层阻塞都撬开
+
+所以更准确的说法应该是：**interrupt 不是停止线程，而是向线程发出“请尽快按中断协议收尾”的请求。**
+
+这也是为什么线程池、任务取消、优雅停机这些机制都离不开中断，但又不能只靠调用一次 `interrupt()` 就假定万事大吉。发送请求很容易，真正让线程有序退出靠的是任务代码配合。
+
+## 五、为什么有 `interrupted()` 和 `isInterrupted()` 两种读法：一个是消费标志，一个是观察标志
+
+### 两个 API 不是静态/实例的表面区别
+
+JDK 11 提供了两个常被混淆的读取接口：
+
+- `interrupted()`（`Thread.java:1015`）
+- `isInterrupted()`（`Thread.java:1032`）
+
+它们最大的差异，不是一个静态一个实例，而是**会不会把中断标志顺手清掉**。
+
+`interrupted()` 读取的是当前线程的中断状态，并且带有“消费一次”的意味：你一旦调用它，这次中断请求就被你正式看见并清掉了。`isInterrupted()` 则只是观察某个线程对象当前有没有中断标志，不负责清除。
+
+### 为什么这个差别对协作式中断特别重要
+
+如果一个任务循环里想“看到一次中断就退出”，那用会清标志的路径常常更顺手；但如果你在中间 catch 到 `InterruptedException` 后只是打印日志就把异常吞掉，又没恢复中断标志，那上层逻辑可能再也看不到这次中断请求了。
+
+这正是很多中断 bug 的根：代码收到了退出请求，却因为错误消费或吞掉标志，让后续层级误以为一切正常。中断协议之所以叫协作式，不只因为发送方在请求，更因为接收方必须正确传播、恢复或响应这个信号。
+
+这一层一定要记住：**中断标志不是一个摆设字段，而是线程之间协商退出的通信位。你读它、清它、吞它，都会改变后续控制流。**
+
+## 六、线程状态为什么只是视图：它描述“你现在在等什么”，不是精确调度剧本
+
+### 状态枚举要回扣前文动作链来看
+
+看到 `Thread.State` 时，很多人会把它背成一张孤立表格：`NEW`、`RUNNABLE`、`BLOCKED`、`WAITING`、`TIMED_WAITING`、`TERMINATED`。背表格当然不难，但如果不把它们和前面的动作链连起来，这些名字很快就会变成死记硬背。
+
+更好的理解方式是：这些状态其实是在粗粒度回答一个问题——**这个线程此刻到底是在跑、在等锁、在等时间、在等事件，还是已经结束。**
+
+回扣前文：
+
+- `NEW`：对象刚创建，还没过 `start()` 这道边界
+- `RUNNABLE`：已经可运行，至于是否此刻正在占 CPU，不由这个枚举细分
+- `BLOCKED`：在等进入某个监视器
+- `WAITING`：在等没有超时边界的事件，比如 `join()` / `wait()`
+- `TIMED_WAITING`：在等带时间边界的事件，比如 `sleep()`、超时 `join()`、超时 `wait()`
+- `TERMINATED`：线程生命周期已经收尾结束
+
+这时你就会发现，状态不是孤立知识点，而是前面几个 API 的投影：`start()` 决定能否离开 NEW，`sleep()` 把线程带进 TIMED_WAITING，`join()` 和 `wait()` 可能带进 WAITING，锁竞争则表现为 BLOCKED。
+
+### 为什么它不能被当成“此刻 CPU 上正在发生什么”的绝对真相
+
+这里还要顺手拆掉另一个误解：很多人把 `RUNNABLE` 理解成“线程此刻正占着 CPU 在跑”。JDK 的 Java 层状态视图没有细到这种程度。它只是在说这个线程已经处于可运行域，而不是承诺它就在当前这个时间片上执行字节码。
+
+也就是说，线程状态更像是对“当前在等待什么”或“是否已经具备继续执行资格”的抽象视图，而不是操作系统调度器内部全部细节的逐帧直播。
+
+这一层的收束是：**线程状态表要服务于动作理解，不要反过来把动作理解压扁成状态背诵。**
+
+## 收网：Thread API 真正串起来的是“对象、等待和中断”三条协议
+
+现在回到开头那个错误示例，就能看清为什么它会错了。`new Thread(task).run()` 之所以没有并发，是因为你只得到了一个 Java 对象和一次普通方法调用，根本没跨过 `start()` 这道把对象交给 JVM 的分界线。
+
+而从 `start()` 往后看，`Thread` 这一层真正串起来的，其实是三条协议。第一条是启动协议：对象何时变成真实线程，为什么只能启动一次。第二条是等待协议：sleep 等时间，join 等线程死亡事件，wait 等对象条件，它们不能混成一种“暂停”。第三条是中断协议：interrupt 只发请求、不代你做退出，代码必须通过标志读取、异常传播和状态恢复来协作收尾。
+
+把这三条线压成一张总图，就是：
+
+```text
+new Thread()
+  → 只有 Java 对象
+  → start()
+  → native 创建真实线程
+  → run() 在新线程里回调执行
+
+运行中等待
+  → sleep：等时间，不释放监视器
+  → join：等目标线程结束，靠 wait/notify 休眠等待
+  → wait：等对象条件，释放监视器
+
+退出协作
+  → interrupt：设置中断标志并尝试唤醒可中断阻塞
+  → interrupted / isInterrupted：消费或观察中断信号
+  → 代码自行决定何时退出
 ```
 
-- `interrupted()`(静态):`currentThread().isInterrupted(true)`——**返回并清除**当前线程标志,常用在循环里"清一次、处理一次"
-- `isInterrupted()`(实例):`isInterrupted(false)`——只读不清除
-
-### 3.3 协作式中断
-
-中断是**协作式**的: interrupt 只立标志,线程自己决定何时响应——任务循环里 `if (Thread.currentThread().isInterrupted()) break;` 是标准响应模式。阻塞中被中断的语义: **标志在抛 InterruptedException 时被清空**(JVM 语义)——所以 catch 块里再调 `interrupted()` 返回 false,需要自己恢复标志(重新 `Thread.currentThread().interrupt()`)才能让上层感知。
-
-关键设计(斜体):*interrupt 是"请求"不是"命令"——线程池 shutdownNow 能优雅关闭,靠的就是"给每个 worker 立标志 + 唤醒阻塞",worker 自行退出。面试"interrupt 一个阻塞在 IO 的线程": 传统阻塞 IO 无响应(只有 NIO InterruptibleChannel 可中断,域 19);synchronized 锁等待也不响应。能说清"哪些阻塞可中断、哪些只立标志"是这道题的完整答案。*
-
-## 4. "线程现在是什么状态" — 状态位与 currentThread
-
-### 4.1 currentThread:native 读 TLS
-
-`currentThread()`(`Thread.java:258`)是 native——读取当前线程的线程局部存储(TLS)里的 JavaThread 对象引用,返回它。每次调用都是一次 native 边界,所以热点代码里要缓存(`Thread t = Thread.currentThread()`)。
-
-### 4.2 threadStatus:JVMTI 位标志
-
-`Thread` 的状态只有一个 `int` 字段(`Thread.java:210`):
-
-```java
-// Thread.java:210
-private volatile int threadStatus;
-```
-
-**它不是 0/1/2 数字编码,而是 JVMTI 位标志**(`VM.java:304-309` 的定义:`ALIVE=0x0001`、`TERMINATED=0x0002`、`RUNNABLE=0x0004`、`BLOCKED_ON_MONITOR_ENTER=0x0400`、`WAITING_INDEFINITELY=0x0010`、`WAITING_WITH_TIMEOUT=0x0020`)。`getState()`(`Thread.java:1854`)就是位与解析:
-
-```java
-// Thread.java:1854-1857 + VM.java:282-298(截取核心,逐字)
-public State getState() {
-    // get current thread state
-    return jdk.internal.misc.VM.toThreadState(threadStatus);
-}
-```
-
-```java
-// VM.java:282-298(截取核心,逐字)
-public static Thread.State toThreadState(int threadStatus) {
-    if ((threadStatus & JVMTI_THREAD_STATE_RUNNABLE) != 0) {
-        return RUNNABLE;
-    } else if ((threadStatus & JVMTI_THREAD_STATE_BLOCKED_ON_MONITOR_ENTER) != 0) {
-        return BLOCKED;
-    } else if ((threadStatus & JVMTI_THREAD_STATE_WAITING_INDEFINITELY) != 0) {
-        return WAITING;
-    } else if ((threadStatus & JVMTI_THREAD_STATE_WAITING_WITH_TIMEOUT) != 0) {
-        return TIMED_WAITING;
-    } else if ((threadStatus & JVMTI_THREAD_STATE_TERMINATED) != 0) {
-        return TERMINATED;
-    } else if ((threadStatus & JVMTI_THREAD_STATE_ALIVE) == 0) {
-        return NEW;
-    } else {
-        return RUNNABLE;
-    }
-}
-```
-
-按位优先级从高到低: RUNNABLE → BLOCKED → WAITING → TIMED_WAITING → TERMINATED → NEW。六状态的对应关系:
-
-| 状态 | 触发场景 |
-|------|---------|
-| NEW | 未 start |
-| RUNNABLE | 可运行(含在跑) |
-| BLOCKED | 等 synchronized 监视器 |
-| WAITING | wait/join 无超时 |
-| TIMED_WAITING | sleep/join(timeout)/wait(timeout) |
-| TERMINATED | 结束 |
-
-`threadStatus` 由 **VM 在状态转换时写入**(`VM.java:307-308` 注释:"The threadStatus field is set by the VM at state transition")——Java 侧只是持有这个被 VM 维护的字段。
-
-关键设计(斜体):*用位标志而不是枚举值,是因为 JVMTI 状态本来就是组合位(一个线程可以同时是 ALIVE+RUNNABLE),位与解析把组合折叠成单一 Java 枚举。面试"BLOCKED vs WAITING": 等锁(监视器) vs 等事件(wait/join)——死锁检测看 BLOCKED 环。生产 jstack 的状态比 getState() 更实时: 后者是 Java 字段快照,前者直接问 VM。*
-
-跨层标注: [内部卷: 17-threads 02-javathread-state——VM 侧状态机与 threadStatus 写入路径;JVM TI GetThreadState 规范]
-
-## 核心悬念
-
-线程有了生命周期——但**每个线程私有的变量**怎么存?`ThreadLocal` 挂在 `Thread.threadLocals` 字段上,面试官的下一个问题是: 它内部为什么用弱引用?为什么线程池里一定会内存泄漏?`ThreadLocal.withInitial` 和 `remove` 的源码是什么样?下一篇把 ThreadLocalMap 完整解剖——这也是"四种引用"在真实工程里最重要的一次实战。
-
-> → [11-thread-threadlocal/02 — ThreadLocal 的完整解剖](02-threadlocal.md)
+到这里，Thread 对象本身已经立住了：它既是生命周期入口，也是中断和等待协议的宿主。下一篇继续顺着这条线往下走：既然线程对象会长期存在，线程私有变量为什么不直接放在局部栈里，而是挂到 `Thread` 身上的 `ThreadLocalMap`？它为什么会弱引用、为什么线程池里容易泄漏，这些问题都会在 `docs/openjdk/vol-java/11-thread-threadlocal/02-threadlocal.md` 里展开。

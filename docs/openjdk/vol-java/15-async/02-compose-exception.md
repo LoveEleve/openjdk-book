@@ -1,82 +1,200 @@
-# 02. CompletableFuture 组合与异常 — BiRelay、exceptionally、allOf/anyOf
+# CompletableFuture 组合与异常：异步真正难的不是单链，而是汇合与接管
 
-> **前置依赖**: [15-async/01 — CompletableFuture 基础](01-cf-basics.md)(结果与 Completion)、[14-threadpool/04 — FutureTask](../14-threadpool/04-futuretask-scheduled.md)(Future 异常对照)
-> → **后续**: [03-forkjoinpool.md](03-forkjoinpool.md)
-> 关联: [12-lock-sync/03 — ReentrantLock 与 Condition](../12-lock-sync/03-reentrantlock-condition.md)(汇合等待思想)
+> 本文基于 JDK 11 `CompletableFuture`。讨论范围聚焦 `thenCompose`、`thenCombine`、`whenComplete`、`handle`、`exceptionally`、`allOf`、`anyOf`、超时补偿与组合依赖节点；ForkJoinPool 执行引擎细节留到下一篇。本文讨论的是 JDK 11 Java 层实现路径，不把这里的组合节点形态和超时辅助实现外推成所有异步框架都必须遵守的统一规范。
+> **前置依赖**：[CompletableFuture 基础](01-cf-basics.md)、[FutureTask 对照](../14-threadpool/04-futuretask-scheduled.md)
+> **后续**：[ForkJoinPool work-stealing](03-forkjoinpool.md)
 
-## 异步结果怎么组合
+## 先看一个最常见、也最容易把异步编排重新写回阻塞代码的现场
 
-单链只是开始。真实编排通常需要等待两个结果、接管异常、等待一批任务或给整条链加超时。
+上一篇已经把 `CompletableFuture` 的基本心智立住了：它不是一个“结果盒子”，而是把 result、Completion 栈和回调执行模型压进同一个对象里。可这还只是单源单链场景。现实里的异步流程很少这么干净。更常见的情况是：
 
-## 1. "thenCombine 等两个源" — BiCompletion
+- A 的结果出来后，还得异步去查 B；
+- C 和 D 两路结果都到齐，才能继续下一步；
+- 某一环失败后，不是立刻崩，而是要给一个降级值继续往下走；
+- 一批任务里只要有一个先完成就够了，或者相反，必须所有都收齐；
+- 外部调用方不只是想 `get(timeout)`，而是希望超时本身就成为链上的一条明确语义。
 
-### 1.1 双源汇合
+很多人一碰到这些需求，就会把异步重新写回阻塞：在 then 里手工 `join()` 另一个 future，或者靠外层 catch 和 timeout 去兜底。问题在于，这会把前一篇刚建立起来的异步传播模型打碎，让线程重新陷进显式等待和手工拼接。
 
-`thenCombine`(`CompletableFuture.java:2139`)调用 `biApplyStage`(`:1244`),创建 `BiApply`(`:1190`)组合节点。它持有两个源 Future、目标 Future 和 `BiFunction`。
+所以这篇真正要解决的问题是：**一旦不再只是单源单链，CompletableFuture 怎么把“多个结果怎么汇合”“异常怎么沿链传播并被接管”“超时怎样变成编排语义”这些更复杂的关系，仍然塞回同一套 Completion 传播模型里。**
 
-只有两个源都完成后,组合函数才会执行,结果再发布到目标。`BiRelay`(`:1404`)是 `allOf` 使用的无函数汇合节点,不要和 `thenCombine` 的 `BiApply` 混淆。
+## 一、为什么单链不够：thenCompose 解决的是“Future 的 Future”必须被压平
 
-面试"thenCombine vs thenApply": thenApply 是单源链,thenCombine 是双源汇合。
+### 先看最自然但最别扭的失败方案
 
-### 1.2 触发方式
+假设你有一个异步步骤 A，完成后还得再发起另一个异步步骤 B。最直觉的写法是：在 `thenApply` 里直接返回一个新的 `CompletableFuture`。问题是，这样得到的不是“下一步异步结果”，而是“一个 future 里的 future”。调用方后面想继续串，就不得不自己再拆一层。
 
-两个源的 Completion 都可能推动同一个 `BiRelay`;第一个完成时条件未满足,第二个完成时才真正执行组合。它更像一个异步屏障,但不阻塞线程等待。
+这就是嵌套 future 的典型尴尬：**外层 future 只是告诉你“另一个 future 已经被创建出来”，并没有把那条内层异步链真正接到当前链上。**
 
-关键设计(斜体):*"Bi 依赖 = 双源汇合"——两个源都完成才执行组合函数。面试"thenCombine 原理": 两个源完成后才触发。*
+### thenCompose 真正做的是“把二层 future 压平回一条链”
 
-## 2. "异常接管" — exceptionally/whenComplete
+JDK 11 中，`thenCompose` 的入口在 `CompletableFuture.java:2239-2252`，底层落到 `uniComposeStage`（`1089`）。这已经说明它不是另一个“换名字的 thenApply”，而是在专门处理“回调本身又返回了一个 CompletionStage”的情况。
 
-### 2.1 两种处理角色
+更准确地说，thenCompose 的职责是：
 
-- `exceptionally(fn)`(`CompletableFuture.java:2311`)——异常时执行恢复函数,把异常转换成正常备用值;正常完成时透传原结果
-- `whenComplete(fn)`(`:2255`)——无论正常/异常都回调,适合作为观察钩子
+```text
+源 future 完成
+  → 执行函数 fn
+  → fn 返回另一个 future
+  → 不把它当普通值装箱塞进目标 future
+  → 而是把这条新 future 的完成继续接到原链上
+```
 
-`whenComplete` 不负责把异常变成正常值: 观察回调正常完成时,原结果状态继续向下传播;如果观察回调自身抛异常,返回的阶段也可能以该异常完成。要恢复需要 `exceptionally`/`handle`。
+所以 thenCompose 解决的根本问题不是“链式写法更优雅”，而是：**异步步骤 A 的输出本来就应该成为异步步骤 B 的输入，而不是让调用方看到一层 future 壳再手工扒开。**
 
-### 2.2 异常传播
+这一层一定要立住，因为它是后面所有更复杂组合的前提：先把“单源但下一步仍然异步”这件事处理干净，才轮得到多源汇合。
 
-链上某节点异常后,下游普通阶段通常跳过函数并继续携带异常;最近的 `exceptionally` 可以接管并发布备用值,否则最终 `get`/`join` 抛出包装异常。
+## 二、为什么 thenCombine 不是“再接一步”，而是一个双源汇合点
 
-面试"join vs get 异常差异": join 抛 `CompletionException`,get 抛 `ExecutionException`。
+### 先拆掉“在一个回调里等另一个 future”这种最常见的假异步写法
 
-关键设计(斜体):*"异常 = 数据沿链传播 + 最近接管"——exceptionally 是恢复分支,whenComplete 是观察钩子。面试"异常链怎么处理": 恢复用 exceptionally/handle,记录用 whenComplete。*
+双源组合最常见的坏味道是：A 完成后，在它的回调里手工 `join()` B。这样虽然也能等到两个结果，但本质上已经退化成“一个线程拿着 A 的完成机会，阻塞地等 B”。这不是组合，而是把异步编排重新写回阻塞等待。
 
-## 3. "allOf/anyOf" — 批量等待
+CompletableFuture 真正想表达的 thenCombine，语义完全不同：**它不是让 A 这条线去等 B，而是让系统挂一个双源汇合节点，谁先完成都先记住，直到两边都到齐才真正触发组合函数。**
 
-### 3.1 allOf
+### 双源汇合为什么本质上像异步屏障
 
-`allOf(CompletableFuture<?>... cfs)`(`CompletableFuture.java:2342`)返回 `CompletableFuture<Void>`: **所有输入都完成**后完成;各输入结果仍需自行 `join/get`。
+JDK 11 里，双源相关节点族和批量 `allOf` 共用一部分 Bi 结构，`BiRelay` 就是一个典型锚点（`CompletableFuture.java:1404`）。这能帮助我们抓住重点：双源组合不再是“一个源完成后就立刻能推进”，而是“必须同时观察两个源的完成情况”。
 
-内部使用 `AndTree`/`BiRelay` 组织多路完成依赖。
+这更像一块非阻塞异步屏障：
 
-### 3.2 anyOf
+```text
+源 A 完成
+  → 看一眼 B 到了没
+  → 没到就先挂着
 
-`anyOf(CompletableFuture<?>... cfs)`(`:2361`)返回 `CompletableFuture<Object>`: **任一输入完成**就完成,结果是先完成者的结果或异常。
+源 B 完成
+  → 看一眼 A 到了没
+  → 如果两边都到了，才执行组合函数
+```
 
-关键设计(斜体):*"allOf = N 路汇合,anyOf = 竞速"——一个等待全部,一个等待第一个。面试"等所有任务": allOf 后再分别 join,而不是串行阻塞等待。*
+所以 thenCombine 真正表达的不是“多一个参数的 thenApply”，而是**从单源传播切换到多源汇合语义**。这也是为什么组合节点不需要显式阻塞线程：它靠的是完成事件驱动，而不是某个线程一直等在那儿。
 
-## 4. "编排实战" — 超时与组合
+## 三、异常为什么会像结果一样沿链流动：直到被某个节点显式接管
 
-### 4.1 超时与兜底
+### 先看最容易误解的一点：异常不会自己消失在最近的 then 上
 
-- `orTimeout`(`:2627`)——超时后让 Future 以超时异常完成
-- `completeOnTimeout`(`:2648`)——超时后用默认值完成
+很多人会下意识觉得，异步链里某一步抛了异常，后面的下一步总会“自动处理一下”。真实情况恰好相反。普通的下游阶段如果看到上游已经是异常完成，往往不会执行自己的成功函数，而是直接带着这份异常继续往后流。也就是说，在 CompletableFuture 里，异常非常像一种特殊结果：它会**占住这条链，直到有人明确声明要接它。**
 
-`allOf` 本身不提供超时参数,可以给组合 Future 额外设置超时或在各子任务层配置超时。
+这也是为什么很多人写完一长串 thenApply / thenCompose 后，最后 `join()` 才第一次看到异常。不是异常没发生，而是中间根本没人声明要接管它。
 
-### 4.2 生产链路
+### `whenComplete`、`exceptionally`、`handle` 为什么不是三种叫法，而是三种角色
 
-典型链: `supplyAsync → thenApply → exceptionally → thenAccept`。
+JDK 11 里，和异常相关的几个核心入口分别是：
 
-生产规范:
+- `whenComplete`（`CompletableFuture.java:2255-2267`）
+- `handle`（`2270-2282`）
+- `exceptionally`（`2311-2313`）
 
-- 回调内避免再次阻塞,否则可能占满 commonPool
-- 异常要有接管或观测出口
-- 外部调用设置超时与降级值
-- 阻塞任务使用隔离 Executor,不要混入计算池
+它们最大的区别，不在“是否看到异常”，而在**看到异常后要不要把这条异常链改写成新的正常结果。**
 
-关键设计(斜体):*"编排 = 数据流图"——每个 then/exceptionally 都是图节点。生产规范: 全链异常接管 + 超时兜底 + 池隔离。面试"异步编排最佳实践": 超时 + 异常 + 执行器隔离。*
+- `whenComplete` 更像观察钩子：无论成功失败都看一眼，但默认不替你把异常变成正常值。
+- `exceptionally` 是恢复分支：只有异常时才出手，并把失败翻译成一个备用正常结果。
+- `handle` 则更像总接线盒：无论成功失败都进来，由你显式决定返回什么新结果。
 
-## 核心悬念
+这三者一旦角色分清，异步异常链就不再混乱：
 
-异步编排通了——**执行引擎**呢?`ForkJoinPool` 的 WorkQueue 双端队列、ctl 状态、work-stealing 算法——为什么它适合并行分治?——下一篇: ForkJoinPool work-stealing。
+```text
+只想记录/埋点
+  → whenComplete
+
+只想失败时给默认值
+  → exceptionally
+
+想统一处理成功和失败并产出新值
+  → handle
+```
+
+### 这就是为什么“异常接管”必须是显式动作
+
+CompletableFuture 在这里的设计哲学非常明确：**异常不会被默默吞掉或就近修复，除非你明确注册了一个接管节点。** 这比同步代码里一个大 try/catch 一把兜住更细粒度，也更危险——因为你如果不主动设计异常节点，异常就会一路挂着往后流，直到最后才在 `join/get` 处暴露。
+
+## 四、allOf / anyOf 为什么不是“批量版 thenCombine”，而是两种完全不同的批量语义
+
+### allOf 真正解决的是“全员到齐，不代表结果自动收集好”
+
+`allOf` 入口在 `CompletableFuture.java:2342`。很多人第一次用它都会诧异：为什么返回的是 `CompletableFuture<Void>`，而不是一组结果集合？原因就在于，它首先解决的不是“帮你收集结果”，而是“**帮你建立一块批量完成屏障**”。
+
+换句话说，allOf 的核心语义是：所有给定 future 都完成后，我这个组合 future 才完成。至于每个子任务的具体结果是什么，仍由调用方自己再去取。这正说明 allOf 的第一责任不是数据聚合，而是完成条件聚合。
+
+### anyOf 则是在表达“竞速先到即用”
+
+`anyOf` 入口在 `CompletableFuture.java:2361`。它和 allOf 的差别非常根本：它不是等全员，而是只要其中任意一个完成，就把最先到的那个结果或异常立刻变成自己的结局。
+
+所以：
+
+- `allOf` 是异步屏障
+- `anyOf` 是异步竞速
+
+它们都属于“批量组合”，但想解决的问题完全不同。把 anyOf 讲成“更快的 allOf”，或者把 allOf 讲成“收集一批结果的容器”，都会把真正语义讲偏。
+
+## 五、为什么超时也应该进异步链：它不是 get 的附属参数，而是编排语义的一部分
+
+### 先看只在外层 `get(timeout)` 设超时的局限
+
+如果你只在最外层调用 `get(timeout)`，那你表达的其实是“**我这个调用方等不了更久了**”。这当然有用，但它并没有告诉异步链内部：一旦超时，这条链究竟应该变成失败、返回降级值，还是让别的补偿路径接手。
+
+所以把超时只放在外层等待里，更多是在约束调用方耐心，而不是在约束异步编排本身的语义。
+
+### `orTimeout` 和 `completeOnTimeout` 为什么更像链上的护栏
+
+JDK 11 中：
+
+- `orTimeout` 相关逻辑锚点在 `CompletableFuture.java:2631`
+- `completeOnTimeout` 在 `2653`
+
+它们的价值在于把超时直接写进了 future 自己的命运里：
+
+- `orTimeout`：超时后把这条链变成异常完成
+- `completeOnTimeout`：超时后直接给一个降级正常值
+
+这样一来，超时就不再只是外层等待者的姿势问题，而变成了异步图里一个明确的控制节点。它和前面讲的 `exceptionally`、`handle` 正好连起来：超时本身也可以成为“异常信号”或“降级结果”的来源。
+
+这一层真正要记住的是：**异步编排里的超时，最好直接成为图上的一条语义边，而不是只留给最外层阻塞等待时再临时处理。**
+
+## 六、五个最容易混掉的边界：thenCompose 不是换个返回值，thenCombine 不是手工等另一个 future，whenComplete 不是恢复，allOf 不是结果收集器，超时不只是调用方耐心
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`thenCompose` 不是“返回值类型更高级的 thenApply”。它真正解决的是 future 嵌套问题：如果下一步本身还是异步调用，那你需要的是把内层 future 接回原链，而不是把它当普通值再包一层。
+
+第二，`thenCombine` 也不是“在 A 的回调里顺手等 B 一下”。真正的组合节点不会把某个线程卡在那儿等另一路，而是把“两边都完成”本身注册成一个汇合条件，谁先到都先挂起，直到最后一块拼图补齐。
+
+第三，`whenComplete` 更不是异常恢复器。它更像观察窗口：你可以记录成功、记录失败、埋点、清理资源，但如果上游本来是异常完成，它默认不会替你把失败翻译成正常值。真正把链从失败改回正常，需要 `exceptionally` 或 `handle` 明确接手。
+
+第四，`allOf` 也不是“帮你把所有结果打包收集好”的容器。它先解决的是完成条件：所有子 future 都结束后，我这个组合 future 才结束。至于每个结果怎么取、以什么顺序组装，那仍然是调用方在屏障之后要自己完成的工作。
+
+第五，超时也不只是“调用方耐心用完了”。只在外层 `get(timeout)` 限时，表达的是等待者愿意等多久；把 `orTimeout` 或 `completeOnTimeout` 写进链里，表达的才是这条异步流程本身在超时后应该变成失败还是降级值。
+
+把这五条边界记稳，CompletableFuture 的组合与异常模型才不会重新塌回“多几个 then、再补几个 catch 和 timeout”这种扁平印象。它真正管理的是更复杂的传播关系：一条链什么时候要压平，几条链什么时候算汇合，异常什么时候继续向后流，什么时候被明确接管，超时又该在哪个层级变成语义决策。
+
+## 收网：CompletableFuture 真正难的，不是继续 then 下去，而是多源汇合、异常接管和批量完成条件
+
+回到开头那个误区，现在已经能看清为什么“CompletableFuture 会链式调用”远远不够解释它了。单源 thenApply 只是基础；一旦进入真实异步业务，复杂度立刻转移到三件事上：
+
+- 一条链里下一步本身还是异步任务，必须用 thenCompose 压平 future 嵌套；
+- 两个或一批结果要汇合，必须用 thenCombine / allOf / anyOf 把完成条件表达出来；
+- 异常不会自己消失，而是会像结果一样沿链流动，直到被 exceptionally / handle / whenComplete 以不同角色接住。
+
+把整篇压成一张总图，就是：
+
+```text
+单源异步继续异步
+  → thenCompose
+  → 把 Future 的 Future 压平回一条链
+
+双源或多源汇合
+  → thenCombine / allOf / anyOf
+  → 分别表达双源合流、全员到齐、竞速先到
+
+异常与超时
+  → 默认沿链传播
+  → exceptionally 恢复
+  → handle 统一接管
+  → whenComplete 观察
+  → orTimeout / completeOnTimeout 作为链上护栏
+```
+
+如果上一篇讲的是“结果到了以后，后继步骤怎样继续流”，这一篇真正补上的就是：**当流不再是一条直线，而是分叉、汇合、失败、竞速和超时并存时，CompletableFuture 如何继续靠同一套 Completion 模型维持编排。**
+
+下一篇就该把视角从编排模型切到执行引擎本身：这些 async 节点最终很多都会落到 `ForkJoinPool.commonPool()` 或其他执行器里。为什么 ForkJoinPool 特别适合并行分治和异步任务窃取？它的 work-stealing 又是怎样和前面这些 Completion 节点的调度需求接上的？

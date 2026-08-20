@@ -1,153 +1,386 @@
-# 02. JDK11 内建加载器体系 — Boot/Platform/App 三层、模块化双路径
+# JDK 11 内置类加载器：三层边界与模块/类路径双轨
 
-> **前置依赖**: [07-classloader/01 — 双亲委派模型](01-delegation-model.md)(loadClass 三步骤与委派链)
-> → **后续**:[07-classloader/03 — 资源查找与 SPI](03-resource-spi.md)
-> 关联: 内部卷 06-jpms-modules(模块图与解析)
+> 本文基于 JDK 11 `java.base` 的 `ClassLoaders`、`BuiltinClassLoader`、`BootLoader` 和 `ClassLoader` 实现。Boot / Platform / App 的初始化、模块优先路径和 `BootLoader` 都是 JDK 11 当前实现事实；JDK 8 的 Bootstrap / Ext / App 只作为历史对照。模块图和启动镜像的更深层实现不在本文展开。本文讨论的是 JDK 11 内建加载器的 Java 层分工，不把这里的三层关系、模块优先路径和 Boot 侧 Java 视图外推成所有 JVM 或所有类加载体系都必须遵守的统一规范。
+> **前置依赖**：[双亲委派与类加载流程](01-delegation-model.md)
+> **后续**：[资源查找与 SPI](03-resource-spi.md)
 
-## 三层"父母"是谁
+## JDK 9+ 改掉的不是“三层”，而是中间层的权力边界
 
-面试"JDK9+ 类加载器有什么变化"——大多数人还停留在 JDK8 的 Bootstrap/Ext/App 三件套。JDK11 里 `sun.misc.Launcher` 已经消失,替代者是 `jdk.internal.loader` 的 **BootClassLoader / PlatformClassLoader / AppClassLoader**。三层职责怎么划分?模块化之后加载路径变成什么样?
+很多人回答 JDK 9+ 类加载器变化时，会把 JDK 8 的三件套背出来：Bootstrap、Ext、App。然后再说“Ext 改名成 Platform”。这句话看似对，实际上漏掉了最重要的变化。
 
-这篇把内建加载器体系讲清楚: ClassLoaders 的三个内部类、BuiltinClassLoader 的模块+classpath 双路径、三层职责边界、以及"Bootstrap 是 null"的语义。
+JDK 8 的 ExtClassLoader 代表一种很宽松的扩展方式：把 jar 放进约定的 `ext` 目录，就可能进入一条全局可见的加载路径。它方便，但也让“谁能把代码塞进 JDK 的扩展世界”变得模糊。
 
-## 1. "JDK11 的类加载器三层是谁" — ClassLoaders 内部类
+模块化之后，JDK 不再希望用一个可随意投放 jar 的目录表达平台边界。于是 JDK 11 仍然保留三层加载关系，却把中间层收紧成了受控的平台模块：
 
-### 1.1 三个内部类
-
-JDK11 的内建加载器定义在 `jdk/internal/loader/ClassLoaders.java`,是三个**静态内部类**,全部继承 `BuiltinClassLoader`:
-
-```java
-// ClassLoaders.java:111 + 126 + 151(截取核心,逐字)
-private static class BootClassLoader extends BuiltinClassLoader { ... }
-
-private static class PlatformClassLoader extends BuiltinClassLoader { ... }
-
-private static class AppClassLoader extends BuiltinClassLoader { ... }
+```text
+JDK 8：Bootstrap → ExtClassLoader → AppClassLoader
+JDK 11：Boot       → PlatformClassLoader → AppClassLoader
 ```
 
-- **BootClassLoader**(@111):启动加载器的 Java 侧视图——`super(null, null, bcp)` 父为 null(委派链顶端);`loadClassOrNull` 委托 `JLA.findBootstrapClassOrNull`(VM 查询)
-- **PlatformClassLoader**(@126):平台加载器
-- **AppClassLoader**(@151):应用加载器——`ClassLoader.getSystemClassLoader()`(`ClassLoader.java:1928`)返回的就是它
+注意，这不是简单换名字：
 
-### 1.2 历史对照:Extension 的退场
+- **Boot** 仍然代表最核心的 VM 侧加载边界。
+- **Platform** 不再是“某个目录里随便放扩展 jar”，而是平台模块的受控加载层。
+- **App** 继续是应用侧入口，但它在 JDK 11 里不只处理 classpath，还要处理应用模块。
 
-| | JDK8 | JDK11 |
-|---|---|---|
-| 顶层 | Bootstrap(原生) | BootClassLoader(Java 侧视图) |
-| 中层 | **ExtClassLoader**(ext 目录) | **PlatformClassLoader**(平台模块) |
-| 底层 | Launcher.AppClassLoader | AppClassLoader |
+这篇要解开的核心问题是：**JDK 11 如何在三层委派关系不变的情况下，把模块世界和传统 classpath 世界同时装进去？**
 
-**JDK9+ 移除了 Extension 加载器**: ext 目录机制(任意 jar 塞进 ext 就全局生效)太容易被滥用;PlatformClassLoader 职责收缩为"加载平台模块",不再有可配置的 ext 路径。classpath 逻辑全部由 AppClassLoader 承担。
+## 一、系统类加载器为什么是 App，而不是最顶层
 
-关键设计(斜体):*Extension→Platform 是"重命名 + 职责收缩": 可扩展目录(危险)变成只读平台模块(受控)。面试答"JDK9 前后变化": 三层变三层(名字变了)+ 模块化加载路径——能说出"Ext 没了,Platform 顶上"就超过背结论的。*
+### 先排除一个常见的名字误导
 
-## 2. "BuiltinClassLoader 怎么加载" — 模块路径 + 类路径双路径
+“系统类加载器”听起来像是整个 JVM 最核心的那个加载器。于是很多人会顺手把它等同于 Bootstrap，或者认为 `ClassLoader.getSystemClassLoader()` 应该返回最顶层。
 
-### 2.1 loadClassOrNull:模块优先
+事实相反：系统类加载器是应用程序默认使用的入口。它要负责找到应用的主类、classpath 上的业务类，并参与应用模块加载，所以它天然位于委派链的下方。
 
-`BuiltinClassLoader.loadClassOrNull`(`BuiltinClassLoader.java:590` 起)是第 1 篇 loadClass 的 JDK11 版本——多了一步模块查询:
+JDK 11 的初始化代码先创建 Boot，再创建 Platform，最后创建 App：
 
 ```java
-// BuiltinClassLoader.java:590-625(截取核心,逐字)
+// ClassLoaders.java:53-78
+private static final BootClassLoader BOOT_LOADER;
+private static final PlatformClassLoader PLATFORM_LOADER;
+private static final AppClassLoader APP_LOADER;
+
+static {
+    String append = VM.getSavedProperty("jdk.boot.class.path.append");
+    BOOT_LOADER =
+        new BootClassLoader((append != null && !append.isEmpty())
+            ? new URLClassPath(append, true)
+            : null);
+    PLATFORM_LOADER = new PlatformClassLoader(BOOT_LOADER);
+
+    String cp = System.getProperty("java.class.path");
+    if (cp == null || cp.isEmpty()) {
+        String initialModuleName = System.getProperty("jdk.module.main");
+        cp = (initialModuleName == null) ? "" : null;
+    }
+    URLClassPath ucp = new URLClassPath(cp, false);
+    APP_LOADER = new AppClassLoader(PLATFORM_LOADER, ucp);
+}
+```
+
+父子关系从这段构造顺序已经能看出来：
+
+```text
+AppClassLoader
+   parent → PlatformClassLoader
+                 parent → BootClassLoader / VM 边界
+```
+
+`getSystemClassLoader()` 的语义也是“返回默认应用入口”，不是“返回整个加载器树的根”：
+
+```java
+// ClassLoader.java:1928
+public static ClassLoader getSystemClassLoader() {
+```
+
+它的名字来自应用视角：当前 Java 程序默认用谁找自己的类和资源，而不是谁负责加载 `java.lang.String`。
+
+### `java.system.class.loader` 只替换应用入口
+
+JDK 11 还允许通过 `-Djava.system.class.loader=...` 指定一个自定义系统类加载器。这个机制更能说明系统加载器的层级：JDK 会用默认系统加载器加载指定类，再把默认系统加载器作为构造器参数传给它，让它成为新的应用侧入口。
+
+它改变的是 App 这一层的实现，不是把 Boot 或 Platform 也替换掉：
+
+```text
+VM / Boot
+   → Platform
+      → 默认 App 或用户指定的 system class loader
+```
+
+因此，生产排查里看到 `getSystemClassLoader()` 不是内建 `AppClassLoader`，不代表整棵树都被替换了；通常只是应用入口被定制。
+
+## 二、Boot、Platform、App 三层各自是什么
+
+### `ClassLoaders` 里真的有三个 Java 侧对象
+
+JDK 11 的三层内建加载器定义在 `jdk.internal.loader.ClassLoaders` 中：
+
+```java
+// ClassLoaders.java:111-160
+private static class BootClassLoader extends BuiltinClassLoader {
+    BootClassLoader(URLClassPath bcp) {
+        super(null, null, bcp);
+    }
+}
+
+private static class PlatformClassLoader extends BuiltinClassLoader {
+    PlatformClassLoader(BootClassLoader parent) {
+        super("platform", parent, null);
+    }
+}
+
+private static class AppClassLoader extends BuiltinClassLoader {
+    final URLClassPath ucp;
+
+    AppClassLoader(PlatformClassLoader parent, URLClassPath ucp) {
+        super("app", parent, ucp);
+        this.ucp = ucp;
+    }
+}
+```
+
+这段源码最值得注意的不是三个类名，而是它们的构造参数：
+
+- Boot 的 parent 是 `null`，因为它已经站在 Java 层父链的顶端。
+- Platform 的 parent 是 Boot。
+- App 的 parent 是 Platform，而且 App 拿到了 `URLClassPath`。
+
+所以 JDK 11 里常说的委派链可以画成：
+
+```text
+AppClassLoader → PlatformClassLoader → BootClassLoader / VM
+```
+
+### Boot：Java 侧的视图，不等于普通应用可操作的加载器
+
+BootClassLoader 虽然在 `ClassLoaders.java` 里有一个 Java 类，但它的加载动作直接回到 JVM 提供的 bootstrap 查询：
+
+```java
+// ClassLoaders.java:111-119
+private static class BootClassLoader extends BuiltinClassLoader {
+    BootClassLoader(URLClassPath bcp) {
+        super(null, null, bcp);
+    }
+
+    @Override
+    protected Class<?> loadClassOrNull(String cn) {
+        return JLA.findBootstrapClassOrNull(this, cn);
+    }
+}
+```
+
+这说明它更像 Java 层的适配视图，而不是一个由普通 Java 代码独立控制的类加载器。核心类的真正加载边界仍然在 VM 和启动模块环境里。
+
+### Platform：平台模块的受控中间层
+
+PlatformClassLoader 的父类是 Boot，但它没有 App 那样的普通 classpath。它的职责是承接被定义为平台范围的模块，让平台 API 不必全部挤进 Boot，也不必落到应用类路径。
+
+这正是它和 JDK 8 ExtClassLoader 的关键差别：Platform 不是“用户往目录里放扩展 jar 的入口”，而是模块系统划出的受控边界。
+
+### App：应用模块与 classpath 的共同入口
+
+AppClassLoader 携带 `URLClassPath`，因此传统 `-cp`、`-jar` 应用仍然通过它寻找类和资源；同时，JDK 11 的应用模块也由应用侧加载器参与承载。
+
+这就解释了一个容易被历史知识带偏的判断：**AppClassLoader 不等于“只负责 classpath 的旧 AppClassLoader”，它是 JDK 11 应用侧的综合入口。**
+
+## 三、模块化之后为什么变成“先判模块，再回退类路径”
+
+### 两个极端方案都不能接受
+
+如果 JDK 11 继续只用旧式 classpath 委派，那么模块最重要的能力——包归属、模块边界和模块路径——就会被重新压扁成一堆 jar 搜索。
+
+但如果 JDK 11 彻底禁止 classpath，只允许所有类都来自模块路径，既有海量 Java 应用也无法运行。JDK 11 的现实任务不是选择其中一个，而是让两套世界并行存在。
+
+因此 `BuiltinClassLoader` 的主线不是简单复制上一章的 `parent → findClass`，而是多了一个优先判断：**这个类名所属的包，是否已经归属于某个模块？**
+
+### `BuiltinClassLoader.loadClassOrNull` 的双轨流程
+
+JDK 11 的实现可以压缩成下面这段证据：
+
+```java
+// BuiltinClassLoader.java:590-630
 protected Class<?> loadClassOrNull(String cn, boolean resolve) {
     synchronized (getClassLoadingLock(cn)) {
-        // check if already loaded
         Class<?> c = findLoadedClass(cn);
 
         if (c == null) {
-
-            // find the candidate module for this class
             LoadedModule loadedModule = findLoadedModule(cn);
             if (loadedModule != null) {
-
-                // package is in a module
                 BuiltinClassLoader loader = loadedModule.loader();
                 if (loader == this) {
                     if (VM.isModuleSystemInited()) {
                         c = findClassInModuleOrNull(loadedModule, cn);
                     }
                 } else {
-                    // delegate to the other loader
                     c = loader.loadClassOrNull(cn);
                 }
-
             } else {
-
-                // check parent
                 if (parent != null) {
                     c = parent.loadClassOrNull(cn);
                 }
-
-                // check class path
                 if (c == null && hasClassPath() && VM.isModuleSystemInited()) {
                     c = findClassOnClassPathOrNull(cn);
                 }
             }
         }
-        ...
+
+        if (resolve && c != null)
+            resolveClass(c);
+
+        return c;
+    }
+}
 ```
 
-流程:
+把代码翻译成角色时序：
 
-1. **查缓存**:`findLoadedClass`(与第 1 篇相同)
-2. **模块查询**:`findLoadedModule(cn)`——按类名所属包查"哪个已加载模块拥有这个包"。命中模块 → 模块归属的加载器加载(`findClassInModuleOrNull` 或委派给该加载器)——**模块侧不走传统双亲委派,走模块图解析**
-3. **未命中模块 → 回退 classpath 双亲委派**:`parent.loadClassOrNull` → 自己 `findClassOnClassPathOrNull`(@621)
-
-### 2.2 defineClass 的两条路径
-
-`defineClass` 也有两个版本(`BuiltinClassLoader.java:729`/`779`):
-
-- 模块中的类 → `defineClass(cn, LoadedModule)`(@729,带模块上下文)
-- classpath 中的类 → `defineClass(cn, Resource)`(@779,读文件字节)
-
-### 2.3 过渡态
-
-JDK11 是"模块与 classpath 共存"的过渡态: **java.* 等 JDK 模块走模块图解析,第三方 classpath 仍走双亲委派**。`java.util.List` 由 BootClassLoader 的模块路径加载(jimage 镜像),`com.app.Main` 由 AppClassLoader 的 classpath 加载。
-
-关键设计(斜体):*模块化加载 = 先查"类属于哪个模块"再加载——模块比 classpath 更结构化(包归属固定,冲突在编译/启动期就暴露);但非模块化 classpath 类仍按双亲委派。面试"模块化后还需要双亲委派吗": 类路径侧依然需要,模块侧按模块图解析——答出"双轨共存"才是 JDK11 的真相。*
-
-跨层标注: [内部卷: 06-jpms-modules(模块图与解析);C++: java_lang_ClassLoader 的 JVM 侧结构]
-
-## 3. "三层各自加载什么" — 职责边界
-
-### 3.1 三层职责
-
-模块→加载器的分派是**构建期列表制**(`jdk/internal/module/ModuleLoaderMap.mappingFunction`,`ModuleLoaderMap.java:92-114`): 模块名命中构建期生成的 BOOT_MODULES/PLATFORM_MODULES 列表分别归 Boot/Platform,**其余所有模块(含 jdk.* 和第三方)归 App**:
-
-```
-BootClassLoader(启动)     java.base 等启动模块(构建期 BOOT_MODULES 列表)——java.* 核心全在这(被委派保护,不可覆盖)
-PlatformClassLoader(平台)  java.sql/java.xml/java.management 等平台模块(构建期 PLATFORM_MODULES 列表)
-AppClassLoader(应用)       jdk.* 模块 + classpath(-cp/-jar) + 模块路径的应用模块;getSystemClassLoader 指向它
+```text
+BuiltinClassLoader.loadClassOrNull(cn)
+   → 查本加载器缓存
+   → 按包名查是否属于已加载模块
+      ├── 命中模块：交给模块归属的加载器
+      │              → 从模块路径定义类
+      └── 未命中模块：回到传统路径
+             → 先问 parent
+             → 再从自己的 classpath 搜索
 ```
 
-注意一个反直觉点: **jdk.\* 模块(如 jdk.management、jdk.jfr)默认由 AppClassLoader 加载**——平台列表只含 java.* 前缀的模块,不要凭名字前缀猜归属。
+这不是“双亲委派失效”，而是它前面多了一道模块归属判断。模块路径侧先解决“这个包属于哪个模块、哪个加载器”；只有不属于已加载模块的类，才进入传统 classpath 搜索。
 
-委派链:**App → Platform → Boot(null parent)**。
+### 模块类和 classpath 类的定义入口也不同
 
-### 3.2 排查方法论
+模块命中后，`BuiltinClassLoader` 走带 `LoadedModule` 上下文的定义路径：
 
-生产 `ClassNotFoundException` 排查两步: **① 判断类应该在哪层**(java.* → Boot;javax.sql/java.sql → Platform;业务包 → App)→ **② 检查该层的加载路径**(App 层的 `-cp` 内容、Boot 层的模块是否缺失)。"类所属层 + 该层路径"是标准排查框架。
+```java
+// BuiltinClassLoader.java:678-684
+private Class<?> findClassInModuleOrNull(LoadedModule loadedModule, String cn) {
+    if (System.getSecurityManager() == null) {
+        return defineClass(cn, loadedModule);
+    } else {
+        PrivilegedAction<Class<?>> pa = () -> defineClass(cn, loadedModule);
+        return AccessController.doPrivileged(pa);
+    }
+}
+```
 
-**同包类归属**: 应用代码里写 `java.util.Xxx` 一定被 Boot 抢先加载——自定义类试图冒充 java.* 无效(委派方向决定了核心包不可覆盖)。`-Djava.system.class.loader=com.Xxx` 可以替换系统加载器(框架隔离常用)。
+没命中模块、退回 classpath 时，则按类名转换出资源路径，再从 `URLClassPath` 找 `.class`：
 
-关键设计(斜体):*委派方向 = 安全边界: 越核心的包越早被高层加载,应用代码无法冒充 java.*。排查 ClassNotFound 的标准动作: 类所属层 + 该层路径,而不是盲目加依赖。*
+```java
+// BuiltinClassLoader.java:688-699
+private Class<?> findClassOnClassPathOrNull(String cn) {
+    String path = cn.replace('.', '/').concat(".class");
+    if (System.getSecurityManager() == null) {
+        Resource res = ucp.getResource(path, false);
+        if (res != null) {
+            try {
+                return defineClass(cn, res);
+```
 
-## 4. "Bootstrap 加载器是 null" — 启动加载器语义
+两条路径的区别可以压成一句话：
 
-### 4.1 VM 实现,不在 Java 层建模
+```text
+模块类：先确定模块归属，再带模块上下文定义
+classpath 类：按类名找资源，再按传统方式定义
+```
 
-启动加载器**由 VM 实现,不是 Java 类**——所以 `String.class.getClassLoader()` 返回 null: 没有 Java 对象可以返回。Java 侧访问启动加载器功能的主要入口是 `jdk/internal/loader/BootLoader`(`BootLoader.java:56`)——提供 jimage 路径查询(`BootLoader.java:135` 的 `findResource`)等只读操作。
+这就是 JDK 11 的真实过渡状态：模块化不是把 classpath 一夜清空，而是在已有 classpath 之上增加了结构化的模块路径。
 
-### 4.2 null 的双重含义
+**路标：这里先别急着记每个内部方法名。主线只发生了两件事：先问“这个包属于哪个模块”，属于模块就走模块路径；不属于模块，才继续走父加载器和 classpath。下面把三层职责和生产排障接起来。**
 
-`ClassLoader.getParent()` 返回 null = "我是委派链顶端"(启动加载器之上无父)。与 `getClassLoader()` 的 null 含义一致: **"由 VM 直接加载,不在 Java 层建模"**。
+## 四、三层加载器怎么分工，排障时先看哪一层
 
-面试标准答案: "为什么 String 的 classLoader 是 null"——Bootstrap 是 VM 内建,不在 Java 层建模;它加载 java.base 模块的类。
+### 不要只靠包名前缀猜加载器
 
-关键设计(斜体):*null 的双重含义: "没有父"与"由 VM 直接加载"——这不是 bug,是"VM 内建实体在 Java 层没有对象"的自然结果。面试答出"Bootstrap 不是 Java 类,Java 侧用 BootLoader 查询"就完整了。*
+工程师排查 `ClassNotFoundException` 时，最容易直接做的动作是继续加 jar、改 `-cp`。但 JDK 11 的内置加载器已经不适合只靠“这个名字看起来像 `java.*` 还是 `jdk.*`”来猜归属。
 
-## 核心悬念
+更可靠的第一步是：先判断它属于哪个加载层，再检查该层的路径。
 
-类找到了,但**资源怎么找**?`getResource` 走的也是双亲委派——但 SPI 场景(JDBC/ServiceLoader)委派方向反了: 由 Bootstrap 加载的 `java.sql.Driver` 接口,要用 App 加载器里的 MySQL 驱动实现类——**谁去加载它**?线程上下文加载器(Thread Context ClassLoader)就是为打破"委派方向死锁"而生的。下一篇: 资源查找与 SPI。
+```text
+Boot：启动核心模块，例如 java.base
+Platform：受控的平台模块，例如 java.sql、java.xml、java.management
+App：应用模块、classpath / -cp / -jar 上的业务类
+```
 
-> → [07-classloader/03 — 资源查找与 SPI](03-resource-spi.md)
+这里要特别避开一个误解：并不是所有 `jdk.*` 模块都天然属于 Platform。JDK 11 的模块到加载器分派由构建和模块映射决定，不能只看模块名字符串下结论。生产上真正需要的是查当前运行时的模块归属，而不是凭前缀猜。
+
+### `getSystemClassLoader` 对应的是 App 侧
+
+AppClassLoader 的公开获取入口是 `ClassLoaders.appClassLoader()` 的内部实现，以及 `ClassLoader.getSystemClassLoader()` 的公共 API。它服务的是应用入口，所以当业务类找不到时，首先应该检查 classpath 或应用模块路径，而不是去怀疑 Boot。
+
+JDK 11 初始化 App 时会读取 `java.class.path`：
+
+```java
+// ClassLoaders.java:67-78
+String cp = System.getProperty("java.class.path");
+if (cp == null || cp.isEmpty()) {
+    String initialModuleName = System.getProperty("jdk.module.main");
+    cp = (initialModuleName == null) ? "" : null;
+}
+URLClassPath ucp = new URLClassPath(cp, false);
+APP_LOADER = new AppClassLoader(PLATFORM_LOADER, ucp);
+```
+
+这段实现还揭示了一个边界：空 classpath 在未命名初始模块和命名初始模块下可能有不同解释。也就是说，“我明明设置了空 `java.class.path`，为什么路径行为不一样”并不一定是命令行失效，而可能是启动形态不同。
+
+### `String.class.getClassLoader()` 为什么是 `null`
+
+现在看最经典的问题：
+
+```java
+// 用法示意(API 形式,非源码片段)
+String.class.getClassLoader() == null;
+```
+
+这个 `null` 不是“String 没有加载器”，而是“负责它的最底层引导加载边界没有以普通 Java `ClassLoader` 对象暴露出来”。Boot 的真实工作由 VM 和启动模块环境完成，Java 侧只提供受限的辅助入口。
+
+`BootLoader` 本身是一个 Java 类，但它的定位主要是为引导加载器定义的模块查资源和包信息：
+
+```java
+// BootLoader.java:56-65
+public class BootLoader {
+    private BootLoader() { }
+
+    private static final Module UNNAMED_MODULE;
+
+    static {
+        UNNAMED_MODULE = SharedSecrets.getJavaLangAccess().defineUnnamedModule(null);
+        setBootLoaderUnnamedModule0(UNNAMED_MODULE);
+    }
+}
+```
+
+因此要区分三个概念：
+
+```text
+BootClassLoader：ClassLoaders 内部的 Java 侧加载器视图
+BootLoader：     JDK 内部使用的受限辅助入口
+VM bootstrap：   真正承载核心类加载边界的底层实体
+```
+
+它们不是三个并列的“加载器实例”。`String.class.getClassLoader()` 返回 null，正是因为最后那个 VM bootstrap 边界不以普通 Java 对象形式交给应用。
+
+## 七、五个最容易混掉的边界：系统类加载器不是最顶层，Platform 不是旧 Ext 改名，模块优先不是 classpath 消失，BootClassLoader 不等于 BootLoader，null 也不等于没有加载器
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，系统类加载器不是最顶层加载器。`getSystemClassLoader()` 站的是应用入口视角，返回的是 App 这一层，而不是引导边界本身。把“系统”误听成“最核心”，是类加载题里最常见的名字误导。
+
+第二，PlatformClassLoader 也不是旧 ExtClassLoader 仅仅换了个名字。真正变化的是边界：Ext 时代的全局扩展目录被收紧成了受控平台模块层，不再鼓励随手往某个目录里丢 jar 就进入平台世界。
+
+第三，模块优先更不等于 classpath 从 JDK 11 开始彻底消失。真正发生的是双轨并存：先判包是否属于已加载模块，命中就走模块路径；不命中才继续回到 parent 委派与 classpath 搜索。
+
+第四，`BootClassLoader` 和 `BootLoader` 也不是同一个东西的两个名字。前者是 `ClassLoaders` 里用于组织三层关系的 Java 侧视图，后者则是 JDK 内部提供的受限引导加载辅助入口；真正最底层的 bootstrap 边界仍然在 VM 一侧。
+
+第五，`String.class.getClassLoader() == null` 也不等于“这个类没有加载器”。它真正说明的是：负责它的那一层引导加载边界，没有以普通 Java `ClassLoader` 对象的形式暴露给应用代码。
+
+把这五条边界记稳，JDK 11 内建加载器这一篇就不会重新塌回“Bootstrap/Ext/App 换了新名字”的表面印象。它真正想讲的是：JDK 9+ 保留了三层委派关系，但把中间层的权力边界和模块/classpath 的分工一起重写了。
+
+## 收网：JDK 11 是三层关系上的双轨加载
+
+回到开头的问题：JDK 9+ 到底改了什么？不是把三层类加载器删掉，也不是让双亲委派彻底失效，而是把中间层从 Ext 的任意扩展目录收紧成 Platform 的平台模块层，并让内置加载器同时识别模块路径和 classpath。
+
+整条加载主线可以画成：
+
+```text
+App / Platform / Boot 三层
+          │
+          ▼
+BuiltinClassLoader.loadClassOrNull
+          │
+          ├── 先查缓存
+          ├── 再查类名所属模块
+          │      ├── 命中：按模块归属加载
+          │      └── 未命中：parent 委派 + classpath 搜索
+          └── 需要时 resolve
+```
+
+实际排障时记住三条规则：
+
+1. **先判断加载层，再检查路径**：业务类通常先看 App 的 classpath 或应用模块路径；平台 API 看 Platform；核心类看 Boot 边界。
+2. **不要把 Platform 当成 Ext 的简单改名**：Ext 的任意扩展目录被收紧成受控平台模块。
+3. **不要把 `null` classLoader 当成“没有加载器”**：它表示 VM 侧引导边界没有以普通 Java `ClassLoader` 对象暴露。
+
+到这里，类“从哪里来”已经有了答案；但类之外还有另一类同样重要的东西：资源文件、`META-INF/services`、配置和 SPI 描述。下一篇继续追问：资源查找为什么也有委派，而 SPI 为什么又需要线程上下文类加载器把父层接口和子层实现接起来？
+
+> → 下一篇：[资源查找与 SPI](03-resource-spi.md)

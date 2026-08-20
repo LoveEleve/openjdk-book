@@ -1,88 +1,200 @@
-# 04. 录制与配置 — Recording 生命周期、Configuration、事件设置
+# 录制与配置：为什么 JFR 真正要控制的不是“有没有文件”，而是哪些事件在什么窗口里、以什么规则被保留下来
 
-> **前置依赖**: [39-jfr/01 — JFR 全景与事件模型](01-jfr-overview-event-model.md)(Recording 会话,§2)、[39-jfr/03 — 字节码增强机制](03-bytecode-instrumentation.md)(事件提交路径)
-> → **后续**: [05-consumer-api.md](05-consumer-api.md)
-> 关联: 内部卷 32-jfr(缓冲结构/刷盘线程)
+> 本文基于 JDK 11 `Recording`、`Configuration`、`EventSettings`、`PlatformRecording`。本文聚焦录制会话生命周期、预置配置模板、事件级别开关与保留策略；消费者 API 放到下一篇。
+> **前置依赖**：[JFR 全景与事件模型](01-jfr-overview-event-model.md)、[字节码增强机制](03-bytecode-instrumentation.md)
+> **后续**：[消费者 API](05-consumer-api.md)
 
-## 录制怎么配置
+## 先看一个最容易把 JFR 用窄的误区：录制不是“开一下、停一下、出个文件”，而是一段有明确预算和保留策略的会话
 
-前三篇讲了事件机制——这一篇看会话管理: Recording 生命周期怎么控制、预置配置模板是什么、事件级设置怎么链式调整、数据落在内存还是磁盘。
+前几篇已经把 JFR 的事件模型、事件 Schema 和事件注入路径讲清了。到这一步，最容易产生的错觉是：既然事件已经能写了，那录制不就是“开开关、停掉、导出文件”吗？
 
-## 1. "Recording 的生命周期" — 会话管理
+这只看到了最后结果，没有看到真正困难的那一层。生产里真正的问题从来不是“能不能写出一个 `.jfr` 文件”，而是：
 
-### 1.1 构造三形态
+- 哪些事件值得记录；
+- 这段记录从什么时候开始，到什么时候结束；
+- 是常驻后台低干扰录制，还是短时间高细节剖析；
+- 数据只留内存窗口，还是持续落盘；
+- 文件或仓库数据增长到多大、多老时该把最旧数据淘汰掉。
 
-`Recording` 构造三种(`Recording.java`): `Recording(Map<String,String> settings)`(`:96`)/`Recording()`(`:120`)/`Recording(Configuration configuration)`(`:150`,带预置模板)。
+也就是说，JFR 真正要管理的不是“一个文件”，而是一段可配置、可收敛、可长期运行的录制会话。`Recording`、`Configuration` 和 `EventSettings` 正是围绕这件事分工出来的三层控制面：
 
-### 1.2 生命周期
+- `Recording` 管会话边界；
+- `Configuration` 管整体模板；
+- `EventSettings` 管单类事件的细粒度规则。
 
-| 阶段 | 方法 | 锚点 |
-|------|------|------|
-| 构造 | 空 Recording(NEW 状态,Javadoc `:135`) | `:120` |
-| 开始 | `start()` | `:168` |
-| 停止 | `stop()` | `:209` |
-| 导出 | `setDestination(Path)`(停止时自动写文件的位置,Javadoc `:449-450`)/ `dump(Path)`(手动立即导出) | `:462` / `:374` |
-| 释放 | `close()` | `:341` |
+所以这一篇真正要回答的，不是“有哪些配置方法”，而是：**JFR 怎么把持续录制这件事做成可控系统。**
 
-配置项: `setMaxSize`(`:409`,磁盘仓库数据量上限,超限移除最旧 chunk)/`setMaxAge`(`:432`,磁盘数据保留时长上限)/`setName`。
+## 一、为什么 `Recording` 代表的是会话，而不是最终输出文件：真正的核心是录制窗口
 
-面试"怎么导出录制": setDestination + stop——会话自动结束写文件;生产: jcmd JFR.start name=x duration=60s → 自动产出 .jfr 文件。
+### 先看它的构造和生命周期入口
 
-关键设计(斜体):*"Recording = 配置 + 时间窗口"——start/stop 界定录制,close 释放资源。面试"怎么导出录制": setDestination + stop;生产: jcmd JFR.start name=x duration=60s → 自动产出 .jfr 文件。*
+JDK 11 里，`Recording` 定义在 `Recording.java:63`。构造入口有三种：
 
-## 2. "Configuration 预置方案" — 配置模板
+- `Recording(Map<String, String> settings)`：`Recording.java:96`
+- `Recording()`：`120`
+- `Recording(Configuration configuration)`：`150`
 
-### 2.1 结构
+生命周期上的关键动作则包括：
 
-`Configuration`(`jdk/jfr/Configuration.java:48`)——**设置集合**(name/label/描述 + `Map<String,String> settings`(`:49`,构造 `:57`));`getConfiguration(String name)`(`:181`)按名获取预置方案。
+- `start()`：`168`
+- `stop()`：`209`
+- `dump(Path)`：`374`
+- `setMaxSize(long)`：`409`
+- `setMaxAge(Duration)`：`432`
+- `setDestination(Path)`：`462`
+- `setToDisk(boolean)`：`531`
 
-### 2.2 预置方案
+这组入口合在一起，已经非常说明问题：Recording 本体不是“文件句柄”，而是一段录制规则正在生效的会话对象。
 
-- **default** — 默认低开销
-- **profile** — 详细(更多事件/更低阈值)
+### 为什么“会话”这个词比“文件”更准确
 
-文件在 `jdk.jfr/share/conf/jfr/`(`default.jfc`/`profile.jfc`,XML,141 个事件条目),经 `JFC.getPredefined` 加载(`Configuration.getConfiguration`——`:181`),转成 `Map<String,String>` 设置键值——**API 层格式**: `"jdk.GC#enabled" = "true"` 等事件级键值。
+如果 Recording 只是文件抽象，那它最重要的动作应该是 open/write/close 一类语义。但 JFR 这里的核心动作是：
 
-面试"default vs profile 区别": 启用的事件与阈值不同;生产: 常规监控 default,问题定位 profile。
+- 什么时候开始记录；
+- 什么时候停止记录；
+- 用哪套配置开始；
+- 是否落盘；
+- 落盘数据保留多久、保留多大。
 
-关键设计(斜体):*"配置 = 事件设置的集合"——按场景选模板(default 低开销/profile 详细)。面试"default vs profile 区别": 启用的事件与阈值不同;生产: 常规监控 default,问题定位 profile。*
+这些动作描述的不是“文件操作”，而是“时间窗口内的录制策略”。文件只是其中一个输出结果，窗口和策略才是本体。
 
-## 3. "事件级设置" — EventSettings 链式
+这也解释了为什么 `setDestination()`、`setMaxAge()`、`setMaxSize()` 都和 Recording 紧紧绑在一起：它们都不是后处理选项，而是会话边界的一部分。
 
-### 3.1 链式 API
+## 二、为什么 `Configuration` 是模板，而不是当前录制状态：它解决的是“你打算按什么预算去看世界”
 
-`EventSettings`(`jdk/jfr/EventSettings.java:56`,抽象类)提供链式方法:
+### 先看它本身保存什么
 
-- `withThreshold(Duration)`(`:114`)——低于该时长的事件丢弃
-- `withPeriod(Duration)`(`:103`)——周期事件频率
-- `withStackTrace()`(`:69`)——是否抓栈
+JDK 11 里，`Configuration` 定义在 `Configuration.java:48`，核心字段 `settings` 在 `49`，构造在 `57`。外部入口包括：
 
-用法: `recording.enable(MyEvent.class).withThreshold(Duration.ofMillis(10)).withStackTrace()`;入口 `Recording.enable`——`enable(String)`(`:602`,按名称启用,同名事件全开——Javadoc `:590-596`)/`enable(Class)`(`:640`,按类精确启用)。
+- `getConfiguration(String name)`：`Configuration.java:181`
+- `getConfigurations()`：`191`
+- 底层配置列表来源：`195`
 
-面试"阈值干什么": 减少低价值事件(性能开销控制);生产: 业务事件默认开 + 阈值过滤噪音。
+这些锚点已经说明，Configuration 不是某次 Recording 正在变化的实时状态，而是一组可复用的配置模板：名称、说明、提供者信息，以及最关键的 settings 键值集合。
 
-关键设计(斜体):*"事件设置 = 录制级过滤"——开关/阈值/周期/栈四类。面试"阈值干什么": 减少低价值事件(性能开销控制);生产: 业务事件默认开 + 阈值过滤噪音。*
+### 为什么模板比“当前状态对象”更适合 JFR
 
-## 4. "缓冲与磁盘" — 数据去向
+因为录制启动前就必须回答一个问题：你准备拿多大的成本预算去观察系统？JFR 不同于临时 dump，它经常需要在录制开始前就决定：
 
-### 4.1 数据路径
+- 启哪些事件；
+- 阈值设多低；
+- 栈信息是否开启；
+- 这更像低干扰背景录制，还是更偏问题剖析。
 
-**默认落盘**: 录制数据持续刷到磁盘仓库(`PlatformRecording.toDisk` 默认 `true`——`jdk/jfr/internal/PlatformRecording.java:70`);`setToDisk(false)` 则数据限于内存缓冲(`setToDisk` Javadoc——`Recording.java:531`)。
+Configuration 的意义，就是把这整套“观察预算”预先打包成模板，而不是让每次录制都从零拼装。
 
-写入路径: 线程本地缓冲(内存环形,第 3 篇 §3)→ 后台线程刷盘(内部卷 32-jfr)。
+### 为什么 `default` 和 `profile` 不是两个名字，而是两种成本策略
 
-### 4.2 上限语义
+旧稿已经指出最常见的两套模板：
 
-`setMaxSize`(`:409`)/`setMaxAge`(`:432`)限定**磁盘数据**的量/时长——超限或超龄时 JVM **移除最旧 chunk**(Javadoc: "removes the oldest chunk to make room for a more recent chunk",`:397`);两者都不设则数据无限增长(Javadoc `:424`)。
+- `default`：低开销、适合常驻；
+- `profile`：更详细、更多事件、更低阈值，适合问题定位。
 
-面试"JFR 数据存哪": 默认磁盘仓库(可切内存缓冲),线程本地缓冲 → 文件;面试"JFR 不阻塞业务的关键": 线程本地缓冲写入 + 后台持久化。
+这两者的差别，不在文件格式，也不在 API 入口，而在“你愿意为观察支付多少成本”。这才是理解预置模板最关键的视角。JFR 不是在问“你想看不看”，而是在问“你想看多细、愿意花多大成本看”。
 
-关键设计(斜体):*"环形缓冲 + 异步刷盘"是 JFR 不阻塞业务的关键——写入线程本地缓冲,后台持久化;默认落盘仓库(`PlatformRecording.java:70`),可切纯内存缓冲。面试"JFR 数据存哪": 线程本地缓冲 → 磁盘仓库文件。*
+## 三、为什么 `EventSettings` 要单独存在：整体模板还不够，你还需要在事件级别精修规则
 
-跨层标注: [内部卷 32-jfr——缓冲结构/刷盘线程/文件格式;第 1 篇 §2——Recording 会话与 getDuration 回指]
+### 先看它暴露了什么
 
-## 核心悬念
+JDK 11 里，`EventSettings` 定义在 `EventSettings.java:56`，关键链式方法包括：
 
-录完了——**.jfr 文件怎么读**?`RecordingFile` 的流式解析、RecordedEvent/RecordedObject 的字段访问、文件内部结构(Chunk/Parser)——下一篇: 消费者 API。
+- `withStackTrace()`：`69`
+- `withPeriod(Duration)`：`103`
+- `withThreshold(Duration)`：`114`
 
-> → [05-consumer-api.md](05-consumer-api.md)
+而 Recording 里把事件级开关接了进来：
+
+- `enable(String)`：`Recording.java:602`
+- `disable(String)`：`623`
+- `enable(Class<? extends Event>)`：`640`
+- `disable(Class<? extends Event>)`：`658`
+
+### 为什么 JFR 不把一切都塞进 Configuration 模板
+
+因为模板适合表达“整体倾向”，不适合表达每类事件的精细差异。真实系统里很常见的需求是：
+
+- 大部分事件按 default 跑；
+- 某个业务事件单独降阈值；
+- 某类事件额外打开栈；
+- 某类周期事件重新调频；
+- 某类噪音事件在这次录制里先关掉。
+
+这类需求如果只能靠整体模板表达，会非常笨重。EventSettings 的存在，就是把“录制级总策略”和“事件级微调”拆开。
+
+### 为什么这形成了三层控制模型
+
+到这里，JFR 配置面其实已经很清楚了：
+
+- **Recording**：我这次录多久、落哪、保留多久；
+- **Configuration**：我整体打算怎么看这个系统；
+- **EventSettings**：某类具体事件还要不要再细调。
+
+也就是说，JFR 的配置不是一层大 Map，而是有层次的：会话、模板、事件级规则各自负责不同粒度的问题。
+
+## 四、为什么 `toDisk`、`setMaxAge`、`setMaxSize` 体现的是长期录制纪律：JFR 从设计上就不接受“无限制积累”
+
+### 先看默认落盘语义
+
+JDK 11 里，`PlatformRecording` 定义在 `PlatformRecording.java:58`，其中：
+
+- `toDisk` 默认值在 `PlatformRecording.java:70`，是 `true`
+- `setToDisk(...)` 则由 `Recording.setToDisk(boolean)` 在 `Recording.java:531` 接出来
+
+这说明 JFR 的默认心智模型并不是“只在内存里攒点临时事件”，而是支持把录制持续落到磁盘仓库里。也因此，保留策略才会变得重要。
+
+### 为什么 `maxAge` / `maxSize` 本质上是在控制“滚动窗口”
+
+- `setMaxSize(long)`：`Recording.java:409`
+- `setMaxAge(Duration)`：`432`
+
+这两个设置的真正意义不是“导出之后帮你清理一下文件”，而是在录制进行过程中定义：
+
+- 仓库里最多保留多少数据量；
+- 或者最多保留多长时间窗口。
+
+一旦超出，就淘汰最旧的 chunk，让较新的数据继续留下来。也就是说，JFR 从一开始就不是按“无限增长日志”设计的，而是按“受控滚动窗口”设计的。
+
+### 为什么这恰恰是它适合生产长期运行的原因
+
+如果 JFR 没有明确的保留上限，那它就只能做短时排查工具，很难长期挂在线上。正因为它把保留策略、数据落点和淘汰逻辑做成配置的一部分，JFR 才能既适合短时定位，也适合背景持续录制。
+
+所以 `toDisk` / `maxAge` / `maxSize` 这些看起来像后勤参数，实际上和 JFR 的可用性直接相关：**它们决定 JFR 是不是一个能长期运行的记录系统。**
+
+## 五、为什么 default / profile 的选择本质上是在选“观察预算”：不是功能有无，而是成本和细节等级的取舍
+
+前面讲模板时已经提到 default 和 profile，但放到录制实践里，还可以再往前推进一步：这两者的差别，本质上是在问你——为了得到更多细节，你愿意支付多少额外成本？
+
+- `default` 更像常驻背景录制：信息足够用、干扰更小；
+- `profile` 更像问题定位录制：更细、更全、也可能更重。
+
+这就像把观测调到两个不同档位：
+
+- 平时你希望系统一直有一份可回看历史，但不想为此付出太高代价；
+- 真出现问题时，你愿意在更短窗口里换取更细粒度信息。
+
+所以 default/profile 不是“哪套更高级”，而是“哪套更符合当前观察预算”。这才是生产里选模板时应该先想清的问题。
+
+## 六、为什么 JFR 录制管理真正解决的是“窗口、范围、成本、保留”四件事，而不是“写不写文件”
+
+如果把前面几节收回到一起，会发现 JFR 录制配置一直在围绕四个问题打转：
+
+- **窗口**：什么时候开始、什么时候结束；
+- **范围**：启哪些事件、关哪些事件；
+- **成本**：阈值、周期、栈等细节怎么调；
+- **保留**：落哪、留多久、超限如何淘汰。
+
+这也就是为什么只把 JFR 理解成“录一下、导出一个文件”会把它用窄。文件只是结果，真正的管理对象是整段录制会话的观测预算和数据生存策略。
+
+## 收网：JFR 真正要控制的不是“有没有文件”，而是哪些事件在什么窗口里、以什么规则、保留多久被写下来
+
+现在可以把整篇压成一条主线：
+
+- `Recording` 不是文件句柄，而是一段录制会话；
+- `Configuration` 不是运行时状态，而是整体观察模板；
+- `EventSettings` 负责在事件级别继续精修阈值、周期和栈策略；
+- `toDisk` / `setMaxAge` / `setMaxSize` 体现的是长期录制的数据保留纪律；
+- default 和 profile 的选择，本质上是观测成本预算的选择。
+
+所以理解 JFR 录制配置的正确角度，不是“记住几个 start/stop API”，而是：**怎样把录制窗口、事件范围、成本控制和保留策略组织成一套可长期运行的会话模型。** 一旦这套会话模型立住，JFR 才真正从“能写事件”变成“能在生产里持续、可控地保留事件历史”。
+
+下一篇自然就会落到录制完成之后的另一半链路：`.jfr` 文件写出来了，消费者 API 到底怎样把这些二进制事件流重新读回来、按字段解析并交给程序处理，这就是 `05-consumer-api.md` 要接着回答的问题。

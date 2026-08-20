@@ -1,12 +1,16 @@
 # 03. FileChannel 与 mmap 零拷贝 — map、transferTo、文件锁
 
-> **前置依赖**: [19-buffer-channel/01 — Buffer 抽象与状态机](01-buffer-state-machine.md)(直接缓冲与地址)、[19-buffer-channel/02 — ByteBuffer 家族](02-bytebuffer-family.md)(MappedByteBuffer 的父类体系)
-> → **后续**: 域 21 Selector 与网络 NIO(按写作顺序)
-> 关联: 内部卷 01-os(虚拟内存与页缓存);域 32 Unsafe(堆外内存)
+> 本文基于 JDK 11 `FileChannel`、`MappedByteBuffer`、`FileChannelImpl`。本文聚焦 `map`、`MappedByteBuffer.load/force`、`transferTo/transferFrom`、文件锁与零拷贝语义；不深入 NIO Selector/SocketChannel 与所有平台差异分支。本文讨论的是 JDK 11 文件通道与内存映射语义，不把这里的 mmap、sendfile 降级路径和页缓存控制方式外推成所有平台、所有通道实现都必须遵守的统一规范。
+> **前置依赖**：[19-buffer-channel/01 — Buffer 抽象与状态机](01-buffer-state-machine.md)(直接缓冲与地址)、[19-buffer-channel/02 — ByteBuffer 家族](02-bytebuffer-family.md)(MappedByteBuffer 的父类体系)
+> **后续**：域 21 Selector 与网络 NIO(按写作顺序)
 
-## 一个文件,怎么"变成"内存
+## 为什么文件不只是“读一段字节”,还可以像内存一样访问、像内核任务一样直接搬运
 
-面试必考 "零拷贝怎么实现"——答案的核心是 `FileChannel` 的两个方法: `map()` 和 `transferTo()`。前者把文件映射进进程地址空间,后者让内核直接搬运文件数据。这一篇拆三件事: FileChannel 的能力全景、mmap 内存映射与 MappedByteBuffer 的控制、transferTo 零拷贝的三级路径。
+很多人第一次接触 `FileChannel` 时,都会把它理解成“比 FileInputStream 更高级一点的读写接口”。这样理解当然不全错,但会把它最值得学的两个能力都压扁: 一是 `map()`——文件为什么能看起来像一段内存;二是 `transferTo()`——文件数据为什么有机会根本不经过用户态缓冲就被送到目标通道。
+
+真正的问题不在“API 多了几个方法”,而在于 **文件在通道视角下不再只是顺序字节流,而是既可以被映射成地址空间的一段页,也可以被当成内核直接搬运的数据源**。这也是为什么 `FileChannel`、`MappedByteBuffer`、`transferTo()` 这些名字经常和 `mmap`、页缓存、sendfile、零拷贝绑在一起——它们对应的是三条完全不同于普通流的能力边界。
+
+所以这一篇的主线不是方法清单,而是沿着两个问题展开: 为什么 `map()` 像是在把文件“变成内存”,以及为什么 `transferTo()` 所谓的“零拷贝”其实是在尽量消灭用户态中转,而不是让数据凭空不移动。
 
 ## 1. "FileChannel 是什么？" — 文件通道抽象
 
@@ -210,8 +214,46 @@ try (FileChannel src = FileChannel.open(srcPath, READ);
 
 跨层标注: [内部卷: 01-os——sendfile(2)/mmap(2)系统调用与页缓存;域 21 Selector——SocketChannel 与 transferTo 组合的网络零拷贝]
 
-## 核心悬念
+## 五、五个最容易混掉的边界：FileChannel 不只是流，mmap 不是读进堆数组，load 不等于 force，零拷贝不是零移动，transferTo 也不是总走 sendfile
 
-文件通道收官——但**网络通道**呢?`SocketChannel` 怎么注册到 `Selector`?epoll 是什么?IO 多路复用怎么让一个线程管百万连接?NIO 的事件驱动模型怎么工作?——下一篇(按写作顺序): 域 21 Selector 与网络 NIO。
+在收网之前，先把这一篇最容易记错的五条边界压实。
 
-> → 域 21 Selector 与网络 NIO(21-selector 系列)| 关联: 域 32 堆外内存
+第一，`FileChannel` 不是“比 FileInputStream 多几个方法”的顺序流小升级。它真正多出来的是文件资源视角：位置、映射、锁、批量转移，这些能力都在说明它面对的已经不是单纯“读一串字节”，而是一份可定位、可映射、可搬运的文件资源。
+
+第二，`map()` 也不是把文件内容复制进一个 Java 堆数组。它借的是操作系统虚拟内存，把文件页映射进进程地址空间；你碰到的是映射页，不是手工 `read` 出来的一份用户态副本。
+
+第三，`load()` 更不等于 `force()`。一个是在努力把页提前热进内存，减少后续缺页；另一个是在尽量把已经改脏的页刷回磁盘，保证持久性。它们一进一出，服务的是完全不同的方向。
+
+第四，所谓零拷贝也不是“数据完全没有移动”。它真正省掉的是数据经过用户态缓冲再回到内核的那两次折返；DMA、页缓存和目标设备之间照样会发生数据搬移，只是这条路径尽量不再把用户态当中转站。
+
+第五，`transferTo()` 也不是无论何时都能直接命中 sendfile 快路径。JDK 自己就准备了直接搬运、信任通道中转和通用 read+write 慢路径三级降级；目标通道类型、平台支持和场景边界一变，走的就可能不是同一条路。
+
+把这五条边界记稳，FileChannel 这一篇就不会重新塌回“mmap 很快、零拷贝很酷”的口号印象。它真正想讲的是两条不同但互补的能力线：一条把文件页映射成地址空间里的可访问页，另一条把文件数据尽量留在内核路径里直接搬运到目标通道。
+
+## 收网：FileChannel 真正把文件从“顺序字节流”提升成“可映射、可锁定、可直接搬运的数据源”
+
+回到开头那个问题，现在已经能看清为什么 FileChannel 不该只被理解成“更高级的文件流”。它真正把文件能力拆成了两种非常不同的视角：
+
+- `map()` 让文件页进入地址空间，于是文件可以像内存一样被访问；
+- `transferTo()` 让文件数据尽量在内核侧直接搬运，于是用户态中转可以被最大限度削掉；
+- `load/force` 又进一步把页缓存预热和持久化边界显式交给调用方控制。
+
+把整篇压成一张总图，就是：
+
+```text
+FileChannel
+  → 不只是顺序读写
+  → 还拥有位置、映射、锁与批量转移能力
+
+mmap 路线
+  → 文件页映射进地址空间
+  → load 预热页
+  → force 刷回脏页
+
+transferTo 路线
+  → 优先走 sendfile 直搬
+  → 不行再降级到中转或 read+write
+  → 零拷贝的重点是少过用户态
+```
+
+如果说这一域前两篇解决的是“Buffer 怎样组织状态、ByteBuffer 家族怎样共享底层”，这一篇真正补上的就是：**当底层数据源换成文件时，缓冲、映射和直接搬运怎样一起把 I/O 能力推到更接近操作系统的边界。** 下一站进入域 21 时，视角就会从文件转到网络：为什么一个线程能等很多连接，Selector 又是怎样把“替每个连接单独阻塞”等待这件事重新集中起来的。

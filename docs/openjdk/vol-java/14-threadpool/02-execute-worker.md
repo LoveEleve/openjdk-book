@@ -1,111 +1,178 @@
-# 02. execute 流程与 Worker 生命周期 — 四步执行、任务取送
+# execute 流程与 Worker 生命周期：为什么提交任务不是“扔进队列”这么简单
 
-> **前置依赖**: [14-threadpool/01 — ctl 与 Worker](01-ctl-worker.md)(状态与 Worker)、[10-concurrent-collections/05 — 阻塞队列](../10-concurrent-collections/05-blocking-queues.md)(workQueue)
-> → **后续**: [03-shutdown-reject.md](03-shutdown-reject.md)
+> 本文基于 JDK 11 `ThreadPoolExecutor`。讨论范围聚焦 `execute`、`addWorker`、`runWorker`、`getTask`、`processWorkerExit`、`beforeExecute/afterExecute` 等运行时主线；shutdown、拒绝策略和 FutureTask 放到后续篇章。本文讨论的是 JDK 11 Java 层实现路径，不把这里的执行顺序外推成所有线程池实现都必须遵守的抽象规范。
+> **前置依赖**：[TPE 核心：ctl 与 Worker](01-ctl-worker.md)、[阻塞队列家族](../10-concurrent-collections/05-blocking-queues.md)
+> **后续**：[关闭与拒绝策略](03-shutdown-reject.md)
 
-## execute 怎么决定下一步
+## 先看一个最常见、也最容易把线程池当成“会自动帮你排队跑完”的误解
 
-`ThreadPoolExecutor.execute` 不是简单的"扔给线程": 它按核心线程、队列、最大线程、拒绝处理器的顺序做资源决策。
+很多人写下 `executor.execute(task)` 时，心里默认的模型其实很朴素：我把任务扔进去，线程池总会想办法找个线程把它跑掉。如果现在没空，就先进队列；如果队列满了，再说。这种想法看起来没什么问题，但它忽略了线程池真正要做的事远比“存下任务”复杂。
 
-## 1. "execute 的四步" — 任务路由
+线程池在每次提交时，其实都在做一次资源决策：当前核心执行能力够不够？如果不够，是不是该立刻补核心 worker？如果够了，队列能不能接住？如果队列接不住，是不是还允许把工人数扩到非核心上限？如果这些路都走不通，又该什么时候拒绝？
 
-### 1.1 路由顺序
+这说明 `execute()` 根本不是一个“塞任务”的方法，而是一条层层兜底的资源分配链。它既不是单纯地优先队列，也不是单纯地优先建线程，而是在“线程创建成本、排队缓冲、并发度上限、饱和保护”之间做平衡。
 
-`execute`(`ThreadPoolExecutor.java:1318`)的核心判断:
+所以这篇文章真正要回答的问题是：**为什么任务提交时不能简单扔进队列，而必须按 core → queue → max → reject 这条顺序做决策；以及工人线程一旦出生，又是怎样沿着自己的生命周期不断取活、执行、退出或被补位的。**
 
-1. `workerCountOf(c) < corePoolSize` → `addWorker(command, true)`(`:1343`)——先加核心线程
-2. 线程池仍运行且 `workQueue.offer(command)`(`:1347`)成功——入队,然后双检查状态
-3. 队列放不下 → `addWorker(command, false)`(`:1354`)——加非核心线程
-4. 达到上限或状态不允许 → `reject(command)`(`:1355`)——拒绝
+## 一、execute 为什么必须按 core → queue → max → reject 这条顺序决策
 
-这就是**核心线程 → 队列 → 非核心线程 → 拒绝**的资源阶梯。
+### 先推演两个最直觉但都不对的失败方案
 
-面试"为什么先加线程不入队": 核心线程是线程池的常驻基线,先把核心执行能力建立起来。
+第一个失败方案是：任务来了就总是先入队。这样看似最稳，因为不会一下子把线程数拉高。但问题是，核心线程本来就是线程池的常驻执行基线，如果你总是优先排队，可能会让任务在队列里堆着，而核心执行能力却迟迟没被拉满。换句话说，线程池明明已经被允许持有这些基础工人，却被你先用队列把它们的出场时机拖后了。
 
-关键设计(斜体):*"先核心→再队列→再非核心→拒绝"是线程池的资源阶梯。面试手写 execute 流程时,关键是记住队列发生在 core 与 maximum 之间。*
+第二个失败方案是反过来：任务来了就一路猛加线程，优先扩到最大线程数，队列最后再说。这个方案会把线程池退化成“遇事就扩线程”的系统，排队缓冲几乎失去意义，也更容易把线程创建开销和上下文切换成本迅速拉高。
 
-## 2. "addWorker" — 线程的诞生
+所以真正合理的顺序一定是在这两者之间取平衡：**先建立核心执行能力，再用队列做缓冲，再把非核心线程当成额外弹性，最后才轮到拒绝。**
 
-### 2.1 CAS + 主锁
+### 源码里的四步正好对应这条资源阶梯
 
-`addWorker(firstTask, core)`(`ThreadPoolExecutor.java:885`)分成两种保护:
+JDK 11 的 `execute()` 入口在 `ThreadPoolExecutor.java:1318`，最核心的决策链就在 `1342-1355` 一带。把它翻成人话，就是：
 
-- **计数**: retry 循环里 CAS 更新 `ctl` 的 workerCount,同时校验 RUNNING/SHUTDOWN 状态
-- **集合**: `mainLock.lock()`(`:916`附近)后把 Worker 放入 `workers`(`:468`)
-- **启动**: 完成集合登记后 `t.start()`(`:928`附近)
+1. 如果当前 `workerCount < corePoolSize`，优先尝试补一个核心 worker
+2. 核心线程层级已经够用时，尝试把任务放进 `workQueue`
+3. 队列接不住，再尝试补一个非核心 worker
+4. 非核心也补不了，就进入拒绝路径
 
-失败时回滚 workerCount,避免"计数增加但线程没建成"。
+这就是线程池最重要的一条行为阶梯：
 
-### 2.2 null firstTask
-
-`addWorker(null, false)`(`:1005`)是补位路径: 队列里还有任务,但需要再创建一个非核心 Worker 来继续消费。
-
-关键设计(斜体):*"CAS + 锁的组合"——计数用 CAS 快路径,`workers` 集合用主锁做结构性变更。面试"addWorker 为什么复杂": 并发下要同时维护状态、计数和 Worker 集合。*
-
-## 3. "getTask" — 任务的取与等
-
-### 3.1 阻塞还是限时
-
-`getTask`(`ThreadPoolExecutor.java:1026`)计算:
-
-`timed = allowCoreThreadTimeOut || wc > corePoolSize`(`:1042`)。
-
-- `timed == true`: `workQueue.poll(keepAliveTime, NANOSECONDS)`(`:1053`)——超时返回 null,Worker 退出
-- `timed == false`: `workQueue.take()`(`:1054`)——无限等待任务
-
-### 3.2 回收语义
-
-默认 `allowCoreThreadTimeOut=false`: 核心 Worker 通常通过 `take()` 常驻;超核心 Worker 通过 `poll` 等待 `keepAliveTime`,超时后退出。
-
-关键设计(斜体):*"核心线程 take 常驻,超核心线程 poll 超时回收"——keepAliveTime 只约束超核心线程,除非显式允许核心线程超时。面试"线程什么时候回收": getTask 超时返回 null。*
-
-## 4. "runWorker" — 任务执行循环
-
-### 4.1 主循环
-
-`runWorker`(`ThreadPoolExecutor.java:1107`)的核心结构是:
-
-```java
-// ThreadPoolExecutor.java:1114-1140(截取,逐字)
-            while (task != null || (task = getTask()) != null) {
-                w.lock();
-                // If pool is stopping, ensure thread is interrupted;
-                // if not, ensure thread is not interrupted.  This
-                // requires a recheck in second case to deal with
-                // shutdownNow race while clearing interrupt
-                if ((runStateAtLeast(ctl.get(), STOP) ||
-                     (Thread.interrupted() &&
-                      runStateAtLeast(ctl.get(), STOP))) &&
-                    !wt.isInterrupted())
-                    wt.interrupt();
-                try {
-                    beforeExecute(wt, task);
-                    try {
-                        task.run();
-                        afterExecute(task, null);
-                    } catch (Throwable ex) {
-                        afterExecute(task, ex);
-                        throw ex;
-                    }
-                } finally {
-                    task = null;
-                    w.completedTasks++;
-                    w.unlock();
-                }
-            }
-            completedAbruptly = false;
+```text
+核心线程
+  → 队列缓冲
+  → 非核心线程
+  → 拒绝
 ```
 
-每轮是: 取任务 → `beforeExecute` → `task.run` → `afterExecute` → 计数;循环结束后进入 `processWorkerExit`。
+这一条顺序一定要讲透，因为后面所有参数选择几乎都在影响这条链的每一层门槛，而不是某个单独字段的数值大小。
 
-### 4.2 异常语义
+### 为什么核心线程必须先于队列
 
-异常不是简单"被 afterExecute 吃掉": `afterExecute` 会收到异常,随后异常继续抛出,Worker 进入退出处理。也就是说,**任务抛出未捕获异常时当前 Worker 会结束**,线程池再按策略补 Worker。
+很多人容易背成“线程池先入队，队列满了再加线程”，这是典型记混。真正的设计恰好相反：**核心线程先于队列。** 因为 corePoolSize 代表的不是一个可有可无的上限，而是线程池愿意常驻维持的基础执行能力。先把核心工人建立起来，再谈是否缓冲后续任务，这才符合线程池的资源层级。
 
-面试"任务异常线程会死吗": 未捕获异常会让当前 Worker 退出;`execute` 提交的任务异常通常由线程的异常处理器观察到,`submit` 包装成 Future 的异常结果。
+如果这一点没立住，后面你再怎么调 core/max/workQueue，都会在心智模型上错位。
 
-关键设计(斜体):*"Worker 主循环 = 取任务 + 执行 + 钩子"——`beforeExecute/afterExecute` 是生命周期钩子,异常决定当前 Worker 是否退出。面试"任务异常线程会死吗": 未捕获异常会结束当前 Worker,不是线程池整体崩溃。*
+## 二、为什么 offer 成功后还要二次检查：任务进了队列，不等于线程池此刻仍愿意负责它
 
-## 核心悬念
+### 先看一个很容易被忽略的竞态
 
-线程池要关了——**优雅关闭**怎么保证队列任务跑完?`shutdown` 与 `shutdownNow` 的差别、`awaitTermination`、拒绝策略的四个选择——下一篇: 关闭与拒绝策略。
+假设任务成功 `offer` 进了队列。很多人会自然觉得：这不就结束了吗？任务已经进池，剩下总会有人来处理。问题在于，入队成功只说明“队列当前接住了它”，并不自动说明“线程池此刻仍处在愿意继续消费这个队列的状态”。
+
+想象一个并发窗口：你刚把任务塞进 `workQueue`，另一条线程几乎同时触发了关闭流程。此时如果不再回头看一下线程池状态，你就会把“入队成功”误当成“必定被合法执行”。
+
+### execute 为什么在入队后还要 recheck
+
+这就是 `execute()` 里那段二次检查存在的真正原因。源码在 `ThreadPoolExecutor.java:1347-1352` 一带会在 offer 成功后重新看一眼 ctl 状态，并根据情况做两件补救：
+
+- 如果状态已经不允许继续处理这类任务，要回滚或走拒绝语义
+- 如果队列里有活，但此刻 workerCount 恰好变成 0，就需要 `addWorker(null, false)` 补一个工人去消费队列
+
+第二点尤其关键。很多人以为“有队列就总会有人来取”，但线程池不能靠这个想当然。队列里有任务、工人数却已经掉到 0，是完全可能发生的状态；这时如果不补位，任务就会静静躺在队列里，没有任何 worker 再来碰它。
+
+这一层真正要记住的是：**入队不是 execute 的终点，入队后的状态再确认和空工人补位，才是线程池把“任务被接住”真正转成“任务会有人处理”的关键补丁。**
+
+## 三、addWorker 为什么同时需要 CAS 和主锁：一个在管联合状态，一个在管工人集合
+
+### 先看为什么不能只靠一种同步手段解决全部问题
+
+`addWorker` 之所以看起来比“new Thread().start()”复杂得多，不是因为创建线程慢，而是因为线程池要同时维护两类完全不同的共享事实。
+
+第一类事实是联合状态：当前 runState 是什么，当前 workerCount 是多少，新增这个 worker 是否仍被允许。这类事实已经被上一篇的 `ctl` 打包进一个原子整数里，所以最适合用 CAS 快路径去检查和更新。
+
+第二类事实是结构集合：workers 集合里到底有哪些 Worker，当前这个新工人是否已经正式登记进线程池的内部成员表。这类事情就不只是“数字 +1”了，而是集合结构变更，更适合放在主锁下保护。
+
+因此 `addWorker` 不能只靠一种同步原语粗暴通吃。它必须拆成两层：**先用 CAS 抢状态资格，再用主锁落集合结构。**
+
+### 为什么回滚路径和成功路径一样重要
+
+`addWorker` 入口在 `ThreadPoolExecutor.java:885-943`，失败回滚在 `955` 的 `addWorkerFailed`。这说明线程池从一开始就接受一个事实：工人数加一并不等于工人一定成功出生。你可能在 CAS 成功后、真正启动线程前遇到失败；也可能线程对象造出来了，但还没来得及完整加入集合。
+
+所以回滚不是边角处理，而是 addWorker 正常语义的一部分：如果这个工人没能成功落地，就必须把 workerCount 和 workers 集合都修回一致状态。否则线程池就会以为“自己明明已经多了一个工人”，而真实执行世界里并没有对应线程存在。
+
+这一层和 `ctl` 那一篇是完全呼应的：线程池最怕的不是某一条路径失败，而是**失败后留下联合状态和实际工人集合不一致的残影。**
+
+## 四、Worker 的运行主线为什么是“带首任务出生，再进入长期取活循环”
+
+### `firstTask` 不是装饰字段，它在消灭一次额外排队
+
+Worker 构造位于 `ThreadPoolExecutor.java:620-628`，它并不是先创建一个空工人，再让首个任务也必须回到队列里等一次。而是允许 worker 带着 `firstTask` 出生，然后直接进入 `runWorker(this)`。
+
+这个设计特别合理，因为对于 execute 正在处理的那个任务来说，如果线程池已经决定“我现在要为你新建一个工人”，再把这第一单任务重新塞回队列兜一圈，其实是多此一举。带着首任务出生，意味着新工人可以立刻开工，而不是先去队列窗口重新领号。
+
+### `runWorker` 真正展开的是工人生命周期，而不是单次任务调用
+
+`runWorker` 入口在 `ThreadPoolExecutor.java:1107`，主循环在 `1114` 一带。它的核心不是“执行一个 Runnable”，而是：
+
+- 如果带着 `firstTask`，先把首任务跑完
+- 之后进入 `while (task != null || (task = getTask()) != null)` 这条长期循环
+- 每轮执行前调用 `beforeExecute`
+- 执行 `task.run()`
+- 执行后调用 `afterExecute`
+- 清空当前任务、增加 `completedTasks`
+- 再次去 `getTask()` 决定要不要继续活下去
+
+这条主线说明，Worker 并不是“线程 + 当前任务”，而是“**一个可长期存活、反复领活、反复执行、最终退出的工人生命周期实体**”。
+
+### 为什么任务异常不会让线程池一起崩，但会让当前工人可能换人
+
+`runWorker` 里还有一个特别容易被误解的地方：任务抛异常时，线程池本身并不会整个崩掉；但当前 Worker 也不一定像什么都没发生一样继续干下去。`afterExecute` 能看到异常，而异常之后会继续沿当前 worker 这条执行线往外走，最终进入 `processWorkerExit`（`ThreadPoolExecutor.java:981-1005`）。
+
+这就是“线程池不死，但工人可能换人”的真正含义。线程池作为管理容器会继续活着，并根据当前状态和工人数策略决定要不要补位；但那个具体执行异常任务的 worker，可能已经走向自己的生命周期终点。
+
+这一层特别重要，因为它把“线程池级存活”和“worker 级存活”清楚分开了。
+
+## 五、getTask 为什么真正决定了谁常驻、谁超时回收
+
+### 线程池不是在 execute 里决定谁活多久，而是在 getTask 里决定
+
+很多人调线程池时会盯着 `keepAliveTime`、`allowCoreThreadTimeOut`，但如果不看 `getTask()`，这些参数就只是配置表上的名词。真正把它们变成生存策略的，是 `ThreadPoolExecutor.java:1026-1054` 这段逻辑。
+
+核心判断很简单：
+
+- 如果当前 worker 应当走超时模式，就 `poll(keepAliveTime, ...)`
+- 否则就 `take()`，无限等待新任务
+
+而“是否走超时模式”，又取决于 `allowCoreThreadTimeOut` 或当前工人数是否已经超过 corePoolSize。
+
+### 为什么这意味着核心线程和非核心线程的生存逻辑不同
+
+在默认语义下，核心 worker 更像常驻工人：没活时也通过 `take()` 长期等在那里，不轻易退出。超过核心数的 worker 则更像弹性工人：忙的时候被扩出来，空闲久了就通过 `poll()` 超时返回、进入退出路径。
+
+这说明 keepAliveTime 不是抽象“线程超时参数”，而是直接作用在“**工人下一次从队列领不到活时，到底是继续无限等，还是等到点就下班**”这件事上。
+
+所以如果你想理解线程池为什么会收缩、什么时候收缩，不能只盯着配置项本身，而必须回到 `getTask()` 的等待方式上。
+
+## 六、三个最容易记错的边界：入队不等于执行，异常不等于线程池崩，超时不等于立刻没人干活
+
+到这里先停一下，把最容易混掉的三条边界收一下。
+
+第一，任务 `offer` 成功进队列，不等于它已经开始执行。它只说明队列接住了任务；真正把“被接住”变成“有人处理”的，是后续 recheck 和必要时的 worker 补位。把这两件事混成一件事，最容易误判 shutdown 竞态下的任务命运。
+
+第二，某个任务抛异常，不等于线程池整个失效。真正结束的往往是当前这名 worker 的这段生命周期；线程池管理器本身还活着，后面会不会补位，要看当前 runState、workerCount 和队列情况。也就是说，异常传播打断的是具体工人，不是整个池子立刻报废。
+
+第三，允许超时回收，也不等于线程池下一秒就一定没有工人。`getTask()` 只是把一部分 worker 切换到“领不到活就超时下班”的模式；只要还有任务、还有其他常驻 worker，线程池仍然会继续运转。超时回收表达的是弹性收缩策略，不是清空命令。
+
+这三条边界之所以值得单独拎出来，是因为它们刚好对应线程池最常见的三种误解：把队列当执行保证、把任务异常当系统崩溃、把 keepAliveTime 当立即清场按钮。把这三处记稳，前面那条资源决策链和工人生命周期才不会重新塌回“它会自动帮我处理”的模糊印象里。
+
+## 收网：execute 真正做的是资源决策，Worker 真正走的是工人生命周期
+
+回到开头那个误区，现在已经能看清为什么“execute 就是把任务扔进去”这个说法完全不够了。任务提交时，线程池做的是一条资源决策链：先看是否该补核心执行能力，再看是否允许队列缓冲，再看是否还有非核心扩容空间，最后才是拒绝。任务即使已经入队，也还需要二次检查和可能的 worker 补位，才能真正转化成“会有人来处理”。
+
+而 Worker 一旦出生，也不是只为一单任务服务。它会带着 `firstTask` 开工，然后进入 `runWorker → getTask → processWorkerExit` 这条长期生命周期：有活就继续干，空闲太久可能退出，异常任务会让当前工人换人，但线程池整体仍按状态机继续运转。
+
+把整篇压成一张总图，就是：
+
+```text
+execute(command)
+  → core 不够？先补核心 worker
+  → 否则尝试入队
+  → 队列接不住？再补非核心 worker
+  → 仍不行？拒绝
+  → 入队后还要状态二次检查和 worker 补位
+
+Worker
+  → 带 firstTask 出生
+  → runWorker 主循环执行任务
+  → getTask 决定常驻还是超时回收
+  → processWorkerExit 负责退出收尾与可能补位
+```
+
+如果上一篇是“线程池这台机器有哪些总控制杆”，这一篇就是真正把控制杆和任务流转接起来：任务如何被路由，工人如何出生、干活、回收和替换。下一篇继续沿着这条线往下走：线程池要关了时，为什么 `shutdown()` 和 `shutdownNow()` 不是一回事？什么时候开始拒绝任务，拒绝了又会按什么策略处理？

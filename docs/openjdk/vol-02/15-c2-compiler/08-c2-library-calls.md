@@ -1,82 +1,140 @@
-# 08. library_call.cpp — 6991 行的 intrinsic 世界
+# 08. 为什么有些方法根本不按普通调用编？— `LibraryCallKit + intrinsics`
 
-> **前置依赖**:[15-c2-compiler/02 — Parse + GraphKit: 字节码→Ideal Graph](openjdk/vol-02/15-c2-compiler/02-c2-parse-graphkit.md):do_call→call_generator 决策链里 intrinsic 优先于内联,这里讲 intrinsic 本身;[15-c2-compiler/07 — PhaseMacroExpand: 高层抽象→低层 MachNode 展开](openjdk/vol-02/15-c2-compiler/07-c2-macro-intrinsics.md):arraycopy intrinsic 的落地(ArrayCopyNode→macroArrayCopy);[23-stub/02 — System.arraycopy 为什么能比手写循环快 3 倍?— Arraycopy 向量化](openjdk/vol-02/23-stub/02-arraycopy.md):intrinsic 依赖的运行时桩;[39-runtime-monitoring/02 — Timer + Monitoring Services](openjdk/vol-02/39-runtime-monitoring/02-timer-stats.md):nanoTime 的真实实现
-> → **后续**:[16-code-cache/01 — 机器码的家: CodeBlob 与 CodeHeap](openjdk/vol-02/16-code-cache/01-codeblob-heap.md):编译产物住进 CodeCache
-> 关联域: 13-jit-framework(编译入口)、23-stub(运行时桩)、39-runtime-monitoring(计时)
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64`。这里讨论的是 C2 在 Parse 期如何识别并接管一批特殊方法语义：`Compile::find_intrinsic`、`LibraryCallKit::try_to_inline` 以及 String / Math / Unsafe / Thread / System 等几族典型 intrinsic。各类 runtime stub、平台指令与 matcher 细节只在必要处点到。
+>
+> **前置依赖**：[15-c2-compiler/02 — Ideal Graph 是怎么长出来的？— `Parse + GraphKit`](02-c2-parse-graphkit.md)、[15-c2-compiler/07 — 为什么这些高层节点要留到最后？— `PhaseMacroExpand`](07-c2-macro-intrinsics.md)、[23-stub/02 — `System.arraycopy` 为什么能比手写循环快 3 倍？](../23-stub/02-arraycopy.md)、[39-runtime-monitoring/02 — `Timer + Monitoring Services`](../39-runtime-monitoring/02-timer-stats.md)
+> → **后续**：[16-code-cache/01 — 机器码的家：`CodeBlob + CodeHeap`](../16-code-cache/01-codeblob-heap.md)
 
-## JIT 理解语义的时刻
+前面几篇我们一直在默认一个前提：Java 方法会先经过 `do_call()`、`Parse`、Ideal Graph，再进入优化、匹配、寄存器分配和发码。哪怕有宏节点和 Runtime1，方法本身至少还是按“正常调用语义”在走。
 
-`Math.sin(x)` 的字节码是 `invokestatic Math.sin`(native 方法)——普通 JIT 只能发一条 JNI 调用(Java→C→Java 来回几百纳秒)。C2 的不同: **它认识这个方法**——方法在 `vmSymbols.hpp` 的 `VM_INTRINSICS_DO` 表里注册了 intrinsic ID(`do_intrinsic(_dsin, java_lang_Math, sin_name, ...)`,vmSymbols.hpp:778),`Parse` 期 call_generator 的 `find_intrinsic` 命中后,不建普通调用,而是进入 **`LibraryCallKit`**(library_call.cpp:94,GraphKit 子类)按 ID 生成专用理想图子图。intrinsic = **JIT 理解语义 → 发射专用代码**。library_call.cpp 是 opto 最大的源文件(6991 行),`try_to_inline`(:519)里一个巨型 switch 把 300+ 个 ID 分派到 `inline_xxx` 实现(:536 起)。顺带纠正大纲四处: intrinsic 触发在 **Parse 期**(不是"IGVN 阶段");`MathIntrinsicNode` 不存在——sin/cos 走 `runtime_math`(调用 StubRoutines 桩,不是直接 FSIN);`System.nanoTime` 是运行时调用 `os::javaTimeNanos` 不是 RDTSC;StrictMath 没有 intrinsic(不存在"开关跳过")。
+但 C2 里有一批方法，从一开始就不打算按这条路走到底。
 
-## 1. 机制: 从方法 ID 到专用图
+比如：
 
-触发链(02 篇的决策链里已见过一环): `do_call` → `Compile::call_generator` → `find_intrinsic(callee, ...)`(doCall.cpp:118)。`Compile::find_intrinsic`(compile.cpp:150): 先查缓存表 `_intrinsics`(首次命中后 `register_intrinsic` 缓存,:160-163),未命中且 `m->intrinsic_id() != _none` 时 `make_vm_intrinsic` 创建(library_call.cpp:350)。ID 的来源: `VM_INTRINSICS_DO` 宏表展开出 **300+ 个 `do_intrinsic` 条目**(vmSymbols.hpp),每个条目把"类+方法名+签名"绑定到一个 `vmIntrinsics::ID`;方法加载时 ciMethod 记录 intrinsic_id,编译期据此分发。
+- `Math.sin(x)` 明明是个 native 方法，普通编译意味着一次运行时调用；
+- `System.arraycopy(...)` 表面上是一个静态方法，普通编译会看到一次调用和一堆边界检查；
+- `Unsafe.allocateInstance(cls)` 的真正语义不是“普通 Java new + 调构造器”，而是“按类镜像直接分配对象”；
+- `System.nanoTime()` 从 Java 视角看是一个普通 native 方法，但 JIT 真正关心的是“当前平台上用哪种最合适的 runtime/time source 表示这件事”。
 
-`LibraryCallKit::try_to_inline`(:519)是分发中枢:
+这些方法的共同点是：**编译器已经知道它们的语义比“普通调用”更具体。**
 
-```cpp
-// library_call.cpp:535-559(截取核心,逐字)
-  switch (intrinsic_id()) {
-  case vmIntrinsics::_hashCode:                 return inline_native_hashcode(intrinsic()->is_virtual(), !is_static);
-  case vmIntrinsics::_identityHashCode:         return inline_native_hashcode(/*!virtual*/ false,         is_static);
-  case vmIntrinsics::_getClass:                 return inline_native_getClass();
+所以这篇真正要回答的问题不是“有哪些 intrinsic”，而是：**为什么有些 Java 方法根本不会按“字节码 → 普通调用 → 后续优化”的路径走，而是在 Parse 期就被编译器直接接管语义？Intrinsic 到底替换掉了什么，换来的又不只是‘更快一点的调用’吗？**
 
-  case vmIntrinsics::_ceil:
-  case vmIntrinsics::_floor:
-  case vmIntrinsics::_rint:
-  case vmIntrinsics::_dsin:
-  case vmIntrinsics::_dcos:
-  case vmIntrinsics::_dtan:
-  case vmIntrinsics::_dabs:
-  case vmIntrinsics::_fabs:
-  case vmIntrinsics::_iabs:
-  case vmIntrinsics::_labs:
-  case vmIntrinsics::_datan2:
-  case vmIntrinsics::_dsqrt:
-  case vmIntrinsics::_dexp:
-  case vmIntrinsics::_dlog:
-  case vmIntrinsics::_dlog10:
-  case vmIntrinsics::_dpow:
-  case vmIntrinsics::_dcopySign:
-  case vmIntrinsics::_fcopySign:
-  case vmIntrinsics::_dsignum:
-  case vmIntrinsics::_fsignum:                  return inline_math_native(intrinsic_id());
-```
+先把答案压成一句人话：**intrinsic 不是给普通调用提速，而是 C2 在 Parse 期决定“这次不按原方法体或原生调用去理解这个方法了”，改为直接生成一个更适合优化和匹配的 Ideal Graph 子结构。**
 
-每个 `inline_xxx` 返回 bool(成功/放弃);失败则退回普通调用(02 篇的 cg->generate 兜底)。intrinsic 与普通内联共享同一张图——生成的都是理想节点,后续 IGVN/Matcher 照常处理,没有特殊通道。
+## 先试两个最自然的理解，看看为什么都不对
 
-## 2. String intrinsics — 把字符扫描变成 SIMD
+### 误解一：intrinsic 只是“更快的普通调用”
 
-`str.indexOf('e')` 的 Java 实现是逐 char 循环。intrinsic 版 `inline_string_indexOf`(library_call.cpp:1294): 先 `Matcher::match_rule_supported(Op_StrIndexOf)` 检查架构支持(:1296),null 检查后 `make_indexOf_node`(:1323)生成 `StrIndexOfNode`——这是理想节点,Matcher 把它匹配成 x86 的 `string_indexof` 桩调用(macroAssembler_x86.cpp:6030 起,函数内注释 "This method uses the pcmpestri instruction with bound registers" :6038——**SSE 4.2 的 pcmpestri 一次比较多个字符**,pcmpestri 宏在 :3852)。配套的 equals/compareTo/hasNegatives 在 :1160/:1139/:1221。**compact string 双编码**由 `StrIntrinsicNode::ArgEnc` 表达: 同一逻辑按 `LL/UU/LU/UL`(Latin1/UTF16 的四种组合)分派(:592-598)——JDK9+ 的 compact strings 让 intrinsic 家族翻倍。
+这是最常见的第一反应。既然很多 intrinsic 都关联到 native 方法或 runtime stub，那它们似乎只是在把慢调用换成快调用。
 
-门控细节: `UseSSE42Intrinsics` 默认值是 **false**(globals_x86.hpp:208),但 CPU 探测时若支持 SSE4.2 就 `FLAG_SET_DEFAULT(true)`(vm_version_x86.cpp:1216-1217)——即"CPU 决定默认值"的 ergonomics;`match_rule_supported` 是编译期二次确认。大纲说"CPU 无 SSE4.2 退化为 scalar 慢 30x"方向对,但"默认 true"是错的(默认值在启动时由 CPU 决定)。
+这只说对了一层表面。
 
-## 3. Math 与 Unsafe/Thread/System
+如果 intrinsic 只是“更快的调用”，那它最多是在原有调用边界上做局部加速；而 C2 真正做的，是在 Parse 期就决定：**这里不再是一个普通调用点，而是一段专用图语义。**
 
-`inline_math_native`(library_call.cpp:1873)暴露了数学 intrinsic 的真实形态——**不是直接发 FSIN**,而是**分三档**:
+一旦发生这种替换，后续优化器看到的就不再是“一个未知方法调用”，而是：
 
-```cpp
-// library_call.cpp:1873-1880(截取核心,逐字)
-bool LibraryCallKit::inline_math_native(vmIntrinsics::ID id) {
-#define FN_PTR(f) CAST_FROM_FN_PTR(address, f)
-  switch (id) {
-    // These intrinsics are not properly supported on all hardware
-  case vmIntrinsics::_dsin:
-    return StubRoutines::dsin() != NULL ?
-      runtime_math(OptoRuntime::Math_D_D_Type(), StubRoutines::dsin(), "dsin") :
-      runtime_math(OptoRuntime::Math_D_D_Type(), FN_PTR(SharedRuntime::dsin),   "SIN");
-```
+- 一个 `StrIndexOfNode`；
+- 一个直接的数学运算节点或 runtime_math 调用节点；
+- 一个直接分配对象的图模式；
+- 一个当前线程对象读取节点；
+- 一个时间源 runtime call 的返回值节点。
 
-**①sin/cos/tan/log/exp/pow**: `runtime_math` 生成对 **StubRoutines::dsin()** 桩的调用(桩在启动时生成,fast_sin 的 SIMD 多项式实现见 macroAssembler_x86_sin.cpp:381;桩不可用时兜底 `SharedRuntime::dsin` 的 C 实现)——intrinsic 消除的是 JNI 来回,产物仍是 call(23-stub 域的桩);**②sqrt/abs/ceil/floor/rint**: `inline_double_math`/`inline_math` 直接匹配机器指令(`match_rule_supported(Op_SqrtD)` 等,:1913-1918);**③特例**: `pow(x, 2.0)` 折叠成 `x*x`(:1908-1914)。大纲的"MathIntrinsicNode"在源码里不存在。
+也就是说，intrinsic 改的不是“调用有多快”，而是**优化器面对的问题长什么样**。
 
-Unsafe/Thread/System 三族: **`inline_unsafe_allocate`**(:2870): 拒绝静态调用、null 检查、`new_instance(kls, test)` 分配**不调构造器**(final 字段不初始化,所以仅限 Unsafe 语义)——"跳过 `<init>`"✓ 但大纲的"绕过安全模型"表述过强,实际省略的是类型/null/边界检查;**`inline_native_currentThread`**(:2991)→ `generate_current_thread`(:1093)建 `ThreadLocalNode` 读 threadObj 字段——ThreadLocalNode 在机器层映射为 **r15_thread 读取**(x86_64 的 JavaThread 专用寄存器,macroAssembler_x86.hpp:290 注释 "thread in the default location (r15_thread on 64bit)");**`inline_native_time_funcs`**(:772): `System.nanoTime` → **`os::javaTimeNanos` 运行时调用**(39-02 域已证 = CLOCK_MONOTONIC clock_gettime)——**不是 RDTSC**——大纲这条与 JDK 实际选择不符: RDTSC 会受跨核/频率漂移影响,JDK 用 `clock_gettime(CLOCK_MONOTONIC)`(39-02 域实证过)。CAS 家族(`_compareAndSetObject` → `inline_unsafe_load_store`(:2638,LS_cmp_swap 分派,:703))生成原子比较交换节点,经 x86 匹配成 `lock cmpxchg`。
+### 误解二：intrinsic 是优化后期才识别出来的特殊节点
 
-**实证**([素材](openjdk/planning/outlines/00-jvm-tools/materials/commands/15-c2-macro-demo.txt)第 1 段,复用 07 篇): PrintInlining 里 `System.arraycopy → intrinsic`(0 字节 native 被替换)与 `lockElim` 整体内联——intrinsic 决策的直接证据。`PrintIntrinsics` 是 diagnostic flag(c2_globals.hpp:657)可开可关;`UseSSE42Intrinsics`/`UseAESIntrinsics` 是 product 但默认值受 CPU 探测影响(实证时先 `-XX:+PrintFlagsFinal` 确认当前值)。
+另一个常见误解是把 intrinsic 想成一种“后处理优化”：先按普通调用建图，后面某个 pass 再发现“哦，这其实是 `System.arraycopy`”，于是替换成专用节点。
 
-*关键设计: intrinsic 是"方法级语义的图级展开"——它不是特殊通道,而是**生成普通理想节点,交给同一套 IGVN/Matcher 管线**;这让 intrinsic 与普通代码无缝混合(参数折叠、死代码消除照常发生)。形态分级也体现成本权衡: 能匹配指令的(平方根/绝对值)直接内联,要精度保证的(sin/exp)调用启动期生成的专用桩,既不付 JNI 也没牺牲正确性。*
+源码恰恰说明它发生得更早。
 
-## 核心悬念
+`Compile::find_intrinsic()` 在调用生成器阶段就查 method 的 `intrinsic_id()`，如果它属于 `LAST_COMPILER_INLINE` 范围且平台和 flag 允许，就直接构造一个 `LibraryIntrinsic` call generator。随后 `LibraryIntrinsic::generate()` 会立刻创建 `LibraryCallKit`，并尝试 `try_to_inline(...)`。也就是说，intrinsic 决策和普通内联决策同属 Parse 期的调用语义选择，而不是后期打补丁。`share/opto/compile.cpp:150`、`share/opto/compile.cpp:159`、`share/opto/compile.cpp:160`、`share/opto/compile.cpp:162`、`share/opto/compile.cpp:165`、`share/opto/library_call.cpp:349`、`share/opto/library_call.cpp:350`、`share/opto/library_call.cpp:377`、`share/opto/library_call.cpp:392`、`share/opto/library_call.cpp:407`
 
-15 域收官——C2 的全景终于完整: **Parse**(字节码→理想图,inline 决策链里 intrinsic 优先)→ **三引擎**(IGVN/CCP/EA)→ **循环**(三循环+向量化)→ **Matcher**(.ad 选指令)→ **Chaitin**(图着色)→ **PhaseMacroExpand**(宏节点审判)→ **intrinsic**(library_call.cpp: 300+ ID,按语义生成专用图——String 的 pcmpestri 扫描、Math 的桩调用分级、Unsafe 的直分配、nanoTime 的运行时调用)。编译的终点是 nmethod——它住进 CodeCache(16 域),被解释器/编译代码调用,在依赖失效时被标记失效、被 sweeper 回收。下一篇: 机器码的家。
+这正好解释了 intrinsic 最关键的力量来源：它足够早，所以后面所有优化都能看到替换后的专用图，而不是晚来的补丁结果。
 
-> → [16-code-cache/01 — 机器码的家: CodeBlob 与 CodeHeap](openjdk/vol-02/16-code-cache/01-codeblob-heap.md)
+## 从 `intrinsic_id` 到 `LibraryCallKit`：编译器是怎么决定“这次我来接管”的
+
+整个机制的第一步，是方法对象身上已经带着 `intrinsic_id()`。`Compile::find_intrinsic()` 做的事情很简单却很关键：
+
+- 如果当前方法已经在 `_intrinsics` 缓存表里，直接复用；
+- 否则只要 `intrinsic_id() != _none` 且属于编译器支持的 intrinsic 范围，就尝试 `make_vm_intrinsic()`。 `share/opto/compile.cpp:150`、`share/opto/compile.cpp:152`、`share/opto/compile.cpp:154`、`share/opto/compile.cpp:155`、`share/opto/compile.cpp:160`、`share/opto/compile.cpp:162`
+
+`make_vm_intrinsic()` 进一步做平台和 flag 边界检查：方法必须已加载，C2Compiler 也必须声明它支持这项 intrinsic，而且不能被 directive 或 flags 禁掉。只有这些条件都满足，才创建 `LibraryIntrinsic`。`share/opto/library_call.cpp:350`、`share/opto/library_call.cpp:354`、`share/opto/library_call.cpp:359`、`share/opto/library_call.cpp:368`、`share/opto/library_call.cpp:369`、`share/opto/library_call.cpp:377`
+
+一旦 `LibraryIntrinsic::generate()` 被选中，它就创建 `LibraryCallKit`，并尝试 `try_to_inline(_last_predicate)`。这个名字虽然还叫 “inline”，但这里的本质已经不是“把 callee 字节码铺进 caller”，而是“直接用已知语义替换这个调用点”。`share/opto/library_call.cpp:392`、`share/opto/library_call.cpp:393`、`share/opto/library_call.cpp:403`、`share/opto/library_call.cpp:407`、`share/opto/library_call.cpp:408`
+
+这也解释了一个容易忽略的事实：intrinsic 和普通内联共享的是同一条**调用语义决策链**，只是它在“这次要不要按原方法体解析”的问题上，给了另一个答案。
+
+## `LibraryCallKit::try_to_inline`：它不是“大 if/switch 清单”，而是语义分发器
+
+`try_to_inline()` 最醒目的当然是那个巨大的 switch。String、Math、Unsafe、Thread、System、Class、Monitor……各种 intrinsic 都在这里分派到各自的 `inline_xxx` 实现。`share/opto/library_call.cpp:519`、`share/opto/library_call.cpp:535`、`share/opto/library_call.cpp:585`、`share/opto/library_call.cpp:592`
+
+但如果只把它看成一个“方法名分发器”，还是低估了它。
+
+它真正干的是把“一个普通方法调用”改写成“某种更具体的图语义构造”——有些 case 会直接生成专用理想节点，有些会生成 runtime_math 调用，有些会走 Runtime/Stub 路径，有些会在图里直接建当前线程或类镜像相关结构。
+
+也就是说，switch 分发的并不是“选哪个 helper 函数”，而是**选这个调用点应当被理解成哪种更底层、更具体的语义。**
+
+这才是 intrinsic 世界和普通调用世界的根本分界。
+
+## String intrinsics：为什么字符串扫描特别适合“语义级替换”
+
+String 家族是最能体现 intrinsic 价值的例子之一。普通 Java 实现里的 `indexOf`、`compareTo`、`equals` 往往表现成一串循环、边界判断和字符比较；但 JIT 对这类逻辑真正关心的不是“逐字节码怎么写的”，而是“这是一个字符串扫描/比较问题”。
+
+`inline_string_indexOf()` 一开头就先问 `Matcher::match_rule_supported(Op_StrIndexOf)`，平台不支持就直接放弃；支持的话，再做 null check、拿出底层 `byte[]` 起始地址和长度，并按 `StrIntrinsicNode::ArgEnc` 区分 Latin1/UTF16 几种编码组合。最后调用 `make_indexOf_node(...)`，把这整个调用点变成一个专用的字符串查找节点家族。`share/opto/library_call.cpp:1294`、`share/opto/library_call.cpp:1295`、`share/opto/library_call.cpp:1298`、`share/opto/library_call.cpp:1302`、`share/opto/library_call.cpp:1305`、`share/opto/library_call.cpp:1316`、`share/opto/library_call.cpp:1325`
+
+这里最该记住的一点是：C2 没有在 Parse 期直接发出某条 SSE 指令。它先把“字符串查找”这个语义压成一个更专用的理想图节点，后面再交给 Matcher 和平台后端去决定是不是映射到 `pcmpestri` 等机器模式。
+
+所以 String intrinsic 的力量，不是“直接插 SIMD 指令”，而是**把一段本来会表现成普通循环的 Java 语义，提前压成了后端更容易识别和匹配的图对象。**
+
+## Math intrinsics：为什么有些变成节点，有些仍然是 `runtime_math`
+
+Math 家族特别适合打破“intrinsic = 单条机器指令”这个误解。
+
+`inline_math_native()` 明确分成两类。
+
+第一类是 `sin/cos/tan/log/exp/pow` 这种不是所有硬件都能稳定支持成单条指令、或者需要更复杂实现保障语义的操作。它们会优先调用 `StubRoutines::dsin()` 这类专用桩；如果桩不可用，再退回 `SharedRuntime::dsin` 一类 runtime 实现。也就是说，intrinsic 在这里消除的是“普通 native/JNI 调用路径”，但产物仍然可能是一个 runtime_math 图调用，而不是内联机器指令。`share/opto/library_call.cpp:1873`、`share/opto/library_call.cpp:1877`、`share/opto/library_call.cpp:1878`、`share/opto/library_call.cpp:1879`、`share/opto/library_call.cpp:1881`、`share/opto/library_call.cpp:1889`、`share/opto/library_call.cpp:1908`、`share/opto/library_call.cpp:1921`
+
+第二类是 `sqrt/abs/ceil/floor` 这种，如果 `Matcher::match_rule_supported(...)` 说明目标平台有合适规则，就能更直接地映射成机器节点。`share/opto/library_call.cpp:1899`、`share/opto/library_call.cpp:1901`、`share/opto/library_call.cpp:1902`、`share/opto/library_call.cpp:1903`、`share/opto/library_call.cpp:1905`
+
+还有第三种更有意思的特例：`pow(x, 2.0)`。这里编译器根本不去调用通用 `pow`，而是直接把它识别成 `x*x`，也就是在 Parse 期就把调用语义变成普通算术节点。`share/opto/library_call.cpp:1912`、`share/opto/library_call.cpp:1914`、`share/opto/library_call.cpp:1915`、`share/opto/library_call.cpp:1918`
+
+这正说明 intrinsic 并不承诺统一的“更低层次”。它承诺的是：**编译器会用比“普通方法调用”更贴近真实语义成本的方式来表达这个操作。**
+
+## Unsafe / Thread / System：为什么这些方法也属于“语义接管”
+
+`Unsafe.allocateInstance` 是最直白的例子。`inline_unsafe_allocate()` 并不把它当成普通 Java new——它先 null-check 接收者，再取出 `Class<?>` mirror 里的 `Klass*`，必要时检查初始化，再调用 `new_instance(kls, test)` 分配对象，而且明确不走普通构造器语义。`share/opto/library_call.cpp:2868`、`share/opto/library_call.cpp:2871`、`share/opto/library_call.cpp:2873`、`share/opto/library_call.cpp:2874`、`share/opto/library_call.cpp:2877`、`share/opto/library_call.cpp:2882`、`share/opto/library_call.cpp:2895`、`share/opto/library_call.cpp:2896`
+
+这不是“把一个普通调用做快一点”，而是编译器明确知道：这个 API 的语义本来就不是 `<init>` 那套语义，它应该生成的是“按类镜像直接分配对象”的图。
+
+`generate_current_thread()` 也是同样。它不去假装 `Thread.currentThread()` 是一段普通 Java 方法体，而是直接通过 `ThreadLocalNode` 和 `JavaThread::threadObj_offset()` 构造出“当前线程对象”的图表示。`share/opto/library_call.cpp:1092`、`share/opto/library_call.cpp:1093`、`share/opto/library_call.cpp:1095`、`share/opto/library_call.cpp:1096`、`share/opto/library_call.cpp:1097`、`share/opto/library_call.cpp:1098`
+
+`inline_native_time_funcs()` 也很说明问题。`System.nanoTime()` 在这里不是“读某个神秘 CPU 指令”的别名，而是明确变成对 `os::javaTimeNanos` 或相关 runtime time source 的 runtime call 图。`share/opto/library_call.cpp:771`、`share/opto/library_call.cpp:772`、`share/opto/library_call.cpp:2900`、`share/opto/library_call.cpp:2903`、`share/opto/library_call.cpp:2904`、`share/opto/library_call.cpp:2906`、`share/opto/library_call.cpp:2912`
+
+所以这几族方法的共同点是：它们都让编译器在 Parse 期直接承认“我知道你真正想干什么”，而不是继续假装它们只是普通 Java/native 调用。
+
+## intrinsic 不是后门：它仍然回到同一套优化和发码管线
+
+讲到这里最容易出现另一个误解：既然 intrinsic 这么特殊，那它是不是绕开了普通 Ideal Graph、IGVN、EA、Matcher、RA 这些后续阶段，自成一条后门通道？
+
+恰恰不是。
+
+无论是 `inline_string_indexOf()` 建出来的字符串专用节点，`inline_math_native()` 生成的 runtime_math 图，还是 `inline_unsafe_allocate()` 产生的分配图，**它们最后仍然是普通 Ideal Graph 节点**。后面的 IGVN、CCP、EA、LoopOpts、Matcher、RA、Output 仍然会像对待普通图一样对待它们。
+
+这也是 intrinsic 真正强大的地方：它不用另造一套后端。它只是在最前面的 Parse 期把问题重写成更有利于后续优化的图表示，之后仍然回到统一管线。
+
+所以 intrinsic 的力量，不是“特权通道”，而是**足够早地改变问题表示，然后让整条后续管线一起受益。**
+
+## 收网：intrinsic 不是更快调用，而是 Parse 期的语义接管
+
+现在可以把整篇压成一张总图了。
+
+一个普通调用在 `do_call()` 里会沿着普通 call generator 路径走；而 intrinsic 调用会先在 `Compile::find_intrinsic()` 里按 `intrinsic_id()` 命中，再由 `LibraryIntrinsic::generate()` 创建 `LibraryCallKit`，通过 `try_to_inline()` 把这个调用点替换成更合适的理想图子结构：String 变成专用字符串节点，Math 变成算术节点或 runtime_math 图调用，Unsafe/Thread/System 变成直接表达对象分配、线程读取和时间源访问的节点。可一旦这批节点生成出来，它们又回到和普通节点相同的后续优化/匹配/发码管线里。`share/opto/compile.cpp:150`、`share/opto/compile.cpp:162`、`share/opto/library_call.cpp:392`、`share/opto/library_call.cpp:407`、`share/opto/library_call.cpp:519`、`share/opto/library_call.cpp:1294`、`share/opto/library_call.cpp:1873`、`share/opto/library_call.cpp:2868`
+
+所以，这一篇最核心的一句话不是“intrinsic 是更快的普通调用”，而是：
+
+**intrinsic 是编译器在 Parse 期直接接管方法语义，决定这次根本不按原方法体去理解，而是换成更适合优化和匹配的图。**
+
+只要这句抓住了，后面的 CodeCache 与 nmethod 之家就好理解了：无论是普通调用、宏展开还是 intrinsic，最后都要变成机器码住进同一个地方。
+
+> → [16-code-cache/01 — 机器码的家：`CodeBlob + CodeHeap`](../16-code-cache/01-codeblob-heap.md)

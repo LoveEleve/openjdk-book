@@ -1,87 +1,208 @@
-# 05. 阻塞队列家族 — BlockingQueue 契约、锁与条件、各实现
+# 阻塞队列家族：并发队列解决了能放能取后，空了和满了怎么办
 
-> **前置依赖**: [12-lock-sync/03 — ReentrantLock 与 Condition](../12-lock-sync/03-reentrantlock-condition.md)(Condition 机制)、[10-concurrent-collections/04 — CopyOnWrite 与无锁队列](04-copyonwrite-concurrentqueue.md)(CLQ 对照)
-> → **后续**: 06-transfer-selection(按写作顺序)
-> 关联: [12-lock-sync/03 — ReentrantLock 与 Condition](../12-lock-sync/03-reentrantlock-condition.md)(await/signal)
+> 本文基于 JDK 11 `BlockingQueue`、`ArrayBlockingQueue`、`LinkedBlockingQueue` 与 `SynchronousQueue`。讨论重点是等待语义契约、单锁双条件、双锁分离与零容量直接交接。`DelayQueue`、`PriorityBlockingQueue`、`LinkedTransferQueue` 只在选型层面点到，不在本篇展开内部主线。
+> **前置依赖**：[ReentrantLock 与 Condition](../12-lock-sync/03-reentrantlock-condition.md)、[CopyOnWrite 与无锁队列](04-copyonwrite-concurrentqueue.md)
+> **后续**：[TransferQueue 与并发集合选型](06-transfer-selection.md)
 
-## 阻塞队列怎么实现流控
+## 先看一个并发队列已经够快，但系统还是会卡住的场景
 
-并发队列解决的是"能放/能取"，`BlockingQueue` 解决的是"满了怎么办、空了怎么办"。
+上一篇已经把一个重要事实讲透了：`ConcurrentLinkedQueue` 这类并发队列很擅长解决“多个线程能不能同时往前推进”。生产者可以不断入队，消费者也可以不断出队，局部 CAS 让大家尽量少在全局锁上排队。但真实系统里，很多问题并不会在“能不能推进”这一步停下。
 
-## 1. "BlockingQueue 的契约" — 四组方法
+例如线程池任务队列。任务来得太快时，队列总得回答“现在满了，提交线程该怎么办”；消费者来得太快时，队列也得回答“现在空了，工作线程该怎么办”。如果容器只能返回 `false`、`null` 或者让调用方自己 while 重试，那系统往往会被另一种形式拖垮：空转轮询、无意义重试、CPU 白耗，或者生产者疯狂堆任务却没有任何背压语义。
 
-### 1.1 四种语义
+这正是 `BlockingQueue` 存在的原因：**并发队列解决的是‘能放能取’，阻塞队列要继续解决‘空了谁该睡、满了谁该睡、什么时候再把它叫醒’。**
 
-`BlockingQueue` 明确给出四组接口:
+换句话说，阻塞队列的核心不只是存储结构，而是等待协议。它必须回答三类问题：
 
-- `put(e)`(`BlockingQueue.java:231`)——满则阻塞(可中断)
-- `take()`(`:261`)——空则阻塞
-- `offer(e, timeout, unit)`(`:251`) / `poll(timeout, unit)`(`:275`)——限时阻塞
-- `add/remove` 与 `offer/poll`——异常版/特殊值版
+- 线程在什么条件下应该阻塞
+- 被唤醒后由谁继续推进
+- 失败、超时、永久等待这几种调用语义怎样区分
 
-### 1.2 本质
+围绕这个问题，JDK 11 给出的代表路线是三种：数组有界缓冲的一把锁模型、链式队列的双锁分离模型，以及根本不要缓冲区、只做线程直接交接的零容量模型。
 
-阻塞队列不是"特殊容器",而是**队列 + 条件等待**。核心不是存储结构本身,而是空/满条件下的 `await/signal`。
+## 一、BlockingQueue 的本体不是“特殊队列”，而是“队列加等待契约”
 
-关键设计(斜体):*"阻塞队列 = 队列 + 条件等待"——put/take 用 await/signal 把"空/满"变成线程流控。面试"四组方法区别": 阻塞 vs 非阻塞 vs 超时。*
+### 为什么接口要分成四组方法
 
-## 2. "ArrayBlockingQueue" — 单锁双条件
+很多人第一次看 `BlockingQueue`，会先把注意力放在方法数量上：为什么同样是放元素，有 `add`、`offer`、`put`、带超时的 `offer`；同样是取元素，又有 `remove`、`poll`、`take`、带超时的 `poll`。如果只把这看成 API 风格差异，就会错过阻塞队列真正的价值。
 
-### 2.1 结构
+JDK 11 的接口定义很清楚：
 
-`ArrayBlockingQueue` 用一个定长数组做环形缓冲:
+- `put(e)`（`BlockingQueue.java:231`）：满了就阻塞等待
+- `offer(e, timeout, unit)`（`BlockingQueue.java:251`）：满了就限时等待
+- `take()`（`BlockingQueue.java:261`）：空了就阻塞等待
+- `poll(timeout, unit)`（`BlockingQueue.java:275`）：空了就限时等待
 
-- `items`(`ArrayBlockingQueue.java:103`)——底层数组
-- `lock`(`:120`)——单把 `ReentrantLock`
-- `notEmpty`(`:123`) / `notFull`(`:126`)——两条条件队列
+它们和异常版、特殊值版方法一起，构成了四组不同语义：
 
-### 2.2 put/take
+- 失败立即报错
+- 失败立即返回特殊值
+- 愿意一直等
+- 愿意等一段时间
 
-- `put`(`:361`)：先拿 `lock`,满了就 `notFull.await`,成功入队后 `enqueue`(`:176`)并 `signal notEmpty`
-- `take`(`:412`)：空了就 `notEmpty.await`,成功出队后 `dequeue`(`:191`)并 `signal notFull`
+这说明 `BlockingQueue` 的核心不是“额外多几个方法”，而是把**调用者对失败和等待的容忍方式**正式写进契约。线程不是只能硬拼 while 重试，也不必总是立即失败；它可以明确告诉队列：我愿意睡多久，或者我必须等到条件成立再继续。
 
-因为底层是一个共享数组,头尾位置都受同一组边界约束,所以**一把锁就够**。
+### 这为什么比“外面手写 await/signal”更有价值
 
-关键设计(斜体):*"单锁 + 双条件"让 put/take 等待不同信号,但仍共享同一把互斥锁。面试"ABQ 为什么一个锁够": 数组边界共享,天然单锁。*
+朴素方案当然是：自己拿一个普通队列，再在外面包锁和条件变量，空了就 await，满了就 signal。问题在于，这会把“队列结构正确性”和“等待条件协议”都散落到业务代码里，而且每个调用点都可能重复发明一套不完全一样的约定。
 
-## 3. "LinkedBlockingQueue" — 双锁分离
+`BlockingQueue` 的价值正好相反：**它把等待协议和容器状态绑定在一起。** 谁该因空而睡，谁该因满而睡，什么时候 signal，都是容器内部结构变化的一部分，而不是调用方临时拼出来的附属逻辑。
 
-### 3.1 两把锁
+这一层只要记住一句话：阻塞队列不是普通并发队列再加一点 sleep，而是把“线程何时等待、何时被叫醒”纳入容器契约本身。
 
-`LinkedBlockingQueue` 把入队和出队拆开:
+## 二、为什么 ArrayBlockingQueue 一把锁就够：因为它保护的是同一块环形数组边界
 
-- `takeLock`(`LinkedBlockingQueue.java:156`) + `notEmpty`(`:159`)
-- `putLock`(`:162`) + `notFull`(`:165`)
+### 先看它到底在保护什么状态
 
-### 3.2 为什么吞吐更高
+`ArrayBlockingQueue` 最好理解，因为它的底层本体很直观：一个固定容量的环形数组。JDK 11 里几个关键字段是：
 
-因为 put 主要改尾部, take 主要改头部,所以它们可以分别在不同锁下进行。队列不空不满时,**put 与 take 可以并行**。
+- `items`（`ArrayBlockingQueue.java:103`）：底层数组
+- `lock`（`ArrayBlockingQueue.java:120`）：唯一互斥锁
+- `notEmpty`（`ArrayBlockingQueue.java:123`）
+- `notFull`（`ArrayBlockingQueue.java:126`）
 
-这比 `ArrayBlockingQueue` 的单锁模型吞吐更高,但代价是链表节点对象开销更大,实现也更复杂。
+这里最容易误解的地方是：既然有两条 `Condition`，是不是就应该有两把锁？答案是否定的。`notEmpty` 和 `notFull` 分别表示两种不同等待原因，但它们依附的是**同一套共享状态**：数组里当前装了多少元素，头指针和尾指针在哪，当前是否还能继续写入、是否还能继续读出。
 
-关键设计(斜体):*"双锁分离 = put/take 互不阻塞"——头尾分工,不同方向各拿各的锁。面试"LBQ 为什么常比 ABQ 快": 读写并行,但要付出节点与实现复杂度。*
+也就是说，put/take 虽然服务两类不同线程，却都在围绕同一块环形缓冲区打交道。既然真正要保护的是同一套数组边界，一把锁反而最直接。
 
-## 4. "SynchronousQueue / DelayQueue" — 特殊语义
+### `put` 和 `take` 为什么只是“条件不同”，不是“结构不同”
 
-### 4.1 SynchronousQueue
+`put()` 在 `ArrayBlockingQueue.java:361`，`take()` 在 `ArrayBlockingQueue.java:412`。它们的主线其实高度对称：
 
-`SynchronousQueue` 没有容量,`put` 必须等一个 `take` 来配对。源码里有两套传输器:
+- `put`：拿锁；满了就在 `notFull` 上 await；条件成立后调用 `enqueue`（`ArrayBlockingQueue.java:176`）；成功后 signal `notEmpty`
+- `take`：拿锁；空了就在 `notEmpty` 上 await；条件成立后调用 `dequeue`（`ArrayBlockingQueue.java:191`）；成功后 signal `notFull`
 
-- `TransferStack`(`SynchronousQueue.java:215`)——栈式
-- `TransferQueue`(`:525`)——队列式
+关键不在于背方法顺序，而在于看懂：这两条路径其实都在围绕**同一组数组状态**做等待和推进。生产者关心“还有没有空槽”，消费者关心“还有没有元素”；但一旦任何一方成功推进，另一方的等待条件就可能变成真。
 
-这就是典型的"一手交钱、一手交货"。
+所以 `ArrayBlockingQueue` 的设计结论很自然：一把锁保护环形数组的所有边界状态，两条条件队列分别收容“因空而等”和“因满而等”的线程。它不是并发度最高的设计，却是最直接、最容易维护一致性的有界缓冲方案。
 
-### 4.2 DelayQueue
+### 为什么一把锁不是“落后”，而是结构使然
 
-`DelayQueue`(`DelayQueue.java:77`)内部是延迟堆;`take`(`:210`)如果头元素还没到期,就 `available.awaitNanos(delay)`(`:229`)继续等。
+这里要顺手反驳一个常见误解：很多人看到 `LinkedBlockingQueue` 有两把锁，就下意识把 ABQ 视为更原始的版本。这个比较方式不太对。ABQ 用一把锁，并不是作者没想到拆分，而是因为**数组模型下，头尾和容量天然绑在一起，拆分后反而会为同一组共享边界付出更多协调成本。**
 
-所以它的阻塞条件不是"空/满",而是**时间未到**。
+这一层的顿悟是：ABQ 的一把锁不是偷懒，而是环形数组结构下最顺手的等待协议封装。
 
-关键设计(斜体):*"特殊队列 = 特殊阻塞条件"——SynchronousQueue 按配对阻塞,DelayQueue 按时间阻塞。面试"SynchronousQueue 容量": 0;面试"DelayQueue 怎么知道到期": 看头元素 delay。*
+## 三、为什么 LinkedBlockingQueue 愿意多付一把锁：它想让 put 和 take 尽量并行
 
-## 核心悬念
+### 链式结构和数组结构的关键差异在哪
 
-队列家族收官——**传递语义**呢?`LinkedTransferQueue.transfer()` 为什么比 BlockingQueue 多一步"必须交到接收者手里"?整个并发集合怎么选型?——下一篇: TransferQueue 与选型收官。
+换成 `LinkedBlockingQueue` 后，最本质的变化不是“底层从数组换成链表”这么一句话，而是头尾修改开始更自然地分离了。数组模型里，头尾都受同一片连续存储和容量边界约束；链式模型里，put 主要碰尾部链接，take 主要碰头部出链。它们虽然仍共享“总量是否为空、是否已满”的事实，但真实的节点改动位置已经不在同一小片状态上。
 
-> → [06-transfer-selection.md](06-transfer-selection.md)
+JDK 11 里，这个设计直接体现在字段分工上：
+
+- `takeLock`（`LinkedBlockingQueue.java:156`）+ `notEmpty`（`:159`）
+- `putLock`（`LinkedBlockingQueue.java:162`）+ `notFull`（`:165`）
+
+再加上：
+
+- `count`（`LinkedBlockingQueue.java:141`）
+
+这已经把主线暴露得很清楚：**LBQ 不满足于“一把锁保护所有事”，它更想让入队线程和出队线程在队列不空不满时各走各的路径。**
+
+### put/take 为什么值得拆到两把锁里
+
+`put()` 在 `LinkedBlockingQueue.java:324`，`take()` 在 `LinkedBlockingQueue.java:425`。它们分别主要做的是：
+
+- put：拿 `putLock`，往尾部 `enqueue`（`LinkedBlockingQueue.java:199`），更新计数，必要时 `signalNotEmpty`（`LinkedBlockingQueue.java:171`）
+- take：拿 `takeLock`，从头部 `dequeue`（`LinkedBlockingQueue.java:210`），更新计数，必要时 `signalNotFull`（`LinkedBlockingQueue.java:184`）
+
+跟 ABQ 相比，它的关键优势就在这里：**只要队列既不空也不满，生产者和消费者就不一定要围着同一把锁排队。** 一个线程在尾部入链，另一个线程完全可能同时在头部出链，两者通过共享计数和条件信号协调，但节点层面的改动尽量分离。
+
+这也是为什么很多场景下，LBQ 的吞吐表现会比 ABQ 更容易做高：它让“头部出”和“尾部入”这两件天然分离的事，不必强行共享同一把互斥锁。
+
+### 代价是什么：复杂度和对象成本
+
+当然，双锁分离不是白来的。你付出的代价至少有两类：
+
+- 链表节点对象更多，内存局部性不如数组
+- 头尾分离后，总量协调和唤醒协议都更复杂
+
+所以 LBQ 不是“ABQ 的升级版”，而是另一种取舍：**用更高的结构和协调复杂度，换取 put/take 更高的并行潜力。**
+
+## 四、为什么 `count` 是 LinkedBlockingQueue 的关键中介：双锁并存时，总量得有人统一传话
+
+### 先看双锁模型下最容易失控的地方
+
+一旦 put 和 take 走两把锁，最棘手的问题就不再是“谁保护头尾节点”，而是“谁来告诉双方当前队列到底空不空、满不满”。如果没有一个跨两条路径共享的总量事实，put 线程可能只知道自己尾部能不能挂节点，take 线程可能只知道自己头部能不能摘节点，但两者对“容量边界是否到达”的判断就很容易脱节。
+
+这就是 `count` 的职责：
+
+```java
+// LinkedBlockingQueue.java:141
+private final AtomicInteger count = new AtomicInteger();
+```
+
+它不是一个为了实现 `size()` 顺手加上的统计字段，而是双锁模型下的总量中介。put 线程更新它，take 线程也更新它；双方都通过它来判断是否跨越了“从空到非空”或“从满到非满”的边界，从而决定是否要叫醒另一边的等待线程。
+
+### 为什么 `signalNotEmpty` / `signalNotFull` 要和 `count` 配合看
+
+在 `put()` 成功入队后，如果更新前总量是 0，那这次插入意味着消费者那边从“必须等”变成了“可以继续取”，于是要 `signalNotEmpty()`。反过来，`take()` 成功出队后，如果更新前总量等于容量上限，那么这次删除意味着生产者那边从“必须等”变成了“可以继续放”，于是要 `signalNotFull()`。
+
+这条主线解释了很多读源码时容易分散的细节：为什么 `putLock` 和 `takeLock` 各自独立，却还需要跨锁 signal；为什么 `count` 用的是 `AtomicInteger` 而不是普通 `int`；为什么 LBQ 的复杂度明显高于 ABQ。答案都在同一个地方：**它要在分离头尾并行路径的同时，维持一份被两边共同承认的容量事实。**
+
+所以这一层真正要记住的是，LBQ 的关键不只是“两把锁”，而是“两把锁加一个共享总量协调器”。没有 `count`，双锁并行就很容易把空满边界判断拆碎。
+
+## 五、为什么 SynchronousQueue 根本不要缓冲：有些场景要的是交接，不是排队
+
+### 先看“所有任务都先进缓存队列”这个朴素方案的问题
+
+很多人一想到队列，就默认它应该能先把元素存起来，哪怕暂时没人消费也没关系。但有些并发场景恰恰不希望这样。例如线程池某些交付模式、直接 handoff 的任务协作、更强调背压的交接点，它们真正想表达的是：**生产者交出这个元素时，必须已经有消费者接手；如果没人接手，生产者就别偷偷把它塞进某个缓存里。**
+
+如果此时仍然用普通缓冲队列，问题就会变成“先排着再说”。这会隐式允许任务堆积，也会把“交接失败应当阻塞或回退”的语义偷偷改成“先缓存起来”。在这类场景里，缓存不是帮助，反而改变了系统控制语义。
+
+### `SynchronousQueue` 的重点不是“容量为 0”，而是“没有存储阶段”
+
+`SynchronousQueue` 类定义在 `SynchronousQueue.java:90`。它真正的灵魂在于 `Transferer` 抽象（`SynchronousQueue.java:174`）和 `transfer` 协议（`SynchronousQueue.java:188`）。这里已经把主线讲得很明白：它关心的不是内部有几个槽位，而是“一个生产者线程和一个消费者线程怎样直接配对完成一次交接”。
+
+JDK 11 里还有两套实现路线：
+
+- `TransferStack`（`SynchronousQueue.java:215`）
+- `TransferQueue`（`SynchronousQueue.java:525`）
+
+无论底层是栈式还是队列式配对策略，本质都没变：**它不是先存元素再等别人来取，而是让 put/take 本身成为同一笔会合交易的两端。**
+
+### 为什么这不能用“容量很小的队列”代替
+
+这里很容易产生一个误解：容量为 0，不就是一个极端小的队列吗？不是。容量为 1 的队列仍然允许“先放进去，稍后再取”；SynchronousQueue 完全不允许这个缓冲阶段。元素既不会在容器里排队等待，也不会以传统存储结构停留一段时间；它要么完成线程间交接，要么调用方继续等待、超时或失败。
+
+这就是为什么本篇必须把它纳入阻塞队列家族主线，而不是把它当成冷门实现：它把“等待协议”推到了最极端的位置——**等待的不是容量释放，而是配对线程出现。**
+
+## 六、怎么把 ABQ、LBQ、SQ 放回同一张选型图
+
+### 不是背类名，而是回答你到底要什么等待协议
+
+读到这里，最重要的不是再背几个方法和字段，而是把三种代表实现放回同一条问题链里看：
+
+- 你要不要固定容量缓冲？
+- 你更在意实现直接性，还是 put/take 并行潜力？
+- 你到底要“缓存等待”，还是“直接交接”？
+
+如果需要固定容量、数组局部性、实现简单直接，那 `ArrayBlockingQueue` 很自然：一把锁保护整块环形数组，两条条件队列负责空满等待。
+
+如果希望在链式结构上让 put/take 尽量并行，愿意接受更复杂的协调逻辑和节点对象开销，那 `LinkedBlockingQueue` 更合适：头尾分离，两把锁并行，再用 `count` 协调总量和唤醒。
+
+如果场景根本不希望有任何缓冲，真正需要的是“生产者必须把元素直接交到消费者手里”，那 `SynchronousQueue` 才是语义最匹配的选择。
+
+这说明阻塞队列选型从来不只是“哪个快”，而是“**你到底想让线程在什么条件下睡、在什么条件下醒，以及中间允不允许元素先存着。**”
+
+## 收网：阻塞队列是在并发队列之上，再补一层等待协议
+
+回到开头的问题：并发队列已经能放能取了，为什么还需要阻塞队列？因为真实系统的问题从来不止“能不能放、能不能取”，还包括“空了怎么办、满了怎么办、线程该睡在哪、什么时候被叫醒、有没有资格先把元素缓存在中间”。
+
+`BlockingQueue` 的家族解法，正是围绕这套等待协议分化出来的。
+
+第一，`ArrayBlockingQueue` 把有界缓冲、空满条件和环形数组统一压进一把锁模型里；它的重点是结构直接、容量边界清楚。第二，`LinkedBlockingQueue` 发现头尾改动天然可分，于是愿意为更高并行度付出双锁和共享 `count` 的复杂度。第三，`SynchronousQueue` 进一步把“缓冲”整个删掉，只保留线程间直接交接。
+
+把这三条路线压成一张总图，就是：
+
+```text
+并发推进还不够
+  → 需要等待协议
+  → ABQ：一把锁 + 两个条件 + 固定数组缓冲
+  → LBQ：两把锁 + count 协调 + 链式缓冲
+  → SQ：零容量 + 线程直接交接
+```
+
+所以，阻塞队列家族真正回答的不是“哪种容器更高级”，而是“当线程不能立刻继续时，我们希望它等什么”。
+
+下一篇继续把这个问题再往前推一步：如果不仅要阻塞，还要表达“这个元素必须真的交到接收者手里”，为什么 `LinkedTransferQueue` 会比普通 `BlockingQueue` 多出一层传递语义？整个并发集合又该怎样在吞吐、顺序、容量、快照和交接之间做最终选型？

@@ -1,177 +1,200 @@
-# 03. 线程异常出口与 ThreadLocalRandom — uncaughtException 链、无锁随机数
+# 线程异常出口与 ThreadLocalRandom：线程私有状态的两种命运
 
-> **前置依赖**: [11-thread-threadlocal/01 — 线程的生命周期](01-thread-lifecycle.md)(线程退出路径)、[11-thread-threadlocal/02 — ThreadLocal](02-threadlocal.md)(线程局部存储)、[06-exceptions/01 — Throwable](../06-exceptions/01-throwable-structure.md)
-> → **后续**:域 13 原子类(13-atomic 系列,下一篇)
-> 关联: 内部卷 17-threads(线程退出路径)
+> 本文基于 JDK 11 `Thread`、`ThreadGroup` 与 `ThreadLocalRandom`。讨论重点是未捕获异常处理链、实例/默认处理器、线程组兜底，以及 `ThreadLocalRandom` 的每线程种子初始化和线程字段直挂模型。`FutureTask`、线程池 execute/submit 的完整实现细节留到后续线程池专题。
+> **前置依赖**：[线程的生命周期与调度原语](01-thread-lifecycle.md)、[ThreadLocal 原理与内存泄漏](02-threadlocal.md)、[Throwable 结构](../06-exceptions/01-throwable-structure.md)
+> **后续**：域 13 原子类、域 14 线程池与任务执行
 
-## 两个"线程私有"的收尾
+## 先看两个都和“线程私有”有关，却走向完全不同的结局
 
-线程池 `execute` 的任务抛了异常,日志里什么都没有——异常去哪了?`ThreadLocalRandom.current().nextInt()` 比 `new Random().nextInt()` 快——快在哪?这两个问题分别是线程异常出口和线程局部状态的两个极端: 一个是"异常的最后收容所",一个是"连 ThreadLocalMap 都不用"的线程私有实现。
+线程里的私有状态，并不总是拿来存业务上下文。它有时是“这个线程最后失败时，异常到底交给谁”，有时又是“这个线程高频生成随机数时，怎样完全避开别人的竞争”。这两类问题看起来毫无关系，实际上都在问同一件事：**既然线程是独立执行体，某些状态到底应该怎样绑在线程身上，并在退出、失败或高频访问时被处理。**
 
-这篇把 uncaughtException 处理链和 ThreadLocalRandom 的无锁种子机制讲清楚,最后画一张并发域的衔接地图。
+第一类场景最常见也最容易让人抓狂：子线程里抛了异常，主线程 try/catch 根本接不住；线程池 `execute()` 提交的任务炸了，日志框架里却什么都没有，只有进程 stderr 一闪而过一条堆栈。异常当然不是凭空蒸发了，而是沿着线程自己的退出路径找最后兜底人。
 
-## 1. "子线程的异常去哪了" — uncaughtException 链
+第二类场景则出现在完全不同的地方：并发下反复调用随机数。你如果让所有线程共享一个状态源，它们就会在同一个 seed 更新点上互相撞；可如果每个线程自己带一份随机状态，高频路径上就可以没有共享竞争。`ThreadLocalRandom` 正是这么做的，而且它甚至比普通 `ThreadLocal` 更激进——连 `ThreadLocalMap` 都不走，直接把种子塞在线程对象字段里。
 
-### 1.1 出口:dispatchUncaughtException
+所以这篇不把“未捕获异常”和“随机数性能”当作两段独立冷知识，而是把它们放在同一条收官主线上：**线程私有状态有两种命运——一种在失败时要找到最后的收容链，一种在高频运行时要尽量消掉共享争用。**
 
-线程 run() 返回时,如果异常一路没被捕获,VM 调用 `dispatchUncaughtException`(`Thread.java:1996-1999`):
+## 一、子线程异常为什么经常像“消失”了一样：因为它根本不会回到主线程栈上
+
+### 先拆掉“主线程 catch 一切”的直觉
+
+很多人写并发代码时，会潜意识把异常传播理解成单线程那套：谁调用谁，异常就沿着栈往上冒。这个直觉一旦搬到多线程里，就会立刻出错。主线程创建了子线程，不代表子线程里的异常还能沿着主线程的调用栈冒回来。线程一旦分叉，栈也就分叉了；子线程有自己的执行栈、自己的退出路径、自己的收尾逻辑。
+
+这也是为什么主线程的 try/catch 接不住子线程里未捕获异常：不是 catch 失灵了，而是异常根本不在那条栈上抛出。它最后只能在线程自己的边界上处理，或者走线程自己的兜底链。
+
+### 未捕获异常的真正出口就在当前线程对象上
+
+JDK 11 给这件事设计了一个明确出口：`dispatchUncaughtException`，位于 `Thread.java:1996-1997`：
 
 ```java
-// Thread.java:1996-1999(截取核心,逐字)
+// Thread.java:1996-1997
 private void dispatchUncaughtException(Throwable e) {
     getUncaughtExceptionHandler().uncaughtException(this, e);
 }
 ```
 
-就是一次普通方法调用: 把异常交给"当前线程的未捕获异常处理器"。
+这段代码看上去非常朴素，但它把关键事实说透了：当异常一路没有在线程内部被接住时，JVM 不会把它扔回调用者线程，而是在线程自己的退出路径上，去找“这个线程的未捕获异常处理器”。
 
-### 1.2 处理器链:实例 → 线程组 → 默认 → stderr
+也就是说，问题已经从“异常沿谁的调用栈传播”切换成了“**当前线程的最后责任人是谁**”。
 
-处理器怎么选?`getUncaughtExceptionHandler`(`Thread.java:1967-1970`):
+### 处理器链为什么是“实例 → 线程组 → 默认 → stderr”
+
+JDK 11 中，这条责任链的关键节点都在 `Thread` 自己身上：
+
+- `UncaughtExceptionHandler` 接口（`Thread.java:1884`）
+- 实例处理器字段 `uncaughtExceptionHandler`（`Thread.java:1897`）
+- 默认处理器字段 `defaultUncaughtExceptionHandler`（`Thread.java:1900`）
+- `getUncaughtExceptionHandler()`（`Thread.java:1967`）
+- `setUncaughtExceptionHandler()`（`Thread.java:1987`）
+- `setDefaultUncaughtExceptionHandler()`（`Thread.java:1935`）
+
+`getUncaughtExceptionHandler()` 的逻辑非常关键：如果线程实例自己设置了 handler，就优先用它；否则退回线程组。线程组再往上走父级链，直到最顶层，再看有没有全局默认处理器；再没有，才退化成 stderr 打印。`ThreadGroup.uncaughtException()` 的核心路径在 `ThreadGroup.java:1048-1055` 一带。
+
+把这条责任链画出来：
+
+```text
+线程实例 handler
+  → 没有就交给线程组
+  → 线程组继续向 parent 递归
+  → 到顶层后看 default handler
+  → 再没有就打印到 stderr
+```
+
+这条链不是多余保险，而是在回答一个非常实际的问题：**如果没人显式接住线程里的异常，系统最晚也要决定由谁来知道它。**
+
+## 二、为什么默认终点常常只是 stderr：异常没丢，只是没人收容它
+
+### 这就是“日志里没有，但异常其实发生了”的真相
+
+如果线程没设置实例级 handler，线程组也没有把异常转给业务处理器，全局默认 handler 也没设置，那 JDK 最后的动作通常只是把信息打印到标准错误输出。注意，这里没有任何日志框架自动介入。
+
+这正是很多线上“异常像消失了”的真相：异常不是没抛，也不是 JVM 吞掉了，而是默认出口只剩 stderr。你的日志系统如果没有接住 stderr，或者容器环境没有正确收集标准错误流，异常就会表现成“代码炸了，但业务日志没有记录”。
+
+所以在生产系统里，真正靠谱的策略不是赌每个线程都手动设置实例 handler，而是在进程入口统一配置默认未捕获异常处理器，让最后一道责任链至少能接进统一日志和告警体系。
+
+### `execute` 和 `submit` 为什么让人感觉异常表现不同
+
+这时再看线程池里最常见的困惑：为什么 `execute()` 提交的任务炸了，经常直接走到未捕获异常链；而 `submit()` 提交的任务，异常往往被 `Future` 包住，要等 `get()` 时才感知？本质就在于：前者更接近“线程里的异常没人兜住”，后者则更接近“任务框架先把异常转存起来”。
+
+本文不展开 `FutureTask` 的完整实现，但这里至少要立住一个边界：**线程级未捕获异常处理链和任务框架级异常包装，不是同一条路。** 这也解释了为什么很多团队只盯着线程级 handler，却仍然会在 `submit` 路线上漏掉异常消费。
+
+这一层的收束是：子线程异常没有神秘消失，它只是沿着线程自己的责任链去找收容所；而默认收容所，很多时候并不是你平时看的业务日志。
+
+## 三、共享 Random 为什么会在并发下变成热点：因为所有线程都在抢同一个状态源
+
+### 先看最直觉、也最容易被忽略的问题
+
+随机数经常被当成小工具，似乎和并发核心路径没什么关系。但一旦系统里很多线程都在高频生成随机数，比如限流采样、负载均衡选择、会话 ID 辅助计算、内部扰动值生成，共享随机状态就会变成热点。
+
+朴素方案是多个线程共享一个 `Random` 实例。这个方案的问题不是不正确，而是所有线程都要在同一个内部 seed 更新点上发生竞争。每次你要下一个随机值，都得先把共享状态推进一步；线程越多，高频更新点越拥挤。
+
+这和前面讲 ThreadLocal 泄漏时的失败方案推演很像：看起来是“大家共用一个就好了”，真正代价却是把所有线程重新压回一个共享位置上互撞。对随机数这种高频工具路径来说，这种共享热点本身就可能成为瓶颈。
+
+## 四、ThreadLocalRandom 为什么不走 ThreadLocalMap，而是把状态直接挂在线程字段上
+
+### 先看它到底把状态放哪了
+
+如果只是想“每线程一份随机数种子”，最容易想到的方案是直接用 `ThreadLocal<Random>`。JDK 没这么做。原因很简单：这条路径太重了。ThreadLocalMap 查找、Entry 管理、弱 key 清理、remove 边界，这些都是为“任意业务值”的通用线程私有存储准备的；随机数种子这种高频、固定用途、纯线程内消费的状态，没必要背这整套成本。
+
+JDK 11 直接把相关字段挂到了 `Thread` 对象上：
+
+- `threadLocalRandomSeed`（`Thread.java:2071`）
+- `threadLocalRandomProbe`（`Thread.java:2075`）
+- `threadLocalRandomSecondarySeed`（`Thread.java:2079`）
+
+这已经把设计态度说明得很彻底了：**如果一个线程私有状态足够固定、访问足够高频，JDK 宁愿把它做成线程对象上的裸字段，也不愿让它通过 ThreadLocalMap 间接访问。**
+
+### `current()` 和 `localInit()` 怎么把共享竞争压缩到初始化阶段
+
+`ThreadLocalRandom.current()` 在 `ThreadLocalRandom.java:176-178`：
 
 ```java
-// Thread.java:1967-1970(截取核心,逐字)
-public UncaughtExceptionHandler getUncaughtExceptionHandler() {
-    return uncaughtExceptionHandler != null ?
-        uncaughtExceptionHandler : group;
-}
-```
-
-**实例处理器**(`uncaughtExceptionHandler`,`Thread.java:1897`,volatile)没设置时,**退回线程组**。`ThreadGroup.uncaughtException`(`ThreadGroup.java:1048-1062`)是整条链的核心:
-
-```java
-// ThreadGroup.java:1048-1062(截取核心,逐字)
-public void uncaughtException(Thread t, Throwable e) {
-    if (parent != null) {
-        parent.uncaughtException(t, e);
-    } else {
-        Thread.UncaughtExceptionHandler ueh =
-            Thread.getDefaultUncaughtExceptionHandler();
-        if (ueh != null) {
-            ueh.uncaughtException(t, e);
-        } else if (!(e instanceof ThreadDeath)) {
-            System.err.print("Exception in thread \""
-                             + t.getName() + "\" ");
-            e.printStackTrace(System.err);
-        }
-    }
-}
-```
-
-完整链:
-
-```
-实例 uncaughtExceptionHandler(@1897)──存在──> 用它
-        │ 不存在
-        ▼
-ThreadGroup.uncaughtException(@1048)──parent 非 null──> 逐级向上(parent 递归)
-        │ 顶层线程组
-        ▼
-静态 defaultUncaughtExceptionHandler(@1900)──存在──> 用它
-        │ 不存在
-        ▼
-System.err 打印 "Exception in thread \"名字\" " + 堆栈(ThreadDeath 除外)
-```
-
-### 1.3 异常"消失"的真相
-
-**默认行为的终点就是 stderr 打印**——没有任何日志框架参与。线上 stderr 通常没人收集,所以"线程池 execute 的任务抛异常,日志里什么都没有"的真相是: 异常打印到了没人看的 stderr。
-
-两条关键区分:
-
-- **execute 的任务**:异常走这条链(默认 stderr)→ 看起来"消失"
-- **submit 的任务**:异常被 `FutureTask` 捕获,存进 Future,`get()` 时以 ExecutionException 重新抛出(域 14 展开)
-
-**主线程永远 catch 不了子线程的异常**——异常在子线程的栈上抛出,只能在子线程内处理(或走这条处理器链)。
-
-关键设计(斜体):*这条链的设计是"层层兜底": 实例级(业务定制)→ 线程组级(父级递归,线程组天然有层级)→ 全局默认(进程级)→ stderr(最后防线)。生产做法: 进程启动时设置静态 `defaultUncaughtExceptionHandler` 统一记日志/上报——比每个线程单独设置干净。面试答"主线程 catch 不了子线程异常,只能靠处理器链或 Future"就过关。*
-
-跨层标注: [内部卷: 17-threads(线程退出路径: 异常未捕获时的 dispatch 时机与 VM 侧处理)]
-
-## 2. "ThreadLocalRandom 为什么快" — 无锁种子 + 线程局部
-
-### 2.1 Random 的问题:一颗共享种子的 CAS 竞争
-
-`java.util.Random` 的核心是一个 `AtomicLong seed`——`next()` 每次用 CAS 更新: `seed.compareAndSet(old, old * 0x5DEECE66D + 0xB)`。**高并发下所有线程争抢同一个 AtomicLong**,CAS 失败重试,争抢激烈时吞吐崩塌。随机数在高并发场景(UUID、限流、采样)是热点,这成为瓶颈。
-
-### 2.2 ThreadLocalRandom:每线程独立种子
-
-`ThreadLocalRandom.current()`(`ThreadLocalRandom.java:176-183`):
-
-```java
-// ThreadLocalRandom.java:176-183(截取核心,逐字)
+// ThreadLocalRandom.java:176-178
 public static ThreadLocalRandom current() {
     if (U.getInt(Thread.currentThread(), PROBE) == 0)
         localInit();
-    return instance;
-}
 ```
 
-- **每线程一份独立种子**——没有共享状态,天然无锁、无 CAS 竞争
-- `PROBE`(探针哈希)为 0 表示"本线程还没初始化",`localInit()`(`ThreadLocalRandom.java:165`)首次生成种子: `long seed = mix64(seeder.getAndAdd(SEEDER_INCREMENT))`——静态 `AtomicLong seeder`(`ThreadLocalRandom.java:1082`)只在**初始化时**被访问一次,之后完全脱离共享状态
+第一次进入当前线程时，如果 probe 还没初始化，就走 `localInit()`（`ThreadLocalRandom.java:162-168`）。在那里，JDK 才会触碰共享的初始化源：
 
-### 2.3 种子存放:UNSAFE 直写 Thread 字段
+- `probeGenerator`（`ThreadLocalRandom.java:1074`）
+- `SEEDER_INCREMENT`（`ThreadLocalRandom.java:1040`）
 
-种子存在哪?——**Thread 对象的字段里**(`Thread.java:2071`):
+也就是说，共享写入并没有彻底消失，而是**被压缩到初始化那一刻**。线程一旦拿到了自己的 probe 和 seed，后续高频路径就主要围绕当前线程对象上的字段打转，不再让所有线程都回到同一个共享随机状态源上竞争。
+
+这就是 ThreadLocalRandom 真正的优化重点：不是“随机算法更高级”，而是**高频路径只动线程私有状态，共享竞争只发生在初始化阶段。**
+
+### `nextSeed()` 为什么代表了它的核心优势
+
+种子推进的关键入口在 `ThreadLocalRandom.java:194-197`：
 
 ```java
-// Thread.java:2071
-long threadLocalRandomSeed;
-```
-
-更新用 **UNSAFE 直接读写**(`nextSeed`,`ThreadLocalRandom.java:194-199`):
-
-```java
-// ThreadLocalRandom.java:194-199(截取核心,逐字)
+// ThreadLocalRandom.java:194-197
 final long nextSeed() {
-    Thread t; long r; // read and update per-thread seed
+    Thread t; long r;
     U.putLong(t = Thread.currentThread(), SEED,
               r = U.getLong(t, SEED) + GAMMA);
-    return r;
-}
 ```
 
-种子递进是纯加法: `seed + GAMMA`,其中 `GAMMA = 0x9e3779b97f4a7c15L`(`ThreadLocalRandom.java:1030`)——**64 位黄金比例常数**(`(√5-1)/2 × 2^64` 的整数部分,程序验证 `0x9E3779B97F4A7C15 / 2^64 = 0.618033988749895` 精确等于 `(√5-1)/2`)。它与域 11 第 2 篇的 32 位常数同属黄金比例家族,但数值对应关系要分清: 64 位的直接 32 位同族是 `0x9E3779B9`(同为 `(√5-1)/2` 表示),而 02 篇的 `0x61C88647` 是它的**平方互补值** `(3-√5)/2`。为什么敢用 UNSAFE 直写而不用 volatile 字段?**种子只在线程内使用**(每次用 `Thread.currentThread()` 取自己的线程),不存在跨线程可见性需求——unsafe 直写省掉 volatile 的屏障开销。
+这里最值得记住的不是 `GAMMA` 常量本身（它定义在 `ThreadLocalRandom.java:1030`），而是这件事的执行位置：**读取的是当前线程对象上的 seed，写回的也是当前线程对象上的 seed。** 也就是说，线程每次取随机数时，推进的是自己的状态机，而不是别人共享的那一颗全局种子。
 
-### 2.4 两种"线程局部"的对照
+这就是它相比共享 `Random` 的根本优势：没有一群线程反复在同一个状态点上 CAS 或竞争，大家各自转自己的轮子。
 
-| | ThreadLocal | ThreadLocalRandom |
-|---|---|---|
-| 存储 | Thread.threadLocals(ThreadLocalMap,Entry 弱 key) | Thread.threadLocalRandomSeed(裸字段) |
-| 访问 | getMap → getEntry(探测链) | UNSAFE 直读直写 |
-| 清理 | 需要 remove/清理链 | 随线程死亡废弃(无 Entry 壳) |
-| 适用 | 任意对象值 | 固定单值(种子) |
+## 五、为什么这也算“线程私有状态”，却和 ThreadLocal 完全不是一条实现路线
 
-ThreadLocalRandom 是"线程私有"的更极端形态: **连 ThreadLocalMap 的开销都不要**——一个裸 long 字段 + 直接偏移读写。
+### 前一篇讲的是“线程私有值容器”，这一篇讲的是“线程私有高频字段”
 
-关键设计(斜体):*"线程局部"有两种实现: ThreadLocal 挂在 map(可清除、可继承、任意值)vs ThreadLocalRandom 挂在裸字段(UNSAFE 直写、零间接)。随机数只需"线程内可见、线程内消费",没有跨线程共享需求,所以不走 ThreadLocalMap 那套弱引用+清理链的机制。面试点: "为什么 nextInt 没有线程安全问题"——每线程独立状态机 + UNSAFE 私有字段访问,不同线程读到的种子不同、互不干扰。*
+把 ThreadLocal 和 ThreadLocalRandom 放在一起看，特别能帮助读者真正理解“线程私有”并不是一种固定实现。
 
-跨层标注: [域 32 Unsafe 展开: U.objectFieldOffset 计算线程字段偏移,UNSAFE 直写的机制]
+前一篇的 ThreadLocal 解决的是：我要给任意业务值找一个线程私有容器，因此需要一张 map、需要 key、需要清理、需要 remove、需要继承边界。它强在通用性，代价是结构更重、生命周期管理更麻烦。
 
-## 3. 线程域收尾 — 并发体系地图
+而 ThreadLocalRandom 解决的是：我要给每个线程准备一份固定用途的高频随机状态，因此根本不需要通用 map，不需要弱引用 Entry，也不需要用户代码手动 remove。它强在路径极短，代价是用途极专，不适合承载任意业务值。
 
-### 3.1 接下来往哪走
+把两者对照成一张表：
 
-本域是并发知识的地基,后续的依赖关系:
+```text
+ThreadLocal
+  → 任意业务值
+  → 挂在线程的 ThreadLocalMap 上
+  → 通用，但有清理与泄漏边界
 
-```
-域 11 线程(语言级:synchronized/volatile/Thread)  ← 本域
-  └── 域 13 原子类(volatile 语义 + CAS 指令封装)   ← 下一篇
-        └── 域 12 锁与同步器(AQS 基于 CAS + volatile 状态)
-              └── 域 14 线程池(Worker 用 AQS 状态管理)
-                    └── 域 15 异步编程(CompletableFuture 基于线程池)
+ThreadLocalRandom
+  → 固定用途的随机种子/探针
+  → 直接挂在线程字段上
+  → 极轻，但只服务这一类状态
 ```
 
-### 3.2 本域各篇的衔接
+这一节真正想让读者留下的结论是：**“线程私有状态”不是单一机制，而是一类设计目标。JDK 会根据状态的用途、频率和生命周期，选择 ThreadLocalMap 或线程裸字段这种完全不同的落点。**
 
-- **01 篇**(线程原语):start/interrupt/join 是语言级 API,对应内部卷 17-threads 的 JavaThread/OSThread
-- **02 篇**(ThreadLocal):泄漏治理与 remove 规范——在域 14 线程池复用场景会重点展开(池化线程不销毁,ThreadLocal 的坑被放大)
-- **03 篇**(本篇):异常出口 + 线程私有随机数——execute/submit 的异常差异在域 14 兑现
+## 六、域 11 收官：线程对象既是生命周期宿主，也是私有状态宿主
 
-关键设计(斜体):*域 11 是并发域的"语言级地基"——synchronized/volatile/Thread 是语言自带语义;域 12-15 是"工具级"——AQS/原子类/线程池/CompletableFuture 都是建在地基上的库。面试链路: 从"线程怎么启动"一路问到"AQS 怎么实现",这条链就是从本域出发的。*
+### 把三篇真正串成一条线
 
-## 核心悬念
+到这里，`11-thread-threadlocal` 这一域才算完整闭环。
 
-线程能并发了,但**共享变量怎么保证可见性**?`volatile` 是语言级关键字,它背后的内存屏障、CAS 指令、缓存一致性协议才是并发的底层真相——`synchronized` 的锁升级、AQS 的状态机、原子类的无锁更新,全都建立在这套内存语义上。下一站: 域 13 原子类与内存语义,再往上就是面试必考的 AQS(域 12)。
+第一篇讲的是 Thread 对象何时从普通对象变成真实线程，以及 `start`、`join`、`sleep`、`interrupt` 这些控制协议站在哪些边界上。第二篇讲的是一旦线程长期活着，为什么任意业务值可以挂到线程私有 map 上，以及为什么这会带来泄漏与串值边界。第三篇则把线程私有状态的另外两端拉了出来：异常失败时，线程如何沿自己的责任链找最后收容所；高频随机状态时，线程又如何直接把种子挂在自己身上，彻底躲开共享竞争。
 
-> → 下一篇: 域 13 原子类(13-atomic 系列)| 关联: 域 12 锁与同步器、域 14 线程池
+把它们压成一张线程私有状态地图：
+
+```text
+Thread 对象
+  ├── 生命周期入口：start / run / join / interrupt
+  ├── 通用私有值：ThreadLocalMap
+  │       └── 弱 key / 强 value / remove 边界
+  ├── 异常收尾：UncaughtExceptionHandler 责任链
+  └── 高频私有状态：threadLocalRandomSeed / probe
+```
+
+这张图很重要，因为它说明 Thread 不只是“一个跑任务的壳”，它还是 Java 并发模型里很多线程级协议的真实落点。
+
+## 收网：线程私有状态的两种命运，一个是兜底失败，一个是消灭共享热点
+
+回到开头的两个问题，现在已经能把它们放进同一条主线上了。
+
+子线程异常之所以不会回到主线程，不是因为 JVM 漏掉了它，而是因为异常的最后命运属于线程自己的退出责任链：实例处理器、线程组、默认处理器、stderr。你有没有看见，只取决于这条链最后有没有接进你真正采集的日志出口。
+
+`ThreadLocalRandom` 之所以比共享 `Random` 更适合并发，不是因为它多了一层魔法封装，而是因为它把高频随机状态变成了线程对象自己的字段。初始化时才短暂触碰共享源，运行时则只推动当前线程自己的 seed，于是共享竞争不再出现在热路径上。
+
+把这篇压成一句话，就是：**线程私有状态在失败时要有最后兜底人，在高频时要尽量不再共享。** 这正好是域 11 的两个收尾方向。
+
+下一站就不再停留在线程语言级 API 上了。进入域 13 和域 12 后，问题会变成：共享变量一旦必须被多线程共同读写，`volatile`、CAS、原子类和 AQS 状态机到底怎样把这些线程级基础设施接成真正的并发同步原语。

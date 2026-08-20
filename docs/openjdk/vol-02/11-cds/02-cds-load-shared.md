@@ -1,319 +1,209 @@
-# 02. mmap 之后共享类怎么进 SystemDictionary？— mmap archive → shared spaces → 类就绪
-
-> **前置依赖**:[11-cds/01 — 启动时怎么让核心类秒加载？— CDS 全景与 Dump](01-cds-overview-dump.md):dump 产物是"压实 + 重定位"后的内存镜像,这一篇拆怎么把它装回去;[07-classfile-classloader/04 — SystemDictionary — 类的"全球电话号码本"](openjdk/vol-02/07-classfile-classloader/04-system-dictionary.md):共享类最终要登记进的字典结构;[08-interpreter/04 — 符号引用怎么变成直接引用？— LinkResolver + Rewriter](openjdk/vol-02/08-interpreter/04-linkresolver-rewriter.md):归档字节码是 nofast 形态,load 端不重写;[44-class-verification/01 — 恶意字节码怎么被拦下？— ClassVerifier 类型检查引擎](openjdk/vol-02/44-class-verification/01-verifier.md):44 域埋下的验证约束在 load 端兑现;[09-memory-core/01 — Universe + CollectedHeap — JVM 的"宇宙大爆炸"](openjdk/vol-02/09-memory-core/01-universe-heap.md):initialize_shared_spaces 的调用点在 Universe::genesis
-> → **后续**:[12-ci/01 — ciObject 镜像体系 — JIT 怎么看到 Java 类？](openjdk/vol-02/12-ci/01-ci-overview-mirror.md):JIT 编译器怎么消费这些共享元数据
-> 关联域: 10-metaspace(压缩类空间与 CDS 相邻)、06-oops(Klass/Method 结构恢复)、17-threads(类加载锁)
-
-## 第二次启动: 类从"共享对象文件"里来
+# 02. mmap 之后共享类怎么进 `SystemDictionary`？— CDS Load 端的对位、接线与激活
 
-同一个 JDK,`-Xshare:dump` 生成了归档(01 篇),第二次启动时它就在那里。`java -version` 的版本行末尾多了一个后缀 "sharing"——意味着这次启动真的用上了归档;`-Xlog:class+load` 里 `java.lang.Object` 的 source 是 **"shared objects file"**,而不是 `jrt:/java.base`——ClassFileParser 被绕过了。但"绕过解析"只是结果,问题是: **mmap 之后,这些类凭什么"看起来像刚解析过"?** 这一篇拆 Load 端,按启动时序走: 参数与校验(能不能用)→ 映射(放到哪)→ 装配(怎么解释)→ 加载(怎么进字典)→ 恢复(怎么激活)。
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64`。这里讨论的是 **CDS / AppCDS 的加载端**：归档文件已经存在时，JVM 如何判断它还能不能用、如何把共享空间映射回地址空间、如何把共享类重新接回当前进程的运行时体系。动态 CDS、其他 JVM 实现、其他平台的映射细节，不在本文展开。
+>
+> **前置依赖**：[11-cds/01 — 启动时怎么让核心类秒加载？— CDS 全景与 Dump](01-cds-overview-dump.md)、[07-classfile-classloader/04 — `SystemDictionary` — 类的“全球电话号码本”](../07-classfile-classloader/04-system-dictionary.md)、[08-interpreter/04 — `LinkResolver + Rewriter`](../08-interpreter/04-linkresolver-rewriter.md)、[09-memory-core/01 — `Universe + CollectedHeap`](../09-memory-core/01-universe-heap.md)
+> → **后续**：[12-ci/01 — `ciObject` 镜像体系 — JIT 怎么看到 Java 类？](../12-ci/01-ci-overview-mirror.md)
 
-## 1. 入口与参数: -Xshare:on/auto/off 的语义
+上一篇我们把 dump 端拆开了：`-Xshare:dump` 并不是把 class 文件另存一份，而是把一批已经加载并链接过的核心类压成共享内存镜像。那一篇的关键词是“冻结、压实、重定位、分区写盘”。
 
-归档加载的开关在参数阶段就定了。`UseSharedSpaces` 默认 **true**、`RequireSharedSpaces` 默认 **false**(globals.hpp:2484/2491)——即默认是 **auto** 行为: 归档能用就用,不能用就静默回退。命令行显式指定三态(arguments.cpp:2781-2801):
+这一篇的问题看似更轻，其实更容易想错：既然归档已经是“可映射的内存镜像”，那 JVM 下次启动时把它 `mmap` 进来不就完了吗？类不是已经在那里了吗？
 
-- `-Xshare:on` → `UseSharedSpaces=true` + `RequireSharedSpaces=true`(:2781-2786)——**必须**用上,失败就退出;
-- `-Xshare:auto` → true + RequireSharedSpaces=false(:2789-2793)——失败回退;
-- `-Xshare:off` → UseSharedSpaces=false(:2797-2801)。
+问题就在这里。**`mmap` 只负责把字节放到地址上，不负责让这些字节自动成为“当前 JVM 的活类”。**
 
-`RequireSharedSpaces` 是"必须成功"与"失败可回退"的全部区别,下面每一道校验的门都用它决定是退出还是关共享继续跑。另外两个前置约束: 压缩指针必须开(UseCompressedOops/UseCompressedClassPointers 都要求,arguments.cpp:3501-3503)——窄指针是 01 篇指针重定位的数学基础;归档路径缺省由 `os::jvm_path` 推导,拼上 `classes.jsa`(arguments.cpp:3510-3524)。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 无 `-XX:SharedArchiveFile` 时 dump 产物落在 **`lib/server/classes.jsa`**(jvm_path 解析到 lib/server 目录)。
+共享归档里当然已经躺着 `InstanceKlass`、`Method`、符号表、共享字典、字符串区，甚至还有一部分归档堆对象；但这些内容是在另一次 JVM 启动里做出来的。当前 JVM 要使用它们，至少还要再过四道门：
 
-启动链走到内存子系统时,`Metaspace::global_initialize`(metaspace.cpp:1294)按 UseSharedSpaces 分流(:1300-1305)→ `MetaspaceShared::initialize_runtime_shared_and_meta_spaces`(metaspaceShared.cpp:216)。真正的动作在 :229 一行: `mapinfo->initialize() && map_shared_spaces(mapinfo)`——**先校验、后映射**,两步都不行就进 else 分支断言"归档未关且共享已关"。后面三节拆这两步。
+- 这份归档是不是仍然属于“同一个世界”；
+- 这些共享区是不是被放回了当年假定的位置；
+- 所有不能跨进程保存的运行期地址和状态，是不是已经补回来了；
+- 这些共享类是不是已经重新穿过当前 JVM 的可见性检查、层级一致性检查和类加载状态机。
 
-## 2. 第一道门: 打开与校验——这份归档我能不能用
+所以，CDS load 端既不是“重新解析一遍归档里的类”，也不是“什么都不用干”。它做的是一件更克制的事：**先验条件、再对位、再接线、再补状态，最后让这些共享类以最轻的代价重新进入 `SystemDictionary`。**
 
-打开一个 11MB 的文件之前要先想清楚: 这份归档是另一台机器、另一个 build 上 dump 的,当前进程到底能不能用?**能提前做的校验必须在映射之前完成**——因为映射是 MAP_FIXED,直接覆盖预留地址,映射完再发现不对就晚了(classpath 表坐在 RW 区里,只能等映射完再验,见本节的"三次校验")。
+先记住这句总答案。后面所有看起来很散的动作——magic 校验、路径表校验、`MAP_FIXED`、`clone_cpp_vtables`、`restore_unshareable_info`、`check_verification_constraints`——其实都在为这句话服务。
 
-`FileMapInfo::initialize`(filemap.cpp:1313)依次做: ① 检查 JVMTI 早阶段 ClassFileLoadHook——钩子存在意味着系统类可能被替换,禁用 CDS(:1316-1323);② `open_for_read`(:617,`os::open` O_RDONLY);③ `init_from_file`(:524)读 `FileMapHeader` 整块并逐项核对;④ `validate_header`(:1397)做第二层校验。`init_from_file` 的核对项: magic、版本、JVM 标识、CRC:
+## 先把两个最自然的误解拿掉
 
-```cpp
-// filemap.cpp:537-543(截取核心,逐字)
-  unsigned int expected_magic = CDS_ARCHIVE_MAGIC; // is_static ? CDS_ARCHIVE_MAGIC : CDS_DYNAMIC_ARCHIVE_MAGIC;
-  if (_header->_magic != expected_magic) {
-    log_info(cds)("_magic expected: 0x%08x", expected_magic);
-    log_info(cds)("         actual: 0x%08x", _header->_magic);
-    FileMapInfo::fail_continue("The shared archive file has a bad magic number.");
-    return false;
-  }
-```
-
-[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 把归档前 4 字节改成 0,启动即报 `_magic expected: 0xf00baba2 / actual: 0x00000000 / UseSharedSpaces: The shared archive file has a bad magic number.`——auto 模式下一行日志后继续启动(版本行少了 "sharing");`-Xshare:on` 则是另一个极端(素材里以"归档不存在"触发): `An error has occurred while processing the shared archive file. / Error occurred during initialization of VM / Unable to use shared archive.`,进程直接退出。
+### 误解一：只要 `mmap` 成功，共享类就已经“加载完成”
 
-其余核对项: `_version` 与 CURRENT_CDS_ARCHIVE_VERSION(:545-550);`_jvm_ident` 字符串——**不同 build 的 libjvm.so 不共享**,否则常量池布局、符号表格式全对不上(:561-574);`VerifySharedSpaces` 开启时 `_header->compute_crc()` 校验头部 CRC(:576-584);最后按头里记录的最后一个 region 偏移检查文件是否被截断(:602-608)。
+这是最常见的第一反应。归档既然已经是一份准备好的内存镜像，当前 JVM 把它映射进来，里面的 `InstanceKlass*` 不就已经存在了吗？
 
-第二层 `validate_header`(:1397)调用 `_header->validate()`(filemap.cpp:1359): `ObjectAlignmentInBytes` 必须一致(:1360)、`CompactStrings` 设置必须一致(:1366)、**验证设置不能比 dump 时更严**(:1384-1392,归档类当时通过的是宽松验证,44 域的"验证约束延迟化"是配套)——再加 `ClassLoader::check_shared_paths_misc_info` 对路径信息串(:1401)。
+存在，不等于可用。
 
-**关键设计 (斜体)**: *归档的校验是分三次做的——头部现在做(init_from_file + validate_header)、每个 region 的 CRC 在映射时做(map_region 里 `verify_region_checksum`,filemap.cpp:919)、classpath 表在 RW 区映射后做(`validate_shared_path_table`,filemap.cpp:480,源码注释明说 "this is done later, because the table is in the RW")。原因很朴素: 校验对象坐在不同的位置,读得到的时候才校。所有"可恢复错误"汇到一个出口 `fail_continue`(filemap.cpp:102): 打一行日志、`UseSharedSpaces = false`、close 文件(:124-126);`RequireSharedSpaces` 为 true 时它在同一点改走 `fail` 直接退出(:114-115)——三处校验共用这一个开关,*这就是第一节说的"全部区别"的落点*。*
+这里最容易混淆的是“对象字节已经在内存里”和“当前 JVM 已经认可这是一批活类”这两件事。共享类里的很多东西是 dump 时故意剥掉的：比如 `java_mirror`、解释器入口、默认 native 方法入口、已解析引用数组的一部分运行期内容。因为这些东西跟当前进程的地址布局、当前 `libjvm.so` 的代码地址、当前加载器状态有关，根本不能直接跨进程保存。`share/classfile/systemDictionary.cpp:1328`、`share/oops/instanceKlass.cpp:2345`、`share/oops/method.cpp:979`、`share/oops/method.cpp:985`
 
-## 3. 第二道门: mmap——必须落在"原来"的地址
+所以 `mmap` 成功，只能说明“这批共享对象的字节被放回了一个看起来对的位置”。离“这个类现在真的能被解释器调用、能被字典登记、能通过层级检查、能被反射看见”还差一大截。
 
-校验通过后,`map_shared_spaces`(metaspaceShared.cpp:2034)把 4 个核心空间(mc/rw/ro/md)映射进进程。这里没有"读文件解析"的余地——**一个字节都不能换位置**:
+### 误解二：既然 dump 时都准备好了，load 端应该什么都不用做
 
-```cpp
-// metaspaceShared.cpp:2052-2074(截取核心,逐字)
-  // Map each shared region
-  if ((mc_base = mapinfo->map_region(mc, &mc_top)) != NULL &&
-      (rw_base = mapinfo->map_region(rw, &rw_top)) != NULL &&
-      (ro_base = mapinfo->map_region(ro, &ro_top)) != NULL &&
-      (md_base = mapinfo->map_region(md, &md_top)) != NULL &&
-      (image_alignment == (size_t)os::vm_allocation_granularity()) &&
-      mapinfo->validate_shared_path_table()) {
-    // Success -- set up MetaspaceObj::_shared_metaspace_{base,top} for
-    // fast checking in MetaspaceShared::is_in_shared_metaspace() and
-    // MetaspaceObj::is_shared().
-    //
-    // We require that mc->rw->ro->md to be laid out consecutively, with no
-    // gaps between them. That way, we can ensure that the OS won't be able to
-    // allocate any new memory spaces inside _shared_metaspace_{base,top}, which
-    // would mess up the simple comparision in MetaspaceShared::is_in_shared_metaspace().
-    assert(mc_base < ro_base && mc_base < rw_base && mc_base < md_base, "must be");
-    assert(md_top  > ro_top  && md_top  > rw_top  && md_top  > mc_top , "must be");
-    assert(mc_top == rw_base, "must be");
-    assert(rw_top == ro_base, "must be");
-    assert(ro_top == md_base, "must be");
-
-    MetaspaceObj::set_shared_metaspace_range((void*)mc_base, (void*)md_top);
-    return true;
-```
-
-细节: 映射前先 `reserve_shared_memory`(filemap.cpp:869)以 `core_spaces_size` 在归档记录的首地址预留整块 ReservedSpace——注释说得很直白: *先留位,否则 mmap 会盖掉别的预留内存(比如 code cache)*。然后逐个 `map_region`(filemap.cpp:891): 目标地址 `region_addr(i)` 从归档头读出,`size` 按页对齐,权限来自 dump 时写下的属性(metaspaceShared.cpp:1458-1461: mc=RW+可执行、rw=RW、ro=只读、md=RW)。真正的系统调用在平台层:
-
-```cpp
-// os_linux.cpp:6129-6150(截取核心,逐字)
-char* os::pd_map_memory(int fd, const char* file_name, size_t file_offset,
-                        char *addr, size_t bytes, bool read_only,
-                        bool allow_exec) {
-  int prot;
-  int flags = MAP_PRIVATE;
-
-  if (read_only) {
-    prot = PROT_READ;
-  } else {
-    prot = PROT_READ | PROT_WRITE;
-  }
-
-  if (allow_exec) {
-    prot |= PROT_EXEC;
-  }
-
-  if (addr != NULL) {
-    flags |= MAP_FIXED;
-  }
-
-  char* mapped_address = (char*)mmap(addr, (size_t)bytes, prot, flags,
-                                     fd, file_offset);
-```
-
-[C++:] 这里要纠正一个直觉: 用的是 **MAP_PRIVATE 不是 MAP_SHARED**。多进程共享同一份物理页,靠的是 file-backed mmap 的**页缓存**——所有进程读同一个文件页,OS 只缓存一份;MAP_SHARED 与 MAP_PRIVATE 的区别只在写传播语义(共享映射回写文件,私有映射**写时复制**——所以只读区(ro)才是纯共享,可写的 rw/mc 一旦被加载期 patch 写脏,该页就 COW 成进程私有)。**MAP_FIXED**(addr 非空时,:6145-6146)把文件页钉死在 requested_addr,配合先行的整块预留(见上),保证不会盖到其他预留内存——它本身不报错(目标地址被占用时是静默替换),所以 map_region 还要用 `base != requested_addr` 兜底检查(filemap.cpp:908-911)。
-
-**关键设计 (斜体)**: *为什么必须同址?01 篇的压实把所有内部指针从"绝对地址"改成了"距归档基址的偏移"——dump 时 `Universe::set_narrow_klass_base(_shared_rs.base())` 让窄指针与归档基址重合(metaspaceShared.cpp:305)。因此只要 load 端在同一地址映射,ro 区指针原样有效、零修正;rw 区仍有少量**加载期 patch**——方法入口 trampoline 与适配器槽在运行期才填(第 6 节),这正是 01 篇留给 02 篇的尾巴;代价是这段地址空间在启动时必须真空——被别的预留(堆、code cache)占了就映射失败,auto 模式回退,on 模式退出(:2088-2092)。*
-
-映射成功后还有两件收尾: ① 压缩类空间紧贴 CDS 之上分配(`Metaspace::allocate_metaspace_compressed_klass_ptrs(cds_end, cds_address)`,metaspaceShared.cpp:238,布局见 10-03 域)并设 `narrow_klass_range`(:243);② `map_heap_regions`(:241 → filemap.cpp:1096)——把字符串区(st0)和 open archive 区(oa0)映射进 **G1 堆**: `map_heap_data` 在堆里 `alloc_archive_regions` 划出归档区(filemap.cpp:1140)再 mmap 数据。JDK11 的堆区允许搬家: oop 编码不一致时按 `runtime_heap_end - dumptime_heap_end` 算 relocation delta(filemap.cpp:1042-1058),由 oopmap 在加载期修补(`patch_archived_heap_embedded_pointers`,filemap.cpp:1188);[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 同配置启动打印 `relocation delta = 0 bytes`,`-Xmx1g` 启动打印 `incompatible oop encoding mode` + `delta = -28991029248 bytes`,归档照用。**压缩类指针(narrow klass)**编码不一致则整段堆数据弃用(filemap.cpp:1021-1025)。
-
-## 4. 第三道门: initialize_shared_spaces——装配"杂项数据"
-
-映射只把字节放到了地址上;"这些字节怎么解释"还差一批数据要装配: **vtable 内容**(函数地址是运行期才知道的)、共享字典桶数组的定位(长度/条目数藏在 RW 区数据里)、well-known 类指针、符号/字符串表、java 类字段偏移。装配发生在 `Universe::genesis` 里(universe.cpp:722-741,UseSharedSpaces 分支先 `MetaspaceShared::initialize_shared_spaces()` 再 `StringTable::create_table()`),函数在 metaspaceShared.cpp:2100,按顺序:
-
-1. 从头部读回 `_cds_i2i_entry_code_buffers`(mc 区里解释器入口 trampoline 缓冲的地址)与 `_core_spaces_size`(:2102-2104);
-2. **`clone_cpp_vtables`**(:2106)——归档里的 Metadata 对象(InstanceKlass/Method/ConstantPool 等 8 类,`CPP_VTABLE_PATCH_TYPES_DO`,:591-599)的 C++ vtable 指针在 dump 时被指向 md 区里的"克隆表"(`patch_cpp_vtable_pointers`,:771),克隆内容写盘前由 `zero_cpp_vtable_clones_for_writing` 清零(:751);load 时把**当前 libjvm.so 的真实 vtable 现拷进去**(`CppVtableCloner::clone_vtable`,:667-681,memcpy 在 :680)。原因: libjvm.so 可能被加载到不同基址,vtable 里的函数地址跨进程会变,所以 vtable 内容不能进归档;
-3. **共享字典**: 从 RW 区的 `read_only_tables_start` 读出长度与条目数,直接 cast 成 `HashtableBucket` 数组交给 SystemDictionary(:2110-2117)——字典整个在归档里,零解析;
-4. `HeapShared::read_archived_subgraph_infos`(:2127)读堆对象子图记录;
-5. **`serialize(&rc)`**(:2133,ReadClosure 在 :1957)——一段带 tag 校验的流式读取,结构在 `MetaspaceShared::serialize`(:400-432): 先核对 sizeof(Method/ConstMethod/ConstantPool/Symbol...) 等结构体尺寸(:405-412),再读 well-known 类(`Universe::serialize`,universe.cpp:249 起,如 `_objectArrayKlassObj`)、常用名字签名(`vmSymbols::serialize`)、**两个 CompactHashtable**(SymbolTable/StringTable,见第 7 节)、java 类字段偏移(`JavaClasses::serialize_offsets`,如 java_lang_String 的 value 字段 offset),最后 tag 666 收尾(:431)。任何 tag 不匹配 → 归档作废;
-6. `SymbolTable::create_table()`(:2136)建动态符号表;`patch_archived_heap_embedded_pointers`(:2138)按 delta 修正堆对象内嵌 oop;`close()`(:2141)关文件——此后归档文件不再被访问,内存里已全部就位。
-
-```cpp
-// metaspaceShared.cpp:2105-2117(截取核心,逐字)
-  char* buffer = mapinfo->misc_data_patching_start();
-  clone_cpp_vtables((intptr_t*)buffer);
-
-  // The rest of the data is now stored in the RW region
-  buffer = mapinfo->read_only_tables_start();
-  int sharedDictionaryLen = *(intptr_t*)buffer;
-  buffer += sizeof(intptr_t);
-  int number_of_entries = *(intptr_t*)buffer;
-  buffer += sizeof(intptr_t);
-  SystemDictionary::set_shared_dictionary((HashtableBucket<mtClass>*)buffer,
-                                          sharedDictionaryLen,
-                                          number_of_entries);
-```
-
-**关键设计 (斜体)**: *两段式初始化——"纯字节"的部分(mmap 区)映射完直接可用;"带地址/带代码"的部分(vtable 克隆、字典指针、well-known 类)靠 serialize 流装配。tag 机制保证 dump/load 两端对同一批 C++ 结构体的 sizeof 完全一致,不一致(跨 build)当场失败,而不是跑起来才崩。*
-
-## 5. 类加载: 三条路进字典
-
-装配完成,字典和符号表都活了。现在 `Class.forName("java.lang.Object")` 或加载一个应用类,共享类是怎么从"归档里的 InstanceKlass"变成"SystemDictionary 里的活类"的?取决于发起者,有三条路。
-
-**路 1(引导加载器)**: `SystemDictionary::load_instance_class`(systemDictionary.cpp:1403)在解析前先查共享字典(:1463-1470)→ `load_shared_class(name, loader)`(:1165)→ `find_shared_class`(:1147,按 hash 进桶遍历 `Dictionary::find_shared_class`,dictionary.cpp:361,无锁——表是静态的)→ 仅当是 **boot 类且 loader 为 NULL** 才继续(:1169-1173),否则返回 NULL 走普通解析。
-
-**路 2(AppCDS 快路径,Platform/App 加载器)**: JDK 侧 `BuiltinClassLoader.loadClassOrNull`(BuiltinClassLoader.java:590)先 `findLoadedClass(cn)`(:593)→ native `JVM_FindLoadedClass`(jvm.cpp:962)。注意这个 native 不只是"查已加载": 查不到时(:996-1000)调用 `SystemDictionaryShared::find_or_load_shared_class`——**既查共享字典又当场加载**。注释(:471-478)明说这是对 findLoadedClass 的拦截: 省掉 classfile 解码 + 父加载器委托。函数本身(骨架见下): 三重门(UseSharedSpaces + 归档含 platform/app 类 + 加载器是 system/platform,:483-490)→ 先查加载器自己的字典防重复(:515-519)→ `load_shared_class_for_builtin_loader`(:530): 在共享字典里 `find_class_for_builtin_loader`(:534 → systemDictionaryShared.cpp:991,桶遍历)→ 检查归档类的 `is_shared_app_class`/`is_shared_platform_class` 与当前加载器匹配(:538-541)→ `load_shared_class(ik, ...)`(:544)→ `define_instance_class` 登记(:523)。
-
-```cpp
-// systemDictionaryShared.cpp:480-528(截取核心,逐字)
-InstanceKlass* SystemDictionaryShared::find_or_load_shared_class(
-                 Symbol* name, Handle class_loader, TRAPS) {
-  InstanceKlass* k = NULL;
-  if (UseSharedSpaces) {
-    if (!FileMapInfo::current_info()->header()->has_platform_or_app_classes()) {
-      return NULL;
-    }
-
-    if (shared_dictionary() != NULL &&
-        (SystemDictionary::is_system_class_loader(class_loader()) ||
-         SystemDictionary::is_platform_class_loader(class_loader()))) {
-      // Fix for 4474172; see evaluation for more details
-      class_loader = Handle(
-        THREAD, java_lang_ClassLoader::non_reflection_class_loader(class_loader()));
-      ClassLoaderData *loader_data = register_loader(class_loader);
-      Dictionary* dictionary = loader_data->dictionary();
-
-      unsigned int d_hash = dictionary->compute_hash(name);
-
-      bool DoObjectLock = true;
-      ...
-      {
-        MutexLocker mu(SystemDictionary_lock, THREAD);
-        Klass* check = find_class(d_hash, name, dictionary);
-        if (check != NULL) {
-          return InstanceKlass::cast(check);
-        }
-      }
-
-      k = load_shared_class_for_builtin_loader(name, class_loader, THREAD);
-      if (k != NULL) {
-        define_instance_class(k, CHECK_NULL);
-      }
-    }
-  }
-  return k;
-}
-```
-
-**路 3(自定义加载器)**: `defineClass` 走 `SystemDictionary::parse_stream` 时调 `lookup_from_stream`(systemDictionary.cpp:1072 → systemDictionaryShared.cpp:585): 只处理非 builtin 加载器(:596-601);共享字典里没有名字匹配就直接放弃(:607-610);有则按 **(类名, classfile 长度, crc32)** 三元组精确匹配 UNREGISTERED 条目(:612-616)——自定义加载器无法用类名保证身份,用字节指纹;命中后 `acquire_class_for_current_thread`(:628)在 `SharedDictionary_lock` 下认领(防多线程重复加载,已认领返回 NULL,:637-646),再走 `load_shared_class`。
-
-**关键设计 (斜体)**: *共享字典是 `SharedDictionary : public Dictionary`(systemDictionaryShared.hpp:162)——可链式增长的 Hashtable,不是第 7 节的 CompactHashtable。原因: dump 端要往里逐类插条目并挂每类的附加信息(验证约束、id、classpath 索引、crc,`SharedDictionaryEntry`,:113 起),运行端则只读遍历。boot 类查找无锁,因为表头在归档里就是静态的——"查共享类"与"查符号/字符串"用两套表结构,正是这个原因。*
-
-## 6. 激活: restore_unshareable_info——"看起来像刚解析过"
-
-拿到归档里的 `InstanceKlass*` 只是第一步: 它的 java_mirror 是 NULL(dump 时 `remove_java_mirror` 剥离了,但镜像对象本身若可归档会以 "raw archived mirror" 存进开放归档区),方法入口指向 mc 区 trampoline,常量池的 resolved_references 数组要重建。要真正"就绪",`load_shared_class(ik, ...)`(systemDictionary.cpp:1270)还要过四关:
-
-1. **可见性** `is_shared_class_visible`(:1183): 归档类的 `shared_classpath_index < 0` 表示留给自定义加载器,builtin 加载器不得用(:1191-1199);模块被 patch 过的类不能共享(:1226-1228);模块 location 必须与 dump 时一致(:1236-1241);
-2. **超类/接口重解析**: 逐个 `resolve_super_or_fail` 且**必须与归档里的同一个对象**(:1292-1318)——ik 的布局依赖超类布局,超类变了就不能用(注释 :1285-1290);
-3. **CFLH**: `KlassFactory::check_shared_class_file_load_hook`(:1320),钩子改过类就弃用归档版;
-4. **`restore_unshareable_info`**(:1347,加锁执行):
-
-```cpp
-// systemDictionary.cpp:1328-1348(截取核心,逐字)
-    // Adjust methods to recover missing data.  They need addresses for
-    // interpreter entry points and their default native method address
-    // must be reset.
-
-    // Updating methods must be done under a lock so multiple
-    // threads don't update these in parallel
-    //
-    // Shared classes are all currently loaded by either the bootstrap or
-    // internal parallel class loaders, so this will never cause a deadlock
-    // on a custom class loader lock.
-
-    ClassLoaderData* loader_data = ClassLoaderData::class_loader_data(class_loader());
-    {
-      HandleMark hm(THREAD);
-      Handle lockObject = compute_loader_lock_object(class_loader, THREAD);
-      check_loader_lock_contention(lockObject, THREAD);
-      ObjectLocker ol(lockObject, THREAD, true);
-      // prohibited package check assumes all classes loaded from archive call
-      // restore_unshareable_info which calls ik->set_package()
-      ik->restore_unshareable_info(loader_data, protection_domain, CHECK_NULL);
-    }
-```
-
-`InstanceKlass::restore_unshareable_info`(instanceKlass.cpp:2345)的动作: `set_package`(:2350)→ `Klass::restore_unshareable_info`(klass.cpp:508: 恢复 class_loader_data;若 `has_raw_archived_mirror` 且开放归档区已映射,从归档恢复 java_lang.Class 对象,klass.cpp:545-554,否则新建 mirror,:565-568)→ 逐个 `Method::restore_unshareable_info`(method.cpp:1152 → `link_method` :1077)。方法恢复是理解"为什么 mc 区需要 trampoline"的关键: dump 时 `Method::unlink_method`(method.cpp:977)把 `_i2i_entry` 设成 `Interpreter::entry_for_cds_method`(:985-986)——即 mc 区里的 **jmp 桩**(`update_cds_entry_table`,abstractInterpreter.cpp:214,每个桩 `jmp _entry_table[kind]`);load 时解释器重新生成(`method_entry` 宏,templateInterpreterGenerator.cpp:186-189)把桩的目标地址刷成当前进程的 `_entry_table`,而 `link_method` 的断言 `entry == _i2i_entry`(method.cpp:1082)保证两者一致——于是共享方法的解释器入口无需在归档里存任何运行期地址。i2c/c2i 适配器同理: dump 时 `ConstMethod` 的 `_adapter_trampoline` 指向 RW 区一个槽(初始 NULL,constMethod.hpp:212/301-308),第一个被 link 的方法在运行期生成 `AdapterHandlerEntry` 并把指针填进该槽(注释 method.cpp:1015-1031,`make_adapters` :1142-1148)。常量池侧: `ConstantPool::restore_unshareable_info`(constantPool.cpp:328)重建 resolved_references——归档堆可用就直接用归档的数组,否则按记录长度重建(:352-359)。
-
-接着进 `link_class`(instanceKlass.cpp:777 起)——共享类在这里与普通类分道扬镳:
-
-```cpp
-// instanceKlass.cpp:787-807(截取核心,逐字)
-    if (!is_linked()) {
-      if (!is_rewritten()) {
-        {
-          bool verify_ok = verify_code(throw_verifyerror, THREAD);
-          if (!verify_ok) {
-            return false;
-          }
-        }
-
-        // Just in case a side-effect of verify linked this class already
-        // (which can sometimes happen since the verifier loads classes
-        // using custom class loaders, which are free to initialize things)
-        if (is_linked()) {
-          return true;
-        }
-
-        // also sets rewritten
-        rewrite_class(CHECK_false);
-      } else if (is_shared()) {
-        SystemDictionaryShared::check_verification_constraints(this, CHECK_false);
-      }
-```
-
-[C++:] 归档类 `is_rewritten()` 为 true(dump 端重写 + nofast 化已完成,08-04 篇),所以**跳过 verify_code 与 rewrite_class**;走 else-if 分支调 `SystemDictionaryShared::check_verification_constraints`——这就是 44 域"验证约束延迟化"的兑现: dump 时 `ClassVerifier` 的 `is_reference_assignable_from` 遇到无法当场解析的类层级检查,`DumpSharedSpaces && SystemDictionaryShared::add_verification_constraint(...)` 把它记进字典条目并当场放行(verificationType.cpp:97-103);load 端 `check_verification_constraints`(systemDictionaryShared.cpp:911-941)逐条重跑 `VerificationType::resolve_and_check_assignability`,不满足就抛 **VerifyError**(:937)。**ClassFileParser 没有出现、Verifier 没有整体重跑、字节码没有重写**——01 篇说的"每次启动的重复劳动"就是被这三件事省掉的。
-
-收尾: `print_class_load_logging`(systemDictionary.cpp:1350)——实证里每行 `[class,load] java.lang.Object source: shared objects file` 就是它;[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) AppCDS 归档下应用类 T 同样 `T source: shared objects file`。之后 `define_instance_class` 把它挂进加载器的字典、加入类层级。注意状态机并没有"从归档继承 loaded"——dump 时 `remove_unshareable_info` 把 `_init_state` 重置回 allocated(instanceKlass.cpp:2293-2297,注释明说 loaded 要在运行期由 `add_to_hierarchy` 设置);load 端 `restore_unshareable_info` 的断言也要求状态 < loaded(:2349)。所以加载状态机照走一遍,但每一步的重活都已被跳过——解析(没有 ClassFileParser)、验证(只剩约束)、重写(没有 Rewriter)。
-
-## 7. 符号与字符串: CompactHashtable 的 O(1) 查找
-
-类就绪了,但它们的常量池引用着归档里的 `Symbol*` 与字符串对象。这些小东西归另一张表管:**CompactHashtable**(symbolTable.cpp:53/stringTable.cpp:68)。它只读、不可扩容,但每个条目省到极致: 桶数组 `buckets[num_buckets+1]` 每个 u4——**高 2 位是桶类型、低 30 位是 entries 偏移**(compactHashtable.hpp:140-147);entries 两种形态: 单条目桶(VALUE_ONLY)只存 4B offset,多条目桶(REGULAR)存 (hash, offset) 8B 对,桶尾用下一个桶的偏移标记边界(:158-195)。对照动态 Hashtable 每条目 8B 指针 + 8B 链,省一半以上。
-
-```cpp
-// compactHashtable.inline.hpp:59-91(截取核心,逐字)
-template <class T, class N>
-inline T CompactHashtable<T,N>::lookup(const N* name, unsigned int hash, int len) {
-  if (_entry_count > 0) {
-    int index = hash % _bucket_count;
-    u4 bucket_info = _buckets[index];
-    u4 bucket_offset = BUCKET_OFFSET(bucket_info);
-    int bucket_type = BUCKET_TYPE(bucket_info);
-    u4* entry = _entries + bucket_offset;
-
-    if (bucket_type == VALUE_ONLY_BUCKET_TYPE) {
-      T res = decode_entry(this, entry[0], name, len);
-      if (res != NULL) {
-        return res;
-      }
-    } else {
-      // This is a regular bucket, which has more than one
-      // entries. Each entry is a pair of entry (hash, offset).
-      // Seek until the end of the bucket.
-      u4* entry_max = _entries + BUCKET_OFFSET(_buckets[index + 1]);
-      while (entry < entry_max) {
-        unsigned int h = (unsigned int)(entry[0]);
-        if (h == hash) {
-          T res = decode_entry(this, entry[1], name, len);
-          if (res != NULL) {
-            return res;
-          }
-        }
-        entry += 2;
-      }
-    }
-  }
-  return NULL;
-}
-```
-
-[C++:] 哈希相同还要 **decode_entry 双保险**: 符号版 `(Symbol*)(_base_address + offset)` 后用 `sym->equals(name, len)` 逐字节比对,并且断言 `refcount() == -1`(compactHashtable.inline.hpp:36-46,共享符号不可释放);字符串版把 offset 当 narrowOop,`HeapShared::decode_from_archive` 解码出堆区对象再比对(:48-58)。`_base_address` 是 **dump 时写死的 `shared_rs()->base()`**(compactHashtable.cpp:147),load 时由 serialize 原样读回——之所以有效,正是因为第 3 节的同址映射;大纲所说的"mmap 后把 base 设成实际地址"并不存在,那是把结果当成了原因。
-
-集成侧: 符号表查共享表与动态表的顺序由 `_lookup_shared_first` 决定(symbolTable.cpp:242-258)——初始 false 时**先查动态表**,miss 后查共享表,共享命中把它置 true;此后**先查共享表**,共享 miss 再回落 false——一个"最近哪边命中先查哪边"的启发式;`StringTable::lookup`(stringTable.cpp:240-249)则**固定先查共享表**,miss 才走动态表,归档堆没映射上时 `_shared_table.reset()` 全弃(:866-869)——字符串在堆里,堆区不能用,表就作废,一切回到普通加载。
-
-**关键设计 (斜体)**: *只读 + 不扩容 = 没有 rehash、没有锁、没有引用计数。它赌的是"这些符号永远活着"——归档符号确实如此(没人能删),归档字符串由 G1 的归档区托管。4B 一个桶槽 + 4B 一个单条目值,是"为 mmap 而生"的哈希表。*
-
-## 8. 堆对象: 子图恢复与静态字段
-
-字符串之外,归档里还有一批**对象子图**——`IntegerCache`、`ImmutableCollections` 的 ListN/SetN/MapN、`Configuration`、`ArchivedModuleGraph` 等类的静态字段指向的对象(heapShared.cpp:728 `archive_static_fields` 归档)。load 端不在启动时一锅端: 各宿主类静态初始化时自己调 `VM.initializeFromArchive`(VM.java:426)→ `JVM_InitializeFromArchive`(jvm.cpp:3617-3620)→ `HeapShared::initialize_from_archived_subgraph`(heapShared.cpp:271): 按 klass 找记录(:283-285),把子图里所有对象的类 resolve 出来、**确认还是归档里的同一个类**(否则放弃,:294-311),再把记录里的归档对象 materialize 回 java_mirror 的对应字段(:324-336)。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/11-cds-load-demo.txt) 同配置启动日志 `Trying to map heap data: region[4] at 0x00000007bfe00000, size = 442368 bytes`(st0 字符串区)与 `region[6]`(oa0 开放归档区)就是这两块堆区落地。
-
-## 核心悬念
-
-Load 端拆完了。回头看整个时序: 参数决定能不能用(-Xshare 三态)→ 打开与三重校验(magic/版本/jvm_ident/路径表)分三处做→ **MAP_FIXED 同址映射**(指针全部是"基址+偏移",同址是免修正的唯一方案)→ `initialize_shared_spaces` 装配(C++ vtable 现拷、共享字典 cast、well-known 类与符号表流式读回)→ 三条加载路(引导字典直查、AppCDS 拦截 findLoadedClass、自定义加载器按字节指纹)→ `restore_unshareable_info` 激活(方法入口、cpCache、验证约束、挂字典)。一句话: **Load 端没有"加载",只有"对位"**——该做的解析 dump 时做完了,load 端只负责把镜像放回原位、补上运行期指针,顺带用三分校验挡住"这份归档我不认识"。
-
-但类"就绪"只是开始: 解释器要用它们,更重要的是 JIT 编译器——C2 编译 `String.length()` 时需要知道 value 字段的偏移、方法表、继承关系,可它不能直接读 InstanceKlass(太多 VM 专用的锁与虚函数)。下一域进入编译器侧: 12-ci,ciObject 镜像体系。
-
-> → [12-ci/01 — ciObject 镜像体系 — JIT 怎么看到 Java 类？](openjdk/vol-02/12-ci/01-ci-overview-mirror.md)
+另一种看法正好走到另一个极端：上一篇明明已经说过 dump 端做了压实和重定位，说明设计目标就是“以后直接映射即用”。那 load 端为什么还要搞校验、接线、恢复、重新 link？这不是打自己的脸吗？
+
+不是。这里的关键区别在于：**dump 时能固化的，只是“与具体进程无关的稳定结构”；load 时必须补的，是“与当前进程有关的运行期信息”。**
+
+举几个最硬的例子：
+
+- C++ vtable 里的函数地址跟当前 `libjvm.so` 的装载位置有关，不能写死进归档；
+- 解释器入口 trampoline 最终要跳到当前进程生成的 `_entry_table`，不是 dump 时那次 JVM 的入口地址；
+- 自定义加载器能不能使用某个共享类，要看当前 class loader、当前保护域、当前模块状态；
+- 某个共享类的超类和接口在当前 JVM 里解析出来的对象，必须还是 dump 时那同一批对象，否则布局前提就变了。`share/memory/metaspaceShared.cpp:2105`、`share/classfile/systemDictionary.cpp:1285`、`share/classfile/systemDictionary.cpp:1296`、`share/classfile/systemDictionary.cpp:1311`、`share/oops/method.cpp:1020`
+
+所以“直接映射即用”这句话只能在一个限定语下成立：**对那些已经被 dump 端稳定化、而且仍然满足当前 JVM 全部假设的部分，load 端尽量不重做。**
+
+换句话说，CDS load 端的高明之处不在于“完全不干活”，而在于“只补当前 JVM 非补不可的那一小块活”。
+
+到这里先立一个路标：这一篇真正要追的不是“共享归档如何被打开”，而是“共享类如何从‘躺在归档里的字节对象’变成‘当前 JVM 的活类’”。
+
+## 第一道门：先确认这还是不是“当年那份世界”
+
+共享类之所以能直接拿来用，前提是当前 JVM 和 dump 那次 JVM 仍然生活在同一套世界观里。只要这个前提破了，归档里的字节越完整，风险反而越大。
+
+这个判断从参数阶段就开始了。`Metaspace::global_initialize()` 在运行时会按 `UseSharedSpaces` 分流。如果不是 dump 模式但启用了共享空间，就会走 `MetaspaceShared::initialize_runtime_shared_and_meta_spaces()`。也就是说，CDS 加载根本不是“类加载时临时看看有没有 archive”，而是在 metaspace 和 class space 初始化的最前面就要介入，避免后面的地址布局先把关键位置占掉。`share/memory/metaspace.cpp:1294`、`share/memory/metaspace.cpp:1300`、`share/memory/metaspace.cpp:1305`、`share/memory/metaspaceShared.cpp:216`
+
+`initialize_runtime_shared_and_meta_spaces()` 的骨架很直接：先 new 一个 `FileMapInfo`，然后只在 `mapinfo->initialize()` 和 `map_shared_spaces(mapinfo)` 都成功时继续往下。也就是说，CDS 加载的第一道门不是映射，而是“这份归档是否还可信”。`share/memory/metaspaceShared.cpp:223`、`share/memory/metaspaceShared.cpp:229`
+
+`FileMapInfo::initialize()` 自己就像一个很谨慎的门卫。它先检查 JVMTI 的 early `ClassFileLoadHook`。这是个极好的例子：只要 VM 允许某个 agent 在非常早的阶段改系统类，CDS 对“共享类内容不会被动态替换”的假设就不成立，所以直接禁用共享。这里不是技术做不到，而是设计者不肯赌。`share/memory/filemap.cpp:1316`、`share/memory/filemap.cpp:1321`
+
+接下来才是打开归档文件、读取 header、做头部校验。我们在上一篇看过归档头里塞了不少信息：magic、版本、JVM 标识、对象对齐、压缩指针参数、路径杂项信息、共享路径表等。现在终于能看出它们的真正作用：不是为了描述文件格式，而是为了判断“当前 JVM 还能不能继承 dump 当时的那套假设”。`share/memory/filemap.cpp:1325`、`share/memory/filemap.cpp:1329`、`share/memory/filemap.cpp:1332`、`share/memory/filemap.cpp:1359`
+
+这一层检查里，最显眼的是 magic 与版本。它们保证眼前这玩意儿确实是 CDS archive，而且版本对得上。更细的还有 `ObjectAlignmentInBytes`、`CompactStrings`、JVM build 标识，以及共享路径杂项信息。只要有任何一条不对，HotSpot 就不再把它视为“本进程可以接上的共享镜像”，而是果断回退。`share/memory/filemap.cpp:1360`、`share/memory/filemap.cpp:1366`、`share/memory/filemap.cpp:1376`、`share/memory/filemap.cpp:1386`、`share/memory/filemap.cpp:1397`、`share/memory/filemap.cpp:1401`
+
+这里有一个特别值得停一下的点：`validate_shared_path_table()` 并不在最开始做，而是延后到映射阶段之后。源码注释点得很清楚：因为那张表坐在 archive 的 `RW` 区里，没映射之前还读不到。`share/memory/filemap.cpp:1311`、`share/memory/filemap.cpp:480`
+
+这说明 CDS 的校验不是一把梭，而是按“当前能读到哪一层信息”逐步推进的：
+
+- 先用文件头能看到的东西，确认大前提还成立；
+- 映射时再验证每个 region 的校验和；
+- 映射完 `RW` 区，最后再验共享路径表。`share/memory/filemap.cpp:491`、`share/memory/filemap.cpp:493`
+
+如果把这整段翻译成人话，就是：**HotSpot 不是在问“这个文件能不能打开”，而是在问“这是不是我当年那套世界里做出来的镜像，而且当前世界还没有变掉”。**
+
+## 第二道门：不是“映射进来就行”，而是“必须映射回原位”
+
+通过头部校验之后，才轮到真正的 `mmap`。但这里也不是随便找块空地把内容读进来。`map_shared_spaces()` 明确要求把四个 core spaces —— `mc`、`rw`、`ro`、`md` —— 映射到归档头记录的地址，而且中间不能有缝。`share/memory/metaspaceShared.cpp:2033`、`share/memory/metaspaceShared.cpp:2052`、`share/memory/metaspaceShared.cpp:2063`、`share/memory/metaspaceShared.cpp:2069`、`share/memory/metaspaceShared.cpp:2070`、`share/memory/metaspaceShared.cpp:2071`
+
+为什么这么苛刻？因为共享类里的大量指针关系，并不是为“任意地址恢复”而设计的，而是为“尽量在同一基址原样成立”而设计的。上一篇已经讲过 dump 时为什么要围着共享区基址来设 `narrow_klass_base`；load 端在这里就是在兑现那个前提。
+
+`FileMapInfo::reserve_shared_memory()` 会先尝试把整个 core spaces 连续预留出来，理由写得很坦白：如果不先 reserve，后面的映射可能会直接盖到别的保留内存，比如 code cache。`share/memory/filemap.cpp:868`、`share/memory/filemap.cpp:873`、`share/memory/filemap.cpp:875`、`share/memory/filemap.cpp:877`
+
+然后 `map_region()` 再逐区做真正的文件映射。它不是“尽量映射到这个地址”，而是“必须映射到这个地址”。只要 `base == NULL` 或者 `base != requested_addr`，就算失败。随后还会跑 `verify_region_checksum()`。也就是说，CDS 这里关心的是 **地址正确 + 内容正确**，缺一不可。`share/memory/filemap.cpp:891`、`share/memory/filemap.cpp:897`、`share/memory/filemap.cpp:905`、`share/memory/filemap.cpp:908`、`share/memory/filemap.cpp:919`
+
+这一步的本质非常重要：**共享 archive 不是一堆“可以被重新解释的数据”，而是一段“最好能被原样接上的运行时内存”。**
+
+如果地址不对，HotSpot 不会说“那我辛苦一点，把所有共享类里的指针都重新修一遍吧”。它宁可放弃共享。因为一旦走到那一步，load 端就不再是“最轻量接线”，而会退化成另一套巨大的恢复系统，那等于自己否定了 dump 端整个镜像设计。
+
+映射成功之后，事情还没完。运行时初始化还要顺手把 compressed class space 放到 CDS 区之后，并把 heap archive regions 也接进来。源码里明确要求先确定所有 encoding，再做 `map_heap_regions()`。如果 class space 地址和 CDS 基址不兼容，还会直接 stop sharing and unmap。`share/memory/metaspaceShared.cpp:233`、`share/memory/metaspaceShared.cpp:238`、`share/memory/metaspaceShared.cpp:239`、`share/memory/metaspaceShared.cpp:241`、`share/memory/metaspace.cpp:1187`、`share/memory/metaspace.cpp:1189`、`share/memory/metaspace.cpp:1193`
+
+所以第二道门的真正答案是：load 端不是把文件读进来，而是在做一次严苛的“对位”。对位失败，整套共享类体系就不成立。
+
+## 第三道门：映射完只是“躯壳到位”，还得把运行期接线补上
+
+很多人第一次看到 `initialize_shared_spaces()` 会疑惑：既然四个 core spaces 都已经映射成功了，为什么还要再读一遍所谓的 miscellaneous data？
+
+因为映射成功只是把归档里的“躯壳”摆回来了，真正让它接上当前 JVM 的那些线，还没插上。
+
+`initialize_shared_spaces()` 一开头先从 `FileMapInfo` 里取回 `_cds_i2i_entry_code_buffers`、`_cds_i2i_entry_code_buffers_size` 和 `_core_spaces_size`，然后马上调用 `clone_cpp_vtables()`。这一步的直觉很好理解：归档里的 C++ 对象虽然字节形状对了，但 vtable 里的函数地址属于当前进程的 `libjvm.so`，不可能跨进程照搬。所以 dump 时只是给它们留了克隆表位置，load 时再把当前 JVM 的真实 vtable 内容 memcpy 进去。`share/memory/metaspaceShared.cpp:2102`、`share/memory/metaspaceShared.cpp:2105`、`share/memory/metaspaceShared.cpp:2106`
+
+接下来 HotSpot 从 `read_only_tables_start()` 开始读回共享字典表头：先拿表长、条目数，再直接把那段内存 cast 成 `HashtableBucket` 数组，交给 `SystemDictionary::set_shared_dictionary()`。注意这个动作非常能体现 CDS 的风格：这里没有“重新解析一张字典文件”，而是“把一段已经成型的只读哈希表接到当前 `SystemDictionary` 身上”。`share/memory/metaspaceShared.cpp:2108`、`share/memory/metaspaceShared.cpp:2110`、`share/memory/metaspaceShared.cpp:2114`、`share/classfile/systemDictionary.cpp:1133`、`share/classfile/systemDictionary.cpp:1138`
+
+再往后还有两层接线。
+
+第一层是共享堆子图信息。`HeapShared::read_archived_subgraph_infos()` 会把这批记录读回来，供后续需要时按类去 materialize 归档对象子图。也就是说，连堆对象的恢复都是“先把索引和描述接好，等真正用到时再拿”。`share/memory/metaspaceShared.cpp:2126`、`share/memory/metaspaceShared.cpp:2127`
+
+第二层是 `serialize(&rc)`。这个名字很容易让人误会成“又在序列化/反序列化对象”。其实它更像一份双端都认识的接线清单：按照固定顺序读回 well-known klasses、共享符号/字符串表、某些 Java 类字段偏移，以及一批尺寸与 tag 校验。它真正干的，是确认“dump/load 两端仍然在谈论同一批 C++ 结构与同一批全局对象”。`share/memory/metaspaceShared.cpp:2129`、`share/memory/metaspaceShared.cpp:2132`、`share/memory/metaspaceShared.cpp:2133`
+
+最后，运行时符号表要创建，归档堆对象里嵌入的 oop 指针要 patch，文件句柄要关闭。到这一步，共享区才算真的从“纯字节地图”变成“当前 JVM 已接好线的共享运行时部件”。`share/memory/metaspaceShared.cpp:2135`、`share/memory/metaspaceShared.cpp:2138`、`share/memory/metaspaceShared.cpp:2140`
+
+这里可以先收一个阶段性结论：**`initialize_shared_spaces()` 的意义不是“再做一次加载”，而是“把跨进程不能保存的接头重新插进当前 JVM”。**
+
+## 共享类怎么真正进 `SystemDictionary`：三条入口，最后汇到同一个核心动作
+
+到这里，共享区已经在内存里、共享字典已经挂上、共享符号表也能查了。但“共享类存在于 archive 中”仍然不等于“共享类已经变成当前类加载器眼里的类”。真正让它们进字典、进层级、进状态机，还要靠类加载路径上的接入点。
+
+### 引导加载器：先查共享字典，再决定是否直接拿共享类
+
+对于 bootstrap loader，逻辑最直观。`SystemDictionary::find_shared_class()` 会在 `_shared_dictionary` 上按 hash 查类名；`SystemDictionary::load_shared_class(Symbol*, Handle)` 再要求它必须是共享 boot class，而且当前 loader 也必须是 `NULL`。只有这一层条件成立，才会走真正的 `load_shared_class(InstanceKlass*, ...)`。`share/classfile/systemDictionary.cpp:1147`、`share/classfile/systemDictionary.cpp:1149`、`share/classfile/systemDictionary.cpp:1152`、`share/classfile/systemDictionary.cpp:1165`、`share/classfile/systemDictionary.cpp:1169`
+
+这条路径很能说明共享类不是“字典里预先就算已加载完”。共享字典里放的是“可被尝试接入的共享类候选项”，而不是“已经完成当前 loader 语义的类对象”。真正接入系统，还要经过后面的可见性与恢复过程。
+
+### 平台 / 应用加载器：在 `findLoadedClass` 这一刀上截胡
+
+AppCDS 的巧劲在这里最明显。`SystemDictionaryShared.cpp` 里有一大段注释专门解释：平台类加载器和应用类加载器都经由 `BuiltinClassLoader.loadClassOrNull()`，而这条路径在 Java 侧会先调 `findLoadedClass()`。HotSpot 正是借这个时机，在 `JVM_FindLoadedClass` 里面插入 `SystemDictionaryShared::find_or_load_shared_class()`。这样做的好处是，一旦共享字典里有现成类，就可以直接从 archive 接入，省掉 classfile 解码，也省掉一轮父加载器委托。`share/classfile/systemDictionaryShared.cpp:449`、`share/classfile/systemDictionaryShared.cpp:471`、`share/classfile/systemDictionaryShared.cpp:472`、`share/classfile/systemDictionaryShared.cpp:474`
+
+`find_or_load_shared_class()` 自己也很谨慎。它先要求 `UseSharedSpaces` 为真，归档里确实包含平台/应用类，然后要求共享字典不为空、当前 loader 是 system/platform loader。之后它先在当前 loader 自己的字典里检查是不是已经有同名类，避免重复定义；只有没找到，才去 `load_shared_class_for_builtin_loader()`。`share/classfile/systemDictionaryShared.cpp:480`、`share/classfile/systemDictionaryShared.cpp:483`、`share/classfile/systemDictionaryShared.cpp:488`、`share/classfile/systemDictionaryShared.cpp:494`、`share/classfile/systemDictionaryShared.cpp:514`、`share/classfile/systemDictionaryShared.cpp:521`
+
+`load_shared_class_for_builtin_loader()` 再进一步要求：归档里的类必须标记为 shared app class 或 shared platform class，而且要与当前加载器身份对应。通过后才初始化安全信息，并走统一的 `load_shared_class(ik, class_loader, protection_domain, NULL, THREAD)`。`share/classfile/systemDictionaryShared.cpp:530`、`share/classfile/systemDictionaryShared.cpp:534`、`share/classfile/systemDictionaryShared.cpp:538`、`share/classfile/systemDictionaryShared.cpp:542`、`share/classfile/systemDictionaryShared.cpp:544`
+
+### 自定义加载器：不是按名字认，而是按字节指纹认
+
+第三条路径最能体现 HotSpot 为什么不能偷懒。对于非 builtin loader，光靠类名根本不足以确认“这是不是 dump 时归档的那一个类定义”。所以 `lookup_from_stream()` 先排除 `NULL`、system、platform loader，只在自定义加载器路径上工作。接着如果共享字典里连这个名字的 UNREGISTERED 条目都没有，就直接放弃。真有的话，还要拿当前 `ClassFileStream` 的长度和 `crc32`，与归档时记录的三元组 `(name, size, crc32)` 精确比对。`share/classfile/systemDictionaryShared.cpp:585`、`share/classfile/systemDictionaryShared.cpp:596`、`share/classfile/systemDictionaryShared.cpp:607`、`share/classfile/systemDictionaryShared.cpp:612`、`share/classfile/systemDictionaryShared.cpp:615`
+
+命中之后，还不能直接宣布成功。`acquire_class_for_current_thread()` 要先在 `SharedDictionary_lock` 下确认这份 `InstanceKlass` 还没有被别的线程或别的 loader 抢走，然后先把它绑定到当前 `ClassLoaderData`，再继续调用统一的 `load_shared_class()`。`share/classfile/systemDictionaryShared.cpp:628`、`share/classfile/systemDictionaryShared.cpp:637`、`share/classfile/systemDictionaryShared.cpp:644`、`share/classfile/systemDictionaryShared.cpp:650`、`share/classfile/systemDictionaryShared.cpp:653`
+
+三条路径看起来差别很大，但真正的共性就在这里：**它们最终都不是“直接拿共享类返回”，而是汇入同一个核心动作——`load_shared_class(InstanceKlass*)`。** 这正说明共享类是否能被当前 JVM 接受，并不是由“有没有映射成功”决定，而是由“能不能通过这套接入过程”决定。
+
+## 共享类怎么“活过来”：先过可见性和层级检查，再恢复不可共享状态
+
+`SystemDictionary::load_shared_class(InstanceKlass* ik, ...)` 是本篇真正的心脏。因为它决定了共享类从“archive 里的候选对象”变成“当前 JVM 的活类”还差哪些动作。`share/classfile/systemDictionary.cpp:1270`
+
+第一关是可见性。`is_shared_class_visible()` 会根据类的 `shared_classpath_index()`、当前 loader、模块初始化状态、包与模块归属来判断这份共享类对当前 loader 是否成立。一个非常关键的规则是：`path_index < 0` 表示这个类本来就是为自定义加载器准备的，builtin loader 不能随便拿；被 patch 过的模块也不能再用 archive 里的版本。`share/classfile/systemDictionary.cpp:1183`、`share/classfile/systemDictionary.cpp:1189`、`share/classfile/systemDictionary.cpp:1191`、`share/classfile/systemDictionary.cpp:1194`、`share/classfile/systemDictionary.cpp:1224`、`share/classfile/systemDictionary.cpp:1226`
+
+第二关是超类和接口必须还是“同一批对象”。源码注释说得非常直白：`ik` 的布局依赖于 dump 时看到的 `super()` 和 `local_interfaces()`。所以运行时要重新 resolve 一遍；如果现在解析出来的超类或接口对象，不等于归档里记录的那个对象，说明类层级世界已经变了，archive 里的这份 `ik` 就不能再用。`share/classfile/systemDictionary.cpp:1285`、`share/classfile/systemDictionary.cpp:1292`、`share/classfile/systemDictionary.cpp:1296`、`share/classfile/systemDictionary.cpp:1305`、`share/classfile/systemDictionary.cpp:1311`
+
+第三关是 `ClassFileLoadHook`。如果 CFLH 真把类改了，那就放弃共享版本，改用新的类定义。这说明 CDS 加载不是“共享类优先级最高”，而是“在不违反当前类加载语义的前提下，尽量复用共享类”。`share/classfile/systemDictionary.cpp:1320`、`share/classfile/systemDictionary.cpp:1322`
+
+真正最关键的第四关是 `restore_unshareable_info()`。源码注释非常值得细看：方法地址恢复必须在锁下完成，避免多个线程并行更新共享类的方法入口。共享类当前都由 bootstrap 或内部并行类加载器加载，所以这样加锁不会把 custom loader 锁死。`share/classfile/systemDictionary.cpp:1328`、`share/classfile/systemDictionary.cpp:1332`、`share/classfile/systemDictionary.cpp:1342`、`share/classfile/systemDictionary.cpp:1347`
+
+`InstanceKlass::restore_unshareable_info()` 干的第一件事是断言当前状态还没有到 loaded，然后先 `set_package()`，再调用 `Klass::restore_unshareable_info()` 恢复类加载器相关信息。之后逐个 `Method::restore_unshareable_info()`，再恢复常量池的 resolved references，必要时连 array classes 一起恢复。`share/oops/instanceKlass.cpp:2345`、`share/oops/instanceKlass.cpp:2349`、`share/oops/instanceKlass.cpp:2350`、`share/oops/instanceKlass.cpp:2351`、`share/oops/instanceKlass.cpp:2355`、`share/oops/instanceKlass.cpp:2370`、`share/oops/instanceKlass.cpp:2373`
+
+这里的方法恢复最能体现“load 端不是重新解析，而是补运行期缺件”。
+
+在 dump 时，`Method::unlink_method()` 会把 `_i2i_entry` 和 `_from_interpreted_entry` 都改成 `Interpreter::entry_for_cds_method(this)`，也就是指向 CDS 代码区里的 trampoline；native 方法的真实入口清空；adapter trampoline 也只留下一个固定槽位。总之，dump 时刻意把那些不能跨进程带走的运行期入口都剥掉，只保留一个可在加载期接线的骨架。`share/oops/method.cpp:979`、`share/oops/method.cpp:983`、`share/oops/method.cpp:985`、`share/oops/method.cpp:988`、`share/oops/method.cpp:994`、`share/oops/method.cpp:996`
+
+到运行时，`Method::restore_unshareable_info()` 并不重新造方法结构，只是在必要时重新 `link_method()`。而 `link_method()` 对 shared 方法有一个非常说明问题的断言：`Interpreter::entry_for_cds_method(h_method)` 必须已经和 `_i2i_entry` 一致，这说明共享方法的解释器入口骨架在 dump 时就定好了。运行时真正要补的，是 adapter、native 默认入口、以及最终跳到当前进程解释器/适配器代码的那一层连接。`share/oops/method.cpp:1077`、`share/oops/method.cpp:1080`、`share/oops/method.cpp:1081`、`share/oops/method.cpp:1084`、`share/oops/method.cpp:1106`、`share/oops/method.cpp:1126`、`share/oops/method.cpp:1142`、`share/oops/method.cpp:1152`
+
+所以 `restore_unshareable_info()` 的真正意义不是“补点零碎字段”，而是：**把 dump 时为了可共享而剥掉的、所有属于当前进程的运行期接头重新装回去。**
+
+## 最后那一点“链接”还要不要走？要，但已经是最轻量版本
+
+到这里读者很容易再问一句：既然共享类已经恢复得差不多了，`link_class()` 还要不要走？
+
+要走，但它和普通类已经不是同一条重量级路径了。
+
+`InstanceKlass::link_class()` 里的关键分支是：如果类还没 linked，而且还没 rewritten，就走普通验证和 `rewrite_class()`；但如果类已经是 rewritten 的共享类，就不再重跑整套 verifier 和 rewriter，而是只做 `SystemDictionaryShared::check_verification_constraints()`。`share/oops/instanceKlass.cpp:787`、`share/oops/instanceKlass.cpp:788`、`share/oops/instanceKlass.cpp:790`、`share/oops/instanceKlass.cpp:804`、`share/oops/instanceKlass.cpp:805`、`share/oops/instanceKlass.cpp:806`
+
+这段代码是理解 CDS 加载价值的关键证据。它告诉我们：
+
+- `ClassFileParser` 不会重跑；
+- verifier 不会整套重跑；
+- `Rewriter` 不会再重写一次字节码；
+- 只保留 dump 时没法完全确定、必须在当前 JVM 再兑现的那批验证约束。
+
+而这些验证约束也不是凭空来的。dump 端在某些需要延迟决定的场景下，会把约束存进共享字典条目；到运行时，`SystemDictionaryShared::check_verification_constraints()` 再按当前类层级去逐条核验，不满足就抛 `VerifyError`。这说明 CDS 不是“把验证偷掉”，而是把“当时做不完、但以后必须兑现的那部分验证”延期到 load 端。`share/classfile/systemDictionaryShared.cpp:808`、`share/classfile/systemDictionaryShared.cpp:811`、`share/classfile/systemDictionaryShared.cpp:911`、`share/classfile/systemDictionaryShared.cpp:926`、`share/classfile/systemDictionaryShared.cpp:937`
+
+所以最后这段链接可以概括成一句话：**共享类不是完全不走类状态机，而是走一条剥掉了解析、重写和大部分验证成本的最轻量路径。**
+
+## 共享类活起来之后，符号、字符串和堆子图也要能一起跟上
+
+共享类并不是孤零零活着的。它们的方法、常量池、字段名、字符串常量，全都依赖共享符号表、共享字符串表和一部分归档堆对象。
+
+符号这边，`SymbolTable::lookup()` 会在动态表和共享表之间切换查找顺序；命中共享表时，共享符号是通过 `base_address + offset` 直接解码出来的。也就是说，符号表不是把名字再重建一遍，而是利用同址映射的共享区直接定位 `Symbol*`。`share/classfile/symbolTable.cpp:229`、`share/classfile/symbolTable.cpp:242`、`share/classfile/symbolTable.cpp:254`、`share/classfile/symbolTable.cpp:262`、`share/classfile/symbolTable.cpp:270`、`share/classfile/symbolTable.cpp:272`
+
+字符串这边更直接：`StringTable::lookup()` 固定先查共享表，命中就直接返回 archive 里的字符串对象；否则才落回动态字符串表。`share/classfile/stringTable.cpp:240`、`share/classfile/stringTable.cpp:242`、`share/classfile/stringTable.cpp:246`
+
+而 CompactHashtable 本身也很符合本文的主线：它不是一张需要恢复链表指针和节点对象的动态哈希表，而是一张只读、偏移驱动、专门为共享映射准备的紧凑查找结构。`decode_entry()` 对符号版直接做 `_base_address + offset`，对字符串版则通过 `HeapShared::decode_from_archive()` 还原归档堆对象。只有名字真正匹配，才返回对象。`share/classfile/compactHashtable.inline.hpp:36`、`share/classfile/compactHashtable.inline.hpp:38`、`share/classfile/compactHashtable.inline.hpp:48`、`share/classfile/compactHashtable.inline.hpp:50`、`share/classfile/compactHashtable.inline.hpp:60`、`share/classfile/compactHashtable.inline.hpp:77`
+
+这部分虽然不是“共享类怎么进字典”的主线，但它提供了一个很重要的背景：**共享类之所以能像活类一样工作，并不是只有 `InstanceKlass` 自己活了，而是它依赖的整套共享元数据和归档堆对象也都一起被接进来了。**
+
+## 收网：load 端真正做的，不是“重新加载类”，而是“把共享镜像重新接回当前 JVM”
+
+现在可以把整篇压成一张总图。
+
+CDS load 端先在 metaspace 初始化最前面介入，判断这份 archive 还是不是 dump 当时那套世界里做出来的东西；随后要求把 `mc/rw/ro/md` 这些 core spaces 映射回原地址，因为共享类内部大量指针关系就是为同址接线准备的；映射成功之后，还要补上 vtable、共享字典、共享符号表、归档堆对象指针这些跨进程不能保存的接头；然后类加载路径上的三类入口——boot loader、builtin loader、自定义 loader——再把候选共享类送进统一的 `load_shared_class()`；最后通过可见性检查、超类/接口一致性检查、`restore_unshareable_info()` 和最轻量版本的 `link_class()`，让这些共享类重新变成当前 JVM 真正承认的活类。`share/memory/metaspace.cpp:1300`、`share/memory/metaspaceShared.cpp:229`、`share/memory/metaspaceShared.cpp:2052`、`share/memory/metaspaceShared.cpp:2100`、`share/classfile/systemDictionaryShared.cpp:480`、`share/classfile/systemDictionary.cpp:1270`、`share/oops/instanceKlass.cpp:2345`、`share/oops/instanceKlass.cpp:805`
+
+所以，这一篇最核心的一句话不是“共享类从 shared objects file 里读出来”，而是：
+
+**共享类先被验明还属于当前世界，再被放回原位、补上当前进程的运行期接头，最后以最轻量的状态机路径重新接入 `SystemDictionary`。**
+
+只要这句话抓住了，下一域为什么还需要 `ciObject` 这样的编译器镜像体系也就不难理解了：JIT 不能直接把这些 VM 内部对象当作自己的数据模型，它还要再看一层为编译器准备的镜像视图。
+
+> → [12-ci/01 — `ciObject` 镜像体系 — JIT 怎么看到 Java 类？](../12-ci/01-ci-overview-mirror.md)

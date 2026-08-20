@@ -1,175 +1,162 @@
-# 04. 终端求值 — 归约框架、短路终端、evaluate 流程
+# 终端求值：为什么终端操作不是最后一步 API，而是整条流水线真正开始执行的那一刻
 
-> **前置依赖**: [16-stream/02 — 流水线结构与惰性机制](02-pipeline-lazy.md)(链组装、SHORT_CIRCUIT 传播)、[16-stream/03 — 中间操作实现](03-intermediate-ops.md)(有状态操作)
-> → **后续**: [16-stream/05 — Collectors 与收集器](05-collectors.md)
-> 关联: 域 08 集合(ArrayList 容器);域 13 原子类(结合律思想同 LongAccumulator);内部卷 13-jit-framework(分层编译)
+> 本文基于 JDK 11 `TerminalOp`、`ReduceOps`、`ForEachOps`、`FindOps`、`MatchOps`、`ReferencePipeline`。讨论范围聚焦终端操作分类、`evaluate` 触发、归约 sink、短路终端、`allMatch/anyMatch/findFirst/count/collect` 的求值骨架；并行 collector 细节与收集器特征放到下一篇。
+> **前置依赖**：[流水线结构与惰性机制](02-pipeline-lazy.md)、[中间操作实现](03-intermediate-ops.md)
+> **后续**：[Collectors 与收集器](05-collectors.md)
 
-## 终端按下开关之后
+## 先看一个最容易让人把“终端操作”误会成“最后顺手拿个结果”的错觉
 
-第 2 篇讲了"终端按下开关"——`evaluate` 组装 Sink 链、单遍遍历。这一篇看开关本身: 终端操作有哪几类?`collect` 的三段式归约框架怎么工作?`anyMatch` 为什么快?以及 `list.stream().filter(...).collect(toList())` 的完整时序。
+前两篇已经把 Stream 的惰性模型拆得很清楚了：构建期有 Pipeline 链，执行期会反向包成 Sink 链；中间操作有的无状态、有的有状态，有的会吞掉前面的短路机会。可读到这里，很多人仍然会下意识把 `collect()`、`count()`、`findFirst()`、`anyMatch()` 看成链尾那一下“取结果”的 API——好像它们只是最后顺手拿个返回值。
 
-## 1. "终端操作家族" — 四大类
+这个理解只说对了表面。对 Stream 来说，终端操作真正承担的是两件更底层的职责：
 
-第 1 篇的 API 地图已按"中间/终端"分类。终端内部再分四类(`Stream.java` 接口行号同第 1 篇):
+- 它是**整条流水线真正开始执行的总开关**；
+- 它还要决定**这条流水线最后由谁来收口结果、是否允许提早停流、以及并行时怎样合并局部结果**。
 
-| 类 | 操作 | 实现工厂 |
-|----|------|---------|
-| 遍历 | `forEach`/`forEachOrdered` | `ForEachOps` |
-| 归约 | `reduce`/`collect` | `ReduceOps` |
-| 匹配/查找 | `anyMatch`/`allMatch`/`noneMatch`/`findFirst`/`findAny` | `MatchOps`/`FindOps` |
-| 汇总 | `count`/`min`/`max`/`toArray` | `ReduceOps`/`Nodes` |
+也就是说，终端操作不是中间链的附属品，而是整条流从“描述阶段”切到“结果阶段”的控制中枢。你前面所有的 `filter`、`map`、`sorted`、`limit` 都只是搭管道；终端一来，才真的决定“现在开始放水，并且最后流到哪里”。
 
-全部实现为 `TerminalOp`(`TerminalOp.java:45`)——接口只有一个抽象方法 `evaluateSequential`(`:96-97`);`evaluateParallel` 有默认实现,默认**转回串行**并打一条 Tripwire 警告(`:80-85`)。"并行"不是白来的,是每个终端操作自己实现的。
+所以这篇的主线不是再列一遍终端 API，而是回答一个更关键的问题：**为什么终端操作既是执行入口，又是收口策略对象。**
 
-面试"终端操作都是短路吗": 不——只有匹配/查找类;`count` 要全遍历。不过 `count` 有个捷径: 流水线是 SIZED 时**一次都不遍历**,直接 `spliterator.getExactSizeIfKnown()` 返回大小:
+## 一、TerminalOp 为什么不是普通接口名，而是整条流的“收口策略”抽象
 
-```java
-// ReduceOps.java:253-258(截取,逐字)
-            public <P_IN> Long evaluateSequential(PipelineHelper<T> helper,
-                                                  Spliterator<P_IN> spliterator) {
-                if (StreamOpFlag.SIZED.isKnown(helper.getStreamAndOpFlags()))
-                    return spliterator.getExactSizeIfKnown();
-                return super.evaluateSequential(helper, spliterator);
-            }
+### 先看为什么中间操作自己不能决定结果怎么收束
+
+前面的 Pipeline 节点只知道“元素到我这里该怎么处理”。它们并不知道最后要返回的是一个布尔值、一个 `Optional<T>`、一个聚合容器、一个计数，还是根本没有结果只做遍历副作用。换句话说，中间操作能决定局部变换逻辑，却不能决定整条流的最终结局形状。
+
+这正是终端操作必须独立成 `TerminalOp` 的原因。JDK 11 中，`TerminalOp` 定义在 `TerminalOp.java:45`，它不是简单为了给终端方法找个共同接口名，而是在明确表达：**不同终端操作要用不同的策略来收口整条流水线。**
+
+### 为什么 `evaluateSequential` 是唯一必须实现的核心点
+
+`TerminalOp` 里最关键的方法是：
+
+- `evaluateSequential(...)`（`TerminalOp.java:96`）
+
+而 `evaluateParallel(...)`（`80-84`）甚至有一个默认实现：直接转回顺序求值。这本身就特别说明问题——终端操作最基本的义务，是先把**串行收口语义**讲清楚；至于并行能不能真正高效落地，则要看每种终端操作自己有没有额外实现能力。
+
+这说明终端操作的抽象重点并不是“末尾执行一下”，而是：
+
+- 串行怎么收口；
+- 并行怎么收口；
+- 结果类型是什么；
+- 是否能提前停；
+- 是否需要合并多片局部状态。
+
+所以从这个角度看，TerminalOp 已经不是“一个接口细节”，而是整个 Stream 流水线最后一段策略骨架。
+
+## 二、为什么 collect / reduce 天然适合做终端收口：它们把“结果容器 + 累加 + 合并”一起讲清了
+
+### 先看最直觉但不够并行化的失败方案
+
+如果你要把一条流最终收成某个结果，最朴素的想法是：先把所有元素处理完，再自己写一个循环去拼结果。这种写法当然能工作，但它很难自然支持并行，因为你没有提前把“局部结果怎样独立累加、最后又怎么合并”设计进协议里。
+
+这正是 `reduce` / `collect` 这类归约终端的价值：它们不是简单“最后再收一下”，而是一开始就把**结果容器、单元素累加方式、多片结果合并方式**一起声明出来。
+
+### 为什么这三段式刚好构成可并行的收口协议
+
+在 JDK 11 里，`ReduceOps` 相关工厂包括：
+
+- `makeRef(identity, reducer, combiner)`（`ReduceOps.java:69`）
+- `makeRef(BinaryOperator)`（`105`）
+- `makeRef(Collector)`（`156`）
+
+而 collector 路线最终的串行求值入口在 `ReduceOps.java:911-914`。这里最该记住的不是某个具体类名，而是这条统一骨架：
+
+```text
+先有一份初始结果容器或种子
+  → 每来一个元素就累加进去
+  → 如果是并行分片，最后再把多个局部结果合并起来
 ```
 
-(`ReferencePipeline.count()` 在 `:604-605` 调 `evaluate(ReduceOps.makeRefCounting())`。)
+这三段式之所以重要，不只是 API 优雅，而是因为它天然适合并行拆片：每片可以先局部累加，最后只要合并规则满足要求，就能把整条流结果重新拼回去。
 
-关键设计(斜体):*终端操作 = "求值 + 收尾"——全部实现为 TerminalOp,串行求值是唯一抽象方法,并行是各操作自己实现的加分项。面试"终端操作有几类": 遍历/归约/匹配查找/汇总;面试"终端操作都是短路吗": 只有匹配/查找类,count 有 SIZED 捷径(`getExactSizeIfKnown`)但语义上是全遍历。*
+### 为什么 `collect` 和 `reduce` 看似不同，骨架却同构
 
-## 2. "归约框架" — 容器 + 累加 + 合并
+`reduce` 更像不可变归约：每次把旧状态和新元素算成一个新状态。`collect` 更像可变归约：容器对象在接收元素时被就地累加修改。两者表面风格不同，但在终端求值骨架上完全同构——都是“初始化 → 累加 → 合并”的三段式收口。
 
-### 2.1 三段式: 三个函数合成一个 Sink
+这一层真正要留下的是：**归约框架之所以是 Stream 最核心的终端家族，不是因为它最常用，而是因为它天然把串行和并行收口都组织好了。**
 
-`collect(supplier, accumulator, combiner)` 与 `reduce(seed, reducer, combiner)` 分别走 `ReduceOps.makeRef` 的两个重载——seed 版在 `:68-69`、supplier 版在 `:204-205`,骨架完全同构。核心是 `ReducingSink`——一个持单个状态字段的 Box(`Box` 定义在 `:869-877`,就一个 `state` 字段 + `get()`),以下为 seed 版:
+## 三、为什么短路终端能提前停：不是因为它们“更聪明”，而是因为它们在 sink 上主动发出了取消信号
 
-```java
-// ReduceOps.java:73-86(ReducingSink 核心,逐字)
-            @Override
-            public void begin(long size) {
-                state = seed;
-            }
+### 先看最容易误解的点：短路不是遍历循环里写个 break 就完了
 
-            @Override
-            public void accept(T t) {
-                state = reducer.apply(state, t);
-            }
+很多人会把 `anyMatch`、`findFirst` 这类终端想成：遇到第一个命中值就 break。这个说法太表面，因为 Stream 里并没有一段统一的“for 循环源码”专门给每个 API 手写 break。真正起作用的是上一篇讲过的 Sink 协议：终端 sink 一旦知道“结果已经够了”，就会通过 `cancellationRequested()` 让整条执行链停下来。
 
-            @Override
-            public void combine(ReducingSink other) {
-                state = combiner.apply(state, other.state);
-            }
+### any / all / none 为什么本质上只是“何时停、停后返回什么”两件事
+
+在 JDK 11 中，匹配家族的关键分类在 `MatchOps.MatchKind`（`MatchOps.java:50-63`）。这个设计非常漂亮，因为它说明：`anyMatch`、`allMatch`、`noneMatch` 的本质差别，其实只在两个布尔问题上——**什么时候 stop，stop 后结果是什么。**
+
+对应的 sink 在 `accept()` 时一旦命中条件，就把 stop 置起来，后续 `cancellationRequested()` 再把这件事传回执行链。也就是说，短路不是“终端方法自己早点返回”这么简单，而是终端 sink 在真正改变上游遍历控制流。
+
+### findFirst / findAny 为什么也属于另一种短路终端
+
+`FindOps` 中的 `FindSink`（`FindOps.java:171-199`）则说明，查找家族的短路逻辑是“**一旦已经拿到候选值，就不必再往后看**”。差别只在于：
+
+- `findFirst` 还要守 encounter order；
+- `findAny` 则更愿意只要先到就算。
+
+所以匹配与查找看起来是两类 API，内部其实都在做同一件事：某个终端 sink 先判断“我是不是已经足够有答案了”，再把取消信号传回去。
+
+这一层把前一篇的短路协议和这一篇的终端求值真正焊在了一起：**短路终端之所以快，不是因为它们跳过了终端阶段，而是因为它们在终端 sink 层提前终止了整条流。**
+
+## 四、为什么 `count()` 有时根本不用遍历：终端操作甚至可以决定“不必真的放水”
+
+### 先看这个最反直觉的例子
+
+很多人一想到 `count()`，脑中浮现的就是“把元素一个个数过去”。可 JDK 11 里，`ReferencePipeline.count()`（`ReferencePipeline.java:604`）走到 `ReduceOps` 的计数路径后，如果发现上游特征明确告诉我这条流是 `SIZED`，会直接用 `spliterator.getExactSizeIfKnown()` 返回大小（见 `ReduceOps.java:253-258`）。
+
+这件事非常反直觉，因为它说明：**终端操作甚至可以根据自己的语义和上游标志，决定根本没必要驱动整条元素消费。**
+
+### 为什么这更能说明终端操作是“策略”而不是“最后一步”
+
+如果终端操作只是统一末尾“取结果”的步骤，那 `count()` 就该老老实实遍历所有元素。但它没有，因为它的收口策略允许它说：“只要我已经知道精确大小，我的结果就已经确定，不需要真正把元素都喂进 sink 了。”
+
+这恰恰从另一个角度证明：终端操作不是被动接收前面给我的流水结果，而是会主动决定“这条流值不值得完整执行到最后”。
+
+## 五、为什么 `collect(toList())` 的完整时序最能把前几篇全部收回来
+
+### 从 API 到内部执行，它正好穿过了每一层抽象
+
+如果要找一个最能把前 1-3 篇都串起来的例子，`list.stream().filter(...).collect(toList())` 基本就是最合适的那一个。因为它会完整穿过：
+
+- API 分类：filter 是中间操作，collect 是终端操作；
+- Pipeline 链：filter 只是注册节点；
+- Sink 链：终端到来时，filter 的 `opWrapSink` 被包进 collect 的终端 sink 外层；
+- evaluate：终端按下开关；
+- copyInto：源数据单遍流过整条管道。
+
+### 为什么这个例子能说明“终端不是最后一下，而是总开关 + 收口器”
+
+在这个例子里，collect 不只是“拿到一个 List”。它先通过 `ReferencePipeline.collect(...)` 进入 `evaluate()`（`AbstractPipeline.java:226-234`），再通过 `ReduceOps` 的 collector 路线创建终端 sink，最后 `wrapAndCopyInto()` / `copyInto()` 把前面的 filter 链真正跑起来。
+
+这说明 collect 干的两件事缺一不可：
+
+1. 它按下了执行开关；
+2. 它提供了链底容器 sink，决定结果怎样被收口。
+
+这也正是我们整篇一直在强调的事：**终端操作不只是“最后返回值是什么”，而是“整条流从描述转向执行时，由谁来收口、何时能停、结果怎样汇总”的总策略。**
+
+## 收网：终端操作真正决定的是“这条流怎样开始执行、又怎样结束”
+
+回到开头那个误解，现在已经能看清为什么把终端操作讲成“链尾 API”会严重低估它了。中间操作负责搭建处理图纸，但真正让图纸活起来的是终端：它通过 TerminalOp 决定串行/并行收口策略，通过归约或遍历 sink 决定结果怎样落地，通过短路 sink 决定什么时候够了可以停，甚至像 `count()` 一样，在某些场景下直接判断连完整遍历都不必做。
+
+把整篇压成一张总图，就是：
+
+```text
+终端操作
+  → 不是链尾附属
+  → 是执行总开关
+  → 同时也是结果收口策略对象
+
+归约类
+  → 容器/累加/合并三段式
+
+短路类
+  → sink 主动请求取消
+
+特殊捷径
+  → count 在 SIZED 下可直接返回大小
 ```
 
-- `begin`: 注入种子(每个 sink 自己的起点)
-- `accept`: 每来一个元素累加
-- `combine`: 合并另一个 sink 的状态——这是**并行化的接缝**
+如果说上一章解决的是“中间操作怎样被组织成一条可执行管道”，这一章真正补上的就是：**谁来按下开关、谁来决定什么时候停、以及谁来把最终结果收回来。**
 
-collect 版是同构的**可变归约**: `accumulator.accept(state, t)` 就地修改容器(`ReduceOps.java:168-170`);reduce 版是**不可变归约**: `state = reducer.apply(state, t)` 每次产生新状态(`:79-81`)。
-
-骨架是 `AccumulatingSink`(`:858-861`)= `TerminalSink` + 一个 `combine(K other)` 方法。
-
-### 2.2 串行直通,并行分片
-
-`ReduceOp` 的两个求值入口(`ReduceOps.java:911-920`):
-
-```java
-// ReduceOps.java:911-914(逐字)
-        public <P_IN> R evaluateSequential(PipelineHelper<T> helper,
-                                           Spliterator<P_IN> spliterator) {
-            return helper.wrapAndCopyInto(makeSink(), spliterator).get();
-        }
-```
-
-- **串行**: 一个 sink,`wrapAndCopyInto` 灌完直接 `get()`——**combine 从不被调用**
-- **并行**: `ReduceTask` 分治(`:927-965`)——`doLeaf` 每片独立 sink 各自累加(`:951-953`),`onCompletion` 沿任务树把左右子结果 `combine` 起来(`:956-964`)
-
-并行可合并的前提: accumulator/combiner 满足**结合律**——和域 13 的 `LongAccumulator` 同一思想(能分片就能合并,分片粒度与结果无关)。
-
-面试"combiner 什么时候调用": 仅并行;串行直通(顺序保持)。
-
-关键设计(斜体):*归约 = "容器 + 累加 + 合并"三段式,是并行化的完美结构——每线程独立容器互不干扰,最后沿任务树合并。面试"collect 怎么并行": 分片容器 + combiner;面试"为什么 reduce/collect 要求结合律": 分片任意切分、合并结果必须一致。*
-
-## 3. "短路终端" — MatchOps/FindOps
-
-### 3.1 MatchKind: 三兄弟一张表
-
-`MatchKind` 枚举(`MatchOps.java:50-68`)用两个布尔组合出三种语义:
-
-| kind | 构造参数(到 :63-67) | 停的条件(stopOnPredicateMatches) | 停时的结果(shortCircuitResult) |
-|------|--------------------|----------------------------------|-------------------------------|
-| `ANY`(`:52`) | (true, true) | 谓词命中 | true |
-| `ALL`(`:55`) | (false, false) | 谓词不命中 | false |
-| `NONE`(`:58`) | (true, false) | 谓词命中 | false |
-
-字段声明在 `:60-61`。`MatchSink.accept`:
-
-```java
-// MatchOps.java:89-94(逐字)
-            public void accept(T t) {
-                if (!stop && predicate.test(t) == matchKind.stopOnPredicateMatches) {
-                    stop = true;
-                    value = matchKind.shortCircuitResult;
-                }
-            }
-```
-
-命中条件即置 `stop`——`BooleanTerminalSink.cancellationRequested()` 返回 `stop`(`:264-267`),短路循环每轮先问取消(第 2 篇 §4.2),源遍历终止。
-
-注意默认值(`MatchOps.java:256-258`): `value = !matchKind.shortCircuitResult`——ANY 默认 false、ALL 默认 true。**空流语义**由此保证: `anyMatch` 空流 = false、`allMatch` 空流 = true,与数学量词一致。
-
-面试"anyMatch 复杂度": 最好 O(1)(第一个元素就命中);最坏 O(n)(全部不命中,遍历完)。"anyMatch 为什么快": 命中即置 stop,短路循环立即停。
-
-### 3.2 findFirst vs findAny: 一个布尔
-
-`FindOps.makeRef(mustFindFirst)`(`FindOps.java:58-63`)按布尔选静态实例(`:197-199` / `:201-203`)。差别就在 opFlags(`FindOps.java:130`):
-
-```java
-// FindOps.java:130(逐字)
-            this.opFlags = StreamOpFlag.IS_SHORT_CIRCUIT | (mustFindFirst ? 0 : StreamOpFlag.NOT_ORDERED);
-```
-
-- `findFirst`: 保序——**必须**拿到 encounter order 的第一个,并行时为了保序各分片需要按 encounter order 对齐,代价高
-- `findAny`: 标记 NOT_ORDERED——并行时**先到先得**,任意分片命中即可
-
-两者串行行为一致(`FindSink` 拿到值即取消,第 2 篇 §4.2 逐字块)。
-
-面试"并行流用 findAny 更优": 顺序保证 vs 并行性能——findFirst 有顺序约束,findAny 可以不管顺序抢答。
-
-关键设计(斜体):*短路终端 = "命中即停"——MatchKind 两个布尔把 any/all/none 统一成一条 if;FindSink 一个 hasValue 字段承担"停"。面试"短路操作有哪些": 匹配/查找类(anyMatch/allMatch/noneMatch/findFirst/findAny);面试"空流结果": anyMatch=false、allMatch=true、findAny=empty——都由默认值/空结果约定保证。*
-
-## 4. "evaluate 的完整流程" — 串行视角
-
-### 4.1 四步全景: collect(toList())
-
-以 `list.stream().filter(...).collect(toList())` 为例:
-
-1. `collect(Collector)`(`ReferencePipeline.java:568`)——非 CONCURRENT 收集器走 `evaluate(ReduceOps.makeRef(collector))`(`:578`;CONCURRENT 收集器另有并行捷径 `:570-576`)
-2. `evaluate(terminalOp)`(`AbstractPipeline.java:226`): 检查 linkedOrConsumed → 标记消费 → `sourceSpliterator(terminalOp.getOpFlags())` 取源并把终端标志并入 combinedFlags(第 2 篇 §3.1/§4.1)
-3. `ReduceOp.evaluateSequential`(`ReduceOps.java:911`): `makeSink()` 建容器 sink → `wrapAndCopyInto`(`AbstractPipeline.java:473`)——wrapSink 反向组装 filter 的 Sink(第 2 篇 §2.4)→ `copyInto` 单遍遍历(第 2 篇 §3.2)
-4. `get()` 取出容器;`IDENTITY_FINISH` 收集器直接返回,否则套 `finisher`(`ReferencePipeline.java:580-582`)
-
-全部中间操作在一个 `forEachRemaining` 循环里完成——**没有中间集合**(sorted/distinct 的状态缓冲除外,第 3 篇)。`collect` 的集合是最后才建出来的。
-
-### 4.2 并行分派对比
-
-`evaluate` 的并行分支(`AbstractPipeline.java:233`)把求值交给各终端操作自己:
-
-| 终端 | 并行实现 | 特点 |
-|------|---------|------|
-| `forEach` | `ForEachOrderedTask`/`ForEachTask`(`ForEachOps.java:152-157`) | 有序需专门任务 |
-| `reduce`/`collect` | `ReduceTask` 分治(`ReduceOps.java:917-920`) | 分片 + combine |
-| `anyMatch` 等 | `MatchTask`(`MatchOps.java:234-243`) | 命中即短路整棵树 |
-| 未实现者 | `TerminalOp` 默认转串行(`TerminalOp.java:80-85`) | Tripwire 警告 |
-
-面试"中间结果有集合吗": 无——所有中间操作在一个循环里完成;`collect` 才是最终集合。
-
-关键设计(斜体):*串行求值 = "链组装 + 单遍遍历"——所有中间操作的 Sink 在一个循环里完成,无中间集合;并行 = 每个终端操作自己的分治(归约分片合并、匹配短路整树)。面试画完整时序图(源 → Sink 链 → 终端容器)是这道题的满分答案。*
-
-跨层标注: [域 08 集合——collect 的容器常见 ArrayList(08-collections/01),归约思想同样适用于 StringBuilder(joining);域 13 原子类——结合律与分片合并思想同 LongAccumulator;域 01 字符串(03-build-concat)——谓词/累加器是 invokedynamic 引导的 lambda]
-
-## 核心悬念
-
-归约框架有了——**collect 的丰富形态**呢?`Collectors.toList/toMap/groupingBy/joining` 怎么实现?downstream 收集器怎么嵌套?`Characteristics` 的 CONCURRENT/UNORDERED/IDENTITY_FINISH 特征各干什么?——下一篇: Collectors 与收集器。
-
-> → [16-stream/05 — Collectors 与收集器](05-collectors.md)
+下一篇继续顺着这个收口逻辑往下走：既然 `collect` 已经是终端收集大户，那 `Collectors.toList()`、`toMap()`、`groupingBy()`、`joining()` 到底各自提供了什么 supplier / accumulator / combiner / finisher 套餐？这就是 `16-stream/05-collectors.md` 要真正拆开的主线。
