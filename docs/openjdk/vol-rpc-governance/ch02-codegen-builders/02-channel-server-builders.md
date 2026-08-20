@@ -442,20 +442,37 @@ transport-specific builder 当然重要，但它们更像：
 
 并不是 `ServerImpl` 临时脑补出来的，而是在 builder 阶段就已经被集中装配好了。
 
-### `addService()` / `fallbackHandlerRegistry()` 说明服务端 method lookup 是 builder 阶段就被参数化的
+### `bindService()` / `addService()` / registry / `ServerImpl` lookup 是一条连续装配链
 
 第二篇里最关键的一条线之一，是：
 
 - `ServerImpl` 会先查主 registry，再查 fallback registry
 
-而现在回头看 builder 层，就会发现这条行为其实早就被 builder 参数化了：
+前一篇 codegen 装配桥又已经证明：
 
-- `addService()` 决定主 registry 内容
-- `fallbackHandlerRegistry()` 决定兜底 lookup 策略
+- 用户实现的 `ImplBase` 会通过 `bindService()` 生成 `ServerServiceDefinition`
 
-见 `core/src/main/java/io/grpc/internal/ServerImplBuilder.java:143`、`:181`。
+现在把两篇接起来，服务端真正完整的装配链就变成了：
 
-这正说明 builder 层不是和 runtime 层割裂的；它其实在提前决定 runtime 的查找与装配行为。
+```text
+用户实现 ImplBase
+  -> bindService()
+  -> ServerServiceDefinition
+  -> ServerBuilder.addService()
+  -> ServerImplBuilder.registryBuilder
+  -> ServerImpl 主 registry lookup
+  -> fallbackHandlerRegistry() 兜底 lookup
+```
+
+`ServerImplBuilder.addService()` 会把 `ServerServiceDefinition` 加入主 registry；`fallbackHandlerRegistry()` 则决定找不到主 registry 方法时的兜底来源，见 `core/src/main/java/io/grpc/internal/ServerImplBuilder.java:143`、`:181`。
+
+这说明 builder 层不是和 codegen 或 runtime 割裂的：
+
+- codegen 负责把用户实现装成 `ServerServiceDefinition`
+- builder 负责把它放进主 registry 或指定 fallback registry
+- `ServerImpl` 再按这份装配状态完成真正的 method lookup
+
+所以“用户实现最后怎样被服务端 runtime 找到”并不是某一篇单独完成的，而是 codegen、builder、server runtime 三层共同闭合的装配链。
 
 ### `build()` 不是“创造 server”，而是“把装配状态收口成 `ServerImpl`”
 
@@ -507,13 +524,22 @@ transport-specific builder 当然重要，但它们更像：
 
 - 公共 `ManagedChannelBuilder` / `ServerBuilder` 定义“grpc-java 这套框架允许用户表达什么”
 - `ManagedChannelImplBuilder` / `ServerImplBuilder` 负责把这些表达压缩成内部装配状态
-- transport-specific builder 则是在这个基础上，继续补充“某个 transport 自己额外还支持什么”
+- transport-specific builder 则是在这个基础上，把公共装配语义兑现成某个具体 transport 能真正执行的实现分叉
 
-也就是说，transport-specific builder 只是：
+也就是说，transport-specific builder 不是可有可无的参数附录，而是：
 
-- **第二座装配桥上的差异化补层**
+- **第二座装配桥落到 Netty、OkHttp、InProcess 等具体 transport 时的兑现层**
 
-不是第二座桥本身。
+它们不负责重新定义 grpc-java 的公共配置模型，却负责回答一个更具体的问题：
+
+- 同一个 `usePlaintext()`、keepalive、executor、message limit 或 transport credentials，在当前 transport 上到底怎样变成真实的 factory、handler、socket 或 in-process runtime 参数？
+
+所以 transport-specific builder 的准确位置是：
+
+- 公共 Builder API 与 ImplBuilder 定义统一装配语义
+- transport-specific builder 把统一语义翻译成具体 transport 的可执行配置
+
+它不是第二座桥本身，但也不是锦上添花；它是这座桥真正落地时不可省略的分叉层。
 
 ## 最后把整条 builder 主线收回来：为什么它是 grpc-java 的第二座装配桥
 

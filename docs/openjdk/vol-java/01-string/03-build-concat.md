@@ -1,6 +1,6 @@
 # 字符串构建与拼接 — 可变缓冲、扩容与 JEP 280
 
-> 基于 JDK 11 `java.base` 的 `AbstractStringBuilder`、`StringBuffer`、`StringConcatFactory` 与 `StringJoiner` 实现。
+> 基于 JDK 11 `java.base` 的 `AbstractStringBuilder`、`StringBuffer`、`StringConcatFactory` 与 `StringJoiner` 实现。本文讨论的是 JDK 11 字符串构建与拼接机制，不把这里的扩容策略、coder 膨胀路径和 invokedynamic 拼接策略外推成所有 JVM 字符串构建的统一规范。
 > **前置依赖**: [String 为什么是不可变的](01-storage-immutable.md)(byte[]+coder 与不可变边界)、[String 的相等、哈希与比较](02-equals-hashcode-compare.md)(值对象收益)
 > → **后续**: [字符编码与 Unicode](04-encoding-unicode.md)
 
@@ -241,7 +241,7 @@ public static CallSite makeConcat(MethodHandles.Lookup lookup,
 }
 ```
 
-**注意一个前提**:如果 `a`、`b`、`c` 全是编译期常量(字面量),javac 在编译期就把 `"a" + "b" + "c"` 折叠成一个字符串塞进常量池了——**根本不会生成任何拼接字节码**。面试经典题"`"a"+"b"+"c"` 创建了几个对象"的现代答案第一句就是:字面量拼接在编译期就完成了,运行时没有任何拼接动作(那个折叠后的字面量对象在类加载时驻留一次,见第 2 篇 intern——那是"常量池驻留",不是"拼接")。JEP 280 只对**运行期才知道值的变量拼接**生效。
+**注意一个前提**:如果 `a`、`b`、`c` 全是编译期常量(字面量),javac 在编译期就把 `"a" + "b" + "c"` 折叠成一个字符串塞进常量池了——**根本不会生成任何拼接字节码**。面试经典题"`"a"+"b"+"c"` 创建了几个对象"的现代答案第一句就是:字面量拼接在编译期就完成了,运行时没有任何拼接动作(那个折叠后的字面量对象在类加载时驻留一次,这属于常量池驻留,不是拼接)。JEP 280 只对**运行期才知道值的变量拼接**生效。
 
 关键设计(斜体):*invokedynamic 的精髓是**把拼接策略推迟到运行时**——字节码里只有一条 indy 指令,具体怎么做由 JVM 决定。好处: 以后 JDK 想换拼接实现,老字节码不需要重新编译。面试对比题: JDK8 的答案是"编译成 StringBuilder",JDK9+ 的答案是"编译成 indy,常量折叠除外"——答错版本就是踩了 JDK 版本差异的坑。*
 
@@ -422,6 +422,22 @@ public static String join(CharSequence delimiter, CharSequence... elements) {
 源码注释(`String.java:2395`)甚至解释了为什么不用 Stream:`"Number of elements not likely worth Arrays.stream overhead"`——元素不多时,手写 for 循环比 Stream 便宜。这个判断也提醒我们:`Collectors.joining`(Stream 里的版本)在底层同样用的是 StringJoiner。
 
 关键设计(斜体):*String.join 和 JEP 280 的 `+` 是两条独立的路径: `+` 走 invokedynamic 拼接策略,join 走显式的 StringJoiner——一个是语言运算符,一个是显式 API,互不干扰。面试若问"join 内部用什么",答案是 StringJoiner(以及它自己的 char[] 拼接),不是 StringBuilder。*
+
+## 五、五个最容易混掉的边界：StringBuilder 不是永远更快，×2+2 不是每次都翻倍，inflate 不是不会带来代价，toString 不是共享数组，+ 也不是永远编译成 StringBuilder
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`StringBuilder` 不是永远比 `StringBuffer` 快。差异的来源不是 StringBuilder 本身“更聪明”，而是它去掉了方法级 `synchronized`；在单线程封闭场景下，这个差别是真实的，但一旦需要线程安全共享，StringBuilder 反而会错乱。
+
+第二，×2+2 也不是每次 append 都翻倍。扩容只发生在 `minimumCapacity - oldCapacity > 0` 时，否则直接复用旧数组；而且 `newCapacity` 还要考虑 `minimumCapacity` 和 `MAX_ARRAY_SIZE` 的边界保护，不是机械的 `(old << 1) + 2`。
+
+第三，coder 升级（inflate）也不是“不会带来任何代价”。从 LATIN1 整体膨胀到 UTF16 是一次 O(n) 的全量复制，之后缓冲区就永久停留在 UTF16 了。所以中文场景下构建器“变慢”有真实的结构原因。
+
+第四，`toString` 也不是共享数组。`StringBuilder.toString()` 的注释明确写着“Create a copy, don't share the array”，因为构建器本身是可变的，如果共享数组，后续 append 就会污染已返回的 String。
+
+第五，JDK 11 的 `+` 也不是永远编译成 `StringBuilder`。显式 `StringBuilder` 仍然存在，但语言级 `+` 拼接在 JDK 9+ 已经改为走 `invokedynamic`，由 `StringConcatFactory` 在运行时决定最佳拼接策略。
+
+把这五条边界记稳，字符串构建与拼接这一篇就不会重新塌回“StringBuilder 比 StringBuffer 快、扩容是两倍”的面试口诀印象。它真正想讲的是：可变缓冲区、线程安全、语言级拼接和专用 Joiner 是四条不同的构建路径，各自服务于不同的使用场景和成本模型。
 
 ## 核心悬念
 

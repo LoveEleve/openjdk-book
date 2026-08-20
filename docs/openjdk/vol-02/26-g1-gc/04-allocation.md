@@ -1,473 +1,350 @@
-# 04. new Object() 在 G1 里走到哪？— 分配与晋升
+# 04. `new Object()` 在 G1 里到底落哪？— Mutator、GC Copy 与 Humongous 三条分配路径
 
-> **前置依赖**:[26-g1-gc/03 — Region A 里谁引用了 Region B？— RSet + CardTable 并发细化](03-rem-set.md):Pause 里已经知道该从哪些来源 card 找入边,本篇接着看对象平时怎么落到 Region 上;[25-gc-framework/02 — new Object() 走到了哪？— CollectedHeap + 分配路径](openjdk/vol-02/25-gc-framework/02-collected-heap.md):TLAB/slow path/`MemAllocator` 总入口已拆,本篇只看 G1 这一层;[26-g1-gc/01 — 堆被切成 2048 块](01-heapregion.md):Region 粒度、humongous 阈值和类型标签都依赖它
-> → **后续**:[26-g1-gc/05 — Mixed GC + 策略](05-mixed-gc-policy.md)
-> 关联域: 25-04(WorkGang/PLAB)、17-threads(TLAB)、09-memory-core(heap 保留/扩容)
+> **版本边界**：本文基于 `OpenJDK 11u / HotSpot / Linux / x86_64 / G1`。这里讨论 G1 中三类对象落地路径：Java mutator 的普通分配、GC worker 的 evacuation copy、以及 humongous 对象的连续 Region 分配。TLAB 的完整实现、晋升年龄策略和 evacuation scanner 不在本文展开。
+>
+> **前置依赖**：[03 — 为什么 G1 pause 不扫全老年代？— RSet + CardTable 的反向索引协议](03-rem-set.md)、[25-gc-framework/02 — `new Object()` 走到了哪？— `CollectedHeap` + 分配路径](../25-gc-framework/02-collected-heap.md)、[01 — 为什么 G1 要把堆切成一张网格？— `HeapRegion` 与 `G1CollectedHeap`](01-heapregion.md)
+> → **后续**：[05 — Mixed GC + 策略](05-mixed-gc-policy.md)
 
-标记和 RSet 都准备好了,但 JVM 还有个最现实的问题: **`new Object()` 到底落哪?** 在 G1 里,普通对象优先走 TLAB,TLAB 不够时去当前 mutator allocation region 继续 bump;GC 拷活对象时,每个 worker 先用自己的 PLAB,PLAB 不够再去 survivor/old 的 GC alloc region 领一段;只有超过 humongous 阈值(> region/2)的对象,才会完全绕过这两套快路径,直接抢一串连续 Region。分配路径之所以复杂,是因为 G1 要同时满足三件事: mutator 快、GC 拷贝快、巨型对象别把 pause 拖死。
+到这里，G1 已经有了三张关键地图：
 
----
+- Region 网格告诉它“空间被切成了哪些格子”；
+- 并发标记告诉它“哪些对象活着”；
+- RSet 告诉它“谁可能指向我要收的 Region”。
 
-## 1. mutator 分配 — TLAB 上面是 MutatorAllocRegion
+但 JVM 还要面对一个最现实的问题：**对象究竟应该落到哪一块内存里？**
 
-### `G1CollectedHeap::mem_allocate`: 先判 humongous,否则走普通路径
+这句话看起来像是在问一个地址，实际上是在问三套完全不同的分配协议：
 
-`mem_allocate`(g1CollectedHeap.cpp:398-408)非常直接: 先断言当前不在 safepoint/不持堆锁;若 `is_humongous(word_size)` 为真就 `return attempt_allocation_humongous(word_size)`;否则走普通对象分配 `attempt_allocation(word_size, word_size, &dummy)`。G1 的总入口先做一次非常关键的分流:
+- Java mutator 调 `new Object()`，希望以最低成本拿到一段普通 Eden 空间；
+- GC worker 搬运活对象，希望多个线程并行把对象复制到 survivor 或 old 目标区；
+- 超过半个 Region 的大对象，根本不适合塞进 TLAB 或 PLAB，而要横跨连续 Region。
 
-- **`is_humongous(word_size)` 为真** → 直接走 humongous 路径;
-- 否则走普通对象分配(`attempt_allocation`)。
+这就逼出本篇最该回答的问题：**G1 里 `new Object()`、GC 复制活对象、超大对象分配，为什么不能共用同一个 bump-pointer？它们分别怎样避开线程竞争、减少尾部浪费、处理晋升目标、跨 Region 摆放和分配失败？**
 
-所以大纲里那种"G1Allocator 三层就是全部分配路径"不完整。**humongous 完全绕过 `G1Allocator` 的 mutator fast path。**
+先把答案压成一句话：**G1 的分配不是一条越来越慢的长路径，而是三条互相隔离的路径：mutator 先在 TLAB 和 `MutatorAllocRegion` 上无锁 bump，GC worker 先在 survivor/old PLAB 上本地 bump，humongous 对象则直接申请连续 Region。它们共同遵守一个原则：对象级快路径尽量不抢全局锁，只有换 Region、补 PLAB、触发 pause 或处理连续大块时才进入慢协议。**
 
-### humongous 阈值是严格大于 region/2
+## 先试两个最自然的办法，看看为什么都不行
 
-`is_humongous` 与阈值公式(g1CollectedHeap.hpp:1211-1224):
+### 朴素方案一：所有对象共享一个 bump pointer
 
-```cpp
-// g1CollectedHeap.hpp:1211-1224(截取核心,逐字)
-  static bool is_humongous(size_t word_size) {
-    // Note this has to be strictly greater-than as the TLABs
-    // are capped at the humongous threshold and we want to
-    // ensure that we don't try to allocate a TLAB as
-    // humongous and that we don't allocate a humongous
-    // object in a TLAB.
-    return word_size > _humongous_object_threshold_in_words;
-  }
+这是最简单的内存分配器思路：准备一块大空间，维护一个全局 `top`，谁来申请对象，谁就把 `top` 往前推一段。
 
-  // Returns the humongous threshold for a specific region size
-  static size_t humongous_threshold_for(size_t region_size) {
-    return (region_size / 2);
-  }
+如果只有一个线程，这个方案非常漂亮；但 G1 同时面对：
+
+- 大量 Java mutator 线程；
+- 多个 GC worker；
+- 不同目标代际；
+- Region 轮换与暂停边界；
+- humongous 连续空间请求。
+
+把它们全塞进一个 bump pointer，会立刻引入几种冲突：
+
+- 每次普通对象分配都要在全局竞争；
+- GC worker 复制 survivor 和 old 对象会抢同一套空间；
+- TLAB/PLAB 的局部性完全消失；
+- 大对象不能切片跨 Region，必须另找连续区间；
+- 一旦 `top` 不能满足请求，普通对象和大对象的失败处理也会互相污染。
+
+所以第一种方案失败，不是 bump pointer 不好，而是**G1 的三个住户有不同的竞争者、目标区和失败语义，必须先把路径隔离。**
+
+### 朴素方案二：所有 GC copy 都先塞进 PLAB
+
+第二个很自然的想法是：既然 PLAB 能让 worker 本地 bump，那 GC 复制的所有对象都先进入 PLAB。对象再大也先申请一个足够大的 PLAB，不就统一了吗？
+
+这个办法会在两个地方浪费：
+
+- 大对象本身可能接近或超过一个 PLAB 的合理尺寸；
+- 为了容纳一次大分配而新开 PLAB，可能要扔掉旧 PLAB 的大段尾部空间。
+
+所以 G1 的真实策略不是“PLAB 万能”，而是：**适合装进 PLAB 的对象用 PLAB；不值得为它新开一块 PLAB 的对象直接落到 GC allocation region。**
+
+这两个失败方案合起来，正好引出本篇主线：**mutator、GC copy、humongous 不是同一条分配路径的不同速度档，而是三种不同的空间协议。**
+
+## Mutator 总入口：为什么先判 humongous，再走普通路径
+
+先看 Java 线程自己的分配。
+
+`G1CollectedHeap::mem_allocate()` 的第一件事不是直接问 `G1Allocator`，而是先判断对象大小：
+
+- 如果 `is_humongous(word_size)`，走 `attempt_allocation_humongous`；
+- 否则走普通 `attempt_allocation`。`src/hotspot/share/gc/g1/g1CollectedHeap.cpp:398`
+
+这条分流非常关键，因为它说明 humongous 对象从入口上就绕开了普通 mutator 快路径。
+
+### 为什么 humongous 是严格大于 Region/2
+
+`humongous_threshold_for(region_size)` 返回 `region_size / 2`，而 `is_humongous()` 使用严格大于。`src/hotspot/share/gc/g1/g1CollectedHeap.hpp:1212`
+
+这个“严格大于”不是细枝末节，而是为了保证：
+
+- TLAB 的大小上限不会刚好踩到 humongous 边界，避免把 TLAB 本身当成 humongous 对象处理；
+- 正好半个 Region 的对象仍然可以留在普通分配模型里；
+- 只有超过半个 Region，才进入连续 Region 逻辑。
+
+所以普通对象分配和 humongous 分配的边界，是一个明确的大小协议，不是后面失败了才临时决定。
+
+### `allocate_new_tlab` 其实只是普通路径的壳
+
+G1 的 `allocate_new_tlab()` 自己几乎不做额外策略，只断言请求不能是 humongous，然后转到普通 `attempt_allocation`。`src/hotspot/share/gc/g1/g1CollectedHeap.cpp:389`
+
+这说明 TLAB refill 在 G1 眼里并不是一条独立的“特殊分配算法”，而是普通对象分配的一种请求形式：带着最小和期望大小，向 mutator allocation path 要一段空间。
+
+所以本节最该记住的一句话是：**G1 分配入口先按对象大小分出 humongous 与 ordinary，TLAB 只是 ordinary 路径的前端缓存。**
+
+## 普通 Mutator：为什么 TLAB 下面还有 retained/active 两个 Region
+
+普通对象进入 `attempt_allocation()` 后，才来到 `G1Allocator`。
+
+### 第一层：先吃 retained，再吃 active
+
+`G1Allocator::attempt_allocation()` 的顺序非常短：
+
+1. 先向 `mutator_alloc_region()->attempt_retained_allocation(...)` 要空间；
+2. 失败后，再向当前 active allocation region `attempt_allocation(...)` 要空间。`src/hotspot/share/gc/g1/g1Allocator.inline.hpp:44`
+
+所以普通 mutator 的实际路径不是“TLAB 满了就立刻领新 Eden Region”，而是：
+
+- Java 线程先在自己的 TLAB 里 bump；
+- TLAB refill 到 G1；
+- G1 先看有没有还值得继续使用的 retained Region；
+- 再看当前 active mutator Region；
+- 都失败后才进入加锁换区和 GC 慢路径。
+
+### 为什么要保留一个尾部还没吃干净的 Region
+
+`MutatorAllocRegion::should_retain()` 会检查：
+
+- 当前 Region 的 free bytes 是否至少还能容纳 `MinTLABSize`；
+- 如果已经有 retained Region，当前这个 Region 的空闲量是否更值得保留；
+- 只有残量连一个完整 TLAB 都装不下时，才不保留。`src/hotspot/share/gc/g1/g1AllocRegion.cpp:275`
+
+这项设计直接针对一个现实问题：**Region 退休时经常会留下装不下普通对象、但仍然能装下一块 TLAB 的尾巴。**
+
+如果每次 active Region 不能继续满足当前请求就直接 retire，这些尾巴会变成内部浪费。G1 因此允许同时保留：
+
+- 一个当前 active mutator allocation Region；
+- 一个 retained allocation Region。
+
+下一次 TLAB refill 先吃 retained，再吃 active，尽量把尾部空间榨干。
+
+这不是为了让分配逻辑更复杂，而是用一个小型暂存位换更少的 Region 尾部浪费；但前提是残量真的还能装下一整个 TLAB，否则保留没有意义。
+
+### 快路径为什么不需要堆锁
+
+`G1AllocRegion::attempt_allocation()` 只是取当前 `_alloc_region`，调用并行 bump allocation；只要当前 Region 还有空间，整个路径不需要拿堆锁。`src/hotspot/share/gc/g1/g1Allocator.inline.hpp:44`
+
+真正需要锁的是“当前 Region 不够了，要不要退休、要不要领新 Region”。这时 `attempt_allocation_locked()` 会：
+
+1. 锁内重试一次，防止等待锁期间别人已经换好 Region；
+2. `retire(true)` 封住旧 Region；
+3. `new_alloc_region_and_allocate(...)` 领新 Region 并完成第一笔分配。`src/hotspot/share/gc/g1/g1Allocator.inline.hpp:54`
+
+### 为什么新 Region 要先分配成功，再发布成 active
+
+`new_alloc_region_and_allocate()` 的顺序非常关键：
+
+- 先拿到新 Region；
+- 先在里面完成第一笔分配；
+- 做 `storestore`；
+- 最后才更新 `_alloc_region`。`src/hotspot/share/gc/g1/g1AllocRegion.cpp:134`
+
+源码注释直接说了原因：这样可以保证 active allocation Region 不会是空的。
+
+这是一条很漂亮的发布协议：**别人一旦看见 `_alloc_region` 指向新 Region，就至少能相信这个 Region 已经有第一笔有效分配，而不是刚拿到一块还没初始化的空壳。**
+
+## Slow path：为什么分配失败先锁内重试，再尝试增量 pause
+
+普通快路径和换 Region 都失败后，才进入 `attempt_allocation_slow()`。
+
+这条路径不是“失败就 Full GC”，而是一套循环：
+
+1. 在 `Heap_lock` 下调用 `attempt_allocation_locked()`；
+2. 如果 GCLocker 正在阻塞 GC，且年轻代还有扩展空间，先尝试 `attempt_allocation_force()`；
+3. 如果可以调 GC，就安排一次 `do_collection_pause(..., GCCause::_g1_inc_collection_pause)`；
+4. pause 之后再无锁重试普通分配；
+5. 如果是 GCLocker 阻塞，就等待它清除，再回到下一轮。`src/hotspot/share/gc/g1/g1CollectedHeap.cpp:410`
+
+这条顺序非常能体现 G1 的优先级：
+
+- 先争取在现有分配结构里解决；
+- 再尝试一次增量回收；
+- 回收后重试；
+- 循环不直接触发 Full GC，Full GC 由 `mem_allocate` 返回 NULL 后的调用方另行决定。`src/hotspot/share/gc/g1/g1CollectedHeap.cpp:410`
+
+所以普通分配失败首先意味着“需要协调一次暂停或等待条件”，不等于马上进入 Full GC。
+
+## GC Copy：为什么每个 worker 要有 survivor/old 两个 PLAB
+
+mutator 分配解决的是“新对象第一次落地”。GC worker 复制活对象时，目标语义又不一样：对象可能去 survivor，也可能直接晋升 old。
+
+### `G1PLABAllocator` 不是一个 PLAB，而是两个目标缓冲
+
+`G1PLABAllocator` 同时维护：
+
+- `_surviving_alloc_buffer`
+- `_tenured_alloc_buffer`
+- `_alloc_buffers[InCSetState::Num]`。`src/hotspot/share/gc/g1/g1Allocator.hpp:127`
+
+这不是为了对象分类好看，而是因为 evacuation 的目标不同：
+
+- 还年轻但活下来的对象去 survivor；
+- 满足晋升条件或被策略安排的对象去 old。
+
+如果两个目标共用一个 PLAB，就会把不同目标区的布局、统计和分配锁混在一起。
+
+### 第一反应仍然是本地 bump
+
+`G1PLABAllocator::allocate()` 先调用 `plab_allocate()`；只要当前 PLAB 够用，就直接本地 bump 返回。`src/hotspot/share/gc/g1/g1Allocator.inline.hpp:73`
+
+这和 mutator 的 TLAB 思路是同构的：**对象复制的常见路径也尽量让 worker 在自己的局部缓冲里完成，不要每复制一个对象就去共享 Region 抢空间。**
+
+### PLAB 不够时：新开一块，或者直接分配
+
+`allocate_direct_or_new_plab()` 会先计算这个对象是否适合放进一个新的 PLAB，以及扔掉旧 PLAB 尾巴的浪费是否能接受；适合就 retire 旧 PLAB、申请新 PLAB，再在其中 bump。否则就直接调用 `par_allocate_during_gc()` 为这个对象分配空间。`src/hotspot/share/gc/g1/g1Allocator.cpp:264`
+
+所以“大对象晋升”并不保证一定进 PLAB。它可能因为：
+
+- 对象太大，不值得单独开 PLAB；
+- 新 PLAB 申请失败；
+- 旧 PLAB 尾部浪费太大；
+
+而直接落进 GC allocation region。
+
+### survivor/old 目标最后落到两条 GC allocation region
+
+`par_allocate_during_gc()` 根据 `InCSetState` 分流：
+
+- `Young` -> `survivor_attempt_allocation`
+- `Old` -> `old_attempt_allocation`。`src/hotspot/share/gc/g1/g1Allocator.cpp:174`
+
+这两条路径都先无锁尝试当前 GC allocation Region，失败后才在 `FreeList_lock` 下重试并换 Region。
+
+因此 GC copy 的竞争也分成两层：
+
+- PLAB 解决对象级别的 worker 竞争；
+- survivor/old GC allocation Region 解决 Region 级别的共享竞争。
+
+## Humongous：为什么完全绕过 TLAB/PLAB 去抢连续 Region
+
+如果对象超过 Region 一半，它就不再进入普通 TLAB/PLAB 逻辑，而是走连续 Region 分配。
+
+### 先算需要几块连续 Region
+
+`humongous_obj_size_in_regions()` 会把对象大小向 Region 粒度对齐，再除以 `GrainWords`，得到所需 Region 数。`src/hotspot/share/gc/g1/g1CollectedHeap.cpp:312`
+
+分配时的顺序是：
+
+- 一个 Region 就先走单 Region 快路径；
+- 多个 Region 先找连续的已提交空 Region；
+- 不够再找 free + unavailable 的连续窗口，必要时 `expand_at()` 先 commit；
+- 连连续窗口都找不到，才进入更重的回收/整理可能性。`src/hotspot/share/gc/g1/g1CollectedHeap.cpp:320`
+
+这说明 humongous 分配失败也不是“直接 Full GC”这么简单。G1 会先判断是不是还有连续地址窗口，只是还没 commit；能扩就先扩。
+
+### 为什么 humongous 初始化顺序必须小心
+
+连续 Region 找到之后，还不能随便把它们标成 Starts/Continues 就算结束。
+
+因为分配者虽然持有 `Heap_lock`，但 concurrent refinement 等 reader 线程可能同时看到这些新 Region。初始化必须确保其他线程不会在 Region 的 header、BOT、类型和 top 还处于半成品状态时，把它当成正常可扫描对象区。
+
+所以 humongous 初始化会遵循类似这样的顺序：
+
+- 先准备新对象头和填充对象；
+- 第一块设为 `StartsHumongous`，后续块设为 `ContinuesHumongous`；
+- 做必要的内存发布；
+- 最后再把各 Region 的 `top` 推到正确位置。
+
+这条顺序的本质不是“初始化代码比较长”，而是：**humongous Region 的发布也必须遵守并发可见性协议。**
+
+### 为什么 humongous 分配前还要检查是否启动并发标记
+
+G1 在 `attempt_allocation_humongous()` 里会在真正分配前调用 `need_to_start_conc_mark(...)`。源码注释直接说明：humongous 对象可能很快吃掉大量堆空间，所以要在分配前检查是否应启动并发标记，避免分配后再追踪这块新增内存。`src/hotspot/share/gc/g1/g1CollectedHeap.cpp:857`
+
+这说明 humongous 不只是“另一种分配方式”，还是一个会影响整个 G1 周期状态的高压力事件。
+
+## 到这里为止，主线其实只发生了四件事
+
+如果前面路径比较多，这里先把整件事压回四步：
+
+1. mutator 普通对象先走 TLAB，再由 `MutatorAllocRegion` 的 retained/active Region 接力；
+2. 只有在换 Region 或条件不足时，才进入锁内分配、Young pause 和重试；
+3. GC worker 复制对象先吃 survivor/old PLAB，不适合 PLAB 的对象再 direct allocate；
+4. humongous 对象直接申请连续 Region，并在并发可见性约束下完成 Starts/Continues 初始化。
+
+只要这四步还在脑子里，G1 的分配就不会再像一条从快到慢的单链路。
+
+## 常见误解澄清
+
+### 误解一：TLAB refill 就等于直接领新 Region
+
+不完全是。
+
+TLAB refill 先进入 G1 的普通 mutator allocation path，会先试 retained Region，再试 active Region，失败后才换 Region。`src/hotspot/share/gc/g1/g1Allocator.inline.hpp:44`
+
+### 误解二：active allocation Region 可能只是刚领来的空 Region
+
+当前发布顺序下不是这样。
+
+G1 会先在新 Region 上完成第一笔分配，再发布 `_alloc_region`，用 `storestore` 保证观察者不会看到一个空的 active Region。`src/hotspot/share/gc/g1/g1AllocRegion.cpp:134`
+
+### 误解三：所有 GC copy 都先进 PLAB
+
+不对。
+
+PLAB 不适合或 refill 失败时，GC worker 会直接向 survivor/old GC allocation Region 分配。`src/hotspot/share/gc/g1/g1Allocator.cpp:264`
+
+### 误解四：humongous 分配失败就直接 Full GC
+
+不是。
+
+G1 会先找已提交的连续空 Region，再找可扩展的 free + unavailable 连续窗口；能扩就先 commit。`src/hotspot/share/gc/g1/g1CollectedHeap.cpp:320`
+
+### 误解五：普通分配失败必然马上停顿
+
+不是。
+
+快路径失败后还会先锁内重试、处理 GCLocker 特殊分支，再尝试一次增量 pause 并重试；是否进入更重路径取决于后续连续失败。`src/hotspot/share/gc/g1/g1CollectedHeap.cpp:410`
+
+## 收网：G1 分配的本质，是三条隔离路径共享一张 Region 网格
+
+现在再回头看最开头那个问题，答案已经能收成一张总图了。
+
+```text
+Java mutator
+  new object / TLAB refill
+    └─ mem_allocate
+         ├─ > Region/2 -> humongous path
+         └─ ordinary
+              ├─ TLAB
+              ├─ retained MutatorAllocRegion
+              ├─ active MutatorAllocRegion
+              └─ Heap_lock + allocation pause + retry
+
+GC worker evacuation
+  copy live object
+    └─ G1PLABAllocator
+         ├─ survivor PLAB
+         ├─ old PLAB
+         ├─ refill new PLAB
+         └─ too large / refill fail -> direct GC alloc region
+
+Humongous
+  └─ contiguous Region run
+       ├─ empty committed first
+       ├─ free + unavailable -> expand/commit
+       └─ initialize Starts/Continues + publish safely
 ```
 
-两个点必须抓准:
+把它再压成三句话：
 
-1. **是严格大于(`>`)不是大于等于**;
-2. 阈值就是 **region 大小的一半**。
+- mutator 的目标是低延迟，所以把竞争挡在 TLAB、retained Region 和 active Region 之外。
+- GC worker 的目标是并行复制，所以把对象级竞争挡在 PLAB 之外，再按 survivor/old 目标进入 GC allocation Region。
+- humongous 的目标是保证大对象完整落地，所以绕过 TLAB/PLAB，直接申请连续 Region 并用专门初始化顺序发布。
 
-这和 26-02 的实证正好对上: 1MB region 下,512KB 数组加 16B 头后超过 512KB,所以被判成 humongous,进而触发 `Concurrent Start`。
+所以这一篇真正该记住的，不是 TLAB、PLAB、MutatorAllocRegion、GC alloc region 这些名字本身。
 
-### 普通对象真正落到 `MutatorAllocRegion`
+真正该记住的是：**G1 没有试图用一个万能 allocator 解决所有对象落地问题，而是把不同住户的竞争和失败语义隔离到三条路径里；三条路径最后仍然共享同一张可按 Region 调度的网格。**
 
-`G1CollectedHeap::attempt_allocation`(g1CollectedHeap.cpp:730-752)先断言“不是 humongous”,再把请求转交给 `_allocator->attempt_allocation(...)`;若失败,就回退到 `attempt_allocation_slow(...)`;成功后再 `dirty_young_block(result, *actual_word_size)` 把新分配的年轻代区间标成 young。真正决定“先吃 retained 还是 active alloc region”的逻辑在 `G1Allocator::attempt_allocation`(g1Allocator.inline.hpp:44-52):
+下一篇就顺着分配之后的策略问题继续往后走：并发标记给出了每个 Region 的存活度，RSet 给出了入边成本，分配路径给出了新空间和复制目标；Mixed GC 到底怎么把这些信息合成一份 collection set，暂停目标与回收收益又如何折中？下一篇展开策略层。
 
-```cpp
-// g1Allocator.inline.hpp:44-52(截取核心,逐字)
-inline HeapWord* G1Allocator::attempt_allocation(size_t min_word_size,
-                                                 size_t desired_word_size,
-                                                 size_t* actual_word_size) {
-  HeapWord* result = mutator_alloc_region()->attempt_retained_allocation(min_word_size, desired_word_size, actual_word_size);
-  if (result != NULL) {
-    return result;
-  }
-  return mutator_alloc_region()->attempt_allocation(min_word_size, desired_word_size, actual_word_size);
-}
-```
-
-这里暴露出 G1 mutator 路径的两层结构:
-
-1. **先试 retained region** — 上一块快退休但还能塞下 TLAB 的 region,会被 `MutatorAllocRegion` 暂存起来继续吃;
-2. **再试当前 active mutator alloc region**。
-
-所以普通对象的真实快路径不是"TLAB 满了直接要新 Eden Region",而是:
-
-- Java 线程先在自己 TLAB 里 bump;
-- TLAB refill 时来 G1 要一段新空间;
-- G1 先看 retained region,再看当前 mutator alloc region;
-- 都不行才进 slow path/新 region/甚至 Young GC。
-
-### `MutatorAllocRegion` 为什么要 retained region
-
-`MutatorAllocRegion` 在 g1AllocRegion.hpp:210-217 明确声明了 `_retained_alloc_region`,注释直接写明它的目的就是 *lower the waste generated during mutation*。真正的保留条件在 `should_retain`(g1AllocRegion.cpp:275-287):
-
-```cpp
-// g1AllocRegion.cpp:275-287(截取核心,逐字)
-bool MutatorAllocRegion::should_retain(HeapRegion* region) {
-  size_t free_bytes = region->free();
-  if (free_bytes < MinTLABSize) {
-    return false;
-  }
-
-  if (_retained_alloc_region != NULL &&
-      free_bytes < _retained_alloc_region->free()) {
-    return false;
-  }
-
-  return true;
-}
-```
-
-这不是大纲里写的那种"Eden region 满了就 retire,再领一个新的"。G1 多做了一步优化: **如果旧 region 剩的空闲还能装 TLAB,就先别扔,留作 retained region。** 目的只有一个——减少尾部碎片浪费。于是 mutator 阶段可能同时握着:
-
-- 一个当前 active alloc region;
-- 一个 retained alloc region。
-
-先吃 retained,再吃 active,最后才去领新 region。并且 mutator alloc region 本身就是 **eden region**: `new_mutator_alloc_region` 用 `new_region(word_size, false /* is_old */, false /* do_expand */)` 领新块,而 `retire_mutator_alloc_region` 里直接 `assert(alloc_region->is_eden())`(g1CollectedHeap.cpp:4850-4880)。
-
----
-
-## 2. AllocRegion — lock-free first, locked second
-
-### `G1AllocRegion` 是 Region 级分配壳
-
-`G1AllocRegion`(g1AllocRegion.hpp:34-54)的类注释把语义写得很清楚: active region 满了就 retire 并替换;**快路径 allocation 假定 lock-free,真正需要拿锁的是“换 region”这一步。** `_alloc_region` 是 `volatile` 指针,未初始化时为 `NULL`,初始化后会指向 active region 或 dummy region。
-
-### 第一层: 不拿锁直接试当前 region
-
-`G1AllocRegion::attempt_allocation`(g1AllocRegion.inline.hpp:78-90):
-
-```cpp
-// g1AllocRegion.inline.hpp:78-90(截取核心,逐字)
-inline HeapWord* G1AllocRegion::attempt_allocation(size_t min_word_size,
-                                                   size_t desired_word_size,
-                                                   size_t* actual_word_size) {
-  HeapRegion* alloc_region = _alloc_region;
-  assert_alloc_region(alloc_region != NULL, "not initialized properly");
-
-  HeapWord* result = par_allocate(alloc_region, min_word_size, desired_word_size, actual_word_size);
-  if (result != NULL) {
-    trace("alloc", min_word_size, desired_word_size, *actual_word_size, result);
-    return result;
-  }
-  trace("alloc failed", min_word_size, desired_word_size);
-  return NULL;
-}
-```
-
-这一步只是拿当前 `_alloc_region`,在 region 顶上做并发 bump。真正的并发安全在 `HeapRegion::par_allocate(...)` 里面解决。**如果还能从当前 region 里抠出一段,整个路径不碰堆锁。**
-
-### 第二层: 拿锁重试 + retire + 换新 region
-
-`attempt_allocation_locked`(g1AllocRegion.inline.hpp:98-117):
-
-```cpp
-// g1AllocRegion.inline.hpp:98-117(截取核心,逐字)
-inline HeapWord* G1AllocRegion::attempt_allocation_locked(size_t min_word_size,
-                                                          size_t desired_word_size,
-                                                          size_t* actual_word_size) {
-  // First we have to redo the allocation, assuming we're holding the
-  // appropriate lock, in case another thread changed the region while
-  // we were waiting to get the lock.
-  HeapWord* result = attempt_allocation(min_word_size, desired_word_size, actual_word_size);
-  if (result != NULL) {
-    return result;
-  }
-
-  retire(true /* fill_up */);
-  result = new_alloc_region_and_allocate(desired_word_size, false /* force */);
-  if (result != NULL) {
-```
-
-锁内有三个动作:
-
-1. **先重试一次** — 防止你等锁这会儿别人已经把 region 换好了;
-2. **`retire(true)`** — 把旧 region 填满/封口,保证没人再从它分配;
-3. **`new_alloc_region_and_allocate(...)`** — 领新 region,再在新 region 里做第一笔分配。
-
-### 新 region 要先分配成功,再发布为 active
-
-`new_alloc_region_and_allocate`(g1AllocRegion.cpp:134-153):
-
-```cpp
-// g1AllocRegion.cpp:134-153(截取核心,逐字)
-HeapWord* G1AllocRegion::new_alloc_region_and_allocate(size_t word_size,
-                                                       bool force) {
-...
-  HeapRegion* new_alloc_region = allocate_new_region(word_size, force);
-  if (new_alloc_region != NULL) {
-    new_alloc_region->reset_pre_dummy_top();
-    // Need to do this before the allocation
-    _used_bytes_before = new_alloc_region->used();
-    HeapWord* result = allocate(new_alloc_region, word_size);
-    assert_alloc_region(result != NULL, "the allocation should succeeded");
-
-    OrderAccess::storestore();
-    // Note that we first perform the allocation and then we store the
-    // region in _alloc_region. This is the reason why an active region
-    // can never be empty.
-    update_alloc_region(new_alloc_region);
-```
-
-这个顺序特别重要:
-
-- 先在新 region 上完成第一笔分配;
-- 再 `storestore`;
-- 最后把它发布到 `_alloc_region`。
-
-所以**active allocation region 永远不会是 empty region**。别的线程一旦看到 `_alloc_region` 指向某块 region,就一定也能看到它已经有有效的 `top()` 和第一笔对象布局。
-
----
-
-## 3. slow path — 不够了就尝试锁内分配,再 Young GC
-
-### `attempt_allocation_slow` 是“锁内分配 / 触发 pause / 重试”的循环
-
-`attempt_allocation_slow`(g1CollectedHeap.cpp:410-516):
-
-```cpp
-// g1CollectedHeap.cpp:427-455,457-460,500-503(截取核心,逐字)
-  for (uint try_count = 1, gclocker_retry_count = 0; /* we'll return */; try_count += 1) {
-    bool should_try_gc;
-    uint gc_count_before;
-
-    {
-      MutexLockerEx x(Heap_lock);
-      result = _allocator->attempt_allocation_locked(word_size);
-      if (result != NULL) {
-        return result;
-      }
-...
-      should_try_gc = !GCLocker::needs_gc();
-      // Read the GC count while still holding the Heap_lock.
-      gc_count_before = total_collections();
-    }
-
-    if (should_try_gc) {
-      bool succeeded;
-      result = do_collection_pause(word_size, gc_count_before, &succeeded,
-                                   GCCause::_g1_inc_collection_pause);
-...
-    result = _allocator->attempt_allocation(word_size, word_size, &dummy);
-    if (result != NULL) {
-      return result;
-    }
-```
-
-普通对象 slow path 不是“直接 Full GC”。它的顺序是:
-
-1. 先在 `Heap_lock` 下做一次 `attempt_allocation_locked`;
-2. 还不行,再尝试调度 **一次增量暂停** `do_collection_pause(..., GCCause::_g1_inc_collection_pause)`;
-3. pause 后再无锁重试一次 `attempt_allocation(...)`;
-4. 还是不行才继续下一轮。
-
-还有一个容易漏掉的分支:g1CollectedHeap.cpp:438-447 里,如果 `GCLocker::is_active_and_needs_gc()` 且 `g1_policy()->can_expand_young_list()` 为真,会先在锁内尝试 `_allocator->attempt_allocation_force(word_size)` 强行领一个新的 mutator alloc region,尽量避免立刻去等 GCLocker 结束。
-
-所以 G1 分配失败的第一反应是 **Young/Mixed pause**,不是 Full GC。只有后面一串策略都失败,才会落到更重的回收路径。
-
-### `allocate_new_tlab` 其实只是普通路径的一个壳
-
-`allocate_new_tlab`(g1CollectedHeap.cpp:389-396)几乎不做额外逻辑: 只断言“TLAB 绝不允许 humongous”,然后直接 `return attempt_allocation(min_size, requested_size, actual_size);`。所以 TLAB refill 在 G1 眼里没有特殊分支——**它只是“带最小值/期望值”的普通 allocation request”**。
-
----
-
-## 4. GC 分配 — 每个 worker 先吃自己的 PLAB
-
-### `G1PLABAllocator` 不是一个 PLAB,而是 survivor/old 两个
-
-`G1PLABAllocator` 在 g1Allocator.hpp:133-145 里同时维护 `_surviving_alloc_buffer`、`_tenured_alloc_buffer` 和 `_alloc_buffers[InCSetState::Num]`,还单独带着 survivor 对齐参数 `_survivor_alignment_bytes` 与 direct-allocation 统计 `_direct_allocated[]`。所以 GC worker 不是只有一根 PLAB,而是至少两根:
-
-- `Young`/survivor 方向一根;
-- `Old`/tenured 方向一根。
-
-这正好对应 evacuation 的两个落点: **幸存下来的年轻对象可能拷去 survivor,也可能直接晋升 old。**
-
-### 快路径: 先在 PLAB 里 bump
-
-`plab_allocate` + `allocate`(g1Allocator.inline.hpp:73-90):
-
-```cpp
-// g1Allocator.inline.hpp:73-90(截取核心,逐字)
-inline HeapWord* G1PLABAllocator::plab_allocate(InCSetState dest,
-                                                size_t word_sz) {
-  PLAB* buffer = alloc_buffer(dest);
-  if (_survivor_alignment_bytes == 0 || !dest.is_young()) {
-    return buffer->allocate(word_sz);
-  } else {
-    return buffer->allocate_aligned(word_sz, _survivor_alignment_bytes);
-  }
-}
-
-inline HeapWord* G1PLABAllocator::allocate(InCSetState dest,
-                                           size_t word_sz,
-                                           bool* refill_failed) {
-  HeapWord* const obj = plab_allocate(dest, word_sz);
-```
-
-和 TLAB 一样,GC worker 的第一反应也是本地 bump。只有 PLAB 不够时才 refill 或直接分配。
-
-### refill 逻辑: 能新开 PLAB 就开,否则 direct allocate
-
-`allocate_direct_or_new_plab`(g1Allocator.cpp:264-306):
-
-```cpp
-// g1Allocator.cpp:264-306(截取核心,逐字)
-HeapWord* G1PLABAllocator::allocate_direct_or_new_plab(InCSetState dest,
-                                                       size_t word_sz,
-                                                       bool* plab_refill_failed) {
-  size_t plab_word_size = _g1h->desired_plab_sz(dest);
-  size_t required_in_plab = PLAB::size_required_for_allocation(word_sz);
-...
-  if ((required_in_plab <= plab_word_size) &&
-    may_throw_away_buffer(required_in_plab, plab_word_size)) {
-...
-    HeapWord* buf = _allocator->par_allocate_during_gc(dest,
-                                                       required_in_plab,
-                                                       plab_word_size,
-                                                       &actual_plab_size);
-...
-    if (buf != NULL) {
-      alloc_buf->set_buf(buf, actual_plab_size);
-
-      HeapWord* const obj = alloc_buf->allocate(word_sz);
-...
-  // Try direct allocation.
-  HeapWord* result = _allocator->par_allocate_during_gc(dest, word_sz);
-```
-
-逻辑是:
-
-1. 这次对象如果适合塞进 PLAB,并且扔掉旧 PLAB 的剩余空间不算太浪费,就先 retire 旧 PLAB;
-2. 向 `G1Allocator::par_allocate_during_gc(...)` 申请一整段新 PLAB;
-3. 申请失败,或者对象本来就不适合新建 PLAB,就直接向 GC alloc region 申请这一个对象。
-
-因此大对象晋升时**可能**走这样一条路径: **跳过 PLAB,直接 old allocation region 分配。** 大纲里“所有 GC copy 都先进 PLAB”并不准确。
-
-### `par_allocate_during_gc`: Young/Old 两条支路
-
-`par_allocate_during_gc`(g1Allocator.cpp:174-187,189-232):
-
-```cpp
-// g1Allocator.cpp:174-232(截取核心,逐字)
-HeapWord* G1Allocator::par_allocate_during_gc(InCSetState dest,
-                                              size_t min_word_size,
-                                              size_t desired_word_size,
-                                              size_t* actual_word_size) {
-  switch (dest.value()) {
-    case InCSetState::Young:
-      return survivor_attempt_allocation(min_word_size, desired_word_size, actual_word_size);
-    case InCSetState::Old:
-      return old_attempt_allocation(min_word_size, desired_word_size, actual_word_size);
-...
-HeapWord* G1Allocator::survivor_attempt_allocation(size_t min_word_size,
-                                                   size_t desired_word_size,
-                                                   size_t* actual_word_size) {
-...
-    MutexLockerEx x(FreeList_lock, Mutex::_no_safepoint_check_flag);
-    result = survivor_gc_alloc_region()->attempt_allocation_locked(min_word_size,
-                                                                   desired_word_size,
-                                                                   actual_word_size);
-...
-HeapWord* G1Allocator::old_attempt_allocation(size_t min_word_size,
-                                              size_t desired_word_size,
-                                              size_t* actual_word_size) {
-...
-    MutexLockerEx x(FreeList_lock, Mutex::_no_safepoint_check_flag);
-    result = old_gc_alloc_region()->attempt_allocation_locked(min_word_size,
-                                                               desired_word_size,
-                                                               actual_word_size);
-```
-
-GC 期间的真正“共享慢点”是 `FreeList_lock`。多个 worker 先无锁试自己挂着的 survivor/old alloc region,不够时才在 `FreeList_lock` 下 retire + 换新 region。和 mutator 路径不同,`new_gc_alloc_region` 调 `new_region(word_size, !is_survivor, true /* do_expand */)` 时允许扩堆(g1CollectedHeap.cpp:4893-4909 起),因为 evacuation 期间不能像 mutator 那样轻易返回失败。**因此 PLAB 解决的是“对象级竞争”; GC alloc region 解决的是“region 级竞争”。**
-
----
-
-## 5. humongous — 完全绕过 TLAB/PLAB 的连续 Region 分配
-
-### 先算需要几个 Region
-
-`humongous_obj_size_in_regions` + `humongous_obj_allocate`(g1CollectedHeap.cpp:312-345):
-
-```cpp
-// g1CollectedHeap.cpp:312-345(截取核心,逐字)
-size_t G1CollectedHeap::humongous_obj_size_in_regions(size_t word_size) {
-  assert(is_humongous(word_size), "Object of size " SIZE_FORMAT " must be humongous here", word_size);
-  return align_up(word_size, HeapRegion::GrainWords) / HeapRegion::GrainWords;
-}
-...
-HeapWord* G1CollectedHeap::humongous_obj_allocate(size_t word_size) {
-...
-  uint first = G1_NO_HRM_INDEX;
-  uint obj_regions = (uint) humongous_obj_size_in_regions(word_size);
-
-  if (obj_regions == 1) {
-...
-  } else {
-    // Policy: Try only empty regions (i.e. already committed first). Maybe we
-    // are lucky enough to find some.
-    first = _hrm.find_contiguous_only_empty(obj_regions);
-```
-
-先 `align_up(word_size, GrainWords) / GrainWords` 算出需要几块连续 Region。然后:
-
-- 只要 1 块时,先走一条更快的单 region 路径;
-- 需要多块时,先找**连续 empty region**;
-- 不行再找 **empty or unavailable** 区间,必要时扩堆并 commit。
-
-### 真的会去扩堆,不是直接 Full GC
-
-`humongous_obj_allocate` 在 g1CollectedHeap.cpp:345-367 的第二阶段会先 `find_contiguous_empty_or_unavailable(obj_regions)` 找 free+uncommitted 的连续窗口;找到了就 `expand_at(first, obj_regions, workers())` 先扩堆/commit,再 `allocate_free_regions_starting_at(first, obj_regions)`。所以 humongous 分配失败后的顺序也不是"直接 Full GC":
-
-1. 先找已提交的连续空 region;
-2. 不够就找 free + uncommitted 的连续窗口;
-3. 找到了先 `expand_at(...)` 扩堆/commit,再 `allocate_free_regions_starting_at(...)`;
-4. 真连窗口都找不到,这时才进入更重的回收/整理可能性。
-
-### 初始化顺序非常讲究,因为 concurrent refine 可能同时扫这些 region
-
-`humongous_obj_allocate_initialize_regions` 的注释与关键步骤(g1CollectedHeap.cpp:204-210,224-237,255-267,277-290):
-
-```cpp
-// g1CollectedHeap.cpp:204-210,224-237,255-267,277-290(截取核心,逐字)
-  // We need to initialize the region(s) we just discovered. This is
-  // a bit tricky given that it can happen concurrently with
-  // refinement threads refining cards on these regions and
-  // potentially wanting to refine the BOT as they are scanning
-  // those cards (this can happen shortly after a cleanup; see CR
-  // 6991377). So we have to set up the region(s) carefully and in
-  // a specific order.
-...
-  // First, we need to zero the header of the space that we will be
-  // allocating.
-...
-  Copy::fill_to_words(new_obj, oopDesc::header_size(), 0);
-...
-  first_hr->set_starts_humongous(obj_top, word_fill_size);
-  _g1_policy->remset_tracker()->update_at_allocate(first_hr);
-...
-    hr->set_continues_humongous(first_hr);
-    _g1_policy->remset_tracker()->update_at_allocate(hr);
-...
-  OrderAccess::storestore();
-...
-  for (uint i = first; i < last; ++i) {
-    hr = region_at(i);
-    hr->set_top(hr->end());
-  }
-```
-
-这段是本篇最容易被大纲带偏的点。humongous 初始化不是"找到连续 region → 标记 Starts/Continues → 结束"。真实顺序是:
-
-1. 先把新对象头清零,让可能撞上的 refinement 线程看到零 klass 就能安全 bail out;
-2. 计算尾部 filler object,补齐最后一块 region 的剩余空间;
-3. 先把第一块设成 `StartsHumongous`,后续块设 `ContinuesHumongous`,同时通知 remset tracker;
-4. `storestore` 保证前面的 header/BOT/type 更新对别的线程可见;
-5. 最后才把各 region 的 `top` 提起来。
-
-**原因不是分配逻辑本身复杂,而是 humongous 初始化和 concurrent refinement 真能并发撞上。** 这是大纲完全没写到的关键约束。
-
-### humongous 分配前会先判断要不要启动并发标记
-
-`attempt_allocation_humongous`(g1CollectedHeap.cpp:857-865):
-
-```cpp
-// g1CollectedHeap.cpp:857-865(截取核心,逐字)
-  // Humongous objects can exhaust the heap quickly, so we should check if we
-  // need to start a marking cycle at each humongous object allocation. We do
-  // the check before we do the actual allocation. The reason for doing it
-  // before the allocation is that we avoid having to keep track of the newly
-  // allocated memory while we do a GC.
-  if (g1_policy()->need_to_start_conc_mark("concurrent humongous allocation",
-                                           word_size)) {
-    collect(GCCause::_g1_humongous_allocation);
-  }
-```
-
-这就是 26-02 素材里 `Pause Young (Concurrent Start) (G1 Humongous Allocation)` 的根源。humongous 分配是 G1 里一个非常敏感的事件: **它既容易吃掉大量 region,又容易把空洞打得更碎。** 所以 G1 会在分配前先看是否该启动 concurrent mark。
-
----
-
-## 核心悬念
-
-**G1 的分配并不是一条路,而是三套协作机制:** mutator 平时吃 TLAB + MutatorAllocRegion,GC worker 拷对象时吃 survivor/old PLAB + GC alloc region,巨型对象则完全绕过它们去抢连续 Region。到了这里,G1 已经同时掌握了三件事: **对象活不活**(并发标记)、**谁引用我要收的 Region**(RSet)、**新对象和拷贝对象往哪落**(本篇)。最后剩下的就是策略问题: **哪些 old region 值得进 CSet,一次 mixed GC 要收多少,暂停目标和回收收益怎么折中?** 下一篇看 Mixed GC + policy。
-
-> → [05-mixed-gc-policy.md](05-mixed-gc-policy.md)
+> → [05 — Mixed GC + 策略](05-mixed-gc-policy.md)

@@ -164,6 +164,20 @@ JDK 11 里：
 
 这说明 characteristics 不是文档注释，而是框架在真实决定并行收口策略时要读取的执行条件。
 
+## 五个最容易混掉的边界：Collector 不是容器本身，finisher 不是总能省，toMap 不是默认覆盖，groupingBy 不是 toMap 变体，CONCURRENT 也不是“自动更快”
+
+第一，`Collector` 不是容器本身。它更像一份归约配方，描述容器如何被创建、元素如何进入、并行如何合并，以及结果是否还要再收尾处理。
+
+第二，`finisher` 不是总能省。只有在结果容器本身就是最终结果时，`IDENTITY_FINISH` 才成立；像 `joining()` 这种中间用 `StringBuilder`、最终返回 `String` 的收集器，就必须显式跑收尾转换。
+
+第三，`toMap()` 不是默认覆盖。JDK 默认语义恰恰是重复 key 直接报错，逼你把冲突规则讲清楚；只有给出 mergeFunction 时，重复 key 才被正式视为合法输入。
+
+第四，`groupingBy()` 不是 `toMap()` 变体。它从一开始就在表达“同 key 元素继续进入同一个下游归约桶”，语义上本来就是双层归约，而不是一 key 对一值映射收集失败后的补丁路线。
+
+第五，`CONCURRENT` 也不是“自动更快”。它表示框架在满足无序等条件时可以让多个线程并发灌同一个结果容器，但是否值得这么做、容器是否真适合共享累加，仍然取决于收集器和数据源语义。
+
+把这五条边界记稳，Collectors 就不会再被理解成“一堆把结果装进常见容器里的方便方法”。它真正想讲的是：collect 的每一条路径都必须先把收口协议讲清楚，而 Collectors 工厂只是把这些 supplier、accumulator、combiner、finisher 和特征组合提前替你配好了。
+
 ## 收网：Collector 真正描述的不是“收集成什么”，而是“结果怎样被造出来、装进去、合起来”
 
 回到开头那个误解，现在已经能看清为什么 Collectors 绝不只是若干方便方法了。`toList()`、`joining()`、`toMap()`、`groupingBy()` 看起来都在“收结果”，但它们背后真正不同的，是：

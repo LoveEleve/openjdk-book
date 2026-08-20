@@ -178,7 +178,7 @@
 
 ### `search` 为什么与内容域强相关，但不直接并入其中
 
-`search` 控制器在 `my-xhs-search/src/main/java/com/myxhs/search/controller/SearchController.java:18` 到 `:22` 把自己定义为核心搜索接口，并通过 `:47` 与 `:68` 分别提供笔记搜索和商品搜索。它显然需要消费内容和商品数据，但它持有的不是内容真相，而是**检索视图与召回/排序能力**。
+`search` 控制器在 `my-xhs-search/src/main/java/com/myxhs/search/controller/SearchController.java:18` 到 `:22` 把自己定义为核心搜索接口，并通过 `:47` 与 `:68` 分别提供笔记搜索和商品搜索。从这些入口和后续索引/召回实现可以看出，它需要消费内容和商品数据，但它持有的不是内容真相，而是**检索视图与召回/排序能力**。
 
 因此它和内容域强关联，却不等于内容域本体。把 `search` 并回 `content`，会把“内容对象的生命周期”和“内容检索的组织方式”绑死在一起。
 

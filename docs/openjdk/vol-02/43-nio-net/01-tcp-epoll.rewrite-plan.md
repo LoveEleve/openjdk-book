@@ -1,169 +1,150 @@
 # 43-nio-net/01-tcp-epoll 重写规划
 
 > 基于 `OpenJDK 11u / Linux / x86_64 / libnet + libnio`
-> 目标：解释同样是 TCP，为什么 Java 世界会分成“阻塞式 Socket”与“NIO Channel + Selector”两条 native 路径；并讲清 JDK 怎样把超时、非阻塞 connect、epoll 等 Linux 原语组织成两种完全不同的上层语义
+> 目标：解释为什么同一条 TCP 在 Java 世界会走出两条几乎相反的 native 路——传统阻塞 `Socket` 自己在 native 里补等待/超时语义，NIO `SocketChannel`/`Selector` 则把未完成状态上抛给 selector，并由 `epoll` 统一等待
 
 ## 1. 选题判断
 
-现稿已有很强事实基础：
-- `PlainSocketImpl.c` 的 connect/accept/close 逻辑
-- `SocketInputStream.c`
-- `Net.c` 的非阻塞三态返回
-- `EPoll.c` / `EPoll.java` / `EPollSelectorImpl.java`
-- epoll 的裸内存数组与 wakeup pipe
+现稿事实基础已经很强：
+- `PlainSocketImpl.socketCreate/socketConnect/socketAccept/socketClose0`
+- `SocketInputStream.socketRead0`
+- `Net.connect0`
+- `EPoll.c` / `EPoll.java` / `EPollSelectorImpl` / `EPollPort`
 
-但当前正文更像“阻塞 Socket 一章 + NIO/epoll 一章”的并列清单。真正该打穿的读者困惑更集中：
+但当前正文仍偏“阻塞路径一节 + NIO 一节 + epoll 一节”的机制并列。真正该打穿的读者困惑更集中：
 
-**同样是一条 TCP 连接，为什么 `new Socket()` 和 `SocketChannel + Selector` 在 native 侧会走出两条几乎相反的路线？前者为什么自己在用户态用 poll 模拟超时，后者为什么把 `EINPROGRESS` 留给 selector，再靠 epoll 驱动？JDK 到底是在同一套内核原语上叠出了两种 API 语义，还是根本走了两套独立世界？**
-
-这才是本篇最该回答的问题。
+**同样是一条 TCP 连接，为什么 `new Socket()` 和 `SocketChannel + Selector` 在 native 侧会走出两条几乎相反的路线？传统 `Socket` 为什么自己在用户态用 `poll(2)` 模拟超时，NIO 为什么把 `EINPROGRESS` 留给 selector，再靠 `epoll` 统一驱动？JDK 到底是在同一套内核原语上叠出了两种语义，还是根本走了两套独立世界？**
 
 ## 2. 一句话顿悟
 
-**Java 的 TCP 世界不是“一套内核 socket API 的薄封装”，而是 JDK 在同一组 Linux 原语之上主动搭出的两种语义层：传统 `Socket` 走阻塞流语义，所以 connect/accept 的等待和超时由自己在 native 里用 `poll(2)` 补出来；NIO `SocketChannel` 则把 socket 长期保持在非阻塞模式，把“现在做不到”翻译成 `IOS_UNAVAILABLE/IOS_INTERRUPTED` 交给 Selector，再由 epoll 统一等待就绪。**
+**Java 的 TCP 世界不是“一套 socket 系统调用的薄封装”，而是 JDK 在同一组 Linux 原语之上主动搭出的两种语义层：传统 `Socket` 走阻塞流语义，所以 connect/accept 的等待和超时由自己在 native 里用 `poll(2)`/`NET_Timeout` 补出来；NIO `SocketChannel` 则把 socket 长期保持在非阻塞模式，把“现在做不到”翻译成 `IOS_UNAVAILABLE/IOS_INTERRUPTED` 上抛给 Selector，再由 `epoll` 统一等待就绪。**
 
 ## 3. 总图
 
 ```text
 阻塞式 Socket
   PlainSocketImpl / SocketInputStream
-    ├─ socket/connect/accept 仍像同步调用
-    ├─ 超时由 native 自己 poll/NET_Timeout 模拟
-    └─ 成功后返回已就绪结果给 Java 线程
+    ├─ connect(timeout<=0) 直接 NET_Connect
+    ├─ connect(timeout>0)  nonblock connect + poll(POLLOUT) + SO_ERROR + JVM_NanoTime
+    ├─ accept              NET_Timeout + NET_Accept + 竞态重试
+    └─ read/write          SocketInputStream/OutputStream + NET_Read/Write
 
 NIO
   Net.c / SocketChannel
-    ├─ connect 非阻塞返回 1 / IOS_UNAVAILABLE / IOS_INTERRUPTED
-    └─ Java 层把“未完成”交给 Selector
+    ├─ connect0 成功 -> 1
+    ├─ EINPROGRESS -> IOS_UNAVAILABLE
+    ├─ EINTR -> IOS_INTERRUPTED
+    └─ 其余错误 -> handleSocketError
 
 Selector on Linux
   EPoll.c + EPoll.java + EPollSelectorImpl
-    ├─ epoll fd
-    ├─ unsafe poll array
+    ├─ epfd
+    ├─ unsafe poll array (struct epoll_event 裸内存)
     ├─ wakeup pipe
-    └─ ADD/MOD/DEL 驱动兴趣集
+    └─ ADD / MOD / DEL 驱动兴趣集
 ```
 
-## 4. 结构大纲与字数预算
+## 4. 结构大纲
 
-### 第一节：开场困惑——为什么同一条 TCP 在 Java 里会变成两套 native 路径
+### 第一节：开场困惑——同一条 TCP 为什么有两条 native 路
 
 目标约 1200 字。
 
-- 从 `Socket.connect()` 和 `SocketChannel.connect()` 对比切入
-- 点出 strace 上一条直接完成、一条 `EINPROGRESS + epoll`
-- 埋主线：JDK 在相同内核原语上搭出两种不同的语义层
+- 从 `Socket` vs `SocketChannel + Selector` 切入
+- 点出：不是“一个阻塞、一个非阻塞”这么浅的差别，而是“谁负责等待、谁负责把未完成状态翻译给上层”的协议责任分配完全不同
+- 埋主线：阻塞流语义 vs selector 就绪语义
 
-### 第二节：两个朴素理解为什么都不对
+### 第二节：两个朴素方案为什么都不对
 
-目标约 1800 字。
+目标约 1500 字。
 
 必须推演：
-1. 阻塞 Socket 与 NIO 只是同一套 native 封装的薄薄语法糖差异
-2. 带超时 connect 是内核直接提供的能力，JDK 只负责透传
+1. 阻塞 Socket 和 NIO 只是同一套 native 薄封装的语法糖差异
+2. 带超时的阻塞 connect 是内核直接提供给 Java 的能力
 
 结论：
-- 两条路径真正分界在“谁负责等待、谁持有非阻塞状态”
-- 超时与 ready-notification 有大量用户态协议工作
+- 底层原语相同，但等待责任完全不同
+- 带超时的阻塞 connect 是 JDK native 自己模拟出来的
 
-### 第三节：PlainSocketImpl——为什么阻塞 Socket 要在 native 里自己补等待语义
+### 第三节：`PlainSocketImpl`——阻塞 Socket 为什么自己补等待语义
 
-目标约 2300 字。
+目标约 2600 字。
 
-- `socketCreate`：server socket 自动 nonblocking + SO_REUSEADDR
-- `socketConnect`：timeout<=0 直接 `NET_Connect`，timeout>0 走 `poll`
-- `socketAccept`：`NET_Timeout` + `NET_Accept`
-- `socketClose0`：deferred close / marker fd
-- 强调：阻塞 API 的“同步语义”是 JDK native 自己组织出来的
+- `socketCreate` 服务端自动 `SO_REUSEADDR` + non-blocking
+- `socketConnect` timeout<=0 vs >0 两条实现路径
+- timeout > 0: non-blocking connect + poll(POLLOUT) + EINTR 重算剩余超时 + SO_ERROR
+- `socketAccept` 也是 `NET_Timeout` + `NET_Accept` + 竞态重试
+- `socketClose0` 的 deferred close
+- 总结：阻塞 API 的“同步感”是 native 自己补出来的
 
-### 第四节：读写路径——为什么传统 Socket 的正文 I/O 不在 PlainSocketImpl 里
+### 第四节：数据路径——为什么正文 I/O 不在 `PlainSocketImpl`
 
-目标约 1600 字。
+目标约 1400 字。
 
 - `SocketInputStream.socketRead0`
-- 堆/栈缓冲切换
-- `NET_ReadWithTimeout` vs `NET_Read`
-- 说明 control path 与 data path 分离
+- stack buffer / heap buffer
+- timeout 走 `NET_ReadWithTimeout`
+- `NET_*` 工具层才是共享底板
 
-### 第五节：NIO 通道层——为什么 connect 会被翻译成三态返回
-
-目标约 2100 字。
-
-- `Net.socket0/bind0/listen/connect0`
-- `IOS_UNAVAILABLE` / `IOS_INTERRUPTED` / success
-- `handleSocketError`
-- 强调 NIO 不自己等待，而是把“尚未就绪”保留给上层 selector 协议
-
-### 第六节：epoll 底座——为什么 Java 侧要直接操作 `struct epoll_event` 裸内存
-
-目标约 2200 字。
-
-- `EPoll.c` 的 `eventSize/eventsOffset/dataOffset/create/ctl/wait`
-- `EPoll.java` 的 `unsafe.allocateMemory`
-- `EPollSelectorImpl` 的 `epfd`、`pollArrayAddress`、wakeup pipe
-- 说明零拷贝不是炫技，而是为了减少 selector 事件搬运层
-
-### 第七节：Selector 语义——为什么 JDK 11 是 level-triggered，不是 EPOLLET 世界
+### 第五节：NIO 通道层——为什么 connect 被翻译成三态返回
 
 目标约 1800 字。
 
-- `EPoll.java` 没有 `EPOLLET`
-- `processUpdateQueue` 的 ADD/MOD/DEL
-- wakeup pipe 的注册
-- `EPOLLONESHOT` 只在异步通道 `EPollPort` 用
-- 收回主线：Selector 关心的是“兴趣集和就绪集协议”，不是裸 epoll 能力炫技
+- `Net.connect0` 成功=1 / EINPROGRESS=IOS_UNAVAILABLE / EINTR=IOS_INTERRUPTED
+- “未完成”是一等返回值，不在 native 自己等完
+- 关键边界：谁负责等待
+
+### 第六节：`epoll` 底座——Java 为什么直接操作 `struct epoll_event` 裸内存
+
+目标约 2000 字。
+
+- `EPoll.c` 暴露 eventSize/eventsOffset/dataOffset + create/ctl/wait
+- `EPoll.java` 直接 `unsafe.allocateMemory`
+- 减掉一层事件搬运
+
+### 第七节：Selector 语义——JDK 11 关心的是兴趣集增量更新
+
+目标约 1800 字。
+
+- `EPoll.java` 无 `EPOLLET`，有 `EPOLLONESHOT`
+- `EPollSelectorImpl` 构造 epfd/poll array/wakeup pipe
+- `processUpdateQueue()` 做 ADD/MOD/DEL
+- `EPollPort` 才用 `EPOLLONESHOT`
 
 ### 第八节：误解澄清与收网
 
 目标约 1300 字。
 
 至少回答：
-1. 阻塞 connect 带超时是否是内核原生特性
-2. `Socket` 是否也会走 epoll
-3. NIO connect 返回 `IOS_UNAVAILABLE` 是否等于失败
-4. EPoll.java 是否直接把 DirectByteBuffer 传给 epoll_wait
-5. JDK 11 Selector 是否默认边缘触发
+1. 带超时阻塞 connect 是否内核直接提供
+2. 阻塞 Socket 是否也走 epoll
+3. `IOS_UNAVAILABLE` 是否等于失败
+4. `EPoll.java` 是否用 DirectByteBuffer
+5. JDK 11 Selector 是否默认 EPOLLET
 
 ## 5. 失败方案必须写进正文
 
-1. 把阻塞 Socket 和 NIO 理解成同一套 native 薄封装
-2. 把超时 connect 理解成内核直接给的同步语义
-3. 把 epoll 事件机制误解成“JDK 自动就用最炫的 EPOLLET”
+1. 阻塞 Socket 和 NIO 只是同一套 native 薄封装的语法糖差异
+2. 带超时的阻塞 connect 是内核直接提供给 Java 的能力
 
 ## 6. 证据清单
 
-- `src/java.base/unix/native/libnet/PlainSocketImpl.c:159`：`socketCreate`
-- `src/java.base/unix/native/libnet/PlainSocketImpl.c:227`：`socketConnect`
-- `src/java.base/unix/native/libnet/PlainSocketImpl.c:312`：timeout connect 注释
-- `src/java.base/unix/native/libnet/PlainSocketImpl.c:587`：`socketAccept`
-- `src/java.base/unix/native/libnet/PlainSocketImpl.c:769`：`socketClose0`
-- `src/java.base/unix/native/libnet/SocketInputStream.c:91`：`socketRead0`
-- `src/java.base/unix/native/libnet/net_util_md.h:80`：`NET_Timeout/NET_Read/NET_Connect/NET_Accept/NET_Poll`
-- `src/java.base/unix/native/libnio/ch/Net.c:194`：`socket0`
-- `src/java.base/unix/native/libnio/ch/Net.c:306`：`connect0`
-- `src/java.base/linux/native/libnio/ch/EPoll.c:41`：布局三函数
-- `src/java.base/linux/native/libnio/ch/EPoll.c:58`：`EPoll_create`
-- `src/java.base/linux/native/libnio/ch/EPoll.c:68`：`EPoll_ctl`
-- `src/java.base/linux/native/libnio/ch/EPoll.c:82`：`EPoll_wait`
-- `src/java.base/linux/classes/sun/nio/ch/EPoll.java:53`：`SIZEOF_EPOLLEVENT` 等
-- `src/java.base/linux/classes/sun/nio/ch/EPoll.java:72`：`allocatePollArray`
-- `src/java.base/linux/classes/sun/nio/ch/EPollSelectorImpl.java:76`：构造与 wakeup pipe
-- `src/java.base/linux/classes/sun/nio/ch/EPollSelectorImpl.java:102`：`doSelect`
-- `src/java.base/linux/classes/sun/nio/ch/EPollSelectorImpl.java:143`：`processUpdateQueue`
-- `src/java.base/linux/classes/sun/nio/ch/EPollPort.java:176`：`EPOLLONESHOT` 用法
+- `src/java.base/unix/native/libnet/PlainSocketImpl.c:159-216`
+- `src/java.base/unix/native/libnet/PlainSocketImpl.c:227-359`
+- `src/java.base/unix/native/libnet/PlainSocketImpl.c:587-700`
+- `src/java.base/unix/native/libnet/PlainSocketImpl.c:769-807`
+- `src/java.base/unix/native/libnet/SocketInputStream.c:91-170`
+- `src/java.base/unix/native/libnio/ch/Net.c:306-327`
+- `src/java.base/linux/native/libnio/ch/EPoll.c:41-97`
+- `src/java.base/linux/classes/sun/nio/ch/EPoll.java:53-104`
+- `src/java.base/linux/classes/sun/nio/ch/EPollSelectorImpl.java:76-175`
+- `src/java.base/linux/classes/sun/nio/ch/EPollPort.java:176-183`
+- `src/java.base/unix/native/libnet/net_util_md.h:80`
 
-## 7. 必须明确的边界
+## 7. 完成后 review
 
-- 基于 `OpenJDK 11u / Linux / x86_64 / libnet + libnio`
-- 本篇聚焦 TCP 与 epoll；UDP、DNS、NetworkInterface 放下一篇
-- 不把 Windows 的 IOCP / select 路径混进来
-- Selector 行为以 JDK 11 当前实现为准，不外推到所有 JDK/NIO 提供者
-- strace 现象只能作实证，不替代源码主线
-
-## 8. 完成后 review
-
-- 删除代码后，能否复述“JDK 在同一组 socket 原语上叠出了阻塞语义与 selector 语义两条路”
-- 是否清楚区分 control path（connect/accept/close）与 data path（read/write）
-- 是否讲清传统 Socket 的超时等待是 JDK native 自己补的
-- 是否明确 JDK 11 Selector 的 level-triggered 边界
+- 删除代码后，能否复述“同一组原语上叠出的两种等待协议”
+- 是否讲清阻塞 connect 的 timeout 是 native 自己模拟出来的
+- 是否讲清 NIO 为何把未完成状态上抛给 Selector
+- 是否讲清 epoll 底座的裸内存布局与兴趣集更新
 - 是否完成删码测试、禁用词、链接、`file:line`、`git diff --check` 校验

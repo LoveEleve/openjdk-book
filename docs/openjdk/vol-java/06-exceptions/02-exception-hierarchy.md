@@ -1,5 +1,6 @@
 # 02. 异常类型体系与设计哲学 — checked/unchecked、Error 家族、生产规范
 
+> 基于 JDK 11 `java.base` 中 `Exception`、`RuntimeException`、`Error` 及其代表性子类实现，并结合 JLS/JVM Spec 的编译期与运行时规则。本文讨论的是 JDK 11 当前类层次、javadoc 约定和生产框架常见包装策略，不把这些具体家族划分或工程取舍外推成所有语言、所有框架或未来 JDK 的统一规范。
 > **前置依赖**: [06-exceptions/01 — Throwable 内部结构](01-throwable-structure.md)(cause 链与构造器)
 > → **后续**:域 02 数字与数学(02-number-math 系列,下一篇)
 > 关联: [JLS §11.2 Compile-Time Checking of Exceptions];[JVM Spec: §4.7.3 异常表];内部卷 21-shared-runtime 03-exception-handling(编译代码抛异常后 JVM 找 handler)、08-interpreter 03-interpreter-runtime
@@ -41,7 +42,7 @@ Throwable
     └── AssertionError
 ```
 
-注意 **`Error` 是独立分支**:它直接继承 Throwable,和 `Exception` 没有任何继承关系——这条"断路"正是"catch (Exception) 抓不到 OOM"的机制根源(第 2 节展开)。
+注意 **`Error` 是独立分支**:它直接继承 Throwable,和 `Exception` 没有任何继承关系——这条"断路"正是"catch (Exception) 抓不到 OOM"的机制根源:处理器只匹配类型兼容的异常分支。
 
 ### 1.2 unchecked 的"法律条文"在 javadoc 里
 
@@ -180,9 +181,23 @@ catch (IOException e) {
 }
 ```
 
-`new BizException("msg", e)` 走的就是第 1 篇讲过的 `Throwable(String, Throwable)` 构造(`Throwable.java:291-295`)——`this.cause = e`,链延续。日志打印同理: 必须 `log.error("业务 xxx 失败", e)` 把**异常对象**传进去,而不是 `e.getMessage()`——后者只留下消息文本,堆栈帧全部丢失(第 1 篇第 4 节的"堆栈没打出来"很大一部分就是这种日志写法造成的)。
+`new BizException("msg", e)` 走的就是第 1 篇讲过的 `Throwable(String, Throwable)` 构造(`Throwable.java:291-295`)——`this.cause = e`,链延续。记录日志时必须 `log.error("业务 xxx 失败", e)` 把**异常对象**传进去,而不是 `e.getMessage()`——后者只留下消息文本,堆栈帧全部丢失；异常对象和消息文本承担的诊断信息不同。
 
 关键设计(斜体):*异常链的哲学: 每一层包装都保留 cause,让"顶层看到业务语义(文件读取失败)、底层看到技术根因(FileNotFoundException: /xxx/file.txt)"。这是 Throwable.cause 设计的最终目的——第 1 篇的"只设一次""禁止自指""dejaVu 环形保护"三道约束,全是为了这条链可以被安全地遍历和打印。生产规范的本质不是"不许抛异常",而是"抛出去的时候把上下文留全"。*
+
+## 五个最容易混掉的边界：checked 不是必须恢复，unchecked 不是不用管，Error 不是大号 Exception，包装不是吞掉，catch Throwable 也不是兜底美德
+
+第一，checked 不是“必须恢复成功”。它只表示编译器强迫你显式面对这条失败路径；调用方可以转换、包装或继续上抛，但不能假装它不存在。把 checked 等同于“这里一定能补救”，会把异常设计误解成业务承诺。
+
+第二，unchecked 不是“不用管”。`NullPointerException`、`IllegalArgumentException`、`IllegalStateException` 虽然不要求 `throws`，但它们依然要求代码修复、参数校验或边界隔离；不写在签名里，不等于它们对系统无影响。
+
+第三，Error 不是大号 Exception。它在类型树上就是另一条分支，`catch (Exception)` 接不住它；OOM、StackOverflow、LinkageError 这类失败也不是“再包装一下继续跑”的普通业务异常，而是线程或进程状态已不可信的信号。
+
+第四，包装不是吞掉。把底层异常翻译成业务语义时，关键不是“换一个更好懂的类名”，而是保留原始 cause；一旦只抛新异常不带根因，异常链就断了，日志再完整也无法把技术原因传递给上层。
+
+第五，`catch (Throwable)` 也不是兜底美德。它确实能接住一切，但正因为连 Error 都会被你吞进统一逻辑，后续清理、重试、降级和继续执行业务都可能建立在已经失真的运行时状态上；大多数生产代码真正需要的是边界清晰的 catch，而不是覆盖一切的网。
+
+把这五条边界记稳，异常类型体系就不会再塌缩成“受检/非受检”的二分背诵题。它真正想讲的是：类型树决定谁必须在编译期被显式处理，Error 分支决定哪些失败不属于普通恢复语义，包装规则决定根因能否穿透调用链，而工程框架只是在这些语言边界之上做取舍。
 
 ## 核心悬念
 

@@ -1,6 +1,6 @@
 # Object 的方法契约与对象生命周期 — 从集合 key 到引用处理
 
-> 基于 JDK 11 `java.base` 的 `Object`、`Reference`、`Cleaner` 实现；对象头与 GC reachability 的底层细节属于 HotSpot 当前实现，不等于 Java API 规范的全部内容。
+> 基于 JDK 11 `java.base` 的 `Object`、`Reference`、`Cleaner` 实现。本文讨论的是 JDK 11 当前的 native 入口、引用处理状态和 Cleaner 组织方式，不把这些实现细节外推成所有 JDK 版本或所有 JVM 的统一行为；对象头与 GC reachability 的底层细节属于 HotSpot 当前实现，不等于 Java API 规范的全部内容。
 > **前置依赖**: [02-number-math/01 — 包装类与 equals](../02-number-math/01-wrapper-cache-boxing.md)(对象身份/值比较)、[01-string/02 — String 的 hash 契约](../01-string/02-equals-hashcode-compare.md)(不可变 key)
 > → **后续**: [System 与 Runtime 门面](02-system-runtime.md)
 
@@ -124,6 +124,20 @@ inactive
 失败方案：用 WeakReference 当强缓存、用 PhantomReference.get 读取业务对象、用 ReferenceQueue 代替真正资源所有权管理。
 
 关键设计(斜体):*四种引用的差别是“对象存活强度 + 死亡通知时机”。Java 层负责引用对象、队列与回调,GC/运行时负责可达性判断;两边不能混成一个 API 行为。*
+
+## 五个最容易混掉的边界：equals 不是 hashCode，hashCode 不是地址，clone 不是深复制，Cleaner 不是析构，弱引用也不是所有权
+
+第一，`equals` 不是 `hashCode`。`equals` 负责判断对象是否属于同一个相等关系，`hashCode` 负责为相等对象提供一致的定位依据；只重写其中一个，HashMap 和 HashSet 就可能在定位与确认之间失去一致性。
+
+第二，`hashCode` 不是地址。默认哈希值由运行时协助提供，Java API 没有把它承诺成内存地址、持久 ID 或全局唯一编号；GC 是否移动对象，也不能由业务代码通过 hashCode 推断。
+
+第三，`clone` 不是深复制。它提供的是受运行时支持的浅拷贝入口，字段里的引用仍可能指向原对象；`Cloneable` 只表示运行时允许这条复制路径，不表示复制结果符合业务隔离要求。
+
+第四，Cleaner 不是析构函数。它把清理动作接入引用处理机制，但不能提供确定的立即执行时间；文件、Socket 和其他有限资源仍应由显式 `close` 或 try-with-resources 管理。
+
+第五，弱引用也不是所有权。Soft、Weak、Phantom 只是在不同强度上影响对象可达性或死亡通知，不能替业务代码保存资源责任；尤其 PhantomReference 不能用来取回 referent，ReferenceQueue 也不是资源关闭协议。
+
+把这五条边界记稳，Object、finalize、Cleaner 和 Reference 就不会再被看成互不相关的 API 清单。它们真正共同维护的是三件事：对象如何保持可识别，资源如何明确结束，GC 如何把“不可达”转换成 Java 能观察到的通知；其中任何一层都不能替另一层承担责任。
 
 ## 收网：对象、资源、引用三条边界
 

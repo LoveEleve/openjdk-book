@@ -1,6 +1,6 @@
 # System 与 Runtime 门面：Java 进程如何管理时间、状态与退出
 
-> 本文基于 JDK 11 `java.base` 的 `System`、`Runtime`、`Shutdown` 实现。涉及时钟底层时以 HotSpot/Linux 为例；涉及 shutdown hook 时同时区分 Java API 契约与 JDK 11 当前实现。`currentTimeMillis` 的返回格式、`nanoTime` 只适合做差值、`System.exit` 的基本语义属于 API 契约；native 入口、属性快照和 shutdown 槽位则是当前实现证据。
+> 本文基于 JDK 11 `java.base` 的 `System`、`Runtime`、`Shutdown` 实现。涉及时钟底层时以 HotSpot/Linux 为例；涉及 shutdown hook 时同时区分 Java API 契约与 JDK 11 当前实现。`currentTimeMillis` 的返回格式、`nanoTime` 只适合做差值、`System.exit` 的基本语义属于 API 契约；native 入口、属性快照和 shutdown 槽位则是当前实现证据。本文讨论的是 JDK 11 进程门面能力，不把这里的时钟源选择、arraycopy 优化路径和 shutdown 状态机组织方式外推成所有 JVM 进程管理的统一规范。
 > **前置依赖**：[Object 的方法契约与对象生命周期](01-object-contract-references.md)、[包装类与缓存](../02-number-math/01-wrapper-cache-boxing.md)
 > **后续**：[进程与本地交互](03-process-native.md)
 
@@ -273,6 +273,22 @@ JDK 的 API 文档因此要求 hook 尽量线程安全、避免死锁、不要�
 `Runtime.freeMemory()`、`totalMemory()` 和 `maxMemory()` 都是 native 查询，但它们回答的是 JVM 堆状态的近似或当前值，不是操作系统进程的全部内存占用。`freeMemory` 是未来对象可用空间的近似值，`totalMemory` 可能随宿主环境变化，`maxMemory` 是 JVM 尝试使用的上限。`Runtime.gc()` 的 API 语义也只是建议 JVM 花力气回收，并非调用线程可以据此证明“一次完整 GC 已经同步结束”。
 
 这几个方法再次说明 `Runtime` 是进程门面：Java 层只提供稳定调用形式，真正的内存管理和终止动作由 JVM 状态决定。
+
+## 五、五个最容易混掉的边界：currentTimeMillis 不是耗时器，nanoTime 不是日历值，arraycopy 不是手写循环提速，getProperties 不是 JDK 全真相，exit 也不是立即终止
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`currentTimeMillis` 不是做耗时测量的工具。它返回的是墙上时钟时间，可能被校时或手动调整；用它做差值计算，得到的结果可能为负或剧烈跳变。耗时测量应当用 `nanoTime`，它只适合同 JVM 内做差值，不解释成日历时间。
+
+第二，`nanoTime` 反过来也不是日历时间。它返回的是 JVM 实例内某个固定但任意起点后的纳秒数，跨进程、跨重启后的绝对值没有任何语义。只有同一进程内两次调用之间的差值才有意义。
+
+第三，`arraycopy` 的优势也不是“比手写循环更快”这么简单。它更重要的价值是统一了类型检查、范围检查、重叠复制和写屏障处理，让这些复杂边界不再散落到每个调用方手里。把正确性集中起来，然后才谈得上让 JVM 优化成全量复制。
+
+第四，`System.getProperties()` 返回的也不是 JDK 所有内部状态的唯一真相。JDK 11 在启动时通过 `VM.saveAndRemoveProperties` 把内部配置复制到 `savedProps`，再从公开集合中移除。因此公开 `Properties` 的修改并不总是影响 JDK 内部行为。
+
+第五，`System.exit` 更不是“调用后 OS 进程立刻终止”。它会先走 shutdown 流程：安全检查、系统 hook 槽位、用户 hook 并发执行并等待完成，最后才 `halt`。用户 hook 一旦卡住，整个进程就会停在门口。`halt` 才是真正放弃清理承诺的强制终止。
+
+把这五条边界记稳，`System` 和 `Runtime` 这一篇就不会重新塌回“几个静态工具方法”的表面印象。它真正想讲的是：进程级时间、复制、属性和退出，都是 Java 到 OS 和 VM 状态之间的门面，边界一旦选错，事故就会从最常见的 API 用法里冒出来。
 
 ## 收网：四条使用规则背后的同一张图
 

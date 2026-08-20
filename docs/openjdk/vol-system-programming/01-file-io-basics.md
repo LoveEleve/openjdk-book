@@ -29,7 +29,7 @@
 - `close(fd)` 释放了一个 fd 引用，不等于底层对象马上彻底消失；
 - `lseek + read` 在多线程下可能因为共享 offset 竞争读错位置。
 
-所以本篇最重要的顿悟是：**系统编程首先不是记 API，而是把用户态缓冲、系统调用、文件描述符、open file description、VFS/page cache、文件系统、块设备和稳定存储拆成多层账本。**
+所以本篇最重要的顿悟是：**系统编程首先不是记 API，而是把用户态缓冲、系统调用、文件描述符、open file description、VFS/page cache、文件系统、块设备和稳定存储拆成多层账本。** 证据位应回到 `fs/read_write.c` 一类系统调用入口、`fs/open.c`/`fs/file*.c` 的打开文件对象路径、`mm/filemap.c` 的 page cache 读写路径，以及 glibc `stdio`/`fflush` 实现；这些模块共同支撑“成功发生在不同层”这条主线，而不是某一个 API 单独决定全部语义。
 
 先把总图记住：
 
@@ -131,7 +131,7 @@
 
 即使使用 `O_DIRECT`，系统调用、文件系统、块层和设备驱动仍然存在。它改变的是数据是否按普通 page cache 方式中转，以及应用是否需要自己负责对齐、缓存、并发和数据生命周期。
 
-因此它的代价不只是“对齐麻烦”，还包括和 buffered I/O 混用时的一致性、文件系统支持、并发读写和设备队列语义。它更适合已经拥有自己 buffer pool 和 I/O 调度体系的应用，而不是所有程序的通用加速按钮。
+因此它的代价不只是“对齐麻烦”，还包括和 buffered I/O 混用时的一致性、文件系统支持、并发读写和设备队列语义。证据位应检查 `open` 标志解析、文件系统 direct I/O 路径和块层提交流程：它们支撑“O_DIRECT 改的是缓存路径与责任边界”这句判断，但不能被误读成所有文件系统、所有设备都给出完全相同的 direct I/O 语义。它更适合已经拥有自己 buffer pool 和 I/O 调度体系的应用，而不是所有程序的通用加速按钮。
 
 ### 6. 本节最该记住的结论：`fflush`、`write`、`fsync`、`O_SYNC`、`O_DIRECT` 分别站在用户缓冲、内核接管、显式持久化、每次写同步和缓存路径选择不同边界上
 
@@ -276,6 +276,32 @@ stdio：
 也正因为如此，系统编程真正容易出 bug 的地方不在“不会调用函数”，而在“误解函数承诺”。你以为 fflush 就等于落盘、以为 write 就一定写满、以为 close 就马上销毁、以为 lseek+read 在并发下天然安全，最后都可能在边界条件里出错。
 
 这就是为什么说：**文件 I/O 的第一课不是 API 记忆，而是分层账本：数据在哪一层，谁拥有位置，谁负责继续推进，哪一步才接近持久化。**
+
+## 七、误解清单、证据清单与边界清单
+
+### 误解清单
+
+- `read`/`write` 返回成功不等于完整业务消息已经完成；partial I/O 是正常控制流的一部分。
+- `fflush` 不等于 `fsync`；一个刷新的是 libc 用户态缓冲，一个请求的是更强内核/设备持久化语义。
+- `write` 成功不等于断电安全；数据可能仍停在 page cache、文件系统或设备缓存路径上。
+- `fd` 不是文件对象本身；共享 offset 与生命周期往往落在 open file description 上。
+- `O_DIRECT` 不是完全绕过内核，也不是所有程序的通用性能开关；它改变的是缓存路径与责任边界。
+
+### 证据清单
+
+- 系统调用与打开文件对象：`fs/read_write.c`、`fs/open.c`、`fs/file*.c` 一类路径，支撑“fd 引用、open file description 与本次 I/O 推进量”的判断。
+- Page cache 与回写：`mm/filemap.c`、writeback 与文件系统提交路径，支撑“write 成功通常只是内核接管数据”的事实。
+- stdio 用户态缓冲：glibc `stdio`、`fflush`/`fclose` 路径，支撑“FILE 缓冲与内核 page cache 是两层缓存”。
+- 持久化语义：`fsync`/`fdatasync`、`O_SYNC`/`O_DSYNC` 与 direct I/O 路径，支撑“同步 API 分别站在不同层边界上”。
+- 偏移与引用：`dup`/`fork` 后 fd 继承、`pread`/`pwrite` 与共享 offset 路径，支撑“位置竞争来源于共享 description 而不是共享文件名”。
+
+### 边界清单
+
+- 本文讨论的是 POSIX/Linux 文件 I/O 的稳定心智模型，不把某个文件系统、块设备、缓存策略或 glibc 默认值写成跨平台契约。
+- partial I/O、EOF、EINTR、EAGAIN/EWOULDBLOCK 的具体表现会随 fd 类型、阻塞模式和信号环境变化。
+- `fsync`、`fdatasync`、`O_SYNC` 和 `O_DIRECT` 的真实持久化/性能效果依赖文件系统、块层、驱动、设备缓存与硬件保障，不能抽象成单一结论。
+- `close`、`unlink`、fork 继承和 `dup` 共享描述的是不同层级的引用与名字关系，不应混成“文件马上消失”或“资源必然立刻回收”。
+- 后续进入 `mmap`、epoll、inotify 时，重点会从“数据在哪一层”转向“哪些长期状态可以交给内核替你维护”。
 
 ## 下一篇桥接
 

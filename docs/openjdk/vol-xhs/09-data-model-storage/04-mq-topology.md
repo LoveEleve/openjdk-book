@@ -112,14 +112,14 @@
 
 ## 支付结果链为什么是双路的：MQ 不是唯一通道，Feign 回调和 XXL-Job 也是拓扑的一部分
 
-另一个特别值得单独点名的拓扑特征，是支付结果链的双路设计。`my-xhs-payment` 不是只往 `PAY_RESULT_TOPIC` / `REFUND_RESULT_TOPIC` 发一条消息就结束，而是同时保留了 Feign 回调与补偿任务。支付模块文档已经把这条逻辑说得很清楚：
+另一个特别值得单独点名的拓扑特征，是支付结果链的双路甚至三路收敛。当前直接可核到的代码事实是：`my-xhs-payment` 会发送 `PAY_RESULT_TOPIC` / `REFUND_RESULT_TOPIC`，payment 模块自己也保留了同名 Topic 的消费者与补偿任务；与此同时，支付侧还保留了 Feign 回调订单服务的主动通知路径。更稳妥地展开，这条链至少包含：
 
-1. 支付成功后发 MQ 消息给结果 Topic；
-2. 订单服务订阅这些 Topic 更新订单状态；
+1. 支付成功或退款成功后，payment 发 MQ 消息到结果 Topic；
+2. payment 模块内部保留结果消费者，用于日志、补偿与链路兜底；
 3. 如果 MQ 消费失败或链路异常，支付服务还可以通过 Feign 主动回调订单；
-4. 再进一步，还有 `PaymentNotifyCompensateJob` / `RefundNotifyCompensateJob` 这类定时任务扫描“支付已成功但订单未确认”的记录，继续重试通知。`my-xhs-payment/docs/CODE-REVIEW.md:129`
+4. 再进一步，还有 `PaymentNotifyCompensateJob` / `RefundNotifyCompensateJob` 这类定时任务扫描“支付已成功但订单未确认”的记录，继续重试通知。`my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:1083` `my-xhs-payment/src/main/java/com/myxhs/payment/consumer/PayResultConsumer.java:27` `my-xhs-payment/src/main/java/com/myxhs/payment/consumer/RefundResultConsumer.java:22` `my-xhs-payment/src/main/java/com/myxhs/payment/job/PaymentNotifyCompensateJob.java:21` `my-xhs-payment/src/main/java/com/myxhs/payment/job/RefundNotifyCompensateJob.java:19`
 
-这里最重要的理解是：对支付链来说，MQ 不是唯一真理，而是“第一条异步通道”。Feign 回调和 XXL-Job 并不是在和 MQ 竞争，而是在帮 MQ 补最后那一截可靠性。因此本篇如果只按 Topic → ConsumerGroup 画图，会漏掉最关键的业务语义：**支付结果链是一条带同步回调与异步补偿的双路拓扑。**
+这里最重要的理解是：对支付链来说，MQ 不是唯一真理，而是“第一条异步通道”。Feign 回调和 XXL-Job 并不是在和 MQ 竞争，而是在帮 MQ 补最后那一截可靠性。因此本篇如果只按 Topic → ConsumerGroup 画图，会漏掉最关键的业务语义：**支付结果链至少是一条带 MQ 结果通知、主动回调与异步补偿的多路拓扑。**
 
 这也解释了为什么很多 MQ 文章只讲“生产者发，消费者收”不够。对资金相关链路来说，消息投递成功不等于业务一致性成功；真正的成功定义是“订单最终被推进到正确状态”，而不只是“Broker 收到一条消息”。
 
@@ -146,6 +146,14 @@ Task13 的运行态链已经把这点演得非常彻底：同一条真实坏消�
 - 后续重投时应回到哪条 RETRY_TOPIC / 哪组消费者上下文中去
 
 如果把 ConsumerGroup 当成一个“配置细节”，那一到坏消息现场你就会立刻迷路。因为真正的死信、重投、积压、观测，大多都不是沿 Topic 抽象展开，而是沿“某条消费链的这组消费者”展开。
+
+这里还可以再补一层工程问题：当前系统已经开始把“死信积压”本身也当成一个需要独立监控的消息账本指标。`DlqMetrics` 在 `my-xhs-common/src/main/java/com/myxhs/common/metrics/DlqMetrics.java:36` 到 `:97` 中，会按 ConsumerGroup 维护 DLQ backlog 缓存，并定时通过 PullConsumer 查询 `%DLQ%<consumerGroup>` 的堆积量，暴露成 `rocketmq.dlq.backlog` 指标。也就是说，在当前实现里，ConsumerGroup 不只是 MQ 注解上的字符串，它还决定了：
+
+- 哪条失败链进哪个死信空间；
+- 监控里应该按哪个维度暴露积压；
+- 告警和人工处理时应该按哪组消费者去定位。
+
+这进一步说明 MQ 拓扑在 `my-xhs` 里不是“消息怎么发”，还包括“失败之后系统怎样继续观察和收敛这批消息”。
 
 ## 真实故障案例：真实坏消息进入 `%DLQ%inventory-order-transaction-consumer-group`，证明 DLQ 不是抽象概念而是拓扑终点之一
 

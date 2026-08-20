@@ -248,10 +248,12 @@
 ### Ch18 Configuration
 - [01. 为什么 `@Configuration` 不只是一个标记：Spring 如何把配置类解析成会继续扩张的定义世界](ch18-configuration/01-configuration-class-processing.md)
 - [02. 为什么 `@Bean` 方法彼此调用不会不断 new 新对象：Spring 如何用方法级定义与 CGLIB 增强守住配置类单例语义](ch18-configuration/02-bean-method-and-cglib-enhancement.md)
+- [03. 为什么 `@Service`、`@Repository`、`@Controller` 不只是换个名字：Spring 如何把语义元注解、候选扫描、校验分组和字段格式化接回容器主线](ch18-configuration/03-stereotype-validated-format.md)
 
 回答：
 - 为什么配置类处理首先属于定义世界，而不是实例世界
 - `ConfigurationClassPostProcessor / ConfigurationClassParser / ConfigurationClassBeanDefinitionReader / ConfigurationClassEnhancer / BeanMethodInterceptor` 这条配置类扩张与增强主线如何成立
+- stereotype、`@Validated`、`@DateTimeFormat` 如何分别桥接扫描、方法校验和类型转换
 
 ### Ch19 Import / Scan
 - [01. 为什么 `@ComponentScan` 和 `@Import` 不是两个小注解：Spring 如何把它们组织成定义世界的递归扩张引擎](ch19-import/01-componentscan-recursive-scanning.md)

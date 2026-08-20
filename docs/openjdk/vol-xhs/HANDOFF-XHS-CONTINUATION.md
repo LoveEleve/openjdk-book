@@ -262,11 +262,12 @@
 1. `07-im-notification-message/01-websocket-im.md`
 2. `07-im-notification-message/02-sse-notification.md`
 3. `07-im-notification-message/03-message-aggregation.md`
+4. `07-im-notification-message/04-cross-instance.md`
 
 当前状态：
-- IM / SSE 通知 / 通知聚合与未读数三篇已起稿
+- IM / SSE 通知 / 通知聚合与未读数 / 跨实例路由四篇已齐
 - “通知 ≠ IM”的边界已经比较清楚
-- 还缺 `04-cross-instance.md` 或同类收尾篇（如果继续沿当前目录规划）
+- 07 组当前已完成一轮系统深审，可继续补更多跨实例运行态证据
 
 ---
 
@@ -294,9 +295,9 @@
 
 可继续增强的方向：
 
-- 补跨实例专章
 - 补离线消息 / 已读回执 / 未读对账的更强运行态证据
 - 强化通知聚合窗口与 SSE 多实例路由的实锚
+- 继续补 IM 与 SSE 跨实例链的多实例实测材料（当前正文已建立代码与历史证据边界）
 
 ---
 
@@ -336,9 +337,9 @@
 
 如果新 AI 要延续当前写作节奏，建议：
 
-1. 补完 `07-im-notification-message/` 的剩余篇章
-2. 进入 `08-gateway-security-observability/`
-3. 再转 `09 / 10 / 11 / 12` 横切专题
+1. 进入 `08-gateway-security-observability/`
+2. 再转 `09 / 10 / 11 / 12` 横切专题
+3. 继续回头用部署/运行态事实补强 `07-im-notification-message/` 的跨实例与离线补投证据
 
 优点：
 - 当前上下文连续
@@ -411,9 +412,9 @@
 
 优先候选：
 
-1. `07-im-notification-message/04-cross-instance.md`（如果沿通知/IM 链收口）
-2. `08-gateway-security-observability/01-gateway-routing.md`（如果转入横切基础设施）
-3. `09-data-model-storage/01-mysql-sharding.md`（如果转入数据模型横切）
+1. `08-gateway-security-observability/01-gateway-routing.md`（如果转入横切基础设施）
+2. `09-data-model-storage/01-mysql-sharding.md`（如果转入数据模型横切）
+3. 回头补强 `07-im-notification-message/04-cross-instance.md` 的多实例运行态证据（如果继续打磨通知/IM 链）
 
 当前更推荐：
 

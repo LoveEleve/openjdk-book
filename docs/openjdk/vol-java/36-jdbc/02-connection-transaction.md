@@ -1,5 +1,6 @@
 # 02. Connection 生命周期与事务控制 — 接口体系、事务边界、异常链
 
+> 基于 JDK 11 `java.sql.Connection`、`Statement`、`PreparedStatement`、`ResultSet` 与 `SQLException` 接口语义。本文讨论的是 JDK 11 JDBC API 当前的事务边界表达、资源关闭契约和异常链结构，不把这里的接口约定、连接池行为或数据库事务实现细节外推成所有驱动、所有数据库或所有框架的统一规范。
 > **前置依赖**: [36-jdbc/01 — DriverManager 与驱动加载机制](01-drivermanager-loading.md)(连接怎么拿到)、[06-exceptions/01 — Throwable 结构](../06-exceptions/01-throwable-structure.md)(异常链语义)
 > → **后续**:[36-jdbc/03 — XA 与 2PC](03-xa-2pc.md)
 > 关联: 域 06 异常(受检异常与链);域 03 对象系统(资源生命周期)
@@ -166,6 +167,20 @@ for (SQLException e = ex; e != null; e = e.getNextException()) {
 关键设计(斜体):*SQLException 自带链式(getNextException)——遍历取全,生产日志打印完整链(不是只打 message)。面试"SQLException 与 IOException 关系": 都是受检异常(域 06);"错误怎么分类处理": SQLState 标准码(连接失败重试、约束违反告警)。*
 
 跨层标注: [域 06: 01-throwable——SQLException 是受检异常(编译期强制处理),其 next 链与 Throwable.cause 是两种链;域 03 对象系统——Connection/Statement/ResultSet 的资源生命周期与 finalize/Cleaner 的对象清理语义对照]
+
+## 五个最容易混掉的边界：拿到 Connection 不是开始事务，commit 不是 JDBC 自己保证原子，close 不是只关物理连接，cause 不是 nextException，恢复 autoCommit 也不是可选清理
+
+第一，拿到 `Connection` 不是开始事务。默认 `autoCommit=true` 时，每条 SQL 的边界由驱动和数据库按自动提交处理；只有显式关闭自动提交，调用方才开始自己管理一组 SQL 的提交与回滚边界。
+
+第二，`commit()` 不是 JDBC 自己保证原子。JDBC 负责把事务边界指给驱动，具体原子性、隔离和持久化能力仍由数据库与驱动共同实现；接口方法不会替你弥补数据库层的事务语义差异。
+
+第三，`close()` 不是只关物理连接。直连场景它释放连接资源，连接池场景通常意味着把连接归还池中；同时 Statement、ResultSet 也有自己的资源生命周期，不能把依赖链的兜底关闭误当成调用方可以随意漏关。
+
+第四，`cause` 不是 `nextException`。Throwable cause 表达异常因果关系，SQLException 的 next 链表达驱动追加的多个相关 SQL 错误；生产诊断需要分别检查两条链，不能只沿其中一条走。
+
+第五，恢复 `autoCommit` 也不是可选清理。连接池复用的是 Connection 对象及其会话状态，事务完成后若不明确提交或回滚、恢复自动提交并关闭资源，下一个借到同一连接的请求可能继承旧状态或未完成事务。
+
+把这五条边界记稳，JDBC 连接与事务就不会再被简化成“拿连接、执行 SQL、最后 close”三步模板。它真正想讲的是：接口层分别管理会话、事务、资源和错误信息，而调用方必须在成功路径和异常路径上都把这些状态明确收回。
 
 ## 核心悬念
 

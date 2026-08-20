@@ -171,7 +171,7 @@ PoolStats + Dropwizard/Micrometer/Prometheus
 
 这些指标之所以值钱，不是因为它们“好看”，而是因为它们分别对应连接生命史中的关键压力点。
 
-而且这些点不是概念上随便挑的，在 `HikariPool` 里都有明确记录入口：
+而这些点不是概念上随便挑的，在 `HikariPool` 里都有明确记录入口：
 - 借出成功：`recordBorrowStats(...)`：`com/zaxxer/hikari/pool/HikariPool.java:171`
 - 借出超时：`recordBorrowTimeoutStats(...)`：`com/zaxxer/hikari/pool/HikariPool.java:183`
 - 连接使用完成：`recordConnectionUsage(...)`：`com/zaxxer/hikari/pool/HikariPool.java:436`

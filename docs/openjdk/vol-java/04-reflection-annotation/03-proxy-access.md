@@ -1,6 +1,6 @@
 # 动态代理与访问控制：`$Proxy0` 为什么必须被造出来
 
-> 本文基于 JDK 11 `java.base` 的 `Proxy`、`ProxyGenerator`、`AccessibleObject` 和 `sun.reflect.misc.ReflectUtil`。`proxyCache`、`ProxyBuilder`、`UNSAFE.defineClass` 以及命名模块下的代理类包名，都是 JDK 11 当前实现事实，不是 Java 代理 API 规定的唯一内部方案。CGLIB/ASM 只作对照，不展开其实现。
+> 本文基于 JDK 11 `java.base` 的 `Proxy`、`ProxyGenerator`、`AccessibleObject` 和 `sun.reflect.misc.ReflectUtil`。`proxyCache`、`ProxyBuilder`、`UNSAFE.defineClass` 以及命名模块下的代理类包名，都是 JDK 11 当前实现事实，不是 Java 代理 API 规定的唯一内部方案。CGLIB/ASM 只作对照，不展开其实现。本文讨论的是 JDK 11 动态代理生成与反射访问控制边界，不把这里的代理类缓存策略、`ProxyGenerator` 模板拼装方式和模块封装行为外推成所有 JVM 代理实现的统一规范。
 > **前置依赖**：[Class 反射视图](01-class-member-access.md)、[MethodAccessor：反射为什么不是一直都慢](02-methodaccessor.md)
 > **后续**：[注解体系](04-annotation.md)
 
@@ -370,6 +370,22 @@ private static void privateCheckPackageAccess(SecurityManager s, Class<?> clazz)
 因此“为什么 JDK 9+ 以后还会报 `InaccessibleObjectException`”的正确回答不是“JDK 不让你用了”，而是：旧经验默认访问控制只有一层，现在至少变成了“模块/包边界 + 成员修饰符”两层。`setAccessible(true)` 只负责后一层，前一层需要 `opens` 或等价授权。
 
 **这一节真正要收住的结论是：动态代理靠“造出一个新类”解决对象存在问题；`setAccessible` 靠“改一个已存在对象的访问标志”解决语言级别访问问题。模块系统把后者的权限边界抬高后，很多老框架才会突然失灵。**
+
+## 六、五个最容易混掉的边界：动态代理不是拦截接口，$Proxy0 不是每次都新造，JDK 不代理类不是 API 偷懒，handler 对 proxy 反射不是只慢一点，setAccessible 也不是模块万能钥匙
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，动态代理不是“拦截接口调用”这么虚。JVM 需要一个真实类才能实例化出对象，所以 `Proxy.newProxyInstance` 必须先找到或造出一个实现接口的新类，再把所有接口方法统一汇流到 `InvocationHandler.invoke`。没有这个新类，就没有对象可交付。
+
+第二，`$Proxy0` 也不是每次调用都新造一个。JDK 11 的 `proxyCache` 以类加载器+接口列表为键缓存的是代理类构造器，同一组接口的代理类通常只生成一次。
+
+第三，JDK 代理不能代理普通类也不是 API 设计偷懒。它背后的生成模板假设自己是实现接口，方法体模板统一汇流到 `InvocationHandler.invoke`，访问控制、包名选择都围绕这套假设来组织。普通类增强需要继承、super 调用、构造器处理，已经超出这套模板的能力范围。
+
+第四，handler 里对 `proxy` 做 `method.invoke(proxy, args)` 也不是“只是慢一点绕”。它会让代理方法再次进入同一个 handler，导致无限递归直到栈溢出。这不是性能问题，而是结构错误。
+
+第五，`setAccessible(true)` 也不是模块系统的万能钥匙。它只改反射对象的 `override` 标志，能跳过的是语言级别访问检查（private/protected/public），不能替你打开模块边界和包导出。JDK 9+ 以后很多框架在这里失灵，不是因为 `setAccessible` 变弱了，而是访问控制从一层变成了两层。
+
+把这五条边界记稳，动态代理与访问控制这一篇就不会重新塌回“JDK 代理比 CGLIB 慢”和“setAccessible 能打开一切”的表面印象。它真正想讲的是：代理类是新造出来的，访问控制是多层级的，造类和改标志是两件完全不同的事。
 
 ## 收网：JDK 代理是在造类，`setAccessible` 只是在改标志
 

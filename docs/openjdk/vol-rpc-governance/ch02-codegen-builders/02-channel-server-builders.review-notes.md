@@ -30,9 +30,10 @@
 
 1. **高风险：容易把 builder 写成 fluent API 外壳。** 当前正文已把重点压回“外部配置 -> 内部装配状态”。  
 2. **高风险：容易把公共 Builder API 与 ImplBuilder 混成一层。** 当前正文已明确一个负责定义用户配置边界，一个负责翻译内部装配状态。  
-3. **中风险：容易让 transport-specific builder 抢走 builder 层主线。** 当前正文已把它们收在“差异化补层”这一层。  
-4. **中风险：容易让 service config / resolver / registry 等看上去像 build 之后才出现。** 当前正文已补 builder 阶段的参数化与路径限制。  
-5. **低风险：容易顺手扩成 transport 参数清单或 Spring 自动配置文。** 当前正文边界收在 grpc-java 自身 builder 装配桥。  
+3. **中风险：容易让 transport-specific builder 抢走 builder 层主线，或反过来把它们误判成可有可无的参数附录。** 当前正文已把它们定位成公共装配语义落到具体 transport 时的不可省略兑现分叉。  
+4. **中风险：容易让 codegen 的 `bindService()` 与 builder 的 `addService()`、runtime 的 registry lookup 彼此断开。** 当前正文已补出 `ImplBase -> bindService() -> ServerServiceDefinition -> addService() -> registry -> ServerImpl lookup` 完整链。  
+5. **中风险：容易让 service config / resolver / registry 等看上去像 build 之后才出现。** 当前正文已补 builder 阶段的参数化与路径限制。  
+6. **低风险：容易顺手扩成 transport 参数清单或 Spring 自动配置文。** 当前正文边界收在 grpc-java 自身 builder 装配桥。  
 
 ## 第二轮：因果审
 
@@ -72,8 +73,9 @@
 
 ## 第六轮：依赖审
 
-- 已自然承接 codegen 装配桥篇：解释 `*Grpc` 之外，用户配置如何继续把 runtime 装起来。✅  
+- 已直接承接 codegen 装配桥篇：解释 `*Grpc` 生成的 `bindService()` 如何继续经过 `ServerBuilder.addService()` 进入 registry/runtime，而不是只泛泛讨论用户配置。✅  
 - 已自然承接前四篇 runtime 主线：builder 解释的是这些主线在运行前怎样被参数化。✅  
+- transport-specific builder 已被定位为公共装配语义落到具体 transport 时的兑现分叉，而不是可有可无的附录。✅  
 - `ManagedChannelImplBuilderTest` 与 `ServerImplBuilderTest` 足以支撑“builder 不是门面，而是装配中枢”的论断。✅
 
 ## 机械检查

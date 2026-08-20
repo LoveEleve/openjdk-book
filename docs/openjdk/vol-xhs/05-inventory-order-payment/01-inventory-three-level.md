@@ -108,7 +108,7 @@
 - 有人已经抢先买走了
 - 后支付的人其实已经无货可扣
 
-这时问题就从“库存锁死”变成了“支付后缺货”：钱可能已经付了，库存却不够，后面只能退款、赔付或人工处理。这个结果显然比“先锁住库存再释放”更糟。
+这时问题就从“库存锁死”变成了“支付后缺货”：钱可能已经付了，库存却不够，后面只能退款、赔付或人工处理。对交易系统来说，这种结果通常比“先锁住库存再释放”更糟，因为它把失败从系统内部状态管理，推成了用户已经付款后的履约违约问题。
 
 所以第二个失败方案的问题是：**它把库存保护做得太晚，晚到支付完成时才发现货其实不够。**
 
@@ -174,6 +174,24 @@
 所以 `preDeduct()` 在 Lua 成功后，还会同步发送库存事件到 MQ，见 `my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:325` 到 `:329` 和 `:563` 到 `:623`。真正把这条事件落到 MySQL 的，是 `InventoryDeductConsumer`：它在 `my-xhs-inventory/src/main/java/com/myxhs/inventory/consumer/InventoryDeductConsumer.java:18` 到 `:31` 里明确把自己定义成“L2：MQ 异步扣 MySQL”，并在 `handlePreDeduct()` 的 `my-xhs-inventory/src/main/java/com/myxhs/inventory/consumer/InventoryDeductConsumer.java:99` 到 `:134` 中把 `available_stock → locked_stock` 推进到数据库。
 
 这一步说明：**预扣减虽然先在 Redis 完成，但系统不会把 Redis 单独当成唯一完成态，而是要继续把结果推进到 MySQL。**
+
+## 预扣链其实还藏着一层很重的工程防御：幂等占位、自愈回填和扩容暂停
+
+如果只把库存链理解成“Redis 预扣 + MQ 落 MySQL”，会漏掉当前实现里非常关键的一层工程问题：**库存域并不假设 Redis 状态永远完整、桶数量永远稳定、消息永远只来一次。**
+
+`InventoryService.preDeduct()` 的前半段就直接体现了这层防御：
+
+- 先在 MySQL 写 `insertPredeductIdem(orderId, skuId)` 做幂等占位，见 `my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:218` 到 `:238`
+- 如果 `bucketCountKey` 丢失，不是立刻报错，而是先尝试 `rebuildStockFromDb(skuId)` 自愈重建，见 `my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:249` 到 `:266`
+- 如果检测到 SKU 正在扩容，还会抛 `ResizeInProgressException` 延迟消费，避免在桶重分布窗口里继续写旧桶，见 `my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:242` 到 `:246` 和 `:275` 到 `:285`
+
+这三步揭示了库存链另外三类很容易被漏讲的问题：
+
+1. **工程问题**：Redis 状态可能丢、桶结构可能变、消息可能重投，系统必须先防御这些脏状态再谈扣减。
+2. **分布式问题**：同一 `orderId + skuId` 的重复消息不能再扣第二次，因此幂等不能只押在 Redis `predeductKey` 上，还要有 MySQL 兜底占位。
+3. **微服务问题**：库存域并不是被动响应订单链，它还在主动维护自己的可用性与自愈逻辑；否则订单链一旦继续向前，库存真相就会掉队。
+
+也就是说，库存域真正重的地方，不只是“状态机有三段”，而是**这三段状态机还要在 Redis 失真、桶扩容和消息重投这些工程现实里继续成立。**
 
 ## 第二级：确认扣减在支付成功之后推进
 

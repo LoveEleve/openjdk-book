@@ -272,6 +272,26 @@
 
 **钱的状态每往前推进一次，货的状态也必须在正确的时刻、由正确的域、沿正确的路径跟上。**
 
+## 支付域还要接受订单域的反向裁决
+
+很多人讲支付回调时，会把它讲成一条单向链：支付域确认成功，然后把结果推给订单域。当前实现比这更重，因为它允许订单域对这笔钱是否还能被当前订单承认，做一次反向裁决。
+
+最直接的证据在 `PaymentService.handlePaySuccessInternal()`：
+
+- 支付域先把 `t_payment` 从待支付推进成支付成功，见 `my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:323` 到 `:345`；
+- 然后同步 Feign 调 `orderFeignClient.notifyPaySuccess(orderId, tradeNo)`，见 `my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:352` 到 `:361`；
+- 如果订单域返回的不是瞬时 503，而是明确的业务拒绝，支付域会把这理解成“这张订单现在已经不允许接住这笔钱”，于是主动发起退款，见 `my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:362` 到 `:377`。
+
+这条逻辑说明：
+
+```text
+钱到账了
+  → 还要再问订单域：
+     这张订单现在有没有资格承认自己已付款
+```
+
+从分布式角度看，支付真相和订单真相不是“通知一次就结束”的单向关系，而是两套状态机在关键竞态点互相裁决。支付侧因此必须保留自动退款与补偿任务，否则就会留下“钱已成功、订单却不能推进”的高危半成功状态。
+
 ## 真实故障案例：为什么“钱已成功，但订单状态不允许更新”会逼支付域主动退款
 
 这是当前实现里最能体现支付链复杂度的一个真实风险窗口。

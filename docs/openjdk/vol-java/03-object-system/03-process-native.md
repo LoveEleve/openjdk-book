@@ -1,6 +1,6 @@
 # ProcessBuilder 与本地进程：一行 `start()` 如何变成一次进程通信
 
-> 本文基于 JDK 11 `java.base`。进程创建和标准流部分以 Unix/Linux 平台实现 `java.base/unix/classes/java/lang/ProcessImpl.java` 为主；信号部分以 Unix/Linux 的 `Terminator` 为主。`ProcessBuilder` 的参数列表语义属于 Java API，`ProcessImpl` 的 `fork`、`vfork`、`posix_spawn` 选择和文件描述符细节属于 JDK 11 当前平台实现，不能外推为所有操作系统的统一路径。
+> 本文基于 JDK 11 `java.base`。进程创建和标准流部分以 Unix/Linux 平台实现 `java.base/unix/classes/java/lang/ProcessImpl.java` 为主；信号部分以 Unix/Linux 的 `Terminator` 为主。`ProcessBuilder` 的参数列表语义属于 Java API，`ProcessImpl` 的 `fork`、`vfork`、`posix_spawn` 选择和文件描述符细节属于 JDK 11 当前平台实现，不能外推为所有操作系统的统一路径。本文讨论的是 JDK 11 Unix/Linux 进程创建与通信边界，不把这里的启动机制枚举、管道容量和信号处理策略外推成所有平台或所有 JVM 进程管理的统一规范。
 > **前置依赖**：[System 与 Runtime 门面](02-system-runtime.md)
 > **后续**：域 07 类加载器
 
@@ -404,6 +404,22 @@ SIGKILL
 ```
 
 **这一层只需要记住：信号是进程外部发来的请求，Shutdown 是 JVM 内部的清理状态机；只有前者给了后者运行机会，清理才可能发生。**
+
+## 七、五个最容易混掉的边界：ProcessBuilder 不是 Shell，waitFor 不是排水器，Process 不是 Java 线程，-1 不是有效 fd，SIGTERM 也不是一定能跑完清理
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`ProcessBuilder` 不是 Shell。它接收的是命令元素列表，不是一整条待解析的命令字符串；参数边界、重定向和转义语义不会由 Java 自动跨 Shell 完成。真需要 Shell 语法时，应该显式启动 Shell 并把它当成一个真正的子进程。
+
+第二，`waitFor()` 也不是输出排水器。它只等待子进程退出，不会帮你消费 stdout/stderr。两条标准流都有有限容量，写满后子进程写操作会阻塞；所以大输出场景必须先并行消费或显式重定向，而不是“先 waitFor、之后再读”。
+
+第三，`Process` 更不是被 Java 线程包起来的远程调用。它代表操作系统里的另一个进程，Java 侧靠文件描述符和管道与它通信，靠进程句柄感知退出。把它当成线程去理解，就看不到管道容量和 I/O 生命周期的约束。
+
+第四，`-1` 也不是会被传给孩子当有效 fd 的数字。`std_fds` 里的 `-1` 是“这里需要父子之间的管道”的信号，native 层为其创建管道后才填入真实 fd。
+
+第五，`SIGTERM` 也不是一定能跑完 shutdown hook 的保证。它可以被捕获并进入 shutdown 流程，但 hook 可能阻塞，编排系统可能超时后补发 `SIGKILL`，进程也可能先崩溃。`SIGKILL` 才是内核直接终止、不给任何 Java 清理机会的强制路径。
+
+把这五条边界记稳，`ProcessBuilder` 这一篇就不会重新塌回“几行启动命令”的表面印象。它真正想讲的是：一次 `start()` 跨越了启动描述、平台实现、native 创建、管道通信和退出通知五条链，任何一条没有同步推进，业务就可能卡死。
 
 ## 收网：启动、通信、等待、终止是四条不同的责任链
 

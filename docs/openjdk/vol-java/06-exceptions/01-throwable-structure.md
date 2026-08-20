@@ -1,5 +1,6 @@
 # 01. Throwable 内部结构 — 堆栈快照、cause 链、suppressed 异常
 
+> 基于 JDK 11 `java.base` 的 `Throwable` 实现。本文讨论的是 JDK 11 当前的哨兵字段、堆栈快照生成、异常打印和 suppressed 处理路径，不把这些内部协议或性能取舍外推成所有 JDK 版本、所有 JVM 或所有日志实现的统一规范。
 > **前置依赖**: [01-string/03 — 字符串构建与拼接](../01-string/03-build-concat.md)(toString 的 `类名: message` 输出本质是字符串拼接)
 > → **后续**:[06-exceptions/02 — 异常类型体系与设计哲学](02-exception-hierarchy.md)
 > 关联: 内部卷 24-frame-stack(栈帧遍历与 StackTraceElement 生成);[JVM Spec: §6.5 athrow]
@@ -291,6 +292,20 @@ protected Throwable(String message, Throwable cause,
 关键设计(斜体):*"禁用堆栈"是有状态系统(如 JVM 内部、超高频异常通道)的刻意取舍——用可定位性换吞吐。对业务代码,无栈异常是反模式: 你省下的微秒会在生产事故排查时以小时计地还回来。知道它存在,是为了在日志里认出"这是故意为之"而非"日志框架 bug"。*
 
 跨层标注: [内部卷: 24-frame-stack 01-physical-frame(物理帧遍历);JVM Spec: §6.5 athrow(异常抛出指令)]
+
+## 五个最容易混掉的边界：构造不等于抛出，cause 不是 suppressed，无栈不等于无异常，异常对象不是日志文本，Cleaner 也不是异常资源管理
+
+第一，异常构造不等于异常抛出。JDK 11 的 `Throwable` 通常在构造时抓取当前线程的回溯，`throw` 只是把已经存在的异常对象交给运行时处理；同一个对象再次抛出，不会自动获得第二份创建位置的堆栈。
+
+第二，cause 不是 suppressed。cause 表示“谁导致了当前异常”的因果链，suppressed 表示主异常之外并存的失败，典型场景是 try-with-resources 的关闭异常；把两者混成一条链，会丢掉异常发生的时序和责任关系。
+
+第三，无栈不等于无异常。关闭 writable stack trace 只是不再记录或生成可见堆栈，异常仍然可以携带 message、cause 和其他状态；它换来的是创建成本下降，却同时牺牲了定位能力。
+
+第四，异常对象不是日志文本。`printStackTrace` 会根据 cause、suppressed、公共栈帧和循环引用重新组织输出，日志中的 `Caused by`、`Suppressed`、`... n more` 都是打印协议，不是 Throwable 内部的三个字符串字段。
+
+第五，异常机制也不是资源所有权管理。Throwable 能记录关闭失败，但不能替代显式 close、try-with-resources 或业务层的资源生命周期；suppressed 负责保留信息，真正的清理动作仍由资源管理代码执行。
+
+把这五条边界记稳，Throwable 就不会再被简化成“message 加 stackTrace 的数据对象”。它真正连接了四条路径：创建时记录现场，cause 表达因果，suppressed 保留并存失败，打印器再把这些状态组织成可诊断的文本；类型体系则在下一篇继续回答哪些失败必须进入编译期检查。
 
 ## 核心悬念
 

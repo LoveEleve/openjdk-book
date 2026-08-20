@@ -1,6 +1,6 @@
 # Map 家族与选型：先看键语义，再看性能数字
 
-> 本文基于 JDK 11 `WeakHashMap`、`IdentityHashMap`、`EnumMap`、`Hashtable` 源码。重点讨论它们的键语义、生命周期语义与底层特化结构；并发容器与 `ConcurrentHashMap` 留到后续域展开。
+> 本文基于 JDK 11 `WeakHashMap`、`IdentityHashMap`、`EnumMap`、`Hashtable` 源码。重点讨论它们的键语义、生命周期语义与底层特化结构；并发容器与 `ConcurrentHashMap` 留到后续域展开。本文讨论的是 JDK 11 这四个特种 Map 的键语义与生命周期边界，不把这里的弱清理时机、线性探测结构、ordinal 直存和历史哈希表语义外推成所有映射实现都必须遵守的统一规范。
 > **前置依赖**：[HashMap 的存储与哈希](01-hashmap-storage-hash.md)、[HashMap 的扩容与树化](02-resize-treeify.md)
 > **后续**：域 13 原子类、域 10 并发集合
 
@@ -539,6 +539,22 @@ key 走传统 equals/hashCode，且你还在历史同步生态里
 - `Hashtable`：因为它来自旧时代同步哈希表世界，所以保留了方法级同步和老式 rehash 路线。
 
 也就是说，Map 家族的差异首先不是“谁更先进”，而是谁在为不同的 key 语义、生命周期和兼容背景做特化。
+
+## 六、五个最容易混掉的边界：WeakHashMap 不是 bug 性丢数据，IdentityHashMap 不是更快 HashMap，EnumMap 不是靠枚举少变快，Hashtable 不是现代并发答案，选型也不是先看大 O
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`WeakHashMap` 里的条目自己消失，通常不是 bug，而是它故意设计的语义。真正需要小心的是 value 强引用了自己的 key，这会把弱键语义绕穿，导致 key 本该被回收却始终被 value 继续抓住。
+
+第二，`IdentityHashMap` 不是“更快的 HashMap”。它连相等语义都换了：用的是 `k1 == k2` 而不是 `equals`，所以它不适合大多数用内容相等来定位 key 的业务场景，它只适合按对象身份去重的特殊需求。
+
+第三，`EnumMap` 快也不是因为枚举类型数量天生少。它快是因为枚举的键空间天然固定且稠密，所以 JDK 可以直接用 `vals[ordinal]` 走数组下标，完全绕开哈希计算和碰撞处理。
+
+第四，`Hashtable` 更不是现代并发场景的答案。它保留的是方法级同步、非 null 限制和老式取模扩容路线；今天写新代码，单线程应该用 `HashMap`，并发应该用 `ConcurrentHashMap`，而不是回头选 `Hashtable`。
+
+第五，Map 选型也不是先看大 O 复杂度表再来排。很多时候决定结构的第一因素，其实是 key 的语义：会不会被 GC 清掉、按身份还是按内容比较、键空间是否可枚举。复杂度表只在你已经做对语义分流之后，才谈得上细看。
+
+把这五条边界记稳，Map 家族这一篇就不会重新塌回“几个特种 Map 的冷知识合集”这种表面印象。它真正想讲的是：Map 选型先看键语义和生命周期，再看顺序和并发，最后才轮到性能数字。
 
 ## 收网：Map 选型不是性能排行题，而是语义匹配题
 

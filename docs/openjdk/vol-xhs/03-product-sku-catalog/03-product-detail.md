@@ -256,6 +256,26 @@ n- 自己拼价格
 
 这种“不同行字段有不同故障语义”的模型，本质上就是聚合读模型，而不是单域对象读取。
 
+## 商品详情聚合还承担一个工程代价：按 SKU 并发查询会把跨服务扇出带进页面延迟
+
+`ProductAggService.aggregateSkuStock()` 会遍历商品详情中的 `skuListRaw`，为每个 `skuId` 创建一个 `CompletableFuture`，再等待这一批库存查询完成，见 `my-xhs-home/src/main/java/com/myxhs/home/service/ProductAggService.java:178` 到 `:205`。这带来一个很具体的工程问题：
+
+```text
+一个 SPU 有多少 SKU
+→ 一个详情请求就可能产生多少次 inventory Feign 调用
+```
+
+当前实现没有把这个扇出假装成“没有成本”，而是用独立的 `batchFeignPool`、动态超时和字段级降级控制它：库存查询慢或失败时，商品骨架仍可返回，SKU 库存字段降级为默认视图，见 `my-xhs-home/src/main/java/com/myxhs/home/service/ProductAggService.java:202` 到 `:239`。
+
+这条设计同时说明了三个视角：
+
+- **业务逻辑**：详情页必须展示每个变体的库存状态；
+- **工程问题**：按 SKU 扇出会放大线程、连接和延迟成本；
+- **微服务问题**：库存真相留在 inventory，home 只能通过跨服务聚合取得；
+- **分布式边界**：详情页拿到的是某一时刻的库存视图，不是订单提交时的库存承诺，真正交易仍必须回到 order → inventory 的校验与预扣链。
+
+所以 `ProductDetailAggVO` 的存在不仅是返回结构选择，也是在一个页面级接口里承接跨服务扇出和部分降级责任。
+
 ## 真实故障案例：为什么库存一旦被错误看成商品域字段，详情页会先展示错，再交易时打脸
 
 这条聚合链最容易出问题的地方，恰恰就是“库存到底属于谁”。

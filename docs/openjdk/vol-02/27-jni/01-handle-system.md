@@ -4,15 +4,80 @@
 > → **后续**:[27-jni/02 — JNI GetIntField 正常 200 cycles → 怎么做到 30 cycles?— JNI Fast Path](02-jni-fast-path.md)
 > 关联域: 25-gc(根集处理与弱引用清除)、09-memory-core(VM 内部的 Handle/HandleMark 是另一套引用)、31-unsafe(裸 oop 通道)
 
-## native 方法拿到的是什么
+native 代码里拿到的 `jobject` 看起来像一个指针。但 GC 会移动对象——年轻代复制、Full GC 压缩——如果 jobject 是裸 oop 指针，一次 GC 后它就悬空了。那 jobject 到底是什么？为什么 JNI 把引用分成本地、全局、弱全局三种，而不是一套存储加三种权限？
 
-Java 调 native 方法,参数里的 `jobject` 是什么?直觉是"对象的指针"——但 GC 会移动对象(年轻代复制,Full GC 还会压缩),如果 jobject 是裸 oop 指针,一次 GC 后它就悬空了。所以 JNI 规定: **jobject 是间接引用(handle)——指向一个存放 oop 的槽**。GC 移动对象时更新槽里的 oop,handle 本身不变。这篇拆三层: 生命最短的本地引用(local)、跨调用持久的全局引用(global)、可被 GC 清理的弱全局引用(weak)——它们底层各是什么、怎么分配、怎么失效。
+本篇要回答的核心问题:
 
-## 1. 本地引用: 线程行李里的一块块"便签纸"
+1. jobject 到底是对象的地址还是间接引用？
+2. 本地引用、全局引用、弱全局引用是不是同一套存储的三种模式？
+3. 本地引用在 native 返回后自动失效——这个"自动"是怎么实现的？
 
-### 存放: JavaThread 的 active_handles 链
+答案会反复落到一句话:**jobject 是间接引用（handle），指向一个存放 oop 的槽。GC 移动对象时更新槽里的 oop，handle 本身不变。三层引用底层使用了两套完全不同的存储，不是一套存储的三种模式。**
 
-每个 JavaThread 挂着一串 `JNIHandleBlock`(jniHandles.hpp:132 起,线程字段 `_active_handles`,thread.hpp:301/513)。`JNIHandles::make_local`(jniHandles.cpp:52-61)往当前线程的块里塞一个槽:
+---
+
+## 1. 开场困惑——"jobject 不可能是裸 oop 指针"
+
+如果 jobject 是裸 oop 指针，那么下面这段 JNI 代码在 GC 前后就会出现问题:
+
+```c
+jobject ref = (*env)->GetObjectArrayElement(env, arr, 0);
+// 此时 GC 可能发生，对象被移动
+// 如果 ref 是裸 oop，现在它指向旧地址，已经悬空
+```
+
+G1 的年轻代 GC 做 evacuation 时会把活对象从 CSet 复制到幸存区，Full GC 还会压缩整个堆的布局。任何一个暂停都可能让对象的物理地址改变。所以 JVM 必须保证:native 代码持有的"引用"在 GC 后仍然有效——而这个保证不能靠"告诉 native 代码地址变了"来实现，因为 C 代码没有统一的"地址更新回调"。
+
+JVM 的解决方案是: **jobject 不是 oop 地址，而是指向一个存放 oop 的槽的地址。** GC 移动对象时，由 GC 遍历所有根（包括这些槽），把槽里的 oop 更新为新地址。jobject 本身不变，变的是槽里的内容。
+
+但这只是"总体方案"，往下有更具体的差异: 不同生命周期的引用存到了不同的地方。本地引用存在线程本地的 JNIHandleBlock 链里，靠 `_top` 清零整体失效；全局和弱全局引用存在全局的 OopStorage 仓库里，靠显式 API 分配/释放。它们不是同一套存储的三种模式。
+
+---
+
+## 2. 两个朴素方案为什么都不对
+
+### 方案一:jobject = 裸 oop 指针
+
+直觉上，既然 native 代码要通过指针操作对象，那把对象地址直接给 native 就是最直接的方式。但这在 GC 移动对象后就失效了。
+
+JVM 的 GC 确实会遍历根来更新引用——但"遍历根"的前提是 JVM 知道所有根在哪。如果 jobject 直接就是裸 oop，那 native 代码可能把它存在局部变量、寄存器、甚至堆上，GC 在 STW 时无法枚举所有 native 的"根"位置。只有把引用放进 JVM 管理的槽（handle），GC 才能可靠地找到并更新它。
+
+所以间接引用不是"额外开销"，而是"让 GC 可追踪"的必要设计。
+
+### 方案二:本地引用逐个释放
+
+另一个直觉是:既然本地引用有 `DeleteLocalRef` 函数，那每次分配一个引用、native 返回前逐个释放。但 JNI 规范的"本地引用在 native 返回后自动失效"意味着绝大多数 native 方法根本不需要显式释放——JVM 在 native 返回时**整体重置**了 `_top` 指针，比逐个释放快一个量级。如果每个 native 方法都要逐个调用 `DeleteLocalRef`，JNI 的性能负担会翻几倍。
+
+---
+
+## 3. 本地引用——线程行李里的 JNIHandleBlock 链
+
+### 存放:每线程一个 handle 块链
+
+`JavaThread` 挂着一串 `JNIHandleBlock`(thread 字段 `_active_handles`)。每个块的结构(jniHandles.hpp:132-151):
+
+```cpp
+// jniHandles.hpp:136-151(截取核心,逐字)
+enum SomeConstants {
+  block_size_in_oops  = 32                    // Number of handles per handle block
+};
+
+oop             _handles[block_size_in_oops]; // The handles
+int             _top;                         // Index of next unused handle
+JNIHandleBlock* _next;                        // Link to next block
+
+// The following instance variables are only used by the first block in a chain.
+JNIHandleBlock* _last;                        // Last block in use
+JNIHandleBlock* _pop_frame_link;              // Block to restore on PopLocalFrame call
+oop*            _free_list;                   // Handle free list
+int             _allocate_before_rebuild;     // Number of blocks to allocate before rebuilding free list
+```
+
+每块 32 个 oop 槽，`_top` 是已用计数。`_last`、`_pop_frame_link`、`_free_list`、`_allocate_before_rebuild` 只在链首块被使用——字段在所有块里都存在，但链尾块不用（源码注释说，为避免两套块类型增加代码复杂度，空间开销可忽略）。
+
+### 分配:四段优先级
+
+`JNIHandles::make_local`(jniHandles.cpp:52-61)把 oop 塞进当前线程的块链:
 
 ```cpp
 // jniHandles.cpp:52-61(截取核心,逐字)
@@ -28,52 +93,62 @@ jobject JNIHandles::make_local(oop obj) {
 }
 ```
 
-注意两个断言: ① `is_oop`——只收合法的 oop;② `!current_thread_in_native()`——**创建本地引用的代码必须已离开 native 状态**(JNI 函数入口的 `ThreadInVMfromNative` 已做状态转换,17-04 的通道)。null 直接返回 NULL——**jobject 的 null 规范化**(下文 resolve 的注释 "Construction of jobjects canonicalize a null value into a null jobject",jniHandles.inline.hpp:61-62)。
+null 输入直接返回 null——`jobject` 的 null 规范化（resolve_impl 注释说"Construction of jobjects canonicalize a null value into a null jobject"，jniHandles.inline.hpp:61-62）。两个断言:只收合法 oop；调用者必须已离开 native 状态。
 
-`JNIHandleBlock` 是一块定长"便签纸"(jniHandles.hpp:136-160):
+`allocate_handle`(jniHandles.cpp:481-546)按四段优先级找空位:
 
-```cpp
-// jniHandles.hpp:136-160(截取核心,逐字)
-  enum SomeConstants {
-    block_size_in_oops  = 32                    // Number of handles per handle block
-  };
+1. **`_last` 块的末尾槽**（:512-516）：`_last->_top < block_size_in_oops` 时，`&(_last->_handles)[_last->_top++]` 直接取用。这是最热路径——大多数方法只用几个本地引用，一个块就够了，`_last` 就是链首块。
+2. **free list**（:519-524）：`rebuild_free_list` 扫描全链时把被清空（`*handle == NULL`）的槽串成的单链表（`DeleteLocalRef` 只负责写 NULL，串链动作发生在 rebuild 时），取用时 `_free_list = (oop*) *_free_list` 出链。这是"删了又建"时的复用路径。
+3. **`_last->_next` 未用块**（:526-530）：已有后续块但还没用上，`_last = _last->_next` 后递归重试。
+4. **重建 free list 或追加新块**（:532-545）：`_allocate_before_rebuild == 0` 时全链扫描重建 free list（`rebuild_free_list`）；否则追加一个新块并把 `_allocate_before_rebuild` 减一。
 
-  oop             _handles[block_size_in_oops]; // The handles
-  int             _top;                         // Index of next unused handle
-  JNIHandleBlock* _next;                        // Link to next block
-
-  // The following instance variables are only used by the first block in a chain.
-  // Having two types of blocks complicates the code and the space overhead in negligible.
-  JNIHandleBlock* _last;                        // Last block in use
-  JNIHandleBlock* _pop_frame_link;              // Block to restore on PopLocalFrame call
-  oop*            _free_list;                   // Handle free list
-  int             _allocate_before_rebuild;     // Number of blocks to allocate before rebuilding free list
-```
-
-每块 32 个槽;满了链下一块(`_next`);`_top` 是已用计数。`allocate_handle`(jniHandles.cpp:481-546)按四段顺序找空位: ①`_last` 块的末尾槽;②**free list**——由 `rebuild_free_list` 扫描时把被 `DeleteLocalRef` 清空(`*handle == NULL`)的槽串成的单链表,槽内嵌 next 指针,取用头时 `_free_list = (oop*) *_free_list`(:519-524);③`_last->_next` 的未用块;④都不行就**重建 free list 或追加新块**(:532-545)。重建有启发式(rebuild_free_list,:548-575): 扫全链,把 `_handles[i]==NULL` 的槽收进 free list;若空闲槽不到一半,按缺额算出"再分配几个块后才重建"(`_allocate_before_rebuild`),避免每次都全链扫描。
-
-### 失效: 不是"pop",是"清零 _top"
-
-大纲式的想象是"native 返回时把本地引用弹出栈"——真实机制更朴素: **native 方法返回时,解释器与编译代码都把 active_handles 块的 `_top` 直接清零**(块内容留着,下次分配覆盖):
+`rebuild_free_list`(jniHandles.cpp:548-575)扫描全链，把 `_handles[i] == NULL` 的槽串成 free list，然后按空闲比例计算 `_allocate_before_rebuild`:
 
 ```cpp
-// templateInterpreterGenerator_x86.cpp:1163-1166(截取核心,逐字)
-  // reset handle block
-  __ movptr(t, Address(thread, JavaThread::active_handles_offset()));
-  __ movl(Address(t, JNIHandleBlock::top_offset_in_bytes()), (int32_t)NULL_WORD);
+// jniHandles.cpp:566-574(截取核心,逐字)
+// Heuristic: if more than half of the handles are free we rebuild next time
+// as well, otherwise we append a corresponding number of new blocks before
+// attempting a free list rebuild again.
+int total = blocks * block_size_in_oops;
+int extra = total - 2*free;
+if (extra > 0) {
+  _allocate_before_rebuild = (extra + block_size_in_oops - 1) / block_size_in_oops;
+}
 ```
 
-编译代码的 native wrapper 同样处理(sharedRuntime_x86_64.cpp:2652-2656,注释 "reset handle block";critical native 例外)。效果: 一次 native 调用里的所有本地引用整体失效——块里的旧值变成垃圾,GC 的 `oops_do`(jniHandles.cpp:453-478)只遍历 `_top` 以内的槽,所以旧值也不会被当成根。**JNI 规范"本地引用在 native 返回后无效"就是这样一行 movl 实现的**——比逐个释放快一个量级。
+启发式:如果空闲槽超过一半，下一次直接建 free list 就好；否则计算出缺额，换算成"再分配几个块后重建 free list"，避免每次都全链扫描。
 
-**参数也是本地引用**: 实证里 `GetObjectRefType` 对"从 Java 传进来的 jobject"返回 `JNILocalRefType`([实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt));实现上共享的 native 调用代码把**参数帧里 oop 槽的地址**当作 handle 传给 native——编译代码的 native wrapper 走 `object_move`(sharedRuntime_x86_64.cpp:1157-1180,注释 "An oop arg. Must pass a handle not the oop itself"),解释器经签名处理器(`pass_object` 用 `lea` 取参数槽地址,interpreterRT_x86_64.cpp:214-260,templateInterpreterGenerator_x86.cpp:932-947 调用它,参数为 null 时传 NULL 与 null 规范化呼应)——GC 靠 oop map 更新那个槽(`is_frame_handle` 专门识别栈上的引用,jniHandles.cpp:270-278)——所以参数引用在调用结束、帧失效后自然作废,也解释了为什么不能把参数当 global handle 传回给 `DeleteGlobalRef`(那是另一套存储,会崩)。
+### 失效:整体重置 _top，不是逐个释放
 
-### Push/Pop: 显式的帧边界
+native 方法返回时，解释器和编译代码不逐个释放 handle，而是直接把 `_top` 清零:
 
-`PushLocalFrame`/`PopLocalFrame`(jni.cpp:746-783)是显式版本: Push 时 `new_handles->set_pop_frame_link(old_handles); thread->set_active_handles(new_handles)`(:753-757)——旧块挂到新块的 `_pop_frame_link`;Pop 时把结果先解析成 VM 内部 `Handle`(防 GC),恢复旧块,把旧块整链 `release_block` 回池(:766-782)。`_pop_frame_link` 这个字段的存在就是为它准备的。
+```cpp
+// templateInterpreterGenerator_x86.cpp:1164-1166(截取核心,逐字)
+// reset handle block
+__ movptr(t, Address(thread, JavaThread::active_handles_offset()));
+__ movl(Address(t, JNIHandleBlock::top_offset_in_bytes()), (int32_t)NULL_WORD);
+```
 
-## 2. 全局引用与弱全局引用: OopStorage 里的两个仓库
+编译代码的 native wrapper 同样处理（sharedRuntime_x86_64.cpp:2652-2655，reset handle block，且仅在 `is_critical_native` 为假时执行——critical native 跳过 reset）。效果: 一次 native 调用里的所有本地引用整体失效——块里的旧 oop 变成垃圾，GC 的 `oops_do`(jniHandles.cpp:453-478)只遍历 `_top` 以内的槽，所以旧值也不会被当成根。**JNI 规范"本地引用在 native 返回后无效"就是这样一行 movl 实现的**——比逐个释放快一个量级。
 
-本地引用随线程走、随调用失效;跨调用持久的引用要另找存放处——**OopStorage**。`JNIHandles::initialize`(jniHandles.cpp:203-210)建两个仓库:
+### 参数也是本地引用
+
+Java 传给 native 的参数如果是 oop 类型，传递的不是裸 oop 而是 handle。编译代码的 native wrapper 走 `object_move`(sharedRuntime_x86_64.cpp:1157-1228,注释 "An oop arg. Must pass a handle not the oop itself")，把参数槽的地址当作 handle 传过去。解释器经签名处理器 `pass_object`(interpreterRT_x86_64.cpp:214-292)用 `lea` 取参数槽地址。GC 靠 oop map 识别这些栈上的引用槽，在 GC 时更新它们。所以参数 handle 在调用结束、帧失效后自然作废，解释了为什么不能把参数当全局 handle 传给 `DeleteGlobalRef`。
+
+### Push/Pop:显式的帧边界
+
+`PushLocalFrame`(jni.cpp:742-761)和 `PopLocalFrame`(jni.cpp:764-785)是显式版本:
+
+- Push: `new_handles->set_pop_frame_link(old_handles); thread->set_active_handles(new_handles)`——旧块挂到新块的 `_pop_frame_link`。
+- Pop: 把结果先解析成 VM 内部 `Handle` 防 GC，恢复旧块，把旧块整链 `release_block` 回池。
+
+`_pop_frame_link` 这个字段（jniHandles.hpp:148）就是为它准备的。
+
+---
+
+## 4. 全局与弱全局引用——OopStorage 仓库
+
+本地引用随线程走、随调用失效。跨调用持久的引用需要另找存放处——**OopStorage**。`JNIHandles::initialize`(jniHandles.cpp:203-210)建两个仓库:
 
 ```cpp
 // jniHandles.cpp:203-210(截取核心,逐字)
@@ -87,7 +162,9 @@ void JNIHandles::initialize() {
 }
 ```
 
-`make_global`(jniHandles.cpp:101-122)就是"仓库里要一块、写上 oop、返回地址":
+### 全局引用:显式分配/释放
+
+`make_global`(jniHandles.cpp:101-122)从 OopStorage 仓库里要一块，写入 oop，返回地址:
 
 ```cpp
 // jniHandles.cpp:101-122(截取核心,逐字)
@@ -96,10 +173,8 @@ jobject JNIHandles::make_global(Handle obj, AllocFailType alloc_failmode) {
   assert(!current_thread_in_native(), "must not be in native");
   jobject res = NULL;
   if (!obj.is_null()) {
-    // ignore null handles
     assert(oopDesc::is_oop(obj()), "not an oop");
     oop* ptr = global_handles()->allocate();
-    // Return NULL on allocation failure.
     if (ptr != NULL) {
       assert(*ptr == NULL, "invariant");
       NativeAccess<>::oop_store(ptr, obj());
@@ -111,33 +186,37 @@ jobject JNIHandles::make_global(Handle obj, AllocFailType alloc_failmode) {
   ...
 ```
 
-`jni_NewGlobalRef`(jni.cpp:788-799)先 `resolve` 输入再 `make_global`;`DeleteGlobalRef` 走 `destroy_global`(jniHandles.cpp:168-175): 先把槽写 NULL(让对象可能被回收),再 `global_handles()->release(ptr)` 归还条目。两个断言有讲究: **GC 进行中不能扩根集**,**必须已离开 native 状态**。
+两个断言:GC 进行中不能扩根集；必须已离开 native 状态。
 
-### jweak: 地址 +1 就是"弱"的标记
+`destroy_global`(jniHandles.cpp:168-175):先把槽写 NULL，再 `global_handles()->release(ptr)` 归还条目。
 
-`make_weak_global`(jniHandles.cpp:125-146)几乎一样,两个差异——写入用 `NativeAccess<ON_PHANTOM_OOP_REF>`(phantom 语义,GC 不强引用它),以及返回前**给地址加 1**:
+### 弱全局引用:地址 +1 的 tag 位
+
+`make_weak_global`(jniHandles.cpp:125-146)几乎一样，但两个差异:
+
+- 写入用 `NativeAccess<ON_PHANTOM_OOP_REF>`——phantom 语义，GC 不强引用它；
+- 返回前**给地址加 1**:
 
 ```cpp
 // jniHandles.cpp:132-145(截取核心,逐字)
-    oop* ptr = weak_global_handles()->allocate();
-    // Return NULL on allocation failure.
-    if (ptr != NULL) {
-      assert(*ptr == NULL, "invariant");
-      NativeAccess<ON_PHANTOM_OOP_REF>::oop_store(ptr, obj());
-      char* tptr = reinterpret_cast<char*>(ptr) + weak_tag_value;
-      res = reinterpret_cast<jobject>(tptr);
-    } else {
-      report_handle_allocation_failure(alloc_failmode, "weak global");
-    }
+oop* ptr = weak_global_handles()->allocate();
+if (ptr != NULL) {
+  assert(*ptr == NULL, "invariant");
+  NativeAccess<ON_PHANTOM_OOP_REF>::oop_store(ptr, obj());
+  char* tptr = reinterpret_cast<char*>(ptr) + weak_tag_value;
+  res = reinterpret_cast<jobject>(tptr);
+}
 ```
 
-`weak_tag_size = 1`、`weak_tag_alignment = 2`、`weak_tag_value = 1`(jniHandles.hpp:63-66): 仓库条目按 2 字节对齐、低位恒 0,最低位正好空出来做标记。于是 `is_jweak(handle)` 就是一次位测试(inline.hpp:34-38): `(uintptr_t)handle & 1`。[实证:](openjdk/planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt) `NewWeakGlobalRef -> 0x7f99144bbf81, lsb=1`——真实地址低位就是 1;而 `GetObjectRefType` 返回 3(`JNIWeakGlobalRefType`)。**弱全局引用的"弱"不靠单独的数据结构,靠一个 tag 位 + phantom 读写通道**: GC 的 WeakProcessor 阶段(weakProcessor.cpp:37,`JNIHandles::weak_oops_do`)遍历仓库,`is_alive` 为 false 的条目直接写 NULL([实证:] 27-jni-handles-demo.txt: global 删除 + `System.gc()` 后 `NewLocalRef(weak)` 返回 null,对象被清)。
+`weak_tag_size = 1`、`weak_tag_alignment = 2`、`weak_tag_value = 1`(jniHandles.hpp:63-66): OopStorage 条目按 2 字节对齐，低位恒 0，最低位正好空出来做标记。于是 `is_jweak(handle)` 就是一次位测试(jniHandles.inline.hpp:34-38): `(uintptr_t)handle & 1`。**弱全局引用的"弱"不靠单独的数据结构，靠一个 tag 位 + phantom 读写通道**。GC 的 `weak_oops_do` 遍历仓库，`is_alive` 为 false 的条目直接写 NULL。
 
-### 仓库本身: OopStorage
+### OopStorage 仓库结构
 
-OopStorage(gc/shared/oopStorage.hpp:37-73 的注释是设计总纲)管理"堆外指向堆内对象的引用集合",内部是一组 Block,每块含 `oop[]` + 使用位图(`_allocated_bitmask`,oopStorage.cpp:208)。`allocate`(:410-477)持 `_allocation_mutex` 从 `_allocation_list` 头块取条目,没有可用块就新建并把块挂进 `_active_array`(GC 并行遍历用,`expand_active_array` 可扩容),满块从分配列表摘除;`release`(:675-682)无锁——位图用 CAS 原子清位(:575-587),变空的块进延迟清理列表,由后续 allocate 顺带处理(`reduce_deferred_updates`,:416)。**两种并发协议**(头注释 :68-73): GC 的并发迭代(Concurrent Iteration Protocol)与分配(Allocation Protocol)互不长期阻塞——全局引用能被大量并发创建而不会成为 GC 的瓶颈。
+OopStorage(gc/shared/oopStorage.hpp:37-73 的注释是设计总纲)管理"堆外指向堆内对象的引用集合"，内部是一组 Block，每块含 `oop[]` + 使用位图(`_allocated_bitmask`)。`allocate`(oopStorage.cpp:410-477)持 `_allocation_mutex` 从 `_allocation_list` 头块取条目，没有可用块就新建；`release`(oopStorage.cpp:675-682)无锁——位图用 CAS 原子清位，变空的块进延迟清理列表，由后续 allocate 顺带处理。两种并发协议（头注释:68-73）:GC 的并发迭代与分配互不长期阻塞。
 
-## 3. resolve: 无锁地读槽
+---
+
+## 5. resolve——无锁读槽
 
 JNI 函数拿到 jobject 后第一步都是 `JNIHandles::resolve`(jniHandles.inline.hpp:68-74)→ `resolve_impl`(:52-66):
 
@@ -160,12 +239,29 @@ inline oop JNIHandles::resolve_impl(jobject handle) {
 }
 ```
 
-要点: ① **解引用无锁**——读一个普通槽不需要锁,因为"槽是 GC 可见的根": GC 移动对象时负责更新槽(年轻代复制时遍历根),读方总能看到最新值;② 普通 jobject 的槽**永不 null**(null 已规范化为 null jobject),所以断言;jweak 走 `ON_PHANTOM_OOP_REF` 通道,返回可能 null(被 GC 清了);③ **必须已离开 native 状态**——`assert(!current_thread_in_native())`(:55): 在 native 状态下读堆可能和 GC 竞争,所以 JNI 函数入口的 `ThreadInVMfromNative` 先做状态转换,`resolve` 才安全。
+要点:
 
-## 核心悬念
+- **解引用无锁**——读一个普通槽不需要锁，因为"槽是 GC 可见的根":GC 移动对象时负责更新槽，读方总能看到最新值。
+- 普通 jobject 的槽**永不 null**(null 已规范化为 null jobject)，所以断言。
+- jweak 走 `ON_PHANTOM_OOP_REF` 通道，返回可能 null（被 GC 清了）。
+- **必须已离开 native 状态**——`assert(!current_thread_in_native())`:在 native 状态下读堆可能和 GC 竞争，所以 JNI 函数入口的 `ThreadInVMfromNative` 先做状态转换，`resolve` 才安全。
 
-三层引用拆完: 本地引用是线程行李里 32 槽一块的便签纸(`_top` 清零整体失效,参数引用是帧内 oop 槽的地址);全局引用是 OopStorage 仓库里持久条目(显式 delete);弱全局引用靠"地址 +1"的 tag 位与 phantom 读写,由 GC 的 WeakProcessor 清 NULL——[实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/27-jni-handles-demo.txt)里 `jweak` 地址低位为 1、删掉全局引用后弱引用自动清空,一清二楚。SIGQUIT 转储的 "JNI global refs: N, weak refs: M" 摘要行就是这两个仓库的当前水位(jniHandles.cpp:305-307)。
+---
 
-但 Handle 系统只是 JNI 的"数据面"——每次 `GetIntField` 都走完整 JNI 调用(经 JNIEnv 函数表间接调用、状态转换、resolve),约 200 cycles;`GetIntField` 读一个整型字段本该是 10 cycles 的活。下一篇: 快路径怎么把 200 cycles 压到 30?
+## 6. 误解澄清与收网
+
+1. **jobject 是否可以当作裸 oop 指针使用？** 不能。jobject 是间接引用（handle），指向一个存放 oop 的槽。GC 移动对象时更新槽，handle 本身不变。裸 oop 会在 GC 后悬空。
+2. **本地引用失效是否逐个释放？** 不是。native 返回时解释器/编译代码直接把 `_top` 清零，比逐个 `DeleteLocalRef` 快一个量级。
+3. **全局引用和弱全局引用是否同一套存储？** 不是。两个独立的 OopStorage 仓库，一个管 JNI Global，一个管 JNI Weak。
+4. **jweak 是否有独立的数据结构？** 没有。jweak 和普通 jobject 共享同一套 OopStorage 仓库，区别仅在于地址 +1 的 tag 位和 phantom 写入/读取通道。
+5. **resolve 是否加锁？** 不加锁。槽是 GC 可见的根，GC 移动对象时负责更新槽，读方无锁总能读到最新值。
+
+把这一篇压成三句话:
+
+- **jobject 是间接引用**，指向一个 GC 可追踪的 oop 槽，不是裸 oop 指针。
+- **本地引用存于线程本地的 JNIHandleBlock 链**，32 槽一块，靠 `_top` 清零整体失效；参数也是本地引用，靠 oop map 在 GC 时更新。
+- **全局/弱全局引用存于 OopStorage 仓库**，全局引用显式分配/释放，弱全局引用靠地址 +1 tag 位 + phantom 通道实现弱语义，GC 的 WeakProcessor 清 NULL。
+
+Handle 系统只是 JNI 的"数据面"——每次 `GetIntField` 都走完整 JNI 调用（经 JNIEnv 函数表间接调用、状态转换、resolve），约 200 cycles；而 `GetIntField` 读一个整型字段本该是 10 cycles 的活。下一篇:快路径怎么把 200 cycles 压到 30？
 
 > → [27-jni/02 — JNI GetIntField 正常 200 cycles → 怎么做到 30 cycles?— JNI Fast Path](02-jni-fast-path.md)

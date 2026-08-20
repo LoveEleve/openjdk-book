@@ -1,6 +1,6 @@
 # Class 反射视图：为什么拿到 `Method` 还会慢
 
-> 本文基于 JDK 11 `java.base` 的 `Class`、`Method`、`Field` 和 `Constructor` 实现。`Class` 是 JVM 提供给 Java 层的元数据视图；`ReflectionData`、root/copy 和 accessor 共享是 JDK 11 当前实现，不是 Java 反射规范规定的唯一缓存方式。本文只解释 `forName` 的初始化边界，完整类加载链留到域 07。
+> 本文基于 JDK 11 `java.base` 的 `Class`、`Method`、`Field` 和 `Constructor` 实现。`Class` 是 JVM 提供给 Java 层的元数据视图；`ReflectionData`、root/copy 和 accessor 共享是 JDK 11 当前实现，不是 Java 反射规范规定的唯一缓存方式。本文只解释 `forName` 的初始化边界，完整类加载链留到域 07。本文讨论的是 JDK 11 反射视图的缓存与对象隔离机制，不把这里的 SoftReference 策略、redefinedCount 失效和 root/copy 折中外推成所有 JVM 反射实现的统一规范。
 > **前置依赖**：[Object 的方法契约与对象生命周期](../03-object-system/01-object-contract-references.md)
 > **后续**：[MethodAccessor 与反射调用](02-methodaccessor.md)
 
@@ -406,6 +406,24 @@ private AnnotationData annotationData() {
 ```
 
 这段代码此处只承担一个结论：`Class` 是反射信息的缓存和视图中枢。成员、注解等不同信息都需要面对懒解析、并发安装和类重定义失效。下一篇讲 `MethodAccessor`，实际上是在继续追踪这个视图中某个成员的“执行出口”。
+
+## 七、五个最容易混掉的边界：forName 不是纯拿类，缓存不是零成本，ReflectionData 不是永久保留，getDeclaredMethod 不是 getMethod 的必要条件，setAccessible 也不只是性能开关
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`Class.forName(name)` 不是“只是拿一个 Class 对象”。它的默认入口会把初始化要求传给 VM，于是静态初始化器可能执行，驱动注册、线程创建、配置读取这类副作用都可能被顺手触发。只想扫描类型时，应该考虑显式使用 `forName(name, false, loader)`。
+
+第二，JDK 有反射缓存也不等于反射零成本。`ReflectionData` 缓存的是 root 成员视图，避免每次都向 VM 重新索取元数据；但对外返回的 `Method`/`Field`/`Constructor` 对象、public 视图的过滤合并，仍然是每次请求都要付出的成本。
+
+第三，`ReflectionData` 并不是永久缓存。它由 `SoftReference` 持有，还受 `classRedefinedCount` 约束；一旦缓存被 GC 回收，或者类经历 `RedefineClasses`，视图就可能失效重建。
+
+第四，`getDeclaredMethod/getDeclaredMethods` 也不是 `getMethod/getMethods` 的省略版或前置版本。一个只管当前类的声明成员，一个还要把父类 public 成员递归合并；成本和语义都不属于同一条路径。
+
+第五，`setAccessible(true)` 更不是一个可以随意共用的状态开关。它对同一份反射对象是可变的访问状态，所以 JDK 才必须给不同调用者复制出独立的反射对象；否则一个调用者的 override 状态会污染另一个调用者。
+
+把这五条边界记稳，`Class` 反射视图这一篇就不会重新塌回“反射慢、有缓存”的口诀印象。它真正想讲的是：`Class` 是 JVM 元数据的一道 Java 门面，初始化副作用、成员缓存和对象隔离都是在同一个视图上做的取舍。
+
+## 收网：反射的三个使用规则
 
 ## 收网：反射的三个使用规则
 

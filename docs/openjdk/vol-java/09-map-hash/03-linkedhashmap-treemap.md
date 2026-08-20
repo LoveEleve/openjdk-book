@@ -1,6 +1,6 @@
 # LinkedHashMap 与 TreeMap：Map 要“有序”，到底是在保什么序
 
-> 本文基于 JDK 11 `LinkedHashMap` 与 `TreeMap` 源码。重点讨论遍历顺序、访问顺序、LRU、红黑树与 `NavigableMap` 能力；不展开红黑树完整证明和并发有序容器内部实现。
+> 本文基于 JDK 11 `LinkedHashMap` 与 `TreeMap` 源码。重点讨论遍历顺序、访问顺序、LRU、红黑树与 `NavigableMap` 能力；不展开红黑树完整证明和并发有序容器内部实现。本文讨论的是 JDK 11 两类有序 Map 的顺序语义与结构边界，不把这里的全局链维护、访问序 LRU 和比较树定位方式外推成所有有序映射实现都必须遵守的统一规范。
 > **前置依赖**：[HashMap 的存储与哈希](01-hashmap-storage-hash.md)、[HashMap 的扩容与树化](02-resize-treeify.md)
 > **后续**：[Map 家族与选型](04-map-family.md)
 
@@ -582,6 +582,22 @@ final Entry<K,V> getCeilingEntry(K key) {
 保比较顺序
    → TreeMap
 ```
+
+## 九、五个最容易混掉的边界：LinkedHashMap 不是链表 Map，accessOrder 不是默认插入序，LRU 不是额外魔法，TreeMap 不是有序 HashMap，compare==0 也不只是排序细节
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`LinkedHashMap` 不是“把 HashMap 换成链表”。它保留了原来的哈希桶结构，只是在每个 entry 上额外挂 `before/after`，维护一条贯穿所有 entry 的全局顺序链。
+
+第二，`accessOrder=true` 也不是默认行为。默认构造出来的 `LinkedHashMap` 仍然按插入顺序遍历；只有显式打开访问序之后，命中的 entry 才会被移动到尾部，`get()` 也因此可能成为结构性修改。
+
+第三，LRU 也不是 JDK 额外藏了一套缓存算法。访问序已经让 head 天然代表最久未访问节点，`removeEldestEntry` 只需在插入后检查并淘汰它，所以 LRU 是既有顺序语义和淘汰策略自然对齐的结果。
+
+第四，`TreeMap` 更不是“会排序的 HashMap”。它从根上就放弃哈希分桶，改用 comparator/Comparable 驱动红黑树；它维护的不是访问历史，而是 key 的全局比较顺序。
+
+第五，TreeMap 里的 `compare(...) == 0` 也不只是排序细节。它直接决定两个 key 在树里是否落到同一个逻辑位置，所以如果比较器与 `equals` 不一致，树本身仍然能工作，但 Map 契约语义会发生偏移。
+
+把这五条边界记稳，LinkedHashMap 与 TreeMap 这一篇就不会重新塌回“两个有序 Map 的类实现对比”这种表面印象。它真正想讲的是：业务说“要有序”时，必须先问自己要保的是历史顺序，还是 key 的比较顺序。
 
 ## 收网：同样叫“有序”，但它们维护的根本不是同一种秩序
 

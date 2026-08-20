@@ -1,125 +1,189 @@
 # 03. 内存快满时怎么得到通知？— GC Notifier + LowMemory + Flags
 
-> **前置依赖**:[33-jmx/01 — JConsole 怎么知道 Eden 用了多少？— MemoryService + MemoryPool](openjdk/vol-02/33-jmx/01-memory-service.md):池上的 `_usage_sensor`/`_gc_usage_sensor` 与 ThresholdSupport 的数据结构在这篇;[33-jmx/02 — JDK 怎么查询 JVM 内存状态？— JMM 接口 + JDK Management](openjdk/vol-02/33-jmx/02-jmm-interface.md):SetPoolSensor/SetPoolThreshold/SetGCNotificationEnabled 三个"写"接口把传感器挂到池上;[39-runtime-monitoring/01 — JVM 的后台线程做什么?— ServiceThread](openjdk/vol-02/39-runtime-monitoring/01-service-thread.md):传感器请求与 GC 通知都由 ServiceThread 串行消费
+> **前置依赖**:[33-jmx/01 — JConsole 怎么知道 Eden 用了多少？— MemoryService + MemoryPool](openjdk/vol-02/33-jmx/01-memory-service.md):池上的 `_usage_sensor`/`_gc_usage_sensor` 与 ThresholdSupport 的数据结构在这篇;[33-jmx/02 — JDK 怎么查询 JVM 内存状态？— JMM 接口 + JDK Management](openjdk/vol-02/33-jmx/02-jmm-interface.md):SetPoolSensor/SetPoolThreshold/SetGCNotificationEnabled 三个“写”接口把传感器挂到池上;[39-runtime-monitoring/01 — JVM 的后台线程做什么？— ServiceThread](openjdk/vol-02/39-runtime-monitoring/01-service-thread.md):传感器请求与 GC 通知都由 ServiceThread 串行消费
 > → **后续**:[43-nio-net/01 — TCP Socket — PlainSocketImpl + ServerSocket + epoll](openjdk/vol-02/43-nio-net/01-tcp-epoll.md):33 域收官,离开 VM 内部管理,进入网络 I/O 域
 > 关联域: 39-runtime-monitoring(ServiceThread)、37-heap-dumper(OOM 触发)、03-arguments-flags(flag 系统)
 
-## 三种通知,一张脉络
+JMX 的管理面有三类看起来相近、实际不同的信号:
 
-[JMX 通知实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/33-jmx-notify-demo.txt)在 G1 上设了两个 8MB 阈值、挂了一个 GC 监听器,然后分配 200MB:
+- **usage threshold**：当前池使用量超过阈值;
+- **collection usage threshold**：一次 GC 完成后,GC 后使用量仍超过阈值;
+- **GC notification**：一次 GC 完成,带 before/after 完整账本。
 
+本篇要回答的核心问题:
+
+1. 谁在什么时候检查“内存快满”?
+2. 为什么 usage threshold 只报一次,collection threshold 却能累计多次?
+3. GC 通知为什么不是 GC 线程直接发给 Java?
+4. 运行时改 flag 又怎么进入同一个管理面?
+
+答案会反复落到一句话:**检测、记账、发通知是三件分离的事。`LowMemoryDetector` 只更新传感器的 pending 状态，ServiceThread 才调 Java `Sensor.trigger(...)`；`GCNotifier` 先复制 GC 账本入队，再由 ServiceThread 构造并发送通知；JMX/attach/DCmd 改 flag 则统一落到 `WriteableFlags::set_flag`。**
+
+---
+
+## 1. 开场困惑——“谁在什么时候发现内存快满”
+
+一次压力测试可能同时出现三种输出:
+
+```text
+MEM NOTIF type=java.management.memory.threshold.exceeded pool=G1 Old Gen count=1
+GC NOTIF name=G1 Young Generation action=end of minor GC
+MEM NOTIF type=java.management.memory.collection.threshold.exceeded pool=G1 Old Gen count=1
+GC NOTIF name=G1 Old Generation action=end of major GC
 ```
-== MEM NOTIF type=java.management.memory.threshold.exceeded seq=1 pool=G1 Old Gen used=10170368 count=1
-== GC NOTIF seq=1 name=G1 Young Generation action=end of minor GC cause=G1 Humongous Allocation duration=4ms oldBefore=238759936 oldAfter=239639976
-== MEM NOTIF type=java.management.memory.collection.threshold.exceeded seq=2 pool=G1 Old Gen used=421159456 count=1
-...
-== GC NOTIF seq=11 name=G1 Old Generation action=end of major GC cause=System.gc() duration=3ms oldBefore=418081464 oldAfter=421159456
-== MEM NOTIF type=java.management.memory.collection.threshold.exceeded seq=3 pool=G1 Old Gen used=421224720 count=2
+
+它们不是同一个触发器:
+
+- usage threshold 看的是**当前 usage**;
+- collection usage threshold 看的是**最近一次 GC 后 usage**;
+- GC notification 看的是**GC 事件本身**。
+
+更容易混淆的是时间顺序:GC 结束后,VM 线程可能已经把多个请求放进 pending/队列,真正发 Java 回调的是 ServiceThread。因此日志里“先看到内存通知、后看到对应 GC 通知”并不代表检测早于 GC,只代表消费顺序不同。
+
+---
+
+## 2. 两个朴素方案为什么都不对
+
+### 方案一:检测到就直接调 Java 通知
+
+如果分配线程或 GC 线程每次检测到超阈值就直接构造 `MemoryUsage`、调用 Java `Sensor.trigger`,那么热点分配路径会承担 JavaCalls、对象分配和线程状态切换;GC 线程也会被通知处理拖住。
+
+正确做法是:检测线程只在锁内更新 pending 计数,有请求就唤醒 ServiceThread;Java 回调在独立线程上串行完成。
+
+### 方案二:所有阈值都“超过就报”
+
+当前 usage 可能在阈值附近上下抖动。如果每次超过 high 都报通知,会形成通知风暴;但 collection usage 又确实需要记录每次 GC 后仍然超标的次数。
+
+所以 JFR/JMX 使用两套 SensorInfo 语义:
+
+- **gauge**：高阈值触发一次,必须低于 low 阈值清除后才能再次触发;
+- **counter**：每次越过 high 都累计 pending trigger。
+
+---
+
+## 3. 检测入口——GC 后、分配慢路径、gc_end
+
+`lowMemoryDetector.hpp:33-62` 的注释直接给出边界:
+
+- heap memory 在 GC 完成时和分配慢路径检测;
+- Code Cache 在分配和释放时检测;
+- threshold 为 -1 表示不支持;
+- threshold 为 0 表示不执行检测。
+
+### 当前 usage：GC 后与分配慢路径
+
+`detect_low_memory()`(lowMemoryDetector.cpp:81-102)遍历池,读取 `pool->get_memory_usage()`,把 usage 喂给 `set_gauge_sensor_level`。有 pending request 才 `Service_lock->notify_all()`。
+
+分配慢路径走 `detect_low_memory(MemoryPool*)`(lowMemoryDetector.cpp:104-125),同样只检查启用了 sensor 且 high threshold 非零的池。TLAB 快路径不做这件事,所以**快路径分配零开销,慢路径才承担检测成本**。
+
+### collection usage：只在 gc_end 检测
+
+`detect_after_gc_memory()`(lowMemoryDetector.cpp:127-147)读取的是 `pool->get_last_collection_usage()`,并调用 `set_counter_sensor_level`。它由 `GCMemoryManager::gc_end` 在设置 last collection usage 后调用,所以 collection threshold 的语义天然绑定“某次 GC 结束”。
+
+三处入口因此各有语义:
+
+1. `detect_low_memory()`：批量扫描当前 usage;
+2. `detect_low_memory(pool)`：分配慢路径检查当前池;
+3. `detect_after_gc_memory(pool)`：GC 结束检查最近一次 collection usage。
+
+这一步只改变 SensorInfo 状态,**不直接调 Java**。
+
+---
+
+## 4. SensorInfo——迟滞与两种语义
+
+`SensorInfo`(lowMemoryDetector.hpp:116-212)保存四类状态:
+
+- `_sensor_on`：Java 传感器当前是否 on;
+- `_sensor_count`：已经触发的累计次数;
+- `_pending_trigger_count`：等待 ServiceThread 处理的 trigger 数;
+- `_pending_clear_count`：等待处理的 clear 数。
+
+### gauge：高低阈值形成迟滞
+
+`set_gauge_sensor_level`(lowMemoryDetector.cpp:206-239):
+
+- usage crossing high 且 sensor off → pending trigger++;
+- usage crossing low 且 sensor on → pending clear++;
+- 处于 high/low 之间 → 不变;
+- 已经触发但仍在 high 以上 → 不重复触发。
+
+所以 usage threshold 的“只报一次”不是偶然,而是高/低双阈值形成的 hysteresis。
+
+### counter：每次越过 high 都累计
+
+`set_counter_sensor_level`(:261-277)的规则更直接:
+
+- usage crossing high → `_pending_trigger_count++`,无论 sensor 当前是否 on;
+- usage crossing low → 允许 clear。
+
+这正是 collection usage threshold 的需求:每次 GC 后仍然超过阈值,都应让 Java 侧的 count 递增。
+
+### pending 由 ServiceThread 消费
+
+`process_pending_requests`(:283-291)根据 pending clear/trigger 分派 `clear` 或 `trigger`。真正的 `trigger`(lowMemoryDetector.cpp:293-343)会:
+
+1. 构造 Java `MemoryUsage`;
+2. 用 `JavaCalls::call_virtual` 调 `Sensor.trigger(int, MemoryUsage)`;
+3. Java 侧 `PoolSensor` / `CollectionSensor` 再构造 JMX Notification;
+4. 回到锁内更新 `_sensor_on`、`_sensor_count`、pending 计数。
+
+如果构造 `MemoryUsage` 时发生 OOME,源码降级调用 `Sensor.trigger(int)`(注释 :307-309),本次 pending 仍被处理,但不发送带 usage 的通知。
+
+全链路是:
+
+```text
+VM/分配线程检测
+  → Service_lock 下更新 pending
+  → 唤醒 ServiceThread
+  → Java Sensor.trigger(...)
+  → PoolSensor/CollectionSensor
+  → JMX Notification
 ```
 
-三个值得记住的事实: ①**usage 阈值只报一次**(threshold.exceeded 只有 seq=1,count=1)——超阈值后必须降回去才再报;②**collection usage 阈值只在 affected 的 GC 后检测并报**(seq=2、seq=3 对应两次 full GC,count=1→2;young GC 时 Old 池不受影响,01 篇的 always_affected_by_gc);③**GC 通知每次都带完整账本**(oldBefore/oldAfter 逐次变化,13 次通知覆盖 young 与 full)。一个时序细节值得注意: MEM seq=2 的 used=421159456 与 full GC 通知(seq=11)的 oldAfter 相同,却打印在 young 通知之间——**ServiceThread 先处理 sensor 的 pending 请求,再发队列里排队的 GC 通知**(39-01 的检测顺序 sensors 第一),所以"full GC 检测→sensor 通知"先于"排队的 GC 通知"落地。这篇拆三层: 谁检查阈值(检测入口)、传感器怎么"跳闸"(SensorInfo 的迟滞语义)、通知怎么发出(GC Notifier 与 WriteableFlags)。
+---
 
-## 1. 检测入口: GC 后、分配慢路径、GC 结束
+## 5. GC 通知——每次 GC 一份完整账本
 
-阈值检查有三个触发点,lowMemoryDetector.hpp:33-62 的头注释是权威概述——"For heap memory, detection will be performed when GC finishes and also in the slow path allocation. For Code cache, detection will be performed in the allocation and deallocation"——**大纲"只在 GC cycle 中检测"是错的,分配慢路径也会检测**:
-
-- **GC 之后**(`MemoryService::track_memory_usage`,01 篇拆过): gc_epilogue 里遍历所有池 `LowMemoryDetector::detect_low_memory()`(memoryService.cpp:155);
-- **分配慢路径**: TLAB 外/慢分配结束时 `MemAllocator::Allocation::notify_allocation_low_memory_detector`(memAllocator.cpp:234-237,注释 "support low memory notifications (no-op if not enabled)")→ `detect_low_memory_for_collected_pools`(lowMemoryDetector.hpp:258-277): 遍历 collected 池,`used > high_threshold` 才 `detect_low_memory(pool)`——**快路径分配零开销,慢路径才查**;
-- **GC 结束的 gc_end 内**(`LowMemoryDetector::detect_after_gc_memory`): memoryManager.cpp:274-278(gc_end 里 set_last_collection_usage 后)——**这是 collection usage 阈值的唯一检测点**(语义不同,见下节)。
-
-`detect_low_memory()`(lowMemoryDetector.cpp:81-102)是总入口: Service_lock 下遍历所有池,对"有 sensor 且支持高阈值且阈值非 0"的池,把当前 usage 喂给 `sensor->set_gauge_sensor_level(...)`——**这一步只"记账"(算要不要触发),不调 Java**;有 pending 请求才 `Service_lock->notify_all()` 唤醒 ServiceThread。`is_enabled(pool)`(hpp:235-246)判断"检测对这个池是否开启": sensor 非空且 high_threshold > 0。
-
-*关键设计: 检测是"采样"不是"通知"*——阈值检查只更新传感器状态机的 pending 计数,真正调 Java 在 ServiceThread 上(39-01 的 5 条件之一),与 GC 自身完全解耦。
-
-## 2. SensorInfo: 迟滞与两种语义
-
-`class SensorInfo`(lowMemoryDetector.hpp:116-212)是每个池传感器的状态机,头注释(hpp:154-203)定义了两种监控语义:
-
-**gauge 语义**(`set_gauge_sensor_level`,cpp:206-239): usage 升到 high 阈值以上触发一次,**之后即使仍在高位也不触发**,除非降到 low 阈值以下再升回来——高/低双阈值构成**迟滞(hysteresis)**,防止 usage 在阈值附近抖动造成通知风暴。实证的 threshold.exceeded 只报一次就是它。
-
-**counter 语义**(`set_counter_sensor_level`,cpp:261-277): **每次** usage 超阈值都记一次 pending(注释 "will be triggered whenever the usage is crossing the threshold to keep track of the number of times")——实证的 collection.threshold.exceeded 在两次 full GC 后各报一次、count 递增(1→2)就是它(检测点=gc_end 对 affected 池的 detect_after_gc_memory;第三次 full GC 后 Old 降到 1.8MB 未超阈值不报)。
-
-两个方法的差异只在触发条件,共同点是**pending 计数**:
+内存阈值通知是“条件触发”;GC 通知则是“每次 GC 必发”(开启时)。GC 结束时的入口是:
 
 ```cpp
-// lowMemoryDetector.cpp:215-230(截取核心,逐字)
-  if (is_over_high &&
-        ((!_sensor_on && _pending_trigger_count == 0) ||
-         _pending_clear_count > 0)) {
-    // low memory detected and need to increment the trigger pending count
-    // if the sensor is off or will be off due to _pending_clear_ > 0
-    // Request to trigger the sensor
-    _pending_trigger_count++;
-    _usage = usage;
-
-    if (_pending_clear_count > 0) {
-      // non-zero pending clear requests indicates that there are
-      // pending requests to clear this sensor.
-      // This trigger request needs to clear this clear count
-      // since the resulting sensor flag should be on.
-      _pending_clear_count = 0;
-    }
+if (is_notification_enabled()) {
+  GCNotifier::pushNotification(this, _gc_end_message, GCCause::to_string(cause));
+}
 ```
 
-`_pending_trigger_count`/`_pending_clear_count`/`_sensor_on`/`_sensor_count` 四个状态(hpp:118-134): 检测线程(VM 线程/分配线程)在 Service_lock 下**只改 pending 计数**,真正的 trigger/clear 由 ServiceThread 在锁外执行(39-01 已拆 `process_sensor_changes`)。`process_pending_requests`(:283-291)按 pending_clear>0 分派到 `clear`/`trigger`。
+### 开关由监听器自动打开
 
-**trigger 的落点**(:293-343)是 Java 侧 `sun.management.Sensor` 对象——`JavaCalls::call_virtual` 调 `Sensor.trigger(int, MemoryUsage)`(:305-324,先构造 MemoryUsage 对象);**OOM 时降级为 `trigger(int)`**(注释 :307-309 "When OOME occurs and fails to allocate MemoryUsage object, call Sensor::trigger(int) instead")。回调后回到锁内更新 `_sensor_on=true`/`_sensor_count+=count`(:335-342)。Java 侧 `Sensor.trigger(int, MemoryUsage)`(Sensor.java:128-135)置 on/count 后调 `triggerAction(usage)`——`PoolSensor.triggerAction`(MemoryPoolImpl.java:297-303)发 `MEMORY_THRESHOLD_EXCEEDED` 通知,`CollectionSensor.triggerAction`(:325-331)发 `MEMORY_COLLECTION_THRESHOLD_EXCEEDED`;`MemoryImpl.createNotification`(MemoryImpl.java:138-161)检查 `hasListeners()`(没监听器直接不发)后构造 Notification + MemoryNotificationInfo 的 CompositeData 发出。*全链路: C++ 检测→pending 计数→ServiceThread 回调→Java 发 JMX 通知*。
+Java 侧 `GarbageCollectorExtImpl.addNotificationListener` 在从“没有监听器”变为“有监听器”时调用 `setNotificationEnabled(this, true)`,再通过 JMM 的 `jmm_SetGCNotificationEnabled`(management.cpp:1893-1898)设置 `_notification_enabled`。移除最后一个监听器时对称关闭。
 
-## 3. GC 通知: 一次 GC 一份完整账
+所以应用只要 addNotificationListener,GC notification 就开始产生,不需要额外手动开 flag。
 
-内存阈值通知是"条件触发";GC 通知是"每次 GC 必发"(开启时)。触发点在 01 篇拆过的 gc_end 尾部: `if (is_notification_enabled()) GCNotifier::pushNotification(...)`(memoryManager.cpp:294-296)。**开关的开启不是 JVM 侧的事,而是 Java 侧 addNotificationListener 自动做的**: `GarbageCollectorExtImpl.addNotificationListener`(GarbageCollectorExtImpl.java:118-128)在"从无监听器变为有监听器"时调 `setNotificationEnabled(this, true)`→ native → 02 篇的 `jmm_SetGCNotificationEnabled`(management.cpp:1893-1898)置 `_notification_enabled`;removeNotificationListener 对称关闭。所以"挂了监听器通知就来"——实证里 demo 只 addNotificationListener 就收到了 13 条通知,无需任何额外配置。
+### 先复制账本,再入队
 
-`pushNotification`(gcNotifier.cpp:45-54)做两件事: ①**复制账本**——new 一个 GCStatInfo 并 `mgr->get_last_gc_stat(stat)`(注释 "GC may occur between now and the creation of the notification"),这是 01 篇双缓冲账本的一次深拷贝,通知与 GC 之间隔了多少都无所谓;②构造 `GCNotificationRequest`(gcNotifier.hpp:33-54: timestamp/manager/action/cause/stat)入链表(Service_lock 下尾插+notify,:56-65)。`has_event()`(:76-78)就是链表非空——39-01 的 GCNotifier::has_event 条件。
+`GCNotifier::pushNotification`(gcNotifier.cpp:45-54)先 new 一个 `GCStatInfo`,调用 `mgr->get_last_gc_stat(stat)`复制最近一次完成的 GC 账本,再构造 `GCNotificationRequest` 入链表。源码注释特别提醒:复制账本时下一次 GC 可能已经开始,所以通知必须持有自己的深拷贝。
 
-消费端还是 ServiceThread: 锁内 `getRequest()`(:67-74)取头,锁外 `sendNotification`(:165-172,清 pending exception 防线程死,39-01 已拆)→ `sendNotificationInternal`(:189-224):
+请求在 `Service_lock` 下尾插并唤醒 ServiceThread。消费端 `sendNotificationInternal`(gcNotifier.cpp:189-224)锁外构造 Java 对象:
 
-```cpp
-// gcNotifier.cpp:195-222(截取核心,逐字)
-    Handle objGcInfo = createGcInfo(request->gcManager, request->gcStatInfo, CHECK);
+- before/after 每池一个 `MemoryUsage`;
+- GC manager 名称、action、cause;
+- `com.sun.management.GcInfo`;
+- 最后 `GarbageCollectorExtImpl.createGCNotification` 发 JMX Notification。
 
-    Handle objName = java_lang_String::create_from_str(request->gcManager->name(), CHECK);
-    Handle objAction = java_lang_String::create_from_str(request->gcAction, CHECK);
-    Handle objCause = java_lang_String::create_from_str(request->gcCause, CHECK);
-    InstanceKlass* gc_mbean_klass = Management::com_sun_management_internal_GarbageCollectorExtImpl_klass(CHECK);
+因此 GC 通知包含的是一次完整账本,不会随着后续 GC 改写。
 
-    instanceOop gc_mbean = request->gcManager->get_memory_manager_instance(THREAD);
-    instanceHandle gc_mbean_h(THREAD, gc_mbean);
-    if (!gc_mbean_h->is_a(gc_mbean_klass)) {
-      THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(),
-                "This GCMemoryManager doesn't have a GarbageCollectorMXBean");
-    }
+---
 
-    JavaValue result(T_VOID);
-    JavaCallArguments args(gc_mbean_h);
-    args.push_long(request->timestamp);
-    args.push_oop(objName);
-    args.push_oop(objAction);
-    args.push_oop(objCause);
-    args.push_oop(objGcInfo);
-```
+## 6. WriteableFlags——运行时反向控制面
 
-`createGcInfo`(:99-163)把账本变成 Java 对象: before/after 两个 MemoryUsage 数组(每池各一,与 02 篇 jmm_GetLastGCStat 相同,含 survivor max==0 特例 :120-127)+ GC 线程数扩展参数 → `JavaCalls::construct_new_instance` 构造 `com.sun.management.GcInfo`(builder+index+起止毫秒+before/after+扩展)。最后调 `GarbageCollectorExtImpl.createGCNotification`(GarbageCollectorExtImpl.java:93-112): `hasListeners()` 检查(没人听就不发)→ 构造 `GARBAGE_COLLECTION_NOTIFICATION` 类型的 Notification + `GarbageCollectionNotificationInfo` 的 CompositeData。实证里 13 条 GC NOTIF 就是这条链——young GC(cause=G1 Humongous Allocation)与 full GC(cause=System.gc())各有 action("end of minor GC"/"end of major GC",来自 GCMemoryManager 构造参数 g1CollectedHeap.cpp:1424-1425)。
-
-## 4. WriteableFlags: 运行时可改的 flag
-
-第三条线不是通知而是**反向控制**——运行时改 JVM 参数。`jcmd VM.set_flag` [实证](openjdk/planning/outlines/00-jvm-tools/materials/commands/33-jmx-flag-demo.txt):
-
-```
-[HeapDumpBeforeFullGC true]
-Command executed successfully
-[MaxHeapFreeRatio 60]
-Command executed successfully
-[PrintGC true]
-only 'writeable' flags can be set
-[NonExistingFlag true]
-flag NonExistingFlag does not exist
-```
-
-**三个入口,同一个函数**: `jmm_SetVMGlobal`(management.cpp:1569-1580,HotSpotDiagnosticMXBean.setVMOption 走这里,JVMFlag::MANAGEMENT origin)、attach 的 setflag 操作(attachListener.cpp:288,JVMFlag::ATTACH_ON_DEMAND)、VM.set_flag DCmd(diagnosticCommand.cpp:282)。都汇到 `WriteableFlags::set_flag`(writeableFlags.cpp:243-266):
+第三条线不是通知,而是**运行时改 JVM 参数**。`jcmd VM.set_flag`、JMX `HotSpotDiagnosticMXBean.setVMOption`、`VM.set_flag` DCmd 都汇到 `WriteableFlags::set_flag`:
 
 ```cpp
 // writeableFlags.cpp:243-266(截取核心,逐字)
-JVMFlag::Error WriteableFlags::set_flag(const char* name, const void* value, JVMFlag::Error(*setter)(JVMFlag*,const void*,JVMFlag::Flags,FormatBuffer<80>&), JVMFlag::Flags origin, FormatBuffer<80>& err_msg) {
+JVMFlag::Error WriteableFlags::set_flag(const char* name, const void* value,
+                                        JVMFlag::Error(*setter)(...),
+                                        JVMFlag::Flags origin,
+                                        FormatBuffer<80>& err_msg) {
   if (name == NULL) {
     err_msg.print("flag name is missing");
     return JVMFlag::MISSING_NAME;
@@ -131,7 +195,6 @@ JVMFlag::Error WriteableFlags::set_flag(const char* name, const void* value, JVM
 
   JVMFlag* f = JVMFlag::find_flag((char*)name, strlen(name));
   if (f) {
-    // only writeable flags are allowed to be set
     if (f->is_writeable()) {
       return setter(f, value, origin, err_msg);
     } else {
@@ -145,10 +208,30 @@ JVMFlag::Error WriteableFlags::set_flag(const char* name, const void* value, JVM
 }
 ```
 
-三段检查: 参数空(MISSING_NAME/MISSING_VALUE)→ `find_flag` 找不到(INVALID_FLAG,实证 "flag NonExistingFlag does not exist")→ **is_writeable() 检查**(NON_WRITABLE,实证 PrintGC/PrintJNIResolving 被拒)。"writeable" 是 flag 定义时的宏属性(globals.hpp:166-208 注释): `manageable`(如 HeapDumpBeforeFullGC/HeapDumpOnOutOfMemoryError,可经管理接口改)与 `product_rw`(内部可写)两类;其余 flag 一律拒绝——**flag 系统的"可写性"是编译期声明的,不是运行期推导的**。写值经 set_flag_from_char/set_flag_from_jvalue(:269/:298)按 flag 类型分派(bool/int/uint/intx/...)。
+三段检查:
 
-## 核心悬念
+1. 参数为空 → `MISSING_NAME` / `MISSING_VALUE`;
+2. `find_flag` 找不到 → `INVALID_FLAG`;
+3. 找到但 `is_writeable()` 为 false → `NON_WRITABLE`。
 
-33 域收官。通知系统闭环: 检测入口三处(GC 后/分配慢路径/GC 结束)→ SensorInfo 状态机(gauge 迟滞与 counter 两种语义,pending 计数与 ServiceThread 分离)→ Java 侧 Sensor→JMX 通知;GC 通知每次 GC 复制一份账本(GCStatInfo 深拷贝+链表),由 ServiceThread 构造 GcInfo 发出;WriteableFlags 让运行时改参数(manageable/product_rw 编译期声明,三入口一函数)。整个 JMX 域至此完整: 池/账本(01)→ 函数表/交付(02)→ 订阅与通知(03)。下一个域离开 VM 内部管理——**网络 I/O**: TCP Socket 从 Java 到 epoll 的链路。
+“writeable”不是运行时猜出来的,而是 flag 定义时通过 `manageable` 或 `product_rw` 等宏属性声明的。`PrintGC` 这类不可写 flag 即使存在也会被拒绝;`HeapDumpBeforeFullGC` 等 manageable flag 才能通过管理面修改。
+
+---
+
+## 7. 误解澄清与收网
+
+1. **内存阈值检测是不是只在 GC 后发生?** 不是。还有分配慢路径;Code Cache 还有分配/释放路径。
+2. **usage threshold 与 collection usage threshold 是同一种语义吗?** 不是。前者 gauge + 迟滞,后者 counter + 每次 GC 后检测。
+3. **GC 线程直接调 Java 通知吗?** 不是。GCNotifier 复制账本入队,ServiceThread 再构造 GcInfo 并回调 Java。
+4. **GC 通知是不是默认一直开启?** 不是。Java 侧添加监听器时才打开 `_notification_enabled`。
+5. **所有 flag 都能运行时改吗?** 不是。只有定义为 manageable/product_rw 等可写属性的 flag 能改。
+
+把这一篇压成三句话:
+
+- **检测只更新状态,通知由 ServiceThread 发送**；gauge 和 counter 分别解决“只报一次”和“累计报多次”。
+- **GC 通知先深拷贝 GCStatInfo 再排队**,Java 侧收到的是完整、稳定的 GcInfo。
+- **WriteableFlags 是反向控制面**,JMX、attach、DCmd 三条入口统一经过 `set_flag` 的可写性检查。
+
+33 域收官。下一个域离开 VM 内部管理——网络 I/O: TCP Socket 从 Java 到 epoll 的链路。
 
 > → [43-nio-net/01 — TCP Socket — PlainSocketImpl + ServerSocket + epoll](openjdk/vol-02/43-nio-net/01-tcp-epoll.md)

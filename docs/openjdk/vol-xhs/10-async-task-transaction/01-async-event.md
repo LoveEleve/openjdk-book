@@ -26,17 +26,19 @@
 
 问题在于，`my-xhs` 的主链根本承受不起这种做法。只要把库存预扣、券核销、支付创建、事件流写入、通知发送、索引同步、后续状态推进全部塞进同步请求里，接口 RT 会迅速拉长，而且跨服务失败点会被暴露到用户入口：下单请求可能因为搜索索引、通知、远程支付依赖或 Broker 抖动而失败，即便订单主数据本身已经准备好了。
 
-`OrderTransactionService.executeLocalTransaction()` 的实现已经说明作者在主动避免这种路径：本地事务只保证“订单主表 + 明细 + 本地消息表”三件事同库原子成功，再把后续动作交给异步链。也就是说，它故意只把最小同步闭环留在 MySQL 本地事务里。`my-xhs-order/src/main/java/com/myxhs/order/service/OrderTransactionService.java:41`
+`OrderTransactionService.executeLocalTransaction()` 的实现已经说明作者在主动缩短同步核心事务：本地事务保证“订单主表 + 事件流 + 明细 + 本地消息表”这组核心写入同库原子成功，再把库存预扣等后续动作交给异步链。需要补上一个边界：`OrderService.createOrder()` 在事务消息 `COMMIT` 后仍会同步执行优惠券核销、快照 / 映射等后置步骤，所以这里的“最小同步闭环”指的是**订单核心本地事务闭环**，不等于整个下单接口之后没有任何同步动作。`my-xhs-order/src/main/java/com/myxhs/order/service/OrderTransactionService.java:41` `my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:236`
 
-这说明本篇第一条最重要的理解不是“用了异步很先进”，而是：**同步主链被刻意缩短到只保核心写入，后半段动作必须另起一套执行系统。**
+这说明本篇第一条最重要的理解不是“用了异步很先进”，而是：**系统把最需要本地原子性的订单核心写入收进一个事务，把库存、通知和其它跨服务后半段拆到异步链，同时保留少量必须在订单创建结果确认后执行的同步后置步骤。** 这些同步后置步骤不是抽象描述，当前代码里至少能直接看到：`COMMIT` 之后会继续做优惠券核销、发送延时关单消息、补记 CREATED 事件、写订单快照、异步保存订单号映射。`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:243`
 
 ### 失败方案二：本地事务提交后直接 `send` MQ，就算异步化完成
 
 第二个很常见的误解是：只要本地事务提交成功以后顺手发一条 MQ，异步问题就算解决了。这个方案比“全同步做完”前进一步，但仍然不够，因为它没有解决最危险的一种失败：**数据库已经提交成功，但 MQ 没发出去，或者发出去却没被后续消费者正确处理。**
 
-`LocalMessageRetryJob` 的类注释直接点明了本地消息表存在的价值：即使 MQ Broker 整体宕机，本地消息表和订单表在同一 MySQL 事务里，只要 MySQL 不挂消息就不会丢，Broker 恢复后由定时任务扫描补发。`my-xhs-order/src/main/java/com/myxhs/order/job/LocalMessageRetryJob.java:31`
+`LocalMessageRetryJob` 的类注释直接点明了本地消息表存在的价值：当半消息已经被 Broker 接受、随后本地事务完成但后续投递或状态推进出现问题时，本地消息表和订单表仍然在同一 MySQL 事务里，Broker 恢复后定时任务可以扫描记录并补发。`my-xhs-order/src/main/java/com/myxhs/order/job/LocalMessageRetryJob.java:31`
 
-这句话其实已经说明，作者根本不相信“事务后直接 send 一下”能自然可靠。真正可靠的不是那次 `send` 调用，而是**消息先在本地事务里落库，再由异步 job 负责投递和补投**。如果没有这层本地消息表，订单主数据就会和消息投递之间留下一个不可修补的断点。
+但这里必须把一个容易被类注释掩盖的边界说清楚：当前订单主路径是**先向 Broker 发送消费者不可见的半消息，再在事务回调里把订单、明细、事件流和本地消息表一起提交，最后由 `COMMIT` 让半消息变得可见**。如果 Broker 在半消息发送阶段就完全不可达，事务回调不会执行，订单核心事务也不会凭空落库；本地消息表并不是脱离半消息、独立承担首次投递的普通 Outbox。`LocalMessageRetryJob` 主要承接的是半消息已进入事务流程之后的补发、状态待处理和本地死信扫描，而不是替代事务消息的首次提交。`my-xhs-order/src/main/java/com/myxhs/order/listener/OrderTransactionListener.java:20` `my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:225`
+
+因此本地消息表的价值不是简单一句“消息先落库再发”，而是：它和订单主数据共同记录了本地事务事实，并为事务消息异常、后续补发和状态对账提供了可查询的持久锚点；它的保护范围始终受限于本地事务是否已经被事务消息流程触发。
 
 ### 失败方案三：异步失败就靠 MQ 自动重试，系统自然会恢复
 
@@ -80,7 +82,7 @@ Task13 的真实运行态验证已经把这个误解彻底打穿：团队是从�
 
 这张图里最关键的，不是名字多，而是“异步事件”在 `my-xhs` 里从来不是单层能力，而是一整套多级结构。
 
-- 同步主链只负责把最小真相落稳。
+- 同步主链先把订单核心真相落稳，事务消息提交后仍可能有少量同步后置步骤。
 - 本地消息 / 补偿表负责保证“事件意图”先被保存。
 - MQ 与 Feign 是事件外送的通道，而不是成功本身。
 - Consumer、XXL-Job、补偿任务和重建任务共同承担“把事件后半段做完”的职责。
@@ -94,7 +96,9 @@ Task13 的真实运行态验证已经把这个误解彻底打穿：团队是从�
 
 `OrderTransactionService.executeLocalTransaction()` 的顺序非常值得注意：先写订单主表，再写事件流，再写明细，最后把 `LocalMessage` 一起插入。也就是说，这张表里的 payload 不是“补记一下日志”，而是和订单主数据一起提交的、后续将被发往 MQ 的正式事件体。`my-xhs-order/src/main/java/com/myxhs/order/service/OrderTransactionService.java:93`
 
-这一步的关键设计点在于：**事件先变成数据库事实，再变成 MQ 事实。** 如果反过来先发 MQ、再指望数据库成功，那一致性问题会完全反过来爆炸。作者显然优先选择了“订单主数据和事件意图一起写入”，把“对外送出去”留给后面的异步执行层。
+这里要把 RocketMQ 事务消息的时序说准确：客户端先把半消息发送到 Broker，但这条消息此时对普通消费者不可见；随后 `OrderTransactionListener.executeLocalTransaction()` 执行订单主表、事件流、明细和本地消息表的本地事务；本地事务成功才返回 `COMMIT`，Broker 才让消费者看到消息，失败则返回 `ROLLBACK`。因此真正被持久化并纳入本地事务的是“事件意图与订单主数据”，而不是把一条普通 MQ 消息在数据库之后随手补发。`my-xhs-order/src/main/java/com/myxhs/order/listener/OrderTransactionListener.java:20`
+
+如果 Producer 在本地事务完成后没有成功把 Commit 状态送回 Broker，Broker 还会通过 `checkLocalTransaction()` 回查本地消息表。这个回查点把“半消息暂存”和“本地事务事实”重新接了起来：本地消息表有记录才返回 `COMMIT`，没有记录才返回 `ROLLBACK`，查询异常则返回 `UNKNOWN` 等待后续回查。`my-xhs-order/src/main/java/com/myxhs/order/listener/OrderTransactionListener.java:86`
 
 这也解释了为什么 LocalMessage 里会有 `status`、`retryCount`、`nextRetryTime` 这些字段。它不是简单 outbox 文本，而是带最小状态机的事件待办表：
 
@@ -103,6 +107,15 @@ Task13 的真实运行态验证已经把这个误解彻底打穿：团队是从�
 - `3` = 本地死信
 
 `LocalMessageRetryJob` 的逻辑完全围绕这套状态在跑。`my-xhs-order/src/main/java/com/myxhs/order/job/LocalMessageRetryJob.java:24`
+
+这里还要再补一个很关键的分布式判断：**本地消息表不仅是锚点，还是后续恢复系统的“重试凭据”。**
+
+`LocalMessageMapper` 在 `my-xhs-order/src/main/java/com/myxhs/order/mapper/LocalMessageMapper.java:15` 到 `:20` 虽然保留了 `selectPendingMessages()` 这条带 60 秒保护窗口的查询；而当前 `LocalMessageRetryJob` 实际走的是 `selectList(wrapper)`。这说明系统里已经同时存在两种对“何时允许补发”的理解：
+
+- 一种更保守，强调先避开事务消息 `COMMIT` 过程；
+- 一种更直接，按 `status + nextRetryTime` 扫待处理事件。
+
+这类细节非常值得讲，因为它说明异步执行系统的难点，不只是“消息有没有落库”，而是**系统最终靠哪一份状态、哪一个时间窗口、哪一个游标去判定‘现在轮到我重试了’。** 这就是“状态凭据”问题：没有这份状态凭据，后面的补发、死信和对账都只能靠日志猜。
 
 ## `LocalMessageRetryJob` 真正承接了什么：不是定时器，而是事务后半段的第一批执行器
 
@@ -126,7 +139,7 @@ Task13 的真实运行态验证已经把这个误解彻底打穿：团队是从�
 
 `PaymentNotifyCompensateJob` 的类注释把场景写得非常清楚：支付成功后，本来应该通过 MQ 通知订单服务更新状态；但如果 Broker 宕机、订单服务消费失败、网络分区等问题让这条链没收敛，就由补偿任务扫描支付成功但超过 5 分钟仍未被订单侧确认的记录，再通过 Feign 去查询订单状态、必要时重新通知。`my-xhs-payment/src/main/java/com/myxhs/payment/job/PaymentNotifyCompensateJob.java:20`
 
-这里最重要的设计判断是：作者显然没有把 MQ 当成唯一真理，而是把它看作**第一条后半段执行通道**。一旦这条通道失败，系统还愿意绕到另一条通道（Feign + Job）去继续收敛。这比“MQ 重试几次就算了”要积极得多，也更接近真正的最终一致性工程。
+这里最重要的设计判断是：从当前实现可以看出，作者并没有把 MQ 当成唯一真理，而是把它看作**第一条后半段执行通道**。一旦这条通道失败，系统还愿意绕到另一条通道（Feign + Job）去继续收敛。这比“MQ 重试几次就算了”要积极得多，也更接近真正的最终一致性工程。
 
 同样的思路也体现在退款补偿上。退款成功通知不是只有一条消息再赌消费者，而是被视作一条必须最终交付给订单状态机的业务事实。MQ、回调、Job 都只是不同阶段的执行者。
 
@@ -143,7 +156,7 @@ Task13 的真实运行态验证已经把这个误解彻底打穿：团队是从�
 
 `my-xhs-order/src/main/java/com/myxhs/order/consumer/OrderCompensationConsumer.java:20`
 
-这说明作者对“补偿”这件事的理解并不是“失败了以后随便再搞一下”，而是把它变成了有 Topic、有结构、有去重、有重试、有 DLQ 预期的正式异步事件流。
+这说明作者对“补偿”这件事的理解并不是“失败了以后随便再搞一下”，而是把它变成了有 Topic、有结构、有去重、有重试、有 DLQ 预期的正式异步事件流。而且这条补偿链不是停在 Consumer 这一头就结束：`OrderService` 里还能直接看到 `RELEASE_STOCK`、`RETURN_COUPON`、`CLOSE_ORDER` 三类补偿动作是如何发送到 `ORDER_COMPENSATION_TOPIC` 的，和 Task11 里“补偿三动作 MQ 投递”这条运行态修复结论正好一一对应。`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:510` `docs/test-3/HANDOFF-TASK11.md:85`
 
 这一点非常重要，因为它直接决定系统如何对待失败：不是在原来的同步代码里无限 `catch -> retry`，而是把失败动作提升成另一类正式消息，再交给另一套执行器去处理。对于复杂交易链来说，这种设计远比“方法里重试三次”更可维护。
 
@@ -178,7 +191,7 @@ L0 源码静态证据：
 
 L1 框架 / 语义证据：
 
-- 本地消息表模式在这里承担的是“先把事件意图与主数据一并持久化”，再把实际投递延后到异步执行层，而不是把 MQ send 当作事务内动作。
+- 本地消息表模式在这里承担的是“在事务消息回调触发后，把事件意图与主数据一并持久化，并为事务消息回查与后续补发提供锚点”；当前订单主路径的首次消息投递仍是 RocketMQ 半消息 + 本地事务回调，不应简化成普通 Outbox 的“先落库、后首次发送”。
 - at-least-once 语义意味着消费者幂等不是锦上添花，而是异步系统的基本前提。`LocalMessageRetryJob` 已明确把这一点写进注释。`my-xhs-order/src/main/java/com/myxhs/order/job/LocalMessageRetryJob.java:69`
 - “补偿”在 `my-xhs` 里不是异常分支私货，而是 Topic / Job / 回调共同参与的正式执行层。
 
@@ -189,13 +202,13 @@ L2 运行态证据：
 
 ## 边界清单：哪些话现在能说，哪些还不能写满
 
-第一，当前可以明确写出 `my-xhs` 大量依赖异步事件承接同步主链后半段，但不能把它写成“同步路径已经极简到只剩数据库提交”。不同链路同步部分长短不一，支付、通知、搜索仍各自保留了不同程度的同步逻辑。
+第一，当前可以明确写出 `my-xhs` 大量依赖异步事件承接同步主链后半段，但不能把它写成“同步路径已经极简到只剩数据库提交”。订单事务消息 `COMMIT` 后仍有优惠券核销、快照 / 映射等同步后置步骤，不同链路的同步与异步边界并不完全相同。
 
 第二，当前可以明确写出本地消息表 + MQ + 补偿任务已经构成真实执行系统，但不能写成“任何失败最终都会自动收敛”。坏 payload、消费者逻辑错误、外部依赖长期不可达，都可能把问题推到 DLQ 或人工介入边界。
 
 第三，当前可以明确写出补偿消息在系统里被正式建模，但不能把它写成“所有异步失败都统一走补偿 Topic”。有些链路走重试，有些走本地死信，有些走 Job 重扫，有些走全量重建，恢复路径本身是分层的。
 
-第四，当前可以明确写出本地消息表是交易异步事件的第一层保障，但不能把它写成“消息绝对不丢”。更准确的说法是：只要本地事务提交成功且 MySQL 健康，事件意图就先被持久化；但后续如何送达、能否消费、是否需要补偿，仍是异步执行层的事情。
+第四，当前可以明确写出本地消息表是交易异步事件的第一层保障，但不能把它写成“消息绝对不丢”。更准确的说法是：**当事务消息流程已经进入本地事务回调、且本地事务成功提交时**，事件意图会与订单主数据一起持久化；但半消息发送阶段就失败、后续如何送达、能否消费、是否需要补偿，仍分别受事务消息入口与异步执行层影响。
 
 ## 收网：这篇 Async Event 真正建立了什么
 

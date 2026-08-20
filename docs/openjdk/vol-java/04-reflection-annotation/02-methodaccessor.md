@@ -1,6 +1,6 @@
 # MethodAccessor：反射为什么不是一直都慢
 
-> 本文基于 JDK 11 `java.base` 的 `Method`、`Constructor` 和 `jdk.internal.reflect.*` 反射实现。`DelegatingMethodAccessorImpl`、`NativeMethodAccessorImpl`、`MethodAccessorGenerator` 以及字段的 `UnsafeFieldAccessorFactory` 都属于 JDK 11 当前实现，不是 Java 反射规范要求的唯一方案。模块封装与 `InaccessibleObjectException` 已在上一章展开，这里只聚焦反射调用成本与执行器切换。
+> 本文基于 JDK 11 `java.base` 的 `Method`、`Constructor` 和 `jdk.internal.reflect.*` 反射实现。`DelegatingMethodAccessorImpl`、`NativeMethodAccessorImpl`、`MethodAccessorGenerator` 以及字段的 `UnsafeFieldAccessorFactory` 都属于 JDK 11 当前实现，不是 Java 反射规范要求的唯一方案。模块封装与 `InaccessibleObjectException` 已在上一章展开，这里只聚焦反射调用成本与执行器切换。本文讨论的是 JDK 11 反射调用的 accessor 膨胀与字段偏移路线，不把这里的 Delegating/Native/Generated 三层结构和 Unsafe 字段访问策略外推成所有 JVM 反射实现的统一规范。
 > **前置依赖**：[Class 反射视图：为什么拿到 `Method` 还会慢](01-class-member-access.md)
 > **后续**：[动态代理与访问控制](03-proxy-access.md)
 
@@ -441,6 +441,22 @@ Field.get / set
 ```
 
 这也解释了为什么“字段访问比方法反射更快”不能只回答成“因为字段更简单”。更准确的说法是：**JDK 11 为字段选了另一条启动即较轻量的执行路径，它不必像方法那样在 native 调用和字节码生成之间做热度切换。**
+
+## 六、五个最容易混掉的边界：invoke 本身不是慢的主因，Delegating 不是多余跳板，15 不是第 15 次切换，setAccessible 不是万能加速，字段也不是方法来不膨胀
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`Method.invoke` 本身不是反射慢的主因。它只是统一入口，负责访问检查和 accessor 转发；真正的执行成本大头在底层的 accessor 执行路径，而不是这个 Java 门面方法。
+
+第二，`DelegatingMethodAccessorImpl` 也不是多余跳板。它看起来只转发，但真正值钱的是 `setDelegate`，让运行时无感切换实现成为可能：入口对象不用变，底下实现从 native 换成 generated 对其他 `Method` copy 完全透明。
+
+第三，默认阈值 15 也不是“第 15 次开始切换”。`NativeMethodAccessorImpl` 中先自增 `numInvocations`，再判断 `> inflationThreshold`，因此实际触发生成行为的是第 16 次调用，而且 15 只是 JDK 11 默认折中，不是规范要求。
+
+第四，`setAccessible(true)` 不是万能加速键。它只省掉 `!override` 分支下的访问检查，后面的参数包装、异常包装和 accessor 执行成本都不会因此消失。把它讲成“反射几乎等于直接调用”，会严重高估它的收益边界。
+
+第五，字段访问也不是方法来不及膨胀的半成品。字段走的是另一条完全不同的路线：先算偏移，再按 Unsafe 直读，不必像方法那样在 native 和字节码之间做热度切换。以为字段最终也会膨胀出 `GeneratedFieldAccessor`，是直接拿方法的优化路线误套字段场景。
+
+把这五条边界记稳，`MethodAccessor` 这一篇就不会重新塌回“反射 15 次就变快”的口诀印象。它真正想讲的是：JDK 11 按照方法调用、字段访问的不同成本模型，分别选择了不同的执行策略——方法靠热度膨胀，字段靠偏移直读。
 
 ## 收网：反射性能不是一句“慢”，而是四层成本叠加
 

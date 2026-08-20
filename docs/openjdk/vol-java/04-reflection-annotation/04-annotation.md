@@ -1,6 +1,6 @@
 # 注解体系：一个不会执行代码的标签，为什么能驱动框架
 
-> 本文基于 JDK 11 `java.base` 的 `java.lang.annotation` 元模型、`Class` 注解缓存、`sun.reflect.annotation.AnnotationParser` 与 `AnnotationInvocationHandler`。`AnnotationData`、`AnnotationParser` 和 `sun.reflect.annotation` 包路径都属于 JDK 11 当前实现，不是 Java 注解 API 规定的唯一内部方案。APT、ASM 和 Spring 合成注解只作消费边界对照，不展开实现细节。
+> 本文基于 JDK 11 `java.base` 的 `java.lang.annotation` 元模型、`Class` 注解缓存、`sun.reflect.annotation.AnnotationParser` 与 `AnnotationInvocationHandler`。`AnnotationData`、`AnnotationParser` 和 `sun.reflect.annotation` 包路径都属于 JDK 11 当前实现，不是 Java 注解 API 规定的唯一内部方案。APT、ASM 和 Spring 合成注解只作消费边界对照，不展开实现细节。本文讨论的是 JDK 11 运行时注解读取链，不把这里的懒解析缓存、代理对象形态和 `@Inherited` 视图合并方式外推成所有注解处理实现都必须遵守的统一规范。
 > **前置依赖**：[Class 反射视图](01-class-member-access.md)、[动态代理与访问控制](03-proxy-access.md)
 > **后续**：域 07 类加载器
 
@@ -395,6 +395,22 @@ annotations
 ```
 
 所以“为什么 `@Repeatable` 和 `@Inherited` 不在同一层处理”的答案也就清楚了：一个在回答“同一位置的多值怎么展开”，一个在回答“类层次的视图要不要继承”。这两件事本来就不该挤进同一个 if 分支里。
+
+## 六、五个最容易混掉的边界：注解本身不执行代码，CLASS 不等于反射可见，类加载不等于立即解析，注解对象不是普通 POJO，@Repeatable 也不是 @Inherited
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，注解本身不会执行代码。`@Transactional` 不会自己开事务，`@Autowired` 不会自己注入；真正发生动作的，永远是后续读取并解释这张标签的框架、编译器或工具。把注解当成隐式回调，是注解域最初始的误解。
+
+第二，`RetentionPolicy.CLASS` 不等于反射可见。它只说明注解被写进了 class 文件，不代表 VM 会把它保留成反射可读的运行时数据。真正能被 `getAnnotation()` 读到的，是 `RUNTIME`。
+
+第三，类被加载也不等于注解对象已经全部构造好。JDK 11 的 `AnnotationData` 是按需懒解析的视图，只有真正有人调用 `getAnnotation()` 时，class 文件字节才会被翻译成可消费的注解数据。
+
+第四，注解对象也不是普通 POJO。它本质上是一个由 `AnnotationInvocationHandler` 驱动的动态代理：手里握着注解类型和成员值表，方法访问只是拿方法名去表里取值。
+
+第五，`@Repeatable` 更不是 `@Inherited` 的同义变体。前者解决“同一声明位置贴了多次同类注解怎么展开”，发生在 declared 视图层；后者解决“子类读取时要不要投影父类注解”，发生在 `annotations` 视图构造阶段。它们不在同一层完成合并。
+
+把这五条边界记稳，注解体系这一篇就不会重新塌回“框架扫描注解所以生效”这种没有解释力的表面印象。它真正想讲的是：注解是一段被延迟解析、再被代理成对象、最后由读取方解释的元数据，而不是自带行为的小黑盒。
 
 ## 收网：注解从来不是行为，它只是被解释的元数据
 

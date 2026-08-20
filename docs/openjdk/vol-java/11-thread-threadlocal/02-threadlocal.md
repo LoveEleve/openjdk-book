@@ -233,6 +233,20 @@ if (inheritThreadLocals && parent.inheritableThreadLocals != null)
 
 这也解释了为什么很多框架后来要做任务包装或上下文显式透传：不是 `InheritableThreadLocal` 写坏了，而是它天生只承诺构造期复制，不承诺线程池任务级传播。
 
+## 五个最容易混掉的边界：ThreadLocal 不是值容器，弱引用不是自动无泄漏，remove 不是礼貌动作，继承不是实时传播，线程私有也不是线程池安全
+
+第一，`ThreadLocal` 不是值容器。它更像线程私有 map 的 key；真正的 value 存在每个 `Thread` 自己的 `threadLocals` 或 `inheritableThreadLocals` 上，而不是存在线程栈里，也不是挂在 `ThreadLocal` 对象本身。
+
+第二，弱引用不是自动无泄漏。弱的是 key，不是 value；只要活线程上的 `ThreadLocalMap` 里还有那个 Entry 壳，value 就仍可能被强引用着长期滞留。
+
+第三，`remove()` 不是礼貌动作。JDK 的清理链更多是被动补救，依赖后续访问顺路打扫；真正能明确宣布“这份线程绑定值到此结束”的，是调用方主动 `remove()`。
+
+第四，继承不是实时传播。`InheritableThreadLocal` 复制发生在线程构造期，而不是任务提交期；它传播的是“创建子线程那一刻”的父线程快照，不会在线程池复用时替你重新同步上下文。
+
+第五，线程私有也不是线程池安全。ThreadLocal 的隔离粒度是线程，不是任务；当同一个 worker 线程反复处理多个请求时，旧 value 若未清理，就可能把内存残留和业务串值一起带进下一个任务。
+
+把这五条边界记稳，ThreadLocal 就不会再被误解成“线程安全所以天然省心”的小工具。它真正想讲的是：线程私有存储换来了免锁访问，但值的生命周期也随线程一起变长；弱 key 只是降低 key 滞留，真正的资源收尾仍要靠业务代码在正确边界显式完成。
+
 ## 收网：ThreadLocal 真正绑定的不是“代码块”，而是“线程生命周期”
 
 现在回到开头那个问题，就能看清 ThreadLocal 为什么既好用又危险了。它好用，是因为值不挂在共享的 `ThreadLocal` 对象上，而挂在每个 `Thread` 自己的 `ThreadLocalMap` 上，于是同一把 key 可以被很多线程共享，value 却天然按线程隔离，不需要锁。

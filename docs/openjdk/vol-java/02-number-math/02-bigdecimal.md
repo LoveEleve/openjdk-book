@@ -1,6 +1,6 @@
 # BigDecimal 与精确计算 — 数值、scale 与舍入边界
 
-> 基于 JDK 11 `java.math.BigDecimal/BigInteger` 实现。金额舍入规则仍由业务决定，不能把某一种 `RoundingMode` 当成通用财务答案。
+> 基于 JDK 11 `java.math.BigDecimal/BigInteger` 实现。本文讨论的是 JDK 11 当前的紧凑存储路径、构造入口和大整数算法选择，不把这些内部布局、阈值或优化路径外推成所有 JDK 版本或所有语言库的统一规范。金额舍入规则仍由业务决定，不能把某一种 `RoundingMode` 当成通用财务答案。
 > **前置依赖**: [包装类、缓存与装箱](01-wrapper-cache-boxing.md)(数值对象)、[01-string/04 — 字符编码](../01-string/04-encoding-unicode.md)(文本输入边界)
 > → **后续**: [浮点数表示与 Math](03-ieee754-math.md)
 
@@ -108,6 +108,20 @@ BigDecimal 的 `intCompact` 能处理大多数普通金额；当数值超出 lon
 失败方案是所有输入都使用同一算法：小数值会承担不必要的分治成本，大数值又会被 O(n²) 朴素乘法拖慢。
 
 关键设计(斜体):*BigInteger 的算法选择是“规模驱动”。BigDecimal 的双存储路径也是同一思想：小值走紧凑快路径,真正的大数才支付大整数成本。*
+
+## 五个最容易混掉的边界：BigDecimal 不是自动精确，scale 不是纯显示，equals 不是数值相等，BigInteger 不是默认成本，舍入也不是统一财务答案
+
+第一，BigDecimal 不是自动精确。它只能忠实表示传入的值；如果入口已经是近似的 double，`new BigDecimal(double)` 会把近似值完整保留下来，不能把它恢复成调用者原本想写的十进制数。
+
+第二，scale 不是纯显示格式。提高 scale 可能只是补零，但降低 scale 可能改变数值；它还参与 `equals` 与 `hashCode` 的对象语义，所以数据库金额精度、计算精度和展示格式不能混成一个概念。
+
+第三，`compareTo` 相等不是 `equals` 相等。前者回答“数值大小是否相同”，后者回答“数值和 scale 是否都相同”。把 BigDecimal 放进 HashMap 或 HashSet 前，必须先决定容器需要哪一种等价关系。
+
+第四，BigInteger 不是每次 BigDecimal 运算的默认成本。JDK 11 会优先让能放进 long 的值走 `intCompact`；只有数值超出紧凑范围，才进入 `BigInteger` 的 `mag` 数组和分治乘法路径。
+
+第五，舍入模式不是统一财务答案。`HALF_UP`、`HALF_EVEN`、`CEILING` 和 `FLOOR` 对负数、边界值及累计结果的含义不同；真正的规则必须由金额单位、业务约定和合规要求共同决定，BigDecimal 只负责按指定规则执行。
+
+把这五条边界记稳，BigDecimal 就不会重新被误解成“换个类型便自动正确”的魔法容器。它真正想讲的是：输入先决定你保留了什么事实，scale 再决定你如何表示它，运算显式决定舍入，比较明确决定等价关系，而存储实现只是在这些语义确定之后负责把成本压下来。
 
 ## 收网：金额计算的四条边界
 

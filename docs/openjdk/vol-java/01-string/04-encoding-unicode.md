@@ -1,6 +1,6 @@
 # 字符编码与 Unicode — 乱码如何从字节边界一路产生
 
-> 基于 JDK 11 `java.base` 的 `StringCoding`、`StringLatin1`、`StringUTF16` 与 `Character` 实现。
+> 基于 JDK 11 `java.base` 的 `StringCoding`、`StringLatin1`、`StringUTF16` 与 `Character` 实现。本文讨论的是 JDK 11 字符解码与存储链，不把这里的默认 charset 行为、U+FFFD 错误策略和 Compact Strings 双路径外推成所有 JDK 版本或所有文本处理的统一规范。
 > **前置依赖**: [String 为什么是不可变的](01-storage-immutable.md)(byte[]+coder)、[字符串构建与拼接](03-build-concat.md)(coder/Unicode 写入)
 > → **后续**: 按写作顺序进入异常体系
 
@@ -132,6 +132,22 @@ ch >= '0' && ch <= '9'
 这只能覆盖 ASCII 数字，不能代表 Unicode 的全部数字字符。需要 Unicode 语义时，应使用 `Character` 分类 API。
 
 关键设计(斜体):*字符分类是“数据表 + 版本”的问题,不是简单字符算术。Unicode 数据更新时,分类结果也可能随 JDK 数据版本变化。*
+
+## 六、五个最容易混掉的边界：UTF-8 不是内部存储，new String(bytes) 不跨平台稳定，U+FFFD 不是 JVM 改字，length() 不是字符数，isDigit 也不只看 ASCII
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，UTF-8 不是 String 的内部存储格式。它是外部字节层的编码；JDK 11 的 String 内部使用 LATIN1 或 UTF16 两套由 `coder` 选择的表示。把 UTF-8 当成内部存储，就会把“外部字节数”和“内部 value 长度”混为一谈。
+
+第二，`new String(bytes)` 也不跨平台稳定。它使用启动环境的默认 charset，开发机和生产机默认值不同，同一组字节就可能解出不同字符。外部边界必须显式写明 charset，不能把默认值当成协议。
+
+第三，看到 U+FFFD（``）也不是 JVM 随机改了字符。它通常来自 `CharsetDecoder` 的 `CodingErrorAction.REPLACE` 策略，是非法字节序列或不可映射字符被替换后的结果；如果需要保住原始数据，应改用 REPORT 策略并拒绝继续处理。
+
+第四，`String.length()` 返回的也不是用户可见字符数。它返回 UTF-16 code unit 数，补充平面 emoji 通常算两个位置。要按 Unicode 字符遍历、截断或计数，必须使用 `codePointAt`/`codePointCount` 这类 code point API。
+
+第五，`Character.isDigit` 更不是只认 ASCII 0-9。它依据 Unicode 字符分类数据表，`ch >= '0' && ch <= '9'` 只覆盖 ASCII 范围，无法代表 Unicode 的全部数字字符。
+
+把这五条边界记稳，字符编码这一篇就不会重新塌回“乱码就是编码不一致”的表面结论。它真正想讲的是：乱码发生在字节 → 字符的解码边界，而 String 内部存储、UTF-16 视角和 Unicode 分类数据各是一层需要分清的问题。
 
 ## 收网：四步排查乱码
 

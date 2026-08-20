@@ -145,11 +145,22 @@ Gateway 的双向 ACCESS 日志正好填了这个缝：一次 northbound 请求�
 
 当前这份 `docker-compose.yml` 能直接确认的日志链，是 Logstash 暴露 `15044/15045` 输入、向 ES `19200` 写入，再由 Kibana `15601` 提供查询入口；而 Gateway 自己的 `logback-spring.xml` 则同时具备两条产出路径：一条是本地 `/logs/${APP_NAME}.json` 文件，一条是 `LOGSTASH` appender 直连 `21.130.247.89:15044`。因此就当前可见部署与源码证据而言，更稳妥的表述是“**结构化日志既可落本地 JSON 文件，也可由应用直接推送到 Logstash。**”
 
-至于 Filebeat，只能更谨慎地写成另一层历史事实：在 `config/production-env-config/docker-container-review-20260811-162334/07-deploy-src/docker-compose.yml` 这份归档部署包里，确实能看到 `filebeat:` 服务定义；但在当前工作中的主 `config/docker-compose.yml` 片段里，我没有直接看到对应 service。因此 Filebeat 可以被写成“历史部署拓扑中出现过的一条采集路径”，不能被写成“当前主 compose 已显式启用的唯一入口”。`my-xhs/config/docker-compose.yml:903` `my-xhs/config/production-env-config/docker-container-review-20260811-162334/07-deploy-src/docker-compose.yml:708` `my-xhs-gateway/src/main/resources/logback-spring.xml:93`
+至于 Filebeat，现在需要把口径再收得更准确一些。当前主 `config/docker-compose.yml` 里其实已经能直接看到 `filebeat:` 服务定义，归档部署包 `config/production-env-config/docker-container-review-20260811-162334/07-deploy-src/docker-compose.yml` 里也同样存在这条服务。因此更稳妥的表述不是“主 compose 没有 Filebeat”，而是：**当前可见部署描述同时存在两条正式采集路径——应用用 `LOGSTASH` appender 直推 `15044`，以及 Filebeat 走 beats 输入 `15045`。** 仅凭当前这些静态材料，还不能进一步写满“线上此刻究竟主要依赖哪一条、是否两条同时启用并持续产流”；那已经属于运行态选择，不是单靠 compose 与 logback 就能定死的事实。`my-xhs/config/docker-compose.yml:909` `my-xhs/config/docker-compose.yml:950` `my-xhs/config/production-env-config/docker-container-review-20260811-162334/07-deploy-src/docker-compose.yml:708` `my-xhs-gateway/src/main/resources/logback-spring.xml:93`
 
 而 `observability-issues.md` 又给出了更关键的运行态结果：Prometheus 16/16 UP、Grafana 4 面板 + ES 日志、traceId 精确检索，说明这条日志 / 检索链历史上不是只部署过，而是真正打通并被使用过。`docs/observability-issues.md:37`
 
 这也解释了为什么在 `my-xhs` 里，日志不只是排障备用品，而是 trace 的侧证据源。SkyWalking 可以告诉你 home 调了 user、counter、content；ES 则能让你按同一条 traceId 直接捞出 Gateway 入站日志、下游异常日志和业务关键字段。没有这条链，Trace UI 和文本日志仍然是两套世界。
+
+但这里还要再补一个很关键的工程判断：**平台在线不等于观测闭环成立。**
+
+即使当前 Prometheus、Grafana、Alertmanager、SkyWalking UI 和 exporter 端口都可达，也仍然至少有四件事需要继续分开看：
+
+1. **平台在线**：进程、端口、基础 API 可访问；
+2. **指标出数**：目标被抓到、series 真存在、看板不是空壳；
+3. **链路对齐**：trace、日志、metrics 是否能围绕同一条请求互相指认；
+4. **规则有效**：Prometheus 规则是否真的命中当前埋点，Alertmanager 是否真的把异常送到人。
+
+这意味着可观测性在 `my-xhs` 里不是一个“平台有无”的判断，而是一个从平台在线到业务可解释逐层收紧的证据链。也正因为如此，本篇和 `12-testing-release-ops/04-monitoring-alert.md` 才必须同时存在：前者解释接线，后者解释接线之后如何真正形成告警闭环。
 
 ## Metrics 这条线：Gateway 的最大坑不是没指标，而是“入口流量在所有看板里消失”
 

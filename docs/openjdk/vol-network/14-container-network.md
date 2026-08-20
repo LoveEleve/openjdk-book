@@ -3,6 +3,12 @@
 > 主题：网络｜第 14 篇
 > 前置文章：`docs/openjdk/vol-network/08-epoll-reactor.md`、`docs/openjdk/vol-network/10-netfilter-nat.md`
 > 本篇后续：转入系统性能观测或回到本卷做二轮提纯
+> 一句话困惑：Pod 为什么像有自己的网卡、路由和 Service 入口，而这些对象又怎样通过宿主机、虚拟链路和 CNI 重新连成集群网络？
+> 一句话顿悟：容器网络先用 network namespace 隔离网络视图，再用 veth/bridge/route 接线，用 Service 数据面隐藏可变后端，最后由 CNI 和 overlay 在 Pod 生命周期与跨节点范围内装配。
+> 依赖分类：
+> - 硬依赖：`08-epoll-reactor.md` 的 socket/事件视角与 `10-netfilter-nat.md` 的 hook、conntrack、NAT 模型；它们解释容器数据面最终仍落回普通内核网络路径。
+> - 软依赖：`13-dns-cdn-websocket.md` 的 Web 请求全链路；本文只把请求入口作为场景，不重复 DNS/CDN/TLS/HTTP 主线。
+> - 导航依赖：后续系统性能观测会继续测量软中断、队列、conntrack、overlay 和代理线程，不把某个 CNI 或 kube-proxy 模式写成唯一实现。
 > 版本说明：本文讨论 Linux 容器网络的稳定心智模型，重点是 network namespace、veth、bridge、kube-proxy、Service、Pod/Node 路径与 CNI/VXLAN。具体 kube-proxy 模式（iptables/ipvs/nftables/eBPF）、CNI 插件行为、overlay 封装、NetworkPolicy 与各发行版/云厂商实现会随 Kubernetes 版本、CNI 选型和内核功能变化。本文不把某一版 Kubernetes、Flannel、Calico、Cilium、kube-proxy 或内核 VXLAN 细节写成跨版本契约，而把重点放在“为什么容器网络不是一个新协议，而是把隔离、虚拟链路、转发、负载均衡和编排组合起来，给每个 Pod 制造出一张看似独立却又彼此可达的网络世界”。
 
 ## 现在真正该问的，不再是“公网请求怎样走完 DNS、CDN、TLS 和 HTTP 链路”，而是“这些连接一旦进入容器和 Pod 世界，本机网络为什么会突然多出一层又一层看不见的路由、虚拟网线和 Service 转发表”
@@ -53,7 +59,7 @@
 
 这样一来，容器既不独立，也很难安全地与宿主机及其他容器并存。你无法说清“127.0.0.1 是谁的回环”“这个进程看到的默认路由是谁配的”“它为什么不该看见宿主机上别人的监听 socket”。
 
-所以容器网络的第一步，从来不是发 IP，而是先隔离网络视图本身。
+所以容器网络的第一步，从来不是发 IP，而是先隔离网络视图本身。源码证据应回到 Linux `net_namespace`、network device namespace 和 socket/route 查找路径，以及容器 runtime 创建 netns 的装配路径；它们支撑“隔离的是整套网络视图”的判断，不应被简化成只给进程换一个地址。
 
 ### 2. 第二个失败世界：那就给每个容器完全独占一块真实物理网卡
 
@@ -125,7 +131,7 @@ Pod 可以重建、扩缩容、漂移到别的节点，它的 IP 并不一定长
 
 控制面对象一旦变化——后端 Pod 增减、健康状态变化、Service 更新——kube-proxy 就会把这些变化同步进节点本机的数据面：iptables、ipvs、nftables 或其他模式。这样每个节点在看到 ClusterIP 流量时，知道该把它转到哪个 PodIP:targetPort。
 
-这说明 kube-proxy 不是“再跑一个 HTTP 代理”，而是在**持续把集群服务抽象灌进节点本机的转发表/状态机**。它的对象仍然是连接和包，而不是上层业务负载。
+这说明 kube-proxy 不是“再跑一个 HTTP 代理”，而是在**持续把集群服务抽象灌进节点本机的转发表/状态机**。它的对象仍然是连接和包，而不是上层业务负载。证据位应检查 EndpointSlice 事件到 iptables/IPVS/nftables 或其他数据面同步的路径；不同 Kubernetes 与 CNI 版本可能由 eBPF 等方案承担同类职责，不能把 kube-proxy 的某一种模式写成唯一实现。
 
 ### 4. 为什么 Service 抽象本质上在延续前几篇同一个模式
 
@@ -283,6 +289,32 @@ CNI ADD/DEL 只是说明什么时候该创建或删除网络对象，不规定�
 也正因为如此，你会发现“容器网络问题”从来都不是一个点的问题，而是一串重新布线的问题：Pod 通不了，到底是 namespace 没配、veth 没接、bridge/route 出错、Service 没同步、Netfilter/NAT 误改，还是 overlay/VXLAN 根本没把对端节点接通？理解了这张布线图，前面所有 TCP/NAT/TLS/HTTP 知识点才会重新找到自己在容器世界里的落脚位置。
 
 这就是为什么说：**容器网络的本质不是给应用一个新协议，而是给 Linux 网络栈重新接了一层“看起来像很多独立小主机”的舞台布景。** 只有看穿这层布景，你才能真正定位集群网络里的问题到底卡在“隔离”“接线”“转发”“虚拟入口”还是“装配规范”哪一层。
+
+## 八、误解清单、证据清单与边界清单
+
+### 误解清单
+
+- 容器网络不是只给容器分一个 IP；真正被隔离的是设备、路由、socket、loopback 与规则视图。
+- veth pair 不是“虚拟网卡别名”；它是一对真正互通的虚拟链路端点。
+- Service 不是隐藏 Pod 或监听进程；ClusterIP 是由节点数据面实现的稳定入口抽象。
+- kube-proxy 不是 HTTP 代理；它把 Service/EndpointSlice 状态翻译成节点上的 L4 转发表与状态机。
+- CNI 不是某一种固定网络实现，bridge、路由、overlay、eBPF 都可能在其下以不同方式完成装配。
+
+### 证据清单
+
+- network namespace：Linux `net_namespace`、device/route/socket namespace 与 runtime 创建 netns 路径，支撑“隔离的是整套网络视图”。
+- veth/bridge：veth pair 创建、bridge 端口接入、FDB/MAC 学习与本地转发路径，支撑“节点内 Pod 如何被接回同一交换平面”。
+- Service 数据面：EndpointSlice 同步到 iptables/IPVS/nftables/eBPF 路径，支撑“ClusterIP 到后端 Pod 的稳定入口映射”。
+- Ingress/L7：控制器监听规则、SNI/Host/Path 分发与 TLS 终止路径，支撑“L4 Service 之上再叠一层 L7 语义”。
+- CNI/overlay：CNI ADD/DEL、IPAM、路由下发、VXLAN/Geneve 封装与解封路径，支撑“Pod 生命周期与跨节点互联是装配出来的”。
+
+### 边界清单
+
+- 本文讨论的是 Linux/Kubernetes 容器网络的稳定架构模型，不把某个 CNI、kube-proxy 模式或云厂商实现写成唯一答案。
+- Pod 同节点、跨节点、外部访问和 Ingress/TLS 终止路径属于不同层次的问题，不能用同一套抓包或规则假设一概而论。
+- Service 是否由 kube-proxy、IPVS、nftables 还是 eBPF 实现，会显著改变数据面细节，但不改变“稳定入口映射到可变后端”这一主线。
+- VXLAN/overlay 解决的是跨节点互联便利性，不是零成本方案；MTU、封装开销、可观测性与故障排查都会更复杂。
+- 后续若转入系统性能观测，重点会从“网络怎样被布线”转到“软中断、队列、conntrack、TLS 和应用线程怎样被测量与定位”。
 
 ## 下一步桥接
 

@@ -3,6 +3,12 @@
 > 主题：文件系统｜第 10 篇
 > 前置文章：`docs/openjdk/vol-filesystem/01-ext2-disk-layout.md`、`docs/openjdk/vol-filesystem/02-ext2-inode-indirect-blocks.md`、`docs/openjdk/vol-filesystem/03-file-creation-touch.md`
 > 本篇后续：`11-nfs-network-fs.md`
+> 一句话困惑：`mount /dev/sda1 /mnt` 为什么不是把分区“显示出来”这么简单，而是要先把盘上格式装配成 `super_block`/root dentry，再在每次路径访问时叠加 inode 权限、capability 和 ACL 门禁？
+> 一句话顿悟：因为挂载解决的是“盘上结构如何进入 VFS 命名空间成为一棵活树”，权限解决的是“某个进程能沿这棵树走到哪扇门”；存在性和访问资格是两套咬合但不同的判断。
+> 依赖分类：
+> - 硬依赖：文件系统卷前文已建立 superblock、inode、目录项和盘上布局；本文承接的是“这些结构怎样进入 VFS 运行时世界”。
+> - 软依赖：前文关于 dentry、路径解析、inode mode bits、ACL/capability 和命名空间的结论；本文把它们重新组织成挂载 → 接树 → 判门的主线。
+> - 导航依赖：下一篇 NFS 会继续回答“远端文件系统怎样投影成本地 VFS 树”；本文先讲本地盘接入，不前置网络文件系统缓存与协议细节。
 > 版本说明：本文讨论 Linux 本地文件系统挂载和权限判定的稳定心智模型，重点是 `sys_mount`/`vfs_kern_mount`、`ext2_fill_super`、root inode/root dentry 对接、mode bits、capability 与 POSIX ACL。具体 `fs_context`/老式 mount 调用链差异、superblock 缓存与复用、mount namespace、capability 检查细节和 ACL 钩子行为会随内核版本与安全模块配置变化。本文不把某一版 `fs/namespace.c`、`fs/super.c`、`fs/ext2/super.c`、`fs/namei.c`、`fs/posix_acl.c` 中的函数拆分、锁顺序和安全模块钩子写成跨版本契约，而把重点放在“为什么挂载本质上是把磁盘格式翻译成 VFS 运行时对象，以及权限判断为什么必须把 inode 元数据、进程身份和 ACL/capability 叠在一起看”。
 
 ## 现在真正该问的，不再是“磁盘内部结构怎样自洽”，而是“这些结构怎样通过一次 `mount` 进入系统调用可见的世界，并在每次 open/read/write 时变成一套门禁系统”
@@ -53,7 +59,7 @@
 
 这很快就会撞墙。因为 VFS 知道运行时树长什么样，但它并不知道 Ext2、Ext4、XFS、Btrfs 在盘上如何编码块大小、superblock 位置、根 inode 号、日志/校验结构和特定操作集。它无法仅凭抽象接口就猜出磁盘格式。
 
-所以挂载天然必须分层：**VFS 负责统一挂载框架，具体文件系统负责把自己的盘上字节解释成这套统一框架能消费的运行时对象。**
+所以挂载天然必须分层：**VFS 负责统一挂载框架，具体文件系统负责把自己的盘上字节解释成这套统一框架能消费的运行时对象。** 若要把这一节补成更硬的源码正文，最关键的证据位应回到 `fs/namespace.c` 的挂载框架、`fs/super.c` 的超级块管理和 `fs/ext2/super.c` 的 `fill_super` 路径：它们共同支撑“VFS 负责总装，具体文件系统负责解释盘上格式”的挂载分层。
 
 ### 3. Linux 的答案：先选文件系统类型，再由该类型的 mount/fill_super 回调把盘上格式翻译成 VFS 世界
 
@@ -104,7 +110,7 @@
 
 在盘上，这些只是字节；到了 `ext2_fill_super`，它们开始变成 VFS 和 ext2 驱动之后所有决策的真实参数：块多大、组多少、inode 每组多少、根 inode 该怎么取、哪些操作集该挂到 `sb` 上。
 
-这说明挂载不仅是“把已有对象读出来”，还是“把纯存储格式参数提升成运行时行为配置”。同样的盘，如果这一步解释错了，后面整个路径树都会搭歪。
+这说明挂载不仅是“把已有对象读出来”，还是“把纯存储格式参数提升成运行时行为配置”。同样的盘，如果这一步解释错了，后面整个路径树都会搭歪。证据位上，这层最值得回到 `fs/ext2/super.c` 的 `ext2_fill_super()` 一类路径与 `fs/super.c` 的 superblock 装配逻辑去看：它们共同支撑“盘上 superblock 字节只有被解释并挂上 `s_op` 后，才真正成为运行时 `struct super_block`”这句判断。
 
 ### 3. 为什么 `sb->s_op` 这种操作集挂接也是 superblock 成为“活对象”的关键一环
 
@@ -134,7 +140,7 @@
 
 用户态看到的是：原先普通目录 `/mnt`，mount 后变成另一个文件系统的入口。内核里真正发生的，是当前命名空间把新超级块的 `s_root` 接到了这个挂点上。换句话说，不是“/mnt 被填充了内容”，而是“/mnt 变成了另一个 root dentry 的路由口”。
 
-这也解释了为什么 mount namespace 会显得那么重要：挂载不是静态修改磁盘，而是在运行时重接路径树。不同命名空间完全可以因此看到不同的树接法。
+这也解释了为什么 mount namespace 会显得那么重要：挂载不是静态修改磁盘，而是在运行时重接路径树。不同命名空间完全可以因此看到不同的树接法。若要补这层的实现证据位，最关键的落点应回到 `fs/namespace.c` 中 mount namespace、挂载树接入与路径视图相关路径：它们共同支撑“同一底层文件系统可以因命名空间不同而呈现不同树接法”的判断。
 
 ### 4. 本节最该记住的结论：挂载真正完成的标志，不是设备可读、也不是 root inode 找到了，而是 `sb->s_root` 已经作为 dentry 被接进 VFS 路径树
 
@@ -243,6 +249,32 @@ mode bits 的核心价值是提供一个最普遍、最轻量的三层门禁：�
 而一旦这棵树被接进来，第二个问题就立刻站起来：谁能往树里走？这时 mode bits、capability 和 ACL 才开始接力，把“文件系统可见”进一步区分成“对哪些进程可进入、可读、可写、可执行”。也就是说，挂载解决的是存在性和接入，权限解决的是访问资格和边界。
 
 这就是为什么说：**文件系统不是 mount 完就结束，真正的系统现实是“先接树，再判门”。** 只有把这两件事分开，你才能看懂本地文件系统和远程文件系统、权限和命名空间、inode 语义和进程凭据是怎样在 VFS 里真正咬合起来的。
+
+## 八、误解清单、证据清单与边界清单
+
+### 误解清单
+
+- `mount` 不只是“把分区显示在目录里”；它把盘上格式翻译成 VFS 的运行时对象和路径树。
+- 盘上 superblock 不等于内存里的 `struct super_block`；还需要具体文件系统解释、初始化并挂上操作集。
+- root inode 被读出来不等于挂载已经可遍历；真正的路径入口还需要 root dentry 和挂载树接入。
+- `755` 不等于权限判定全部；capability、POSIX ACL 和安全模块可能继续参与。
+- root 特权不是 inode 上一个“超级用户开关”；它更多来自 capability 与凭据检查框架。
+
+### 证据清单
+
+- 挂载框架：`fs/namespace.c` 中 `sys_mount`/`vfs_kern_mount`、挂载树与 mount namespace 相关路径，支撑“设备入口怎样接入命名空间挂点”。
+- 超级块装配：`fs/super.c` 与 `fs/ext2/super.c` 中 superblock 缓存/复用和 `ext2_fill_super()` 路径，支撑“盘上总规怎样成为内存中的活 `struct super_block`”。
+- 根对象接入：root inode、root dentry、`sb->s_root` 和 mount tree 连接路径，支撑“可遍历文件系统的真正入口”判断。
+- 路径权限：`fs/namei.c` 中路径访问检查与 inode permission 路径，支撑“每次 open/read/write 仍要逐层判门”的主线。
+- 身份与细粒度授权：capability 相关检查、`fs/posix_acl.c` 与安全模块钩子，支撑“mode bits + capability + ACL 叠加判定”的边界。
+
+### 边界清单
+
+- 本文讨论的是 Linux 本地文件系统挂载和权限稳定心智模型；`fs_context`/老式 mount 差异、superblock 复用、namespace 与 ACL/安全模块细节会随内核和配置变化。
+- 挂载解决“这棵树如何接进系统”，权限解决“谁能走这棵树”；两者不能被合并成一个“mount 成功就能访问”的结论。
+- `mode bits`、capability、POSIX ACL 和 LSM 钩子分别站在不同授权层，具体拒绝原因需要结合完整凭据与路径上下文解释。
+- mount namespace 改变的是进程看到的挂载树视图，不等于复制了底层磁盘数据。
+- 本文先讲本地盘如何接入 VFS；下一篇 NFS 才把远端协议、缓存一致性和网络权限边界接进来。
 
 ## 下一篇桥接
 

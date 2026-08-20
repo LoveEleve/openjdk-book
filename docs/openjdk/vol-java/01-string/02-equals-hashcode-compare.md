@@ -1,6 +1,6 @@
 # String 的相等、哈希与比较 — 一个值如何成为可靠的容器键
 
-> 基于 JDK 11 `java.base` 的 `String`、`StringLatin1`、`StringUTF16` 实现。
+> 基于 JDK 11 `java.base` 的 `String`、`StringLatin1`、`StringUTF16` 实现。本文讨论的是 JDK 11 String 比较与缓存机制，不把这里的 coder 分派、hash 缓存策略和 compareTo 差值返回外推为所有 JVM 字符串实现的统一规范。
 > **前置依赖**: [String 为什么不可变](01-storage-immutable.md)(内容稳定是 hash 缓存的前提)
 > → **后续**: [字符串构建与拼接](03-build-concat.md)
 > 关联: 内部卷 07-classfile-classloader/03-symbol-string-table(字符串驻留)
@@ -208,6 +208,22 @@ s1.intern() == s2; // true：返回池中的引用
 intern 不是免费的去重开关。大量动态字符串全部进入池，会增加池与堆的管理压力；只有在重复率高、生命周期和收益可控的场景下才值得评估。
 
 关键设计(斜体):*intern 是“稳定值 → 共享引用”的桥,不是 equals 的替代品。只有使用 `intern()` 的返回值，调用方才拿到了池引用。*
+
+## 五、五个最容易混掉的边界：equals 不只比内容，coder 不同直接不等，hash 相同不等于 equals，compareTo 不是 -1/0/1 就够了，intern 也不是 equals 的替代
+
+在收网之前，先把这一篇最容易记错的五条边界压实。
+
+第一，`equals` 不是只比内容。它会先走快速失败路径：同一对象直接成功，非 String 类型直接失败，coder 不同直接失败，每层都在用便宜条件提前排除不可能，最后才进入编码专用内容比较。
+
+第二，coder 不同也直接不相等。JDK 11 的 Latin-1 和 UTF-16 是两种内部编码路径，不走同一套比较逻辑；所以 `equals` 在确认 coder 不同后就直接返回 false，不会继续试图逐字节比较。
+
+第三，hash 相同更不等于 equals 成立。哈希只是定位和分桶的快速摘要，不同字符串可能产生相同哈希；最终是否相等仍然要靠内容比较。只靠 hash 判等，冲突会直接导致误判。
+
+第四，`compareTo` 也不是只返回 -1/0/1 就够了。Comparable 契约只要求返回值的符号表达负/零/正关系，但 String 的实现直接返回了第一个差异字符的差值，前缀场景则返回长度差。
+
+第五，`intern` 更不是 equals 的替代品。它解决的是值相等后如何变成引用共享，而不是“用 == 代替 equals”。只有调用 `intern()` 并拿返回值，才拿到了池引用；把 `new String("a")` 直接拿去和 `"a"` 做 `==`，结果仍然是 false。
+
+把这五条边界记稳，String 的比较体系这一篇就不会重新塌回“equals 比内容、hashCode 算 31 倍”的面试口诀印象。它真正想讲的是：equals、hashCode、compareTo 和 intern 各自服务不同容器和运行时需求，但都建立在 String 内容不可变这个共同前提上。
 
 ## 收网：四个 API 如何协作
 

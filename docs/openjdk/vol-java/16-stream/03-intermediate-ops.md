@@ -1,5 +1,6 @@
 # 03. 中间操作实现 — 无状态包装、状态化操作、短路标记
 
+> 基于 JDK 11 `ReferencePipeline`、`SortedOps`、`DistinctOps`、`SliceOps` 与 `WhileOps` 实现。本文讨论的是 JDK 11 当前的中间操作分类、`opWrapSink` 包装方式和短路标记传播，不把这里的节点划分、优化分支或执行细节外推成所有 JDK 版本或所有流处理框架的统一规范。
 > **前置依赖**: [16-stream/02 — 流水线结构与惰性机制](02-pipeline-lazy.md)(Sink 链组装、SHORT_CIRCUIT 传播)、[09-map-hash/03 — LinkedHashMap](../09-map-hash/03-linkedhashmap-treemap.md)(LinkedHashSet 插入序)
 > → **后续**: [16-stream/04 — 终端求值](04-terminal-eval.md)
 > 关联: 域 08 集合(ArrayList/Arrays.sort 底层);域 09 Map(LinkedHashSet);内部卷 13-jit-framework(分层编译)
@@ -15,7 +16,7 @@ JDK 11 在基类层面已经把这件事写死了：`ReferencePipeline.java:683`
 
 ### 1.1 无状态 Sink: 只持函数,不留字段
 
-filter/map 的 Sink 构造后除了传入的函数,没有任何字段(逐字块已在第 2 篇展示)。三种 accept 对照:
+filter/map 的 Sink 构造后除了传入的函数,没有额外的全局状态字段。三种 accept 对照:
 
 | 操作 | accept 语义 | 源码 |
 |------|------------|------|
@@ -56,7 +57,7 @@ flatMap 略特殊(`ReferencePipeline.java:270-282`): accept 里对每个元素�
         }
 ```
 
-StatefulOp 还强制实现 `opEvaluateParallel`(`ReferencePipeline.java:734-737`,并行求值时每个有状态操作独立成段处理)。另外,有状态节点构造时会给链头打 `sourceAnyStateful` 标记(`AbstractPipeline.java:211-212`)——并行时据此把流水线切成段(每段以有状态操作结尾,第 2 篇 §3.3 的串行流程只适用于纯无状态链)。
+StatefulOp 还强制实现 `opEvaluateParallel`(`ReferencePipeline.java:734-737`,并行求值时每个有状态操作独立成段处理)。另外,有状态节点构造时会给链头打 `sourceAnyStateful` 标记(`AbstractPipeline.java:211-212`)——并行时据此把流水线切成段,每段以有状态操作结尾;而纯无状态链则更容易维持单段串行推进。
 
 面试"哪些操作无状态": filter/map/flatMap/peek(加 unordered);**其余中间操作——distinct/sorted/limit/skip/takeWhile 以及第 1 篇分类表之外的 dropWhile,全是有状态**。后三节逐个讲。
 
@@ -167,7 +168,7 @@ StatefulOp 还强制实现 `opEvaluateParallel`(`ReferencePipeline.java:734-737`
 
 ### 3.2 并行路径: 归约与并发 Set
 
-- **有序**: `ReduceOps.makeRef` 归约到 LinkedHashSet——LinkedHashSet 的插入序保证输出按"各分片汇入顺序"去重(插入序机制在域 09 第 3 篇):
+- **有序**: `ReduceOps.makeRef` 归约到 LinkedHashSet——LinkedHashSet 的插入序保证输出按"各分片汇入顺序"去重:
 
 ```java
 // DistinctOps.java:61-64(逐字)
@@ -187,7 +188,7 @@ StatefulOp 还强制实现 `opEvaluateParallel`(`ReferencePipeline.java:734-737`
 
 ### 4.1 limit/skip 也是 StatefulOp
 
-`limit`/`skip` 走 `SliceOps.makeRef`(`SliceOps.java:109-113`)——返回的是 **StatefulOp**(有 n/m 计数状态),标志由 `flags(limit)` 决定(`:543-545`,第 2 篇 §4.1 已展示): **带 limit 才注入 SHORT_CIRCUIT,纯 skip 不注入**。
+`limit`/`skip` 走 `SliceOps.makeRef`(`SliceOps.java:109-113`)——返回的是 **StatefulOp**(有 n/m 计数状态),标志由 `flags(limit)` 决定(`:543-545`): **带 limit 才注入 SHORT_CIRCUIT,纯 skip 不注入**。
 
 ### 4.2 切片 Sink: 先 n 后 m
 
@@ -211,7 +212,7 @@ StatefulOp 还强制实现 `opEvaluateParallel`(`ReferencePipeline.java:734-737`
                     }
 ```
 
-前 `n` 个元素只递减不转发(skip);之后每转发一个 `m` 递减(limit);`cancellationRequested` 在 `m == 0` 时返回 true(`:206-208`,第 2 篇 §4.2 逐字块)——短路循环下一轮就停。分页就是 `skip(page*n).limit(n)` 组合。
+前 `n` 个元素只递减不转发(skip);之后每转发一个 `m` 递减(limit);`cancellationRequested` 在 `m == 0` 时返回 true(`:206-208`)——短路循环下一轮就停。分页就是 `skip(page*n).limit(n)` 组合。
 
 面试"limit(3) 处理几个元素": 下游**最多**收到 3 个;源被拉取的数量取决于前序——前序 filter 可能拉更多(拒绝的补),前序 sorted 则全量拉(§2.3)。
 
@@ -234,11 +235,25 @@ StatefulOp 还强制实现 `opEvaluateParallel`(`ReferencePipeline.java:734-737`
                     }
 ```
 
-`take && (take = predicate.test(t))` 一石二鸟: 谓词失败时 `take` 置 false——不再测谓词、不再转发;`cancellationRequested` 随即返回 `!take` = true,`forEachWithCancel` 每轮先问取消(第 2 篇 §4.2),源遍历停止。
+`take && (take = predicate.test(t))` 一石二鸟: 谓词失败时 `take` 置 false——不再测谓词、不再转发;`cancellationRequested` 随即返回 `!take` = true,`forEachWithCancel` 每轮先问取消,源遍历停止。
 
-关键设计(斜体):*limit/takeWhile 的"停"不是结束流,是**请求取消、让源遍历终止**——SHORT_CIRCUIT 标志 + cancellationRequested 传播(第 2 篇 §4);skip/dropWhile 丢弃/转发完剩余全部元素,没有提前终止的语义,不注入标志。面试"limit(3) 处理几个元素": 下游最多 3 个,源被拉数量取决于前序(有状态前序全拉);"有状态在前短路失效"是顺序敏感组合的陷阱。*
+关键设计(斜体):*limit/takeWhile 的"停"不是结束流,是**请求取消、让源遍历终止**——SHORT_CIRCUIT 标志 + cancellationRequested 传播;skip/dropWhile 丢弃或转发完剩余全部元素,没有提前终止的语义,不注入标志。面试"limit(3) 处理几个元素": 下游最多 3 个,源被拉数量取决于前序(有状态前序全拉);"有状态在前短路失效"是顺序敏感组合的陷阱。*
 
 跨层标注: [域 08 集合——sorted 的缓冲与排序依赖 ArrayList/Arrays.sort;域 09 Map——LinkedHashSet 插入序是并行 distinct 保序的根基;域 01 字符串(03-build-concat)——filter/takeWhile 的谓词是 invokedynamic 引导的 lambda]
+
+## 五个最容易混掉的边界：无状态不是无逻辑，有状态不是都全局排序，distinct 不是总靠同一种 Set，短路不是每次都能提前停，dropWhile 也不是 takeWhile 反义词
+
+第一，无状态不是无逻辑。`filter`、`map`、`flatMap`、`peek` 这些操作仍然会在执行期做判断、转换或展开，只是它们对每个元素的处理不依赖全局历史，因此可以边来边过。
+
+第二，有状态不是都要全局排序。`sorted` 需要攒批排序，`distinct` 需要记 seen，`limit/skip` 需要维护切片计数，`takeWhile/dropWhile` 需要维护前缀条件；它们同属 StatefulOp，但依赖的状态类型和代价并不一样。
+
+第三，`distinct` 不是总靠同一种 Set。顺序流默认路径会用 HashSet 过滤，排序流可退化成相邻去重，并行有序路径会归约到 LinkedHashSet，并行无序路径则可能转成 ConcurrentHashMap；真正的分支是由标志和执行模式决定的。
+
+第四，短路不是每次都能提前停。`limit`、`takeWhile`、`anyMatch` 等语义虽然允许停流，但一旦前面先经过 `sorted` 这类必须全量攒批的有状态操作，源数据仍然可能先被全量消费，短路只来得及减少后面的转发。
+
+第五，`dropWhile` 也不是 `takeWhile` 的反义词。`takeWhile` 在前缀条件失败后就能请求停流，而 `dropWhile` 在丢完前导匹配段后还必须把剩余元素全部放过去，因此天然不具备同样的短路语义。
+
+把这五条边界记稳，中间操作实现就不会再被压扁成“无状态快、有状态慢”的口号。它真正想讲的是：每个节点到底需不需要记历史、记多少历史、能不能在运行中请求停流，这些差别才决定了流水线的空间成本、短路效果和顺序敏感陷阱。
 
 ## 核心悬念
 

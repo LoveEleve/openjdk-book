@@ -135,14 +135,14 @@
 
 ## 过滤器链如何真正执行：为什么这个项目专门写了 CachingFilteringWebHandler
 
-如果只看各个 Filter，很容易以为 Spring Cloud Gateway 默认就会把它们按顺序串起来执行。`my-xhs` 源码里确实额外实现了一个 `CachingFilteringWebHandler`，它会把全局过滤器和 route 级过滤器合并、排序后按 `routeId` 缓存起来，请求再来时复用这一份已排序链表，并在 `RefreshRoutesResultEvent` 到来时清空缓存。单看实现，它显然是在尝试把过滤器链从“每次请求临时拼装”改成“按路由复用执行计划”。`my-xhs-gateway/src/main/java/com/myxhs/gateway/handler/CachingFilteringWebHandler.java:31`
+如果只看各个 Filter，很容易以为 Spring Cloud Gateway 默认就会把它们按顺序串起来执行。`my-xhs` 源码里确实额外实现了一个 `CachingFilteringWebHandler`，它会把全局过滤器和 route 级过滤器合并、排序后按 `routeId` 缓存起来，请求再来时复用这一份已排序链表，并在 `RefreshRoutesResultEvent` 到来时清空缓存。单看实现，可以看出作者是在尝试把过滤器链从“每次请求临时拼装”改成“按路由复用执行计划”。`my-xhs-gateway/src/main/java/com/myxhs/gateway/handler/CachingFilteringWebHandler.java:31`
 
 但这里必须收口到证据边界：我已经确认这个类存在，也确认它的 `handle()` 和 `onRouteRefresh()` 逻辑完整；不过在当前仓库里没有继续找到把它注册成实际运行中 `WebHandler` 的装配点。因此本篇现在只能把它写成“存在于源码中的优化实现与设计意图”，不能直接写成“当前生产请求一定经过这层缓存式 WebHandler”。`my-xhs-gateway/src/main/java/com/myxhs/gateway/handler/CachingFilteringWebHandler.java:53`
 
 这条边界很重要，因为它恰好体现了方法论里“事实”和“设计解释”必须分开：
 
 - 可以确认的事实是：源码里有这套缓存式过滤器链实现，并且考虑了排序复用与路由刷新失效。
-- 可以做的设计解释是：作者显然想降低入口热路径上重复拼装过滤器链的开销。
+- 可以做的设计解释是：作者大概率是在尝试降低入口热路径上重复拼装过滤器链的开销。
 - 现在还不能写满的结论是：它已经替代了框架默认的 `FilteringWebHandler` 并在运行态生效。
 
 对读者来说，这一节更稳妥的收获不是“网关一定已经用了这套缓存执行链”，而是：`my-xhs` 的网关作者已经意识到过滤器链属于入口热路径，甚至专门写过一版缓存式执行器；只是它是否已真正接入运行链，还需要在后续运行态或装配代码里继续追证。
@@ -187,6 +187,20 @@
 
 换句话说，Gateway 在这里是“谁能进、怎么进、带着什么上下文进”，不是“进来以后业务要怎么跑”。这条边界守住了，后续写 `02-jwt-hmac.md` 和 `03-sentinel-limit.md` 才不会把 Gateway 写成一个包打天下的超级中枢。
 
+## 入口安全边界还要再补一句：经过 Gateway 的请求语义，不等于直连业务端口的请求语义
+
+这篇前面一直在讲 Gateway 如何统一建立 JWT、HMAC、路由和 trace 语义，但还有一个很容易被漏掉的微服务边界：**Gateway 负责的是外部请求入口语义，不自动等于所有服务端口在任何访问方式下都拥有同样的安全语义。**
+
+从当前实现看，Gateway 确实会：
+
+- 覆盖注入 `X-User-Id` / `X-User-Role` / `X-Trace-Id`，见 `my-xhs-gateway/src/main/java/com/myxhs/gateway/filter/GatewayAuthFilter.java:126` 到 `:142`
+- 对外部 Bearer Token 做黑名单检查，见 `my-xhs-gateway/src/main/java/com/myxhs/gateway/filter/GatewayAuthFilter.java:119` 到 `:123`
+- 在入口层统一做 HMAC、限流和流量标记
+
+但这并不自动推出“绕过 Gateway 直连业务服务端口时，所有语义仍然完全等价”。历史 review 文档已经把这个问题单独列成过高风险边界：Gateway 会查黑名单，但业务服务直连信任过滤器是否同样收紧撤销会话、内部头和限流语义，是另一层问题，需要单独看服务端口暴露和网络边界。也就是说，**Gateway 的统一入口治理非常强，但它本质上还是‘入口层收口’，不是对所有旁路访问天然免疫。**
+
+这条判断很重要，因为它让我们在讲 Gateway 时不会把“外部请求走 Gateway 的正确性”误写成“整个系统所有访问路径都已自动被同样强度保护”。
+
 ## 真实故障案例：推荐路由缺失，暴露的是入口地图本身的缺口
 
 本篇必须有一个能逼出设计动机的真实故障。对于 Gateway 路由这一篇，最合适的不是 JWT 或 HMAC 的细节问题，而是更底层的入口地图缺口：`recommend` 路由曾经缺失，后来才补到 `application.yml` 里。交接文档把它记为 `F-025`，修复方式也非常直接，就是在网关配置中新增推荐服务路由。`docs/openjdk/vol-xhs/HANDOFF-XHS.md:160` `docs/HANDOFF.md:119`
@@ -206,7 +220,7 @@ L0 源码静态证据：
 - Gateway 对外监听 `19000`，并在 `spring.cloud.gateway.routes` 下声明了 user、content、search、order、payment、inventory、recommend、AI 等路由及各自 metadata。`my-xhs-gateway/src/main/resources/application.yml:1` `my-xhs-gateway/src/main/resources/application.yml:92`
 - 过滤器顺序由各自 `getOrder()` 决定，`RequestLogFilter`、`GatewayAuthFilter`、`TrafficColoringFilter`、`HmacSignatureFilter`、`RateLimitFilter` 都是全局过滤器。`my-xhs-gateway/src/main/java/com/myxhs/gateway/filter/RequestLogFilter.java:119` `my-xhs-gateway/src/main/java/com/myxhs/gateway/filter/GatewayAuthFilter.java:152` `my-xhs-gateway/src/main/java/com/myxhs/gateway/filter/TrafficColoringFilter.java:117` `my-xhs-gateway/src/main/java/com/myxhs/gateway/filter/HmacSignatureFilter.java:213` `my-xhs-gateway/src/main/java/com/myxhs/gateway/filter/RateLimitFilter.java:171`
 - HMAC 依赖 body 缓存、nonce 去重和 per-session secret；JWT 鉴权依赖 Redis 黑名单；限流规则从 route metadata 读取。`my-xhs-gateway/src/main/java/com/myxhs/gateway/filter/BodyCacheFilter.java:19` `my-xhs-gateway/src/main/java/com/myxhs/gateway/filter/HmacSignatureFilter.java:144` `my-xhs-gateway/src/main/java/com/myxhs/gateway/filter/GatewayAuthFilter.java:203` `my-xhs-gateway/src/main/java/com/myxhs/gateway/filter/RateLimitFilter.java:177`
-- 过滤器链实际通过 `CachingFilteringWebHandler` 合并、排序、缓存并在路由刷新时失效。`my-xhs-gateway/src/main/java/com/myxhs/gateway/handler/CachingFilteringWebHandler.java:53`
+- 源码中存在一套通过 `CachingFilteringWebHandler` 合并、排序、缓存并在路由刷新时失效的过滤器链实现；但其是否已接入当前运行链，仍需继续追证。`my-xhs-gateway/src/main/java/com/myxhs/gateway/handler/CachingFilteringWebHandler.java:53`
 
 L1 框架/语义证据：
 
