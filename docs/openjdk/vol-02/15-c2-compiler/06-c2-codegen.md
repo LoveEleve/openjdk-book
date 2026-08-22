@@ -25,7 +25,9 @@
 
 先把答案压成一句人话：**Ideal Graph 表达的是平台无关的运算关系，寄存器分配表达的是谁占哪个资源，但两者都还没回答“x86 上这团子图最便宜该变成哪条指令、哪些 load 能折进使用者、哪些块该怎么摆、哪些字节与重定位信息该如何一起落地”。Matcher 用 `.ad` 规则把理想节点归约成 `MachNode`，GCM 与块布局决定指令顺序，`Output` 最后把这些机器节点真正压进 `CodeBuffer`。**
 
-## 先试两个最自然的理解，看看为什么都不对
+---
+
+## 1. 先试两个最自然的理解，看看为什么都不对
 
 ### 误解一：理想图已经足够具体了，直接 emit 就行
 
@@ -39,7 +41,7 @@
 
 ### 误解二：Matcher 不过就是一个“节点名翻译器”
 
-第二个常见误解正好走向另一边：既然理想图不能直接发码，那 Matcher 大概就是一张“`AddI -> addl`”“LoadI -> movl” 的翻译表。
+第二个常见误解正好走向另一边：既然理想图不能直接发码，那 Matcher 大概就是一张“`AddI -> addl`”“`LoadI -> movl`” 的翻译表。
 
 这也远远低估了它。
 
@@ -47,7 +49,9 @@ Matcher 并不是按“单节点对单指令”机械映射，而是在看一整
 
 这就是为什么 `.ad` 规则里不仅有 `match`，还有 `ins_cost`、`ins_encode`、`ins_pipe`：Matcher 不是简单翻译，而是在做**最小成本模式选择**。
 
-## `.ad`：为什么平台适配不是 scattered if/else，而是一套规则语言
+---
+
+## 2. `.ad`：为什么平台适配不是 scattered if/else，而是一套规则语言
 
 C2 不把平台适配散落在一堆 `if (x86) { ... } else if (arm) { ... }` 里，而是用 Architecture Description（`.ad`）把一条机器规则打包描述出来。
 
@@ -62,42 +66,46 @@ C2 不把平台适配散落在一堆 `if (x86) { ... } else if (arm) { ... }` �
 
 这比“节点名翻译表”丰富得多。它把语义、成本、编码和调度前提放进同一个规则单元里，意味着平台适配不只是“能不能发出这条指令”，还包括“值不值得匹配成这条指令”。
 
-这也是为什么 `.ad` 必须通过 adlc 在构建期编译成 DFA 匹配代码：运行时后端面对的不是一个硬编码 if/else 系统，而是一套由规则驱动的模式匹配器。
-
 所以 `.ad` 的真正意义，不是“把汇编模板写在文件里”，而是：**把平台指令选择的知识变成可计算的规则系统。**
 
-## Matcher：真正做的是“标注 + 最小成本归约”
+---
 
-`Matcher::match()` 的前半段会做很多准备：初始化返回值寄存器 mask、根据方法签名和调用约定布置参数寄存器和栈槽、计算 `_old_SP/_new_SP` 这类帧布局信息。也就是说，Matcher 一上来就在把“平台调用约定”灌进这次编译。`share/opto/matcher.cpp:181`、`share/opto/matcher.cpp:189`、`share/opto/matcher.cpp:211`、`share/opto/matcher.cpp:224`、`share/opto/matcher.cpp:252`、`share/opto/matcher.cpp:292`
+## 3. Matcher：真正做的是“标注 + 最小成本归约”
 
-然后它会 `find_shared(C->root())`、`find_shared(C->top())`，把可以共享和不能作为树内部节点的对象先标记出来；再把 old-space 的理想节点逐步 `xform` 到 new-space 的机器节点世界。`share/opto/matcher.cpp:307`、`share/opto/matcher.cpp:310`、`share/opto/matcher.cpp:321`、`share/opto/matcher.cpp:343`、`share/opto/matcher.cpp:345`
+`Matcher::match()` 的前半段会做很多准备：初始化返回值寄存器 mask、根据方法签名和调用约定布置参数寄存器和栈槽、计算 `_old_SP/_new_SP` 这类帧布局信息。也就是说，Matcher 一上来就在把“平台调用约定”灌进这次编译。`matcher.cpp:176-345`
+
+然后它会 `find_shared(C->root())`、`find_shared(C->top())`，把可以共享和不能作为树内部节点的对象先标记出来；再把 old-space 的理想节点逐步 `xform` 到 new-space 的机器节点世界。
 
 真正的核心在 `match_tree()`。它会：
 
 1. 以当前理想节点为根，建立 `State`；
 2. 调 `Label_Root` 给整棵输入树打匹配状态标签；
 3. 在根状态里找**最小成本**的合法规则；
-4. 用 `ReduceInst(...)` 把这棵理想子树归约成 `MachNode`。 `share/opto/matcher.cpp:1359`、`share/opto/matcher.cpp:1375`、`share/opto/matcher.cpp:1381`、`share/opto/matcher.cpp:1386`、`share/opto/matcher.cpp:1390`、`share/opto/matcher.cpp:1392`、`share/opto/matcher.cpp:1405`
+4. 用 `ReduceInst(...)` 把这棵理想子树归约成 `MachNode`。`matcher.cpp:1359-1405`
 
 这就是 Matcher 最该记住的一点：**它不是在翻译节点，而是在给子树做状态标注，再按成本最小原则把子树归约成目标机节点。**
 
-`ReduceInst()` 则把这个“归约”变成具体对象：生成 `MachNode`，处理 instruction/chain rule，把 control、memory、AddP base 等 Matcher 不自动消费的边也补回去，还会调用 `MachNode::Expand(...)` 处理 1-to-many 扩展。`share/opto/matcher.cpp:1653`、`share/opto/matcher.cpp:1656`、`share/opto/matcher.cpp:1662`、`share/opto/matcher.cpp:1672`、`share/opto/matcher.cpp:1678`、`share/opto/matcher.cpp:1681`、`share/opto/matcher.cpp:1718`、`share/opto/matcher.cpp:1726`
+`ReduceInst()` 则把这个“归约”变成具体对象：生成 `MachNode`，处理 instruction/chain rule，把 control、memory、AddP base 等 Matcher 不自动消费的边也补回去，还会调用 `MachNode::Expand(...)` 处理 1-to-many 扩展。`matcher.cpp:1653-1726`
 
 所以“平台相关化”不是一个薄薄的翻译层，而是**理想图子树到机器节点世界的一次结构性压扁。**
 
-## GCM 与块布局：为什么指令顺序依然是独立问题
+---
+
+## 4. GCM 与块布局：为什么指令顺序依然是独立问题
 
 即使 `MachNode` 已经选出来了，后端仍然没有结束。因为“选了哪些机器节点”和“这些机器节点最终按什么顺序执行”是两回事。
 
-`PhaseCFG::do_global_code_motion()` 会先建 dominator tree，再 `estimate_block_frequency()`，最后 `global_code_motion()`。这说明调度不是可有可无的后处理，而是显式独立的一步。`share/opto/gcm.cpp:1612`、`share/opto/gcm.cpp:1614`、`share/opto/gcm.cpp:1621`、`share/opto/gcm.cpp:1623`
+`PhaseCFG::do_global_code_motion()` 会先建 dominator tree，再 `estimate_block_frequency()`，最后 `global_code_motion()`。这说明调度不是可有可无的后处理，而是显式独立的一步。`gcm.cpp:1612-1645`
 
-`estimate_block_frequency()` 本身又不只是“给块打分”。它会专门把 leading to uncommon trap 的分支压到极低频，因为那些路径理论上大多只会真走一次——走到了通常就意味着 deopt。`share/opto/gcm.cpp:1632`、`share/opto/gcm.cpp:1636`、`share/opto/gcm.cpp:1637`、`share/opto/gcm.cpp:1638`、`share/opto/gcm.cpp:1645`
+`estimate_block_frequency()` 本身又不只是“给块打分”。它会专门把 leading to uncommon trap 的分支压到极低频，因为那些路径理论上大多只会真走一次——走到了通常就意味着 deopt。
 
 这说明调度和块布局在 C2 里承担的是另一类职责：**把机器节点以更符合热点分布、依赖关系和分支局部性的顺序摆出来。**
 
 所以 GCM 不是在“美化块顺序”，而是在为最后的机器码布局做代价优化。Matcher 选出“用什么指令”，GCM 决定“这些指令在哪里、按什么顺序出现”——两者缺一不可。
 
-## `Compile::Output`：发码不是“for each MachNode emit”这么简单
+---
+
+## 5. `Compile::Output`：发码不是“for each MachNode emit”这么简单
 
 如果继续沿着“后端只是翻译”这个误解往下想，发码阶段大概只会是：遍历每个 MachNode，调用 `emit()`，写到 `CodeBuffer`。
 
@@ -109,15 +117,17 @@ C2 不把平台适配散落在一堆 `if (x86) { ... } else if (arm) { ... }` �
 - 初始化 code buffer；
 - `ScheduleAndBundle()`；
 - `BuildOopMaps()`；
-- 最后才 `fill_buffer(cb, blk_starts)` 真正落字节。 `share/opto/output.cpp:57`、`share/opto/output.cpp:72`、`share/opto/output.cpp:75`、`share/opto/output.cpp:88`、`share/opto/output.cpp:105`、`share/opto/output.cpp:121`、`share/opto/output.cpp:128`、`share/opto/output.cpp:150`、`share/opto/output.cpp:156`
+- 最后才 `fill_buffer(cb, blk_starts)` 真正落字节。`output.cpp:57-156`
 
 这说明 Output 处理的不是“指令如何编码”这么单一的问题，而是把 prolog/epilog、块起始偏移、bundling、OopMap、stack bang、重定位和最终缓冲区布局一起压进最终产物。
 
 因此，理想图优化完以后还缺的不只是目标指令形式，还缺**完整的可执行方法壳子**。这层壳子正是 Output 在补。
 
-## peephole 空实现反而说明：C2 的主要后端聪明劲不在这里
+---
 
-很多人看到后端，就会自然期待一种“最后再来一轮 peephole，把零碎 mov/NOP 收一收”的优化画面。JDK 11 的 x86 C2 恰恰反过来给了一个很好的提醒：`MachNode::peephole` 默认返回 `NULL`。`share/opto/machnode.cpp:413`、`share/opto/machnode.cpp:415`、`share/opto/machnode.cpp:416`
+## 6. peephole 空实现反而说明：C2 的主要后端聪明劲不在这里
+
+很多人看到后端，就会自然期待一种“最后再来一轮 peephole，把零碎 mov/NOP 收一收”的优化画面。JDK 11 的 x86 C2 恰恰反过来给了一个很好的提醒：`MachNode::peephole` 默认返回 `NULL`。`machnode.cpp:413-416`
 
 这并不是说后端没有任何小修饰，而是在告诉你：**C2 的主要后端聪明劲并不寄托在最后一层 peephole 补丁上。**
 
@@ -130,9 +140,9 @@ C2 不把平台适配散落在一堆 `if (x86) { ... } else if (arm) { ... }` �
 
 如果这些都做好了，peephole 即便存在，也只是最后小修；如果这些没做好，peephole 根本救不回来。
 
-所以“C2 x86 后端的主要优化点”这件事，恰恰是通过“peephole 几乎是空的”这个事实被反证出来的。
+---
 
-## 把四件事收回到同一个主线：平台语义降级
+## 7. 把四件事收回到同一个主线：平台语义降级
 
 现在可以把 `.ad`、Matcher、GCM 和 Output 收成一条线了。
 
@@ -143,18 +153,22 @@ C2 不把平台适配散落在一堆 `if (x86) { ... } else if (arm) { ... }` �
 
 这四件事的共同目标不是“最后做一下翻译”，而是：**把平台无关图语义逐层降成平台相关机器语义。**
 
-这才是为什么理想图和寄存器都准备好之后，C2 还必须再接一层 `Matcher + Output`。因为“图已经对了”不等于“平台模式、顺序和字节布局都已经有了”。
+---
 
-## 收网：Matcher/GCM/Output 解决的不是翻译节点，而是把图彻底变成目标机方法
+## 8. 误解澄清与收网
 
-现在可以把整篇压成一张总图了。
+1. **理想图和寄存器都准备好了，就能直接发码吗?** 不能。还缺平台模式选择、调度/布局、重定位与方法壳子落地。
+2. **Matcher 只是节点名翻译器吗?** 不是。它对理想子树做状态标注，再按最小成本归约成 `MachNode`。
+3. **GCM 只是“美化块顺序”吗?** 不是。它在做全局代码调度和热点路径布局优化。
+4. **Output 只是遍历 MachNode 调 emit 吗?** 不是。它要一起补上 prolog/epilog、BuildOopMaps、bundling 和最终缓冲区布局。
+5. **peephole 是后端聪明劲的大头吗?** 不是。x86 路径里它几乎是空的，真正的大头在 `.ad` / Matcher / GCM / RA 这些更早层次。
 
-Ideal Graph 优化完以后，C2 手里拿到的仍然只是平台无关的运算关系与资源安排；`.ad` 规则先定义平台指令世界里哪些模式、成本和编码是可能的；Matcher 通过状态标注和最小成本归约，把理想子树压成 `MachNode`；GCM 与块频率估计把这些机器节点按热点与依赖重新排序；`Compile::Output` 再补上 prolog/epilog、BuildOopMaps、CodeBuffer 布局和最终字节发射。到这一步，理想图才真正降级成一个可安装、可执行、可被 JVM 识别的 nmethod。`share/opto/matcher.cpp:176`、`share/opto/matcher.cpp:1359`、`share/opto/matcher.cpp:1405`、`share/opto/matcher.cpp:1653`、`share/opto/gcm.cpp:1612`、`share/opto/output.cpp:57`、`share/opto/output.cpp:128`、`share/opto/output.cpp:150`
+把这一篇压成三句话：
 
-所以，这一篇最核心的一句话不是“Matcher 做指令选择，Output 做发码”，而是：
+- **Matcher/GCM/Output 解决的不是翻译节点，而是把图彻底变成目标机方法。**
+- **Matcher 负责子树到机器模式的最小成本归约，GCM 负责顺序和布局，Output 负责把完整方法壳子落地。**
+- **C2 后端的主要聪明劲不在最后的 peephole，而在前面几层对平台语义的逐层降级。**
 
-**Matcher/GCM/Output 共同完成的是平台语义降级：把平台无关图、寄存器和控制流关系，真正压成目标机能够执行的方法体。**
-
-只要这句抓住了，下一篇 `PhaseMacroExpand` 就好理解了：前面几章故意没把所有高层抽象都降掉，还有一批宏节点（分配、锁、数组拷贝等）是被暂时挂起的，它们要在真正发码前被展开成更低层的 MachNode 世界。
+下一篇: `PhaseMacroExpand`——前面故意没降掉的高层宏节点，怎么在真正发码前被展开成更低层的 MachNode 世界。
 
 > → [15-c2-compiler/07 — `PhaseMacroExpand`：高层抽象→低层 MachNode 展开](07-c2-macro-intrinsics.md)

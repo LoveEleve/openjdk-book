@@ -108,7 +108,7 @@ CLI:
 - `sca eval <plan.json>`
 
 文档:
-- `docs/progress/PLAN-M11.md`(本文件)
+- `PLAN-M11.md`（本文件）
 
 ---
 

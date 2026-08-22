@@ -53,9 +53,9 @@ core 文件是 ELF 格式。SA 打开 core 后,先读 ELF header 和 program hea
 
 ### 第二步: 链表转数组,按虚拟地址排序
 
-为了让“按地址找段”足够快，SA 不会每次线性扫链表。它会把链表转成指针数组，再按 `vaddr` 排序(`sort_map_array`, ps_core.c:382-421)。源码注释写得很直白：排序之后就能做 binary search。
+为了让“按地址找段”足够快，SA 不会每次线性扫链表。它会把链表转成指针数组，再按 `vaddr` 排序(`sort_map_array`, ps_core.c:382-421)。源码注释写得很直白：排序之后就能对**虚拟地址区间**做 binary search。
 
-### 第三步: `core_lookup` 做二分
+### 第三步: `core_lookup` 对虚拟地址区间做二分
 
 `core_lookup` 的职责就是“给定一个虚拟地址，找到它落在哪个 `map_info` 段里”：
 
@@ -95,7 +95,7 @@ static map_info* core_lookup(struct ps_prochandle *ph, uintptr_t addr) {
 
 ### 建映射表: `/proc/<pid>/maps`
 
-活进程模式里没有 ELF program headers 可用，取而代之的是 `/proc/<pid>/maps`。SA 逐段解析它，生成和 core 模式同形状的 `map_info` 列表。这样一来，“按地址找段”的上层逻辑就可以复用。
+活进程模式里没有 ELF program headers 可用，取而代之的是 `/proc/<pid>/maps`。SA 逐段解析它，生成和 core 模式同形状的 `map_info` 列表。要注意它只提供**地址空间地图**——虚拟地址区间、权限以及 backing file 视图；真正的字节读取仍然靠后面的 `PTRACE_PEEKDATA`。这样一来，“按地址找段”的上层逻辑可以复用，但“内容读取”这一层和 core 模式完全不同。
 
 ### 读字节: 8 字节 `PTRACE_PEEKDATA`
 

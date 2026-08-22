@@ -205,6 +205,26 @@
 
 这说明评论的扩散顺序比点赞更严格：**评论本体必须先落定，通知和计数才能跟着成立。**
 
+### 评论删除的双权限模型
+
+创建评论只有一种身份（登录用户），但删除评论却有两种身份。`CommentService.deleteComment()` 允许**评论作者本人**或**笔记作者**删除评论，见 `my-xhs-content/src/main/java/com/myxhs/content/controller/CommentController.java:49` 到 `:62` 的注释：“评论作者或笔记作者可删除”。删除一级评论时，其下所有子评论也会被级联删除。
+
+这说明当前系统对评论的管理权不是“谁写的谁管”，而是“写的人和被写的人一起管”。笔记作者对自己笔记下的评论有治理权，这和纯关系型互动（点赞、关注）的权限模型完全不同。
+
+### 分享链：计数事件走 MQ 异步扩散
+
+`NoteService.shareNote()` 在 `my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:495` 到 `:507` 中，先校验笔记存在，然后通过 `sendCounterEvent()` 发送 `SOCIAL_TOPIC:SHARE` 事件。这个方法用 `asyncSend` 加回调发送，成功只记 debug 日志，失败只记 warn 日志——是典型的 fire-and-forget 模式。内容域不等 counter 确认，也不对发送失败做重试。
+
+这说明分享计数的可靠性完全依赖 MQ + counter 消费端，内容域只负责“事件已发出”，不负责“计数已收敛”。
+
+## 第三步半：内容域对外暴露的内部端点
+
+除了面向用户的 API，内容域还通过 `CommentController` 暴露了一个仅供微服务内部调用的端点：`/internal/info/{commentId}`，见 `my-xhs-content/src/main/java/com/myxhs/content/controller/CommentController.java:122` 到 `:137`。
+
+这个端点返回评论的存在性、作者和所属笔记 ID，供 analytics 点赞校验与评论点赞通知使用。它的保护机制不是 Gateway 层的用户认证，而是 `X-Internal-Call` Header 里的静态 Token 校验——只有持有正确 token 的内部服务才能调用。
+
+这是一个典型的微服务内部通信模式：内容域不把评论详情通过公开 Feign 接口暴露给所有人，而是用一个带 token 保护的内部端点专门给需要的域使用。它说明当前系统在“服务间调用”层面已经区分了“面向用户的公开 API”和“面向内部服务的受保护端点”。
+
 ## 第四步：计数服务明确把“写入”从 HTTP 里剥离出去，只承认 MQ 驱动
 
 `CounterController` 的类注释在 `my-xhs-counter/src/main/java/com/myxhs/counter/controller/CounterController.java:14` 到 `:19` 已经把自己的定位写明：
@@ -228,6 +248,14 @@
 
 这也说明计数并不是动作本体的内联字段，而是动作扩散后的投影视图。
 
+### counter 查询口的工程边界
+
+`CounterController.batchGetCounts()` 对外暴露的是批量计数查询接口，真实执行路径是：先把请求展开成多组 `targetType:targetId:countType`，再做 Redis Pipeline 批量 GET，最后把 Redis 未命中的项拼成一条 MySQL `IN (...)` 批量回查。
+
+这条路径的性能前提，不是“接口天然就是批量的”，而是“调用方提交的批量规模本身受控”。旧实现里 `queries` 和每项 `countTypes` 都没有上限，恶意或误用请求可以一次塞进非常大的列表，直接放大成超长 Pipeline 和超大 SQL `IN`。这类问题平时压测不一定显影，但在生产里会直接表现成 Redis 单次请求过大、MySQL SQL 包体过长、以及 counter 实例瞬时内存抖动。
+
+当前修复已经把入参限制为：最多 100 个 query、每个 query 最多 7 个计数类型。也就是说，counter 这条读链真正的稳定性，不只来自“用了 Pipeline”，还来自“把批量接口的输入天花板写进 DTO 校验”。
+
 ## 第五步：互动链为什么天然会继续影响推荐和 Feed，而不只是通知和计数
 
 如果只看点赞或评论局部逻辑，很容易以为它们最多影响通知和计数。但从整个项目结构看，互动行为天然还会反向影响流量入口。
@@ -245,6 +273,23 @@
 因此内容互动从来不是终点，它至少是推荐链的潜在输入源之一。
 
 也就是说，当前互动系统不是“内容详情页上的几个按钮”，而是流量系统的行为入口。
+
+## 这一链路新补出的两个边界
+
+### 共同关注的“伪限流”问题
+
+`FollowService.getCommonFollowing()` 原来的注释写着“最多取前 `MAX_COMMON_FOLLOW_FETCH` 个，防止大 V 关注列表过大导致 OOM”，但旧实现实际调用的是 `ZSet.intersect()`，它会先把**完整交集**拉回 JVM，再在 Java Stream 上 `.limit(5000)`。也就是说，保护是写在结果阶段，不在取数阶段；如果两个大 V 的共同关注本来就有几十万，这个方法会先把几十万成员全部搬回堆内存，再丢掉大部分结果。
+
+这属于典型的“代码看起来有限制，真实执行路径却没有提前截断”的伪限流问题。当前修复已经改成：先在 Redis 侧 `intersectAndStore` 到临时 key，再 `range(0, 4999)` 只取前 5000 条，最后删除临时 key。限制现在真正落在 Redis 取数边界，而不是 JVM 结果流边界。
+
+### 关注关系的两层真相仍然要分开看
+
+即使共同关注查询已经补了边界，`follow` 这一条链仍然要继续区分两层：
+
+- Redis 的关注/粉丝 ZSet 是当前权威关系
+- MySQL `t_follow` 和 counter 只是持久化/展示视图
+
+这意味着：共同关注、粉丝列表、互关判断这些读路径，首先要问 Redis 里的关系有没有成立；MySQL 和 counter 更多是在回答“长期持久化是否齐全”和“聚合数是否收敛”。如果只看 `t_follow` 或只看 counter，很容易把展示视图误当成关系真相。
 
 ## 真实故障案例：为什么互动最危险的错误，不是单次按钮失败，而是关系成立了、扩散没跟上
 
@@ -317,6 +362,9 @@
 - 评论创建、审核、afterCommit 通知与计数：`my-xhs-content/src/main/java/com/myxhs/content/service/CommentService.java:67`、`my-xhs-content/src/main/java/com/myxhs/content/service/CommentService.java:156`
 - Counter 消费 SOCIAL_TOPIC 并映射互动计数：`my-xhs-counter/src/main/java/com/myxhs/counter/consumer/CounterEventConsumer.java:17`、`my-xhs-counter/src/main/java/com/myxhs/counter/consumer/CounterEventConsumer.java:167`
 - 计数服务 HTTP 只读/对账，写入由 MQ 驱动：`my-xhs-counter/src/main/java/com/myxhs/counter/controller/CounterController.java:14`
+- 评论删除双权限（评论作者或笔记作者）：`my-xhs-content/src/main/java/com/myxhs/content/controller/CommentController.java:49`
+- 分享→counter 异步 fire-and-forget：`my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:495`、`my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:513`
+- 内部端点 /internal/info（微服务间 token 保护）：`my-xhs-content/src/main/java/com/myxhs/content/controller/CommentController.java:122`
 
 ## 边界清单
 
@@ -324,6 +372,7 @@
 - 当前推荐链与 Feed 链会消费互动结果，但本文只点到为止，不把推荐打分或 Feed 排序机制再次展开。
 - 点赞、关注当前以 Redis 关系为权威，评论以内容库为权威；这两类互动本体不同，不能混写成统一“表更新”。
 - 本篇重点是互动如何扩散，不展开权限校验和敏感词算法原理，这些已在其他篇章建立。
+- 评论删除的双权限模型和内部端点 token 保护是微服务内部通信模式的体现，已在本篇补充。
 - `ai-app`、`ai-mcp`、`ai-tools` 不进入本篇分析线。
 
 ## 这篇解决了什么，还留下什么问题

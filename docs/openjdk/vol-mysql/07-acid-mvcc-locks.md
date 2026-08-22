@@ -168,6 +168,8 @@ SERIALIZABLE
 
 这两类读不是同一种观察行为，所以隔离级别也不是“一条规则同时管住它们”。InnoDB 在普通读上会更积极地用 MVCC 降低阻塞，在当前读和写上则更依赖锁与范围保护。
 
+这里要把 RR 下的边界再钉死一次：**同一个事务里，普通 `SELECT` 与 `SELECT ... FOR UPDATE` / `UPDATE` 看到的“世界”本来就可能不同。** 前者是按一致性读的 ReadView 去判断历史版本，后者要求观察当前最新记录并建立锁；“RR 让普通读可重复”不能被偷换成“事务里的所有读写都固定在同一个快照”。
+
 ### 4. 一个更具体的失败场景：为什么同一事务里两次查同一条件，会看到不同世界
 
 想象一个事务在 RC 下执行：
@@ -178,7 +180,7 @@ SERIALIZABLE
 
 从“我明明还在同一事务里”的直觉看，这会很反人类；从 RC 的世界观看，它又完全合法，因为 RC 更像“每条语句看自己的新快照”。
 
-这说明隔离级别的关键不是“事务是不是同一笔”，而是“视图什么时候被固定、什么时候允许刷新”。
+这说明隔离级别的关键不是“事务是不是同一笔”，而是“视图什么时候被固定、什么时候允许刷新”。在本篇使用的稳定模型里，RC 更接近每条一致性读语句重新建立视图，RR 则让同一事务的普通一致性读复用事务级视图；这只约束一致性读，不覆盖当前读/锁定读。源码上，`MVCC::view_open()`（`storage/innobase/read/read0read.cc:529`）与 `trx_assign_read_view()`（`storage/innobase/trx/trx0trx.cc:2318`）是观察这个视图创建/挂接边界的入口，但具体调用时机仍要结合目标版本和读路径核对。
 
 ### 5. 为什么 InnoDB 默认 RR，不等于“它只靠 MVCC 就解决了一切”
 
@@ -253,7 +255,7 @@ InnoDB 默认 RR 常被误听成“那我只要理解版本链就够了”。这
 
 这些都不是“看旧版本”能解决的问题，所以当前读和写仍然必须把锁拉回来。
 
-证据位上，这层可以落到 `MVCC::view_open()`（`storage/innobase/read/read0read.cc:529`）、`MVCC::get_view()`（`storage/innobase/read/read0read.cc:478`）、`trx_assign_read_view()`（`storage/innobase/trx/trx0trx.cc:2318`）以及 `row_undo` / `roll pointer` 相关路径：它们共同支撑“普通读先做可见性判断，再沿 Undo 历史链回看旧版本”的主线。
+证据位上，这层可以落到 `MVCC::view_open()`（`storage/innobase/read/read0read.cc:529`）、`MVCC::get_view()`（`storage/innobase/read/read0read.cc:478`）、`trx_assign_read_view()`（`storage/innobase/trx/trx0trx.cc:2318`）以及真实版本构造路径 `row_vers_build_for_consistent_read()`（`storage/innobase/row/row0vers.cc:1249`）和 `trx_undo_prev_version_build()`（`storage/innobase/trx/trx0rec.cc:2450`）。这些锚点共同支撑“普通读先做可见性判断，再沿 Undo 历史链回看旧版本”的主线；二级索引与聚簇版本判断还要结合 `read0read.cc` 中关于 secondary/clustered cursor view 的边界说明理解。
 
 ### 6. 一个更具体的失败场景：把 MVCC 当成万能屏障，会在当前读和唯一性检查上直接翻车
 
@@ -332,6 +334,8 @@ Insert Intention 的意义恰恰在于细化这件事：
 - 多个事务若要插入不同位置，往往并不需要彼此完全串行；
 - 系统先申报“我要在这块间隙里插”，再去和真正冲突的 Gap / Next-Key 约束协调；
 - 所以它不是“插入专用的大锁”，而是插入动作的一种意图声明机制。
+
+但“通常可并行”绝不等于“永远不冲突”。例如两个事务都想在同一段被 Next-Key 锁覆盖的间隙里插入，或者插入值还要经过唯一性检查、碰到已经存在的索引约束，Insert Intention 仍然必须和现有 Gap/Record 约束协调，最后可能进入等待。它解决的是“不同位置的插入不要无谓互斥”，不是“插入从此不需要排队”。
 
 ### 6. 为什么锁范围沿索引路径建立，而不是沿 SQL 文本字面范围建立
 

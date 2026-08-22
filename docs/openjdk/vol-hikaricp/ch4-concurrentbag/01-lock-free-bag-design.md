@@ -271,6 +271,72 @@ HikariCP 没有让 `borrow()` 一上来就碰全局结构，而是先尝试本�
 
 这也是为什么它对连接池这种高频借还场景特别有效。
 
+
+
+## 失败路径
+
+1. **ThreadLocal 路径竞争**：`borrow()` 尝试从 ThreadLocal 获取，但其他线程也同时归还了对象到 ThreadLocal → CAS 失败 → 继续共享列表路径。风险低，因为 ThreadLocal 是本线程独有的
+
+2. **handoff 队列无消息**：`handoffQueue.poll(timeout, ...)` 等待归还线程通过 handoff 移交对象 → 超时（无归还发生）→ 返回 null → `borrow()` 返回 null → 调用方超时退出
+
+3. **requite 时 handoff 失败**：`requite()` 中 `handoffQueue.offer(bagEntry)` 失败（无等待线程）→ 回退到 ThreadLocal 路径。设计上这是正常的，但如果在高并发下频繁失败，说明 handoff 队列利用率低
+
+4. **状态竞争**：`borrow()` 中 CAS `NOT_IN_USE→IN_USE` 失败（另一个线程同时借出）→ 跳过该条目，继续找下一个。CAS 失败是正常的，但频繁失败说明共享列表争用高
+
+5. **reserve 失败**：`reserve()` 在 HouseKeeper 驱逐连接时使用，CAS `NOT_IN_USE→RESERVED` 失败 → 连接已被其他线程借出 → 跳过驱逐，等下次巡检
+
+6. **ThreadLocal 泄漏**：ThreadLocal 在长期运行中积累大量已回收的 `bagEntry` 引用 → 但 `borrow()` 会移除并检查，理论上有泄漏风险
+
+
+
+
+## 四种状态的完整语义
+
+`ConcurrentBag.java:83-86` 定义了四种状态：
+
+```java
+int STATE_NOT_IN_USE = 0;  // 空闲，可被借出
+int STATE_IN_USE = 1;      // 已借出，正在使用
+int STATE_REMOVED = -1;    // 已从池中移除，不再可用
+int STATE_RESERVED = -2;   // 已预留，等待驱逐/释放
+```
+
+状态转换图：
+
+```
+    NOT_IN_USE ──borrow()──→ IN_USE
+        ↑                       │
+        │  requite()             │  reserve()
+        │                       ↓
+        │                  RESERVED
+        │                       │
+        └── unreserve() ←───────┘
+        
+    REMOVED ←── closeConnection() ／ 驱逐 ──── 任何状态
+```
+
+`CAS` 操作是状态转换的核心。`borrow()` 中 `compareAndSet(STATE_NOT_IN_USE, STATE_IN_USE)` 是原子操作，多线程下只有一个能成功。`requite()` 中 `setState(STATE_NOT_IN_USE)` 直接设置（不需要 CAS，因为只有持有者才会归还）。`reserve()` 中 `compareAndSet(STATE_NOT_IN_USE, STATE_RESERVED)` 把空闲连接预留，防止在驱逐过程中被借出。
+
+`REMOVED` 状态是终结态：一旦进入，不再回到任何其他状态。驱逐时 `closeConnection()` 标记 `REMOVED` 并从 `sharedList` 移除。
+
+## 借出链与归还链如何通过 ConcurrentBag 衔接
+
+借出链（Ch2）的终点是 `createProxyConnection` 交付代理，但存储层的变化是 `borrow()` 把状态从 `NOT_IN_USE` 改为 `IN_USE`。归还链（Ch3）的起点是 `close()` 被代理拦截，但存储层的变化是 `requite()` 把状态从 `IN_USE` 改回 `NOT_IN_USE`。
+
+```text
+HikariPool.getConnection()          ProxyConnection.close()
+    │                                     │
+    ▼                                     ▼
+ConcurrentBag.borrow()              ConcurrentBag.requite()
+    │                                     │
+    │ NOT_IN_USE → IN_USE                │ IN_USE → NOT_IN_USE
+    ▼                                     ▼
+PoolEntry 交付给代理                  PoolEntry 回到池中
+```
+
+衔接点：`borrow()` 和 `requite()` 是借出链和归还链在存储层上的两个端点。`HikariPool.getConnection()` 调 `borrow()`，`ProxyConnection.close()` 最终调 `requite()`。`handoffQueue` 是它们之间的桥梁——归还线程在 `requite()` 中通过 `handoffQueue.offer()` 直接移交，借出线程在 `borrow()` 中通过 `handoffQueue.poll()` 接收。
+
+
 ## 到了这里，`ConcurrentBag` 已经不可能再被理解成“装连接的容器”了
 
 现在再回头看最开始那个直觉：

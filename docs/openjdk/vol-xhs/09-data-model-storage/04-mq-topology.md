@@ -6,6 +6,8 @@
 
 前面的材料已经反复暴露这种复杂度。订单服务不只是“发消息”，它把本地消息表、RocketMQ topic 和补偿 job 编成一条事务后半段；支付服务又同时保留了 MQ 结果通知与 Feign 回调双路补偿；搜索服务的 `note_index` / `product_index` 增量写链依赖 Canal → MQ → Consumer；通知与 IM 域则又在消费、聚合、未读对账上复用同一套“异步最终一致”思维。最近最新的运行态材料甚至已经把一条真实坏消息推到了 `%DLQ%inventory-order-transaction-consumer-group`，证明这张 MQ 图不是理论图，而是会在真实系统里留下坏消息、重投、消费组和重试痕迹的运行拓扑。`docs/test-3/HANDOFF-TASK13.md:1`
 
+这里还要补一条这轮已经落代码的事实：payment 模块里原先那两个只打日志、不做业务处理的结果消费者，现在已经改成默认关闭。也就是说，当前更稳妥的拓扑口径不再是“payment 自己也正式消费 PAY_RESULT_TOPIC / REFUND_RESULT_TOPIC 完成主链”，而是：**支付结果链的主收敛依赖 MQ 结果通知 + Feign 回调 + Job 补偿三层，payment 模块自消费已退回到可选预留位。**`my-xhs-payment/src/main/java/com/myxhs/payment/consumer/PayResultConsumer.java:27` `my-xhs-payment/src/main/java/com/myxhs/payment/consumer/RefundResultConsumer.java:23`
+
 所以本篇真正要回答的，不是“系统用了哪些 Topic”，而是四个更贴近生产现实的问题：第一，RocketMQ 在 `my-xhs` 里分别承担了哪些类型的异步职责；第二，为什么同样叫“消息”，有的链路是在承接事务后半段，有的在承接索引投影，有的在承接通知分发；第三，为什么消费者分组、重试与 DLQ 语义本身就是业务设计的一部分；第四，为什么一条消息能不能被安全重投，根本取决于它失败在哪一层、消息体是不是坏掉了、以及补偿链是不是还活着。
 
 ## 先给结论：这套 MQ 拓扑的核心不是 Topic 数量，而是“每条异步链都在替同步世界承担不同的代价”

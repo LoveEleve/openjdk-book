@@ -182,6 +182,12 @@ SKU
 
 这意味着分类不是单纯的静态字典，而是一份带缓存时效的共享业务配置。对商品域来说，分类错误可能先表现为导航/列表展示异常，随后才影响搜索过滤、推荐归类和商品创建校验。
 
+这里还有两个很容易被漏掉的工程边界。
+
+第一，分类树递归构建不是无边界展开。`CategoryService` 明确设置了 `MAX_DEPTH = 10`，见 `my-xhs-product/src/main/java/com/myxhs/product/service/CategoryService.java:36` 到 `:37`，递归时一旦超过上限就直接停止并打 warn 日志，见 `my-xhs-product/src/main/java/com/myxhs/product/service/CategoryService.java:111` 到 `:115`。这不是为了支持十层类目，而是在防 DB 脏数据把 `parentId` 配成循环引用后直接把服务栈打穿。
+
+第二，空分类树不会被缓存。`CategoryService.getCategoryTree()` 在构树结果为空时选择跳过 Redis 回填，见 `my-xhs-product/src/main/java/com/myxhs/product/service/CategoryService.java:63` 到 `:72`。它防的不是缓存 miss，而是“数据被临时清空/初始化未完成时把空结果缓存住，后续恢复了数据也要等 2 小时才能生效”。这说明分类树这条链宁可多查几次 DB，也不愿意把空结果误固化成长期真相。
+
 ## 价格体系为什么主要是 SKU 级规则，而不是 SPU 级规则
 
 价格在业务里经常被说成“商品价格”，但在模型里它其实更接近“变体成交价”。
@@ -298,7 +304,10 @@ SKU
 `my-xhs` 当前的修法其实很明确：
 
 - 创建 `SPU` 时强校验 `categoryId`
+- 创建 `SPU` 时再叠一层 `@Idempotent(key = "spu:create:name:category")`，防止接口重试把同名同类目商品短时间内重复插入，见 `my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:58` 到 `:60`
 - 创建 `SKU` 时强校验 `price > 0`
+- SPU 上下架在 Controller 层先校验状态值，避免无效参数穿透到 Service 层变成 500，见 `my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:127` 到 `:145`
+- product 服务启动时强校验 `admin/internal token`，避免漏配后所有管理/内部接口运行期整体失效，见 `my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:50` 到 `:59`
 - 订单下单时只拿 `SKU.price` 进入计费链
 
 ### 验证
@@ -343,8 +352,12 @@ CategoryTree
 
 - 类目树的三级模型：`my-xhs-product/src/main/java/com/myxhs/product/entity/Category.java:9`
 - 分类树读路径与缓存：`my-xhs-product/src/main/java/com/myxhs/product/service/CategoryService.java:20`、`my-xhs-product/src/main/java/com/myxhs/product/service/CategoryService.java:46`、`my-xhs-product/src/main/java/com/myxhs/product/service/CategoryService.java:84`
+- 分类树递归深度保护与空树不缓存：`my-xhs-product/src/main/java/com/myxhs/product/service/CategoryService.java:36`、`my-xhs-product/src/main/java/com/myxhs/product/service/CategoryService.java:63`
 - `SPU` 必须带 `categoryId`：`my-xhs-product/src/main/java/com/myxhs/product/dto/request/SpuCreateRequest.java:18`
 - `SPU` 创建时强校验类目存在：`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:261`
+- `SPU` 创建接口幂等保护：`my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:58`
+- `SPU` 状态值在 Controller 层前置校验：`my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:127`
+- 管理/内部令牌启动期 fail-fast：`my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:50`
 - `SKU` 价格字段与校验：`my-xhs-product/src/main/java/com/myxhs/product/dto/request/SkuCreateRequest.java:23`、`my-xhs-product/src/main/java/com/myxhs/product/entity/Sku.java:29`
 - 订单只借用 SKU 轻量价格真相：`my-xhs-order/src/main/java/com/myxhs/order/dto/SkuInfoDTO.java:7`
 - 分类树返回模型：`my-xhs-product/src/main/java/com/myxhs/product/dto/response/CategoryTreeVO.java:8`

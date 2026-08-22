@@ -32,6 +32,22 @@
 * [第六章 — JMX 与火焰图](openjdk/vol-tools/ch06.md) — jconsole MBean 树 + perf 内核采样 + 栈折叠
 * [第七章 — 翻开 JDK 的箱子](openjdk/vol-tools/ch07.md) — jimage 镜像 + jlink 最小运行时 + jdeps 依赖图
 
+## 卷 AI · 大模型与 Agent
+
+> 从数学、神经网络、Transformer，到 LLM 推理、论文精读、Agent 原理和真实 Agent Runtime 源码。
+> **27 篇核心正文 + 3 个最小实验 + 1 篇论文精读（25 篇本地 PDF）已全部完成。**
+
+* [卷 AI 总览与阅读路线](openjdk/vol-agent/README.md) — 从 00-prerequisites 零基础前置开始，把模型原理、论文、最小实验与 Agent 工程串成一条源码阅读路径
+* [AI / 大模型 / Agent 十层地图](openjdk/vol-agent/README.md#十层地图) — 数学与学习 → Transformer → 训练与模型 → 推理系统 → Agent 机制 → Runtime → 论文 → 实验 → 安全评测
+* [论文阅读路线](openjdk/vol-agent/README.md#论文阅读路线) — Transformer、RLHF、FlashAttention、LoRA、ReAct、RAG、MemGPT、SWE-bench
+* [论文总索引与精读路线](openjdk/vol-agent/07-papers/01-论文总索引与精读路线.md) — 公开可验证链接、推荐阶段、前置知识和精读顺序
+* [论文分级表](openjdk/vol-agent/07-papers/03-论文分级表.md) — 入门 / 进阶 / Agent / 国产模型分组
+* [理论学习方法论](openjdk/vol-agent/10-理论学习方法论.md) — 问题驱动、四层深度、论文/实验/源码四角验证
+* [深度课程地图](openjdk/vol-agent/11-AI大模型Agent深度课程地图.md) — Phase 0~8 的依赖顺序和阶段完成标准
+* [理论卷覆盖矩阵](openjdk/vol-agent/12-理论卷覆盖矩阵与收口标准.md) — 覆盖等级、优先级缺口和阶段收口标准
+* [安全、评测与可靠性](openjdk/vol-agent/09-safety-evaluation/README.md) — Prompt Injection、沙箱、评测、红队和生产治理
+* [现有 Agent Runtime 源码卷](openjdk/vol-agent/08-vol-agent总索引与阅读导航.md) — OpenCode、Reasonix、Pi、Hermes、dsh
+
 ## 卷 2 · 运行时深处
 
 > 从 JVM 的底层原语、对象模型与类加载，到编译器、GC、诊断和启动器，按依赖关系逐步深入 HotSpot 内部实现。

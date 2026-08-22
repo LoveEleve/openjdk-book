@@ -256,6 +256,24 @@ Feed 链最容易被低估的，不是“少一篇内容”，而是“系统以
 
 这个案例说明，**Feed 流最难的不是“发了没发”，而是“这条流在分页、排序和聚合后，是否还像一条真正连续的内容时间线”。**
 
+## 补偿层：Feed 推送失败后的两条收敛路径
+
+前面讲了 Feed 推送发生在事务提交之后，那如果推送本身失败了怎么办？当前实现准备了两条独立的补偿路径，都由 `FeedMessageRetryJob` 驱动，见 `my-xhs-content/src/main/java/com/myxhs/content/job/FeedMessageRetryJob.java:18` 到 `:31`。
+
+### 路径一：MQ 投递失败的重发
+
+`LocalMessageMapper.selectPending()` 扫描 `status=0`（MQ 未发送成功）且 `retry_count < maxRetry` 的消息，重新投递到 `FEED_TOPIC`。这条路径解决的是“笔记已发布、本地消息表已写入、但 MQ 异步发送失败”的场景。
+
+投递成功后通过乐观锁 `markSent()`（`WHERE status=0`）把状态改为 1，防止并发重复投递。超过重试上限的消息通过 `incrementRetry()` 标记为死信（`status=3`），不再重试。注意 `incrementRetry()` 内部用 `retry_count + 1` 做比较，这是为了避免 MySQL UPDATE 中 CASE 引用旧值导致的 off-by-one 问题，见 `my-xhs-content/src/main/java/com/myxhs/content/mapper/LocalMessageMapper.java:40` 到 `:43`。
+
+### 路径二：Feed 推送未完成的补推
+
+`LocalMessageMapper.selectPendingPush()` 扫描 `status=1`（MQ 已发送）但 `push_status in (0,1)`（Feed 推送未完成）的消息，继续补推。这条路径解决的是“MQ 投递成功了，但下游消费者处理 inbox 写入时部分失败”的场景。
+
+这里有一个关键的工程细节：补偿任务使用 `updatePushStatus()` 而不是 `updatePushProgress()`。代码注释明确写着“避免补偿任务覆盖 Consumer 的推送进度”，见 `my-xhs-content/src/main/java/com/myxhs/content/mapper/LocalMessageMapper.java:78` 到 `:81`。这是因为消费者在批量推送粉丝 inbox 时会通过 `push_cursor` 记录推进位置，如果补偿任务也写 cursor，就可能把消费者已经推到第 500 个粉丝的进度覆盖回 0——两条路径必须各写各的字段。
+
+这说明当前 Feed 推送不是“发完就算”，而是“发完还要确认推完，推不完还要继续补”。
+
 ## 这一篇先收束成一张总图
 
 ```text
@@ -293,10 +311,13 @@ Feed 链最容易被低估的，不是“少一篇内容”，而是“系统以
 - 参数顺序与 hasMore 修复点：`my-xhs-home/src/main/java/com/myxhs/home/service/FeedService.java:83`
 - inbox/outbox 清理与裁剪：`my-xhs-home/src/main/java/com/myxhs/home/job/FeedCleanupJob.java:15`
 - 测试写 inbox/outbox 的开发接口：`my-xhs-home/src/main/java/com/myxhs/home/controller/FeedTestController.java:29`
+- Feed 推送补偿任务（两条路径）：`my-xhs-content/src/main/java/com/myxhs/content/job/FeedMessageRetryJob.java:18`
+- 本地消息表乐观锁与 off-by-one 防护：`my-xhs-content/src/main/java/com/myxhs/content/mapper/LocalMessageMapper.java:29`、`my-xhs-content/src/main/java/com/myxhs/content/mapper/LocalMessageMapper.java:40`
+- pushStatus 与 pushProgress 分离防覆盖：`my-xhs-content/src/main/java/com/myxhs/content/mapper/LocalMessageMapper.java:78`
 
 ## 边界清单
 
-- 本篇聚焦 Feed 分发和首页读取语义，不展开 FeedPushConsumer、NoteDeleteConsumer、清理任务等更底层推送与回收机制，它们属于后续更深的运行时分发专题。
+- 本篇聚焦 Feed 分发和首页读取语义，不展开 FeedPushConsumer、NoteDeleteConsumer、清理任务等更底层推送与回收机制，它们属于后续更深的运行时分发专题。补偿层（FeedMessageRetryJob 的两条路径）已在本篇补充，因为它直接影响"Feed 推送最终是否收敛"。
 - 当前实现里，大V阈值、收件箱保留天数和大小属于配置参数，不应误写成业务绝对常量。
 - 未读通知数被拼进 Feed 返回值，是页面场景设计选择，不等于通知服务从属于 Feed 服务。
 - 本篇主要讨论内容流，不展开评论、收藏、关注等互动动作如何回流影响 Feed 排序，这些会在互动专题继续展开。

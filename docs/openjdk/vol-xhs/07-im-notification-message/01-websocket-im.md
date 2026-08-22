@@ -386,3 +386,5 @@ IM 链里最危险的问题，不是单次 WebSocket 发送失败，而是消息
 到这里，`07-im-notification-message` 目录里，通知链和 IM 链的边界已经初步立住了。
 
 下一步如果继续往这条用户感知链深挖，可以进入 `03-message-aggregation.md`，把通知聚合、未读计数和消息视图收敛机制单独讲透。
+
+补：IM ticket 使用的 `jwt.secret` 现在要求安全配置，缺失或落回默认值时服务启动直接失败，避免短期 ticket 使用内置明文密钥签发。

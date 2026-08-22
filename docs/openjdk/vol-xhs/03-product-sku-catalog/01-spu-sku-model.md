@@ -261,6 +261,23 @@ Inventory = 库存真相
 
 换句话说，商品域在业务上解决的是“这个商品是什么”，在工程上又额外解决了“这个高频详情入口怎样在多实例和缓存条件下稳定读”。
 
+这里还有几个源码里很重、但文档里还没点透的工程细节。
+
+第一，`SpuService` 没有把这些异步动作丢给 `ForkJoinPool.commonPool()`，而是自己维护了两个带 `MdcAwareExecutorService` 包装的专用线程池，见 `my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:75` 到 `:94`：
+
+- `SPU_ASYNC_EXECUTOR`：负责缓存刷新、延迟双删、布隆过滤器异步加载；有界队列 + `CallerRunsPolicy`，优先保证任务不静默丢失
+- `SPU_VIEW_EXECUTOR`：负责商品浏览事件落库；有界队列 + `DiscardPolicy`，明确接受“埋点可丢、详情响应不能慢”
+
+这说明系统已经把“商品详情主链”和“详情旁路可观测性”拆成了两套故障语义：缓存刷新这类核心维护动作尽量不丢，而浏览事件这类可观测性旁路允许直接丢弃。
+
+第二，布隆过滤器并不是启动完成后天然可用，而是有一个显式的 `bloomFilterReady` 就绪窗口，见 `my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:120` 到 `:127`。首次部署或异步重建期间，这个标志保持 `false`，所有请求都会跳过布隆过滤器，直接降级到“查缓存/查 DB”。也就是说，系统宁可暂时失去防穿透优化，也不让启动阶段因为布隆过滤器未就绪而误拦真实请求。
+
+第三，异步加载历史 SPU ID 时不只是“分批加载”，还叠加了“分布式锁 + 拿锁后二次检查”，见 `my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:188` 到 `:205`。这意味着多实例同时启动时，只有一个实例真正跑全量加载；其他实例即便晚一步拿到锁，也会先看 `count()>0` 再决定是否退出，避免重复灌 Redis。
+
+第四，`SPU` 写路径也不是简单的 `updateById`。`SpuService.updateSpu()` 用 `LambdaUpdateWrapper` 只更新变更字段，显式规避 read-then-write 导致的并发覆盖；事务提交后又做“立即删缓存 + 1 秒后二次删”，见 `my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:301` 到 `:357`。这条延迟双删不是形式主义，而是在覆盖一个具体窗口：并发读线程可能刚好在第一次删缓存之后、第二次删缓存之前把旧值异步回填回来。
+
+第五，冷 key miss 的“防惊群”后来还补过一次真实修复。现在 `getSpuDetail()` 已改成只有拿到 `loadLock` 的线程才查 DB 并回填缓存；其他线程会短暂等待后重查 Redis，只有缓存仍未回填时才降级直查 DB，见 `my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:485` 到 `:537`。这意味着当前实现不再只是“名义上有加载锁”，而是把“未拿到锁的线程继续直打 DB”这个漏洞真正堵上了。
+
 这说明系统在读路径上的选择是：**把商品详情这个高频入口稳定在 SPU 维度，再把 SKU 作为它的子结构展开。**
 
 ## 这套模型一旦失效，会怎样沿着详情、购物车和订单三条链一起扩散
@@ -418,6 +435,11 @@ Inventory
 - `SkuVO` 不暴露真实库存：`my-xhs-product/src/main/java/com/myxhs/product/dto/response/SkuVO.java:8`
 - `SpuDetailVO` 以 `SPU + SKU 列表` 对外返回：`my-xhs-product/src/main/java/com/myxhs/product/dto/response/SpuDetailVO.java:8`
 - `SPU` 详情入口挂缓存、布隆过滤器与一致性策略：`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:48`、`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:116`
+- 专用异步线程池与 MDC 透传：`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:75`
+- 布隆过滤器就绪降级与空过滤器重载：`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:120`、`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:163`
+- 布隆过滤器分布式锁 + 二次检查：`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:188`
+- `SPU` 部分更新与延迟双删：`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:301`
+- 冷 key miss 的真实防惊群修复：`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:485`
 - `SPU` 创建路径：`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:256`
 - `SKU` 创建路径与 SPU 缓存失效：`my-xhs-product/src/main/java/com/myxhs/product/service/SkuService.java:47`
 - `SKU` 批量读取时补 SPU 图与 SPU 状态：`my-xhs-product/src/main/java/com/myxhs/product/service/SkuService.java:100`、`my-xhs-product/src/main/java/com/myxhs/product/service/SkuService.java:175`

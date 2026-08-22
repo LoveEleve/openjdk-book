@@ -260,17 +260,19 @@ review：
 ### Step 4
 正式开始 `vol-spring-boot` 第一篇正文
 
-建议第一篇从：
-- `@SpringBootApplication`
-或
+建议第一篇先不要直接落到 `run()` 机制，而是先写一篇总开场：
+- `为什么有了 Spring，还要 Spring Boot`
+
+这篇的作用不是立刻讲源码细节，而是先把 Boot 这一卷的总问题立住：
+
+- Spring Framework 已经解决了容器、AOP、事务、MVC 等主干问题
+- 那 Boot 到底新增了什么不可替代的装配价值
+- 它解决的是“能力有没有”还是“系统怎样可装配、可启动、可交付”
+
+在这篇总开场之后，再进入真正的机制总入口篇：
 - `SpringApplication.run()`
 
-二选一作为总入口。
-
-我个人更建议先写：
-- `SpringApplication.run()`
-
-因为它最像 Boot 的总指挥，和前面 `refresh()` 的关系也最容易桥接。
+这样的顺序更自然，因为它先回答“为什么要 Boot”，再回答“Boot 是怎么启动和装配的”。
 
 ---
 

@@ -22,7 +22,9 @@
 
 先把答案压成一句人话：**宏节点不是编译器偷懒没降完的节点，而是延迟决策的载体。C2 故意让它们活到优化后期：能消的零成本消失，不能消的再按当前最成熟的信息展开。**
 
-## 先试两个最自然的办法，看看为什么都不对
+---
+
+## 1. 先试两个最自然的办法，看看为什么都不对
 
 ### 误解一：Parse 后就把所有高层节点都展开，后面只优化低层图
 
@@ -51,50 +53,58 @@
 
 这正是 `PhaseMacroExpand` 的核心职责。
 
-## `expand_macro_nodes`：真正的“最后审判”长什么样
+---
 
-`Compile::Optimize` 里，MacroExpand 是在 loop opts、EA、CCP、IGVN 都跑完之后才登场的。源码位置也很明确：`TracePhase tp("macroExpand")`，随后 `PhaseMacroExpand mex(igvn); mex.expand_macro_nodes()`。`share/opto/compile.cpp:2432`、`share/opto/compile.cpp:2433`、`share/opto/compile.cpp:2434`、`share/opto/compile.cpp:2436`
+## 2. `expand_macro_nodes`：真正的“最后审判”长什么样
+
+`Compile::Optimize` 里，MacroExpand 是在 loop opts、EA、CCP、IGVN 都跑完之后才登场的。源码位置也很明确：`TracePhase tp("macroExpand")`，随后 `PhaseMacroExpand mex(igvn); mex.expand_macro_nodes()`。`compile.cpp:2432-2436`
 
 这已经说明它的时机不是随便挑的：**它发生在高层优化基本定型之后。**
 
-`expand_macro_nodes()` 自己的开头也把自己的定位写得很直白：`Last attempt to eliminate macro nodes.` 也就是说，它不是一进来就展开，而是先 `eliminate_macro_nodes()`，再看还剩什么。`share/opto/macro.cpp:2645`、`share/opto/macro.cpp:2646`、`share/opto/macro.cpp:2647`
+`expand_macro_nodes()` 自己的开头也把自己的定位写得很直白：`Last attempt to eliminate macro nodes.` 也就是说，它不是一进来就展开，而是先 `eliminate_macro_nodes()`，再看还剩什么。`macro.cpp:2645-2647`
 
-紧接着它会做节点预算检查：最坏情况下一个宏节点可能展开成大约 200 个节点，因此先用 `macro_count() * 300` 估算余量，不够就直接放弃编译。这个细节特别能说明：宏展开不是“轻松的最后转换”，而是图规模会显著放大的危险动作。`share/opto/macro.cpp:2650`、`share/opto/macro.cpp:2651`、`share/opto/macro.cpp:2652`、`share/opto/macro.cpp:2653`
+紧接着它会做节点预算检查：最坏情况下一个宏节点可能展开成大约 200 个节点，因此先用 `macro_count() * 300` 估算余量，不够就直接放弃编译。这个细节特别能说明：宏展开不是“轻松的最后转换”，而是图规模会显著放大的危险动作。`macro.cpp:2650-2653`
 
 随后还有两层清理与排序：
 
 - 先把 `LoopLimit`、`Opaque1/2`、某些 `CallStaticJava` 宏节点等临时保护结构从宏列表里摘掉，重新扔回 IGVN worklist；
-- 再强制 **arraycopy 先行展开**，之后才进入 allocate/lock/unlock 的主循环。 `share/opto/macro.cpp:2656`、`share/opto/macro.cpp:2664`、`share/opto/macro.cpp:2666`、`share/opto/macro.cpp:2674`、`share/opto/macro.cpp:2723`、`share/opto/macro.cpp:2724`、`share/opto/macro.cpp:2733`、`share/opto/macro.cpp:2744`
+- 再强制 **arraycopy 先行展开**，之后才进入 allocate/lock/unlock 的主循环。`macro.cpp:2656-2744`
 
-这说明 MacroExpand 不是一个“遍历宏节点挨个翻译”的薄阶段，而是一个**带依赖顺序的最后审判程序**：先消、再清临时结构、再按拓扑顺序展开剩余宏节点，最后 `_igvn.optimize()` 收尾。`share/opto/macro.cpp:2773`、`share/opto/macro.cpp:2774`
+这说明 MacroExpand 不是一个“遍历宏节点挨个翻译”的薄阶段，而是一个**带依赖顺序的最后审判程序**：先消、再清临时结构、再按拓扑顺序展开剩余宏节点，最后 `_igvn.optimize()` 收尾。`macro.cpp:2773-2774`
 
-## 分配的两条出路：先问“能不能不存在”，再问“怎么存在”
+---
+
+## 3. 分配的两条出路：先问“能不能不存在”，再问“怎么存在”
 
 对象分配是宏节点最典型的一类命运分叉。
 
-如果 EA 之前已经证明某个 `Allocate` 是 `NoEscape` 且满足标量替换条件，那么 `eliminate_allocate_node()` 会走“让它不存在”的路线。`share/opto/macro.cpp:1091`、`share/opto/macro.cpp:1096`、`share/opto/macro.cpp:1107`、`share/opto/macro.cpp:1113`、`share/opto/macro.cpp:1128`
+如果 EA 之前已经证明某个 `Allocate` 是 `NoEscape` 且满足标量替换条件，那么 `eliminate_allocate_node()` 会走“让它不存在”的路线。`macro.cpp:1091-1144`
 
-而且这里还要注意一个经常被讲扁的边界：EA 不是直接删除分配，真正删除是在 `eliminate_allocate_node()` 里通过 `scalar_replacement()` 和 `process_users_of_allocation()` 落刀。也就是说，“证明可消”和“真正消掉”在 C2 里是分阶段的。`share/opto/macro.cpp:1128`、`share/opto/macro.cpp:1144`
+而且这里还要注意一个经常被讲扁的边界：EA 不是直接删除分配，真正删除是在 `eliminate_allocate_node()` 里通过 `scalar_replacement()` 和 `process_users_of_allocation()` 落刀。也就是说，“证明可消”和“真正消掉”在 C2 里是分阶段的。
 
 另一条路是“这个对象必须存在”。这时 `expand_allocate()` / `expand_allocate_common()` 才会真正生成 fast path + slow path 结构：快路径内联 TLAB bump 之类的分配序列，慢路径则准备 Runtime/Stub 调用。这里最该记住的不是某条 if，而是这条分工：**对象分配不是天生就要被展开，只有在已经证明不能消掉之后，展开才有意义。**
 
 这也正说明宏节点为什么要保留到这里：太早展开，EA 就失去了一次“让它不存在”的机会。
 
-## 锁的两条出路：锁消除与锁展开也必须等到最后
+---
+
+## 4. 锁的两条出路：锁消除与锁展开也必须等到最后
 
 锁节点的命运和分配完全同构。
 
-如果 `AbstractLockNode` 已经被标成 eliminated，`eliminate_locking_node()` 会把它连同相关的 `MemBarAcquireLock` / `MemBarReleaseLock` 一起拆掉；必要时连 `FastLockNode` 自己也可以被顶掉。`share/opto/macro.cpp:2182`、`share/opto/macro.cpp:2184`、`share/opto/macro.cpp:2203`、`share/opto/macro.cpp:2221`、`share/opto/macro.cpp:2223`、`share/opto/macro.cpp:2227`、`share/opto/macro.cpp:2232`、`share/opto/macro.cpp:2235`、`share/opto/macro.cpp:2240`、`share/opto/macro.cpp:2252`
+如果 `AbstractLockNode` 已经被标成 eliminated，`eliminate_locking_node()` 会把它连同相关的 `MemBarAcquireLock` / `MemBarReleaseLock` 一起拆掉；必要时连 `FastLockNode` 自己也可以被顶掉。`macro.cpp:2182-2252`
 
 也就是说，锁在 MacroExpand 阶段并不是“必然展开”的，它的第一种命运也是完全消失。
 
-只有那些无法消掉的锁，才会进入 `expand_lock_node()`。而这里也要避免一个常见误解：它不是直接在这一步把最终平台指令（例如 cmpxchg）一条条发出来，而是生成机器节点级别的 fast path / slow path 控制结构，让后续 matcher/output 再去做真正的平台化和编码。`share/opto/macro.cpp:2258`、`share/opto/macro.cpp:2261`、`share/opto/macro.cpp:2264`、`share/opto/macro.cpp:2269`、`share/opto/macro.cpp:2272`
+只有那些无法消掉的锁，才会进入 `expand_lock_node()`。而这里也要避免一个常见误解：它不是直接在这一步把最终平台指令（例如 cmpxchg）一条条发出来，而是生成机器节点级别的 fast path / slow path 控制结构，让后续 matcher/output 再去做真正的平台化和编码。`macro.cpp:2258-2272`
 
 所以锁的故事再次说明：**MacroExpand 不是简单翻译，而是统一裁决“消失还是展开”。**
 
-## 为什么 arraycopy 要先于 allocate 展开
+---
 
-`expand_macro_nodes()` 里最容易被忽略、但最能说明它有依赖拓扑的一句注释，就是：为了 `ReduceBulkZeroing`，必须先处理所有 arraycopy，再展开 allocate。`share/opto/macro.cpp:2723`、`share/opto/macro.cpp:2724`
+## 5. 为什么 arraycopy 要先于 allocate 展开
+
+`expand_macro_nodes()` 里最容易被忽略、但最能说明它有依赖拓扑的一句注释，就是：为了 `ReduceBulkZeroing`，必须先处理所有 arraycopy，再展开 allocate。`macro.cpp:2723-2724`
 
 这不是任性排序，而是因为 arraycopy 会消费和影响分配相关结构。如果分配先展开，后面 arraycopy 的优化空间、别名关系或零填充处理就可能被打乱。
 
@@ -102,11 +112,13 @@
 
 - `clonebasic` 直接交给 barrier set 在 expansion 时处理；
 - `copyof/copyofrange/cloneoop` 走对象数组路径，先准备 `MergeMem` 和 slow region，再调 `generate_arraycopy`；
-- 普通 arraycopy 则先做 compile-time checks，如果无法在编译期验证关键前提，就宁可不做 fast path。 `share/opto/macroArrayCopy.cpp:1106`、`share/opto/macroArrayCopy.cpp:1116`、`share/opto/macroArrayCopy.cpp:1117`、`share/opto/macroArrayCopy.cpp:1120`、`share/opto/macroArrayCopy.cpp:1122`、`share/opto/macroArrayCopy.cpp:1141`、`share/opto/macroArrayCopy.cpp:1155`、`share/opto/macroArrayCopy.cpp:1157`
+- 普通 arraycopy 则先做 compile-time checks，如果无法在编译期验证关键前提，就宁可不做 fast path。`macroArrayCopy.cpp:1106-1157`
 
 这进一步说明宏节点展开不是一条“统一 lower”路径，而是到这个时机才根据足够成熟的信息分流：有的走 clone fast path，有的走对象数组语义，有的直接保留成更慢的调用。
 
-## 宏节点为什么故意被保留到这里：前半程需要看见的是“高层语义”，不是“碎控制流”
+---
+
+## 6. 宏节点为什么故意被保留到这里：前半程需要看见的是“高层语义”，不是“碎控制流”
 
 到这里可以把前面的分配、锁、数组拷贝故事收成同一条设计线。
 
@@ -120,26 +132,34 @@
 
 所以宏节点的真正价值，不在于“先留着以后再翻”，而在于它们作为**延迟决策占位符**，让高层优化阶段能够继续以更抽象、更干净的视图工作。
 
-## MacroExpand 之后为什么还要再跑一次 IGVN
+---
+
+## 7. MacroExpand 之后为什么还要再跑一次 IGVN
 
 很多人会把 MacroExpand 想成 C2 的最后转换：展开完，直接去 Matcher/Output 就好了。
 
-源码并不是这样。`expand_macro_nodes()` 在处理完宏节点后，会明确 `_igvn.optimize()` 再收一轮，然后还要交给 GC barrier set 做剩余宏展开。`share/opto/macro.cpp:2773`、`share/opto/macro.cpp:2774`、`share/opto/macro.cpp:2776`、`share/opto/macro.cpp:2777`
+源码并不是这样。`expand_macro_nodes()` 在处理完宏节点后，会明确 `_igvn.optimize()` 再收一轮，然后还要交给 GC barrier set 做剩余宏展开。`macro.cpp:2773-2777`
 
 这再次说明：展开或消除宏节点会重新改变图结构——新的控制边、常量、死节点、内存关系都会冒出来。既然图又变了，IGVN 就还得再回来把这些后效应收敛掉。
 
 所以 MacroExpand 不是“图固定后做一次机械降级”，而是“最后一次大规模结构改写”，并且它之后还要再交给统一收敛器打一遍扫尾。
 
-## 收网：宏节点不是半成品，而是延迟决策的占位符
+---
 
-现在可以把整篇压成一张总图了。
+## 8. 误解澄清与收网
 
-C2 前面几章之所以故意保留 `Allocate`、`Lock`、`ArrayCopy` 这类高层宏节点，不是编译器还没来得及把它们降下去，而是因为它在等命运信息成熟：EA 先证明能不能让它不存在，循环与数组相关优化先决定会不会影响它的形状，平台与运行时语义最后再决定它该如何展开。到了 `PhaseMacroExpand`，编译器先做最后一次“能不能消”的裁决，再清理临时保护结构，按依赖顺序先展开 arraycopy，再展开 allocate/lock/unlock，最后再用 IGVN 收敛一轮。`share/opto/compile.cpp:2432`、`share/opto/macro.cpp:2645`、`share/opto/macro.cpp:2647`、`share/opto/macro.cpp:2723`、`share/opto/macro.cpp:2744`、`share/opto/macro.cpp:2773`
+1. **Parse 后就把所有高层节点都展开，是不是更省事?** 不是。那会让 EA、锁消除、arraycopy 分析在噪音更大的低层图上工作。
+2. **那是不是一直留着，最后统一翻译就行?** 也不对。很多节点的最优命运是“消失”，而不是“翻译”。
+3. **MacroExpand 是“统一翻译所有宏节点”吗?** 不是。它先做最后一次消除裁决，再按依赖顺序展开剩余的。
+4. **锁在 MacroExpand 阶段必然展开吗?** 不是。它第一种命运就是完全消失。
+5. **MacroExpand 之后就不用再优化了吗?** 不是。展开会改变图结构，还要再跑一轮 IGVN 收敛。
 
-所以，这一篇最核心的一句话不是“MacroExpand 把高层节点展开成低层节点”，而是：
+把这一篇压成三句话：
 
-**宏节点是延迟决策占位符：能消的在最后一刻零成本消失，必须留的才在信息最成熟的时候展开。**
+- **宏节点是延迟决策占位符：能消的在最后一刻零成本消失，必须留的才在信息最成熟的时候展开。**
+- **分配、锁、arraycopy 在 MacroExpand 阶段都有“消失 vs 展开”两条命运。**
+- **MacroExpand 不是最终转换，而是最后一次大规模结构改写，之后还要 IGVN 收尾。**
 
-只要这句抓住了，下一篇 `library_call.cpp` 也就顺了：有些高层语义甚至根本不会走普通字节码或普通宏展开，而是在 Parse 阶段就被 `LibraryCallKit` 直接换成更理想的图子结构。
+下一篇: `library_call.cpp`——有些高层语义根本不会走普通字节码或普通宏展开，而是在 Parse 阶段就被 `LibraryCallKit` 直接换成更理想的图子结构。
 
 > → [15-c2-compiler/08 — `library_call.cpp`：6991 行的 intrinsic 世界](08-c2-library-calls.md)

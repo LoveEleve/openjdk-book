@@ -7,7 +7,7 @@
 > 一句话顿悟：因为 InnoDB 不是先保证“数据页已经写好”，而是先保证“描述这次修改的 Redo 已经先记住”；LSN 把日志进度、页进度和恢复起点拉进同一坐标系，Checkpoint 再决定哪些旧日志可以安全忘掉。
 > 依赖分类：
 > - 硬依赖：`01-server-innodb-architecture.md` 已建立 Server 层 / InnoDB 分层、Buffer Pool、后台刷脏与“提交返回不等于数据页立即落盘”的主线。
-> - 软依赖：`docs/openjdk/vol-os-kernel/04-page-cache-reclaim-oom.md`、`docs/openjdk/vol-os-kernel/14-page-cache-io-path.md` 关于脏页、回写、页缓存和异步结算的直觉；本篇会复用这些视角，但不要求先掌握内核细节。
+> - 软依赖：脏页、回写、页缓存和异步结算这类操作系统直觉会帮助理解 WAL 与 Checkpoint 的账本关系，但不是本文成立的前提；本篇会复用这些视角，不要求先掌握其他卷的内核细节。
 > - 导航依赖：下一篇 `03-group-commit-undo-recovery.md` 会继续回答 Undo、未提交事务回滚、组提交与崩溃恢复细节；本篇先把 Redo/WAL、LSN、Checkpoint 这条持久化主账讲清。
 > 版本说明：本文讨论 MySQL 8.x / InnoDB 常见的 Redo Log、WAL、Log Buffer、Mini-Transaction、LSN 与 Checkpoint 稳定心智模型。具体 redo record 类型、MTR 实现细节、日志文件布局、刷盘线程组织、checkpoint 推进算法和配置默认值会随 MySQL 版本、文件系统、设备和运行负载变化。本文不把某一版源码中的字段、函数拆分或默认参数写成跨版本契约，而把重点放在“为什么数据页可以晚刷、为什么日志必须先记、以及 LSN/Checkpoint 怎样共同维持可恢复边界”。
 

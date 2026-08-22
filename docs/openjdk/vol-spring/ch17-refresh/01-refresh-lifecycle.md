@@ -85,6 +85,61 @@
 
 **为什么对 Spring 来说，容器启动必须被组织成一条有严格阶段顺序、还能承载扩展点的总主线，而 `refresh()` 正是这条总主线的模板骨架？**
 
+## 先看 `refresh()` 源码：它不是概念，而是本地源码里真实存在的模板方法骨架
+
+在开始拆失败方案之前，先直接看 Spring 容器真正启动的总入口：
+
+```java
+@Override
+public void refresh() throws BeansException, IllegalStateException {
+    this.startupShutdownLock.lock();
+    try {
+        this.startupShutdownThread = Thread.currentThread();
+        StartupStep contextRefresh = this.applicationStartup.start("spring.context.refresh");
+
+        prepareRefresh();                                          // 1. 准备启动状态
+        ConfigurableListableBeanFactory beanFactory = obtainFreshBeanFactory(); // 2. 获取刷新后的 BeanFactory
+        prepareBeanFactory(beanFactory);                           // 3. 准备 BeanFactory
+
+        try {
+            postProcessBeanFactory(beanFactory);                   // 4. 子类扩展 BeanFactory
+            invokeBeanFactoryPostProcessors(beanFactory);          // 5. 执行 BFPP → 定义世界收口
+            registerBeanPostProcessors(beanFactory);               // 6. 注册 BPP → 实例扩展器入场
+
+            initMessageSource();                                   // 7. 初始化消息源
+            initApplicationEventMulticaster();                     // 8. 初始化事件广播器
+
+            onRefresh();                                           // 9. 子类扩展（如 Web 容器创建）
+
+            registerListeners();                                   // 10. 注册监听器
+            finishBeanFactoryInitialization(beanFactory);          // 11. 预实例化单例
+            finishRefresh();                                       // 12. 发布刷新完成事件
+        }
+        catch (RuntimeException | Error ex) {
+            destroyBeans();                                        // 失败时销毁已创建的单例
+            cancelRefresh(ex);                                     // 重置 active 标志
+            throw ex;
+        }
+        finally {
+            contextRefresh.end();
+        }
+    }
+    finally {
+        this.startupShutdownThread = null;
+        this.startupShutdownLock.unlock();
+    }
+}
+```
+
+来源：`spring-framework/spring-context/.../AbstractApplicationContext.java:588-658`。
+
+这段代码证明了四件事：
+
+- 容器启动不是一个大函数，而是一个阶段明确的模板方法骨架
+- 定义世界处理（BFPP）在实例世界扩展器（BPP）注册之前，BPP 注册又在单例创建之前
+- 失败时通过 `destroyBeans()` / `cancelRefresh()` 回滚，不是直接抛异常就结束
+- 每个阶段都是 `protected` 方法，子类可以覆写（如 `onRefresh()` 被 `ServletWebServerApplicationContext` 重写用于创建内嵌 WebServer）
+
 ## 先看失败方案：为什么不能“定义读完就实例化”“先注册 BPP 再补定义”“把启动写成一个大方法”
 
 理解 `refresh()` 最好的方式，不是先背 12 个步骤，而是先看几种特别顺手、但一放到 Spring 容器里就会迅速失效的朴素方案。
@@ -164,6 +219,18 @@
 - **一个阶段清晰、责任清晰、可覆写和可收口的启动骨架。**
 
 这就是模板方法在这里必须出现的原因。
+
+源码上也直接证明了这种扩展能力：`onRefresh()` 在 `AbstractApplicationContext` 里默认是空实现（定义在第 903 行），子类通过覆写它来插入自己的启动逻辑：
+
+```java
+protected void onRefresh() throws BeansException {
+    // For subclasses: do nothing by default.
+}
+```
+
+来源：`spring-framework/spring-context/.../AbstractApplicationContext.java:903`。
+
+调用点在第 622 行：`refresh()` 内部在 `initMessageSource` 和 `initApplicationEventMulticaster` 之后、`finishBeanFactoryInitialization` 之前调用 `onRefresh()`。`ServletWebServerApplicationContext` 就覆写了它——在 `onRefresh()` 里调用 `createWebServer()`，把嵌入式 Tomcat 创建挂进 `refresh()` 主线的第 9 步。
 
 ## Spring `refresh()` 的最小总图
 

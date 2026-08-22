@@ -141,6 +141,8 @@ n- 自己拼价格
 
 `home` 的 `ProductFeignClient` 在 `my-xhs-home/src/main/java/com/myxhs/home/feign/ProductFeignClient.java:19` 到 `:22` 明确调用的是 `/api/product/spu/{spuId}`，而不是自己重建 `SPU / SKU` 模型。这说明聚合层被严格限制在“先拿商品真相骨架，再补外部视图”，而不是越权篡改商品域边界。
 
+还有一个很现实的微服务边界在源码里也写得很清楚：商品域除了公开详情接口，还额外提供了 `/api/product/sku/batch` 这种内部批量接口，供 cart/order 等下游一次拉多条 SKU 信息，且要求 `X-Internal-Call` 令牌并把 `skuIds` 数量限制在 100 以内，见 `my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:175` 到 `:190`。这说明商品详情聚合并不是“每个下游自己打一堆单条详情 HTTP”，而是已经开始围绕批量读取和内部受保护端点来控制跨服务扇出成本。
+
 ## product 域本地详情到底提供了什么
 
 `ProductController.getSpuDetail()` 在 `my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:94` 暴露单条详情入口。它的返回值来自 `SpuService.getSpuDetail(spuId)`，见 `my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:98`。
@@ -162,6 +164,10 @@ n- 自己拼价格
 3. **这些母体与变体信息怎样稳定、高频地被读取**
 
 所以 product 域的职责已经很明确：它负责把“商品是什么”这层真相读稳定。
+
+这里还有一个容易漏掉的可观测性边界：`ProductController.getSpuDetail()` 只在**单条详情入口**记录商品浏览事件，而且只在存在 `X-User-Id` 时才异步落 `t_product_behavior`，见 `my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:102` 到 `:108`、`my-xhs-product/src/main/java/com/myxhs/product/entity/ProductBehavior.java:12` 到 `:16`。这意味着 search/home 之类的内部 Feign 补全调用、批量读取路径、缓存异步刷新路径，都不会被记成用户浏览。系统不是在“凡是查过商品都算浏览”，而是在刻意保护埋点语义：只有真实用户打开单条详情页，才进入“商品浏览→加购→下单→支付”的漏斗分析链。
+
+但它在写路径上也留下了一个很诚实的边界：当前 `t_spu` 没有 `creatorUserId` 字段，`ProductController.createSpu()` 里直接留了 TODO，只能记录操作者日志，不能做真正的“商品所有权”校验，见 `my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:68` 到 `:69`。这意味着当前管理员权限主要靠 `X-Admin-Call` 令牌控制，而不是靠商品记录自身的归属关系控制。
 
 ## 真正让详情页跨域的，是哪几类外部视图
 
@@ -278,7 +284,7 @@ n- 自己拼价格
 
 ## 真实故障案例：为什么库存一旦被错误看成商品域字段，详情页会先展示错，再交易时打脸
 
-这条聚合链最容易出问题的地方，恰恰就是“库存到底属于谁”。
+这条聚合链最容易出问题的地方，恰恰就是“库存到底属于谁”。另外，商品域自己的只读接口也修过一个容易让前台误判的边界：现在 `/api/product/sku/list/{spuId}` 在所属 `SPU` 已下架时直接返回空列表，不再继续把“SKU 仍上架但母体已下架”的半有效结果暴露给公开读路径，见 `my-xhs-product/src/main/java/com/myxhs/product/service/SkuService.java:124` 到 `:146`。
 
 ### 现象
 
@@ -313,6 +319,17 @@ n- 自己拼价格
 
 这个案例提醒我们：**详情页之所以要聚合，不是为了架构好看，而是因为有些真相从一开始就不属于商品域。** 如果强行把它们塞回商品域，页面也许能暂时少一跳调用，但后续交易链一定会把这个误判放大出来。
 
+## 再补一个容易被忽略的运行时故障：浏览埋点丢了，不等于详情链坏了
+
+商品详情还有一种很容易误判的故障：页面明明能正常打开，但漏斗看板里的“商品浏览”突然变少，于是读代码的人很容易反过来怀疑详情接口本身有问题。
+
+当前实现恰恰把这两件事拆开了。`recordSpuViewAsync()` 用的是独立的 `SPU_VIEW_EXECUTOR`，队列满时走 `DiscardPolicy`，提交失败或落库失败都只记 warn，不影响详情返回，见 `my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:86` 到 `:94`、`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:550` 到 `:569`。这意味着：
+
+- 详情接口 200，不代表浏览事件一定落库成功
+- 浏览事件缺失，也不代表商品骨架、库存聚合或计数聚合出了问题
+
+也就是说，当前系统显式接受一种“页面成功、埋点丢失”的半成功状态。它的代价不是交易错误，而是可观测性变弱、漏斗分析变粗。这和前面讲的“库存或商品骨架错误会直接污染展示/交易”不是同一级事故，不能混成一类排查。
+
 ## 这一篇先收束成一张总图
 
 ```text
@@ -339,7 +356,12 @@ home 域聚合详情
 这篇的关键判断主要由以下证据托底：
 
 - 商品域本地详情入口：`my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:92`
+- 商品域内部批量 SKU 端点与数量上限：`my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:175`
+- SPU 下架时 SKU 列表直接收空：`my-xhs-product/src/main/java/com/myxhs/product/service/SkuService.java:124`
+- SPU 创建当前无 ownership tracking：`my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:68`
 - 本地详情入口与聚合入口在埋点语义上被刻意区分：`my-xhs-product/src/main/java/com/myxhs/product/controller/ProductController.java:102`
+- 商品浏览事件流水只记录真实单条详情浏览：`my-xhs-product/src/main/java/com/myxhs/product/entity/ProductBehavior.java:12`
+- 浏览埋点独立线程池且允许丢失：`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:86`、`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:550`
 - `SpuService` 多级缓存读路径：`my-xhs-product/src/main/java/com/myxhs/product/service/SpuService.java:406`
 - `SpuDetailVO` 结构：`my-xhs-product/src/main/java/com/myxhs/product/dto/response/SpuDetailVO.java:8`
 - `home` 聚合商品详情入口：`my-xhs-home/src/main/java/com/myxhs/home/controller/HomeController.java:95`

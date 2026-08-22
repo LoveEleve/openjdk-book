@@ -1,9 +1,9 @@
 # Vol-02 重写工作交接文档
 
-> 生成时间：2026-08-18
+> 生成时间：2026-08-21
 > 仓库：`/data/workspace/source-code/openjdk-book`
 > 源码树：`/data/workspace/source-code/openjdk11u`
-> 方法论文档：`docs/openjdk/WRITING-GUIDELINES.md`（639 行，全部重写工作的最高规范）
+> 方法论文档：`docs/openjdk/WRITING-GUIDELINES.md`
 
 ---
 
@@ -11,7 +11,7 @@
 
 ### 1.1 最终目标
 
-把 `docs/openjdk/vol-02/` 下全部文章从"源码事实卡片"升级为"删掉代码仍成立的技术文章"。
+把 `docs/openjdk/vol-02/` 下全部文章从“源码事实卡片”升级为“删掉代码仍成立的技术文章”。
 
 判断标准：
 
@@ -24,7 +24,7 @@
 
 ### 1.2 写作流程（四步）
 
-1. **读现稿 + 提取核心困惑**——不是"这篇文章覆盖了什么"，而是"读者真正卡在哪里"
+1. **读现稿 + 提取核心困惑**——不是“这篇文章覆盖了什么”，而是“读者真正卡在哪里”
 2. **收集源码证据**——读真实源码，拿到精确 `file:line` 和 snippet
 3. **落盘 `*.rewrite-plan.md`**——包含一句话顿悟、ASCII 总图、分节大纲与字数预算、失败方案、证据清单、边界清单、完成后 review checklist
 4. **写正文 + 多轮自检**——删码测试、禁用词扫描、链接验证、`file:line` 核对、`git diff --check`
@@ -48,85 +48,96 @@
 
 ---
 
-## 二、当前总进度（本轮交接时）
+## 二、当前总进度（2026-08-21 终检）
 
-### 2.1 已完成篇章（连续重写并校验通过）
+### 2.1 整体判断
 
-以下篇章均已满足：
+`vol-02` 的正文重写主线已经**实质完结**。
 
-- 有对应 `*.rewrite-plan.md`
-- 正文已按方法论重写
-- 删码测试通过
-- 禁用词扫描通过
-- 相对链接通过
-- `file:line` 全部有效
-- `git diff --check` 通过
+这次批量复核后的结论是：
 
-#### 已完成清单
+- 连续域重写已经从早期 HotSpot 基础域一路推进到 `48-utilities`
+- 本轮后半段实际花费的主要精力，不再是“补正文”，而是**排除误判、确认哪些文章只是缺显式 review 提交记录**
+- 对剩余 `missing_review` 候选做逐篇或批量深查后，**没有再发现需要补正文的大缺口**
 
-1. `docs/openjdk/vol-02/09-memory-core/03-arena-resourcearea-allocation.md`
-2. `docs/openjdk/vol-02/10-metaspace/01-metaspace-overview.md`
-3. `docs/openjdk/vol-02/10-metaspace/02-chunk-metablock-allocation.md`
-4. `docs/openjdk/vol-02/10-metaspace/03-virtualspace-arena-reclaim.md`
-5. `docs/openjdk/vol-02/11-cds/01-cds-overview-dump.md`
-6. `docs/openjdk/vol-02/11-cds/02-cds-load-shared.md`
-7. `docs/openjdk/vol-02/12-ci/01-ci-overview-mirror.md`
-8. `docs/openjdk/vol-02/12-ci/02-ci-typeflow-escape.md`
-9. `docs/openjdk/vol-02/12-ci/03-ci-factory-runtime.md`
-10. `docs/openjdk/vol-02/13-jit-framework/01-compile-broker-queue.md`
-11. `docs/openjdk/vol-02/13-jit-framework/02-tiered-compilation-policy.md`
-12. `docs/openjdk/vol-02/14-c1-compiler/01-c1-pipeline-ir.md`
-13. `docs/openjdk/vol-02/14-c1-compiler/02-c1-optimizations.md`
-14. `docs/openjdk/vol-02/14-c1-compiler/03-c1-register-codegen.md`
-15. `docs/openjdk/vol-02/14-c1-compiler/04-c1-runtime-frame.md`
-16. `docs/openjdk/vol-02/15-c2-compiler/01-c2-ideal-graph.md`
-17. `docs/openjdk/vol-02/15-c2-compiler/02-c2-parse-graphkit.md`
-18. `docs/openjdk/vol-02/15-c2-compiler/03-c2-optimizations.md`
-19. `docs/openjdk/vol-02/15-c2-compiler/04-c2-loops.md`
-20. `docs/openjdk/vol-02/15-c2-compiler/05-c2-register-alloc.md`
-21. `docs/openjdk/vol-02/15-c2-compiler/06-c2-codegen.md`
-22. `docs/openjdk/vol-02/15-c2-compiler/07-c2-macro-intrinsics.md`
-23. `docs/openjdk/vol-02/15-c2-compiler/08-c2-library-calls.md`
+也就是说，当前剩余工作更偏向：
 
-### 2.2 当前已完成的 planning 文件
+- 交接与收官文档
+- 是否要补齐个别 `rewrite-plan` 文件
+- 是否要为少数早期成文文章补一轮显式 deep review 提交记录
 
-以下 `rewrite-plan` 已经落地并与正文同步：
+而不是继续大规模重写正文。
 
-- `docs/openjdk/vol-02/10-metaspace/01-metaspace-overview.rewrite-plan.md`
-- `docs/openjdk/vol-02/10-metaspace/02-chunk-metablock-allocation.rewrite-plan.md`
-- `docs/openjdk/vol-02/10-metaspace/03-virtualspace-arena-reclaim.rewrite-plan.md`
-- `docs/openjdk/vol-02/11-cds/01-cds-overview-dump.rewrite-plan.md`
-- `docs/openjdk/vol-02/11-cds/02-cds-load-shared.rewrite-plan.md`
-- `docs/openjdk/vol-02/12-ci/01-ci-overview-mirror.rewrite-plan.md`
-- `docs/openjdk/vol-02/12-ci/02-ci-typeflow-escape.rewrite-plan.md`
-- `docs/openjdk/vol-02/12-ci/03-ci-factory-runtime.rewrite-plan.md`
-- `docs/openjdk/vol-02/13-jit-framework/01-compile-broker-queue.rewrite-plan.md`
-- `docs/openjdk/vol-02/13-jit-framework/02-tiered-compilation-policy.rewrite-plan.md`
-- `docs/openjdk/vol-02/14-c1-compiler/01-c1-pipeline-ir.rewrite-plan.md`
-- `docs/openjdk/vol-02/14-c1-compiler/02-c1-optimizations.rewrite-plan.md`
-- `docs/openjdk/vol-02/14-c1-compiler/03-c1-register-codegen.rewrite-plan.md`
-- `docs/openjdk/vol-02/14-c1-compiler/04-c1-runtime-frame.rewrite-plan.md`
-- `docs/openjdk/vol-02/15-c2-compiler/01-c2-ideal-graph.rewrite-plan.md`
-- `docs/openjdk/vol-02/15-c2-compiler/02-c2-parse-graphkit.rewrite-plan.md`
-- `docs/openjdk/vol-02/15-c2-compiler/03-c2-optimizations.rewrite-plan.md`
-- `docs/openjdk/vol-02/15-c2-compiler/04-c2-loops.rewrite-plan.md`
-- `docs/openjdk/vol-02/15-c2-compiler/05-c2-register-alloc.rewrite-plan.md`
-- `docs/openjdk/vol-02/15-c2-compiler/06-c2-codegen.rewrite-plan.md`
-- `docs/openjdk/vol-02/15-c2-compiler/07-c2-macro-intrinsics.rewrite-plan.md`
-- `docs/openjdk/vol-02/15-c2-compiler/08-c2-library-calls.rewrite-plan.md`
+### 2.2 本轮确认已完成的后续域
 
-### 2.3 下一步起点
-
-最自然的下一篇是：
+除旧 handoff 中已经记录的 `09`–`15` 域外，本轮继续确认并推进完成的卷 2 文章包括：
 
 - `docs/openjdk/vol-02/16-code-cache/01-codeblob-heap.md`
+- `docs/openjdk/vol-02/17-threads/01-thread-hierarchy.md`
+- `docs/openjdk/vol-02/17-threads/02-javathread-state.md`
+- `docs/openjdk/vol-02/17-threads/03-thread-smr-handshake.md`
+- `docs/openjdk/vol-02/17-threads/04-interface-support.md`
+- `docs/openjdk/vol-02/18-safepoint/01-safepoint-orchestration.md`
+- `docs/openjdk/vol-02/18-safepoint/02-polling-verifiers.md`（确认早已完成，无需重复重写）
+- `docs/openjdk/vol-02/19-sync/01-lock-hierarchy.md` 到 `04-internal-locks.md`（确认早已完成）
+- `docs/openjdk/vol-02/20-vm-operations/01-vm-operation.md`
+- `docs/openjdk/vol-02/20-vm-operations/02-background-init.md`
+- `docs/openjdk/vol-02/21-shared-runtime/01-runtime-stubs.md`
+- `docs/openjdk/vol-02/21-shared-runtime/02-c2i-i2c-adapter.md`
+- `docs/openjdk/vol-02/21-shared-runtime/03-exception-handling.md`
+- `docs/openjdk/vol-02/23-stub/01-stub-entry.md`
+- `docs/openjdk/vol-02/23-stub/02-arraycopy.md`
+- `docs/openjdk/vol-02/23-stub/03-crypto-math.md`
+- `docs/openjdk/vol-02/24-frame/01-physical-frame.md`
+- `docs/openjdk/vol-02/24-frame/02-virtual-frame.md`
+- `docs/openjdk/vol-02/24-frame/03-deopt-gc-scan.md`
+- `docs/openjdk/vol-02/25-gc-framework/01-barrier-access.md` 到 `06-oopstorage-stringdedup-stats.md`
+- `docs/openjdk/vol-02/26-g1-gc/01-heapregion.md` 到 `07-full-gc-roots.md`
+- `docs/openjdk/vol-02/27-jni/01-handle-system.md` 到 `03-jni-check-platform.md`
+- `docs/openjdk/vol-02/28-jvmti/01-agent-architecture.md` 到 `03-auxiliary.md`
+- `docs/openjdk/vol-02/30-jvm-entry/01-jvm-entry-points.md` 到 `03-reflection-stackwalk.md`
+- `docs/openjdk/vol-02/32-jfr/01-recorder-engine.md` 到 `06-jni-instrumentation.md`
+- `docs/openjdk/vol-02/33-jmx/01-memory-service.md` 到 `03-gc-notifier-flags.md`
+- `docs/openjdk/vol-02/36-attach/01-attach-listener.md`
+- `docs/openjdk/vol-02/36-attach/02-jdk-attach.md`
+- `docs/openjdk/vol-02/39-runtime-monitoring/01-service-thread.md`
+- `docs/openjdk/vol-02/39-runtime-monitoring/02-timer-stats.md`
+- `docs/openjdk/vol-02/43-nio-net/01-tcp-epoll.md` 到 `03-filesystem.md`
+- `docs/openjdk/vol-02/46-sa-postmortem/01-sa-postmortem.md`
+- `docs/openjdk/vol-02/48-utilities/01-vmerror.md` 到 `04-utf8-json-decoder.md`
 
-建议延续当前连续域重写策略：
+### 2.3 本轮批量复核后确认“正文已完成，只是缺显式 review 记录”的候选
 
-- `15-c2-compiler` 已收束
-- 下一域切到 `16-code-cache`
-- 从 `CodeBlob / CodeHeap / nmethod` 的“机器码的家”开始最顺
+自动统计曾列出 11 篇 `missing_review` 候选。对其中关键文章做深查后，结论是它们**并非正文缺失**，而是历史提交信息里没有出现统一的 `REVIEW/深审` 关键词：
 
+- `docs/openjdk/vol-02/16-code-cache/01-codeblob-heap.md`
+- `docs/openjdk/vol-02/24-frame/01-physical-frame.md`
+- `docs/openjdk/vol-02/26-g1-gc/03-rem-set.md`
+- `docs/openjdk/vol-02/29-mh/02-x86-adapter.md`
+- `docs/openjdk/vol-02/36-attach/02-jdk-attach.md`
+- `docs/openjdk/vol-02/46-sa-postmortem/01-sa-postmortem.md`
+
+这些文章都已经过正文级核查，未发现需要继续修文的实质问题。
+
+其余候选：
+
+- `docs/openjdk/vol-02/05-cpu-primitives/01-atomic-and-memory-order.md`
+- `docs/openjdk/vol-02/14-c1-compiler/04-c1-runtime-frame.md`
+- `docs/openjdk/vol-02/21-shared-runtime/02-c2i-i2c-adapter.md`
+- `docs/openjdk/vol-02/23-stub/03-crypto-math.md`
+- `docs/openjdk/vol-02/25-gc-framework/06-oopstorage-stringdedup-stats.md`
+
+从 git 历史和正文形态看，也更像“早期成文时未补显式 review 标记”，而不是仍有待重写的原稿。
+
+### 2.4 仍然存在的流程性缺口
+
+如果以后要做“形式上的完全收官”，还剩三类可选工作：
+
+1. 为部分早期文章补齐 `*.rewrite-plan.md`
+2. 为少数只有“成文”提交、没有“review”提交标记的文章补一轮显式 deep review 记录
+3. 再做一次全卷统一终检（链接、禁用词、`file:line`、Docsify 根路径）并出一份终检报告
+
+这三类工作都属于**收官流程**，不属于“正文重写仍未完成”。
 ---
 
 ## 三、本轮写作中已经沉淀下来的方法论经验

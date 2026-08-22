@@ -222,6 +222,8 @@
 
 这一步非常关键，因为它说明：**合并是购物车权威态的一次正式变更，不是登录时的临时拼接。**
 
+这里还要补一个容易被忽略的分布式细节：`sendCartSyncEvent()` 并不是简单地把 `System.currentTimeMillis()` 塞进事件，而是叠加了同实例内单调递增的 `EVENT_SEQ`，见 `my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:54` 到 `:55` 和 `:668` 到 `:670`。它防的是同毫秒内连续事件在消费端被 `updatedAt >= eventTime` 误判成旧消息而跳过。也就是说，购物车链不是只靠 MQ 保序，而是还额外修了“同毫秒时间戳碰撞”这个很细的乱序边界。
+
 ## 为什么已有商品不覆盖勾选状态，而新商品默认勾选
 
 这是这套合并逻辑里最值得细看的业务取舍。
@@ -280,6 +282,50 @@
 这第二层防御在 `getCartList()` 里也有明确落点：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:430` 到 `:451` 会根据 `SKU` 和 `SPU` 状态给条目标记 `valid=false`，并写入 `invalidReason("商品已下架")` 或 `invalidReason("商品信息获取失败")`。也就是说，merge 负责阻止明显脏条目进入正式购物车，列表页再负责兜住后续状态变化带来的失效项。
 
 这说明 merge 并不是一个“低价值前置动作”，而是脏数据正式进入权威购物车之前的第一道门。
+
+这里还有一个更底层、但很容易被漏掉的微服务工程点：cart 调 product 的批量接口并不是靠业务代码手动拼 `X-Internal-Call`，而是通过 `InternalCallFeignConfig` 自动注入 Header，见 `my-xhs-cart/src/main/java/com/myxhs/cart/feign/InternalCallFeignConfig.java:9` 到 `:24`。这说明“购物车列表批量补 SKU 详情”在当前实现里已经不是一条临时 Feign 调用，而是一条正式的内部受保护读链。
+
+## Redis 丢失后的恢复为什么也属于购物车合并语义的延长线
+
+如果只看 `/merge` 接口，很容易以为合并在写入 Redis 三结构并发 MQ 之后就结束了。但 `getCartList()` 和 `CartReconcileJob` 说明，系统其实还在为另一个极端场景兜底：Redis 购物车丢失。
+
+`getCartList()` 在发现 `itemsMap` 为空时，并不会立刻认定用户购物车为空，而是先尝试 `restoreCartFromDb()` 从 MySQL 把购物车三结构回写到 Redis，见 `my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:333` 到 `:345` 和 `:698` 到 `:730`。更关键的是，恢复之后它还会**再跑一次 pipeline 重读三结构**，见 `my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:346` 到 `:359`，避免第一次读取时拿到的空 `checkedSet/sortMap` 直接污染首次响应。
+
+这说明登录态购物车并不是“Redis 一丢就只能认空”，而是把 MySQL 当成 Redis 权威态丢失后的恢复来源。购物车合并虽然首先发生在 Redis，但最终还要靠 MySQL 兜底保持“这个用户本来想买什么”不至于因为缓存层事故整体消失。
+
+## 对账为什么要保守到宁可残留脏 MySQL，也不肯误删兜底数据
+
+`CartReconcileJob` 里还有一个非常值得写出来的取舍：当 `itemsKey` 不存在时，它不会贸然执行“Redis 无 + MySQL 有 → 删除 MySQL”这类修复，见 `my-xhs-cart/src/main/java/com/myxhs/cart/job/CartReconcileJob.java:140` 到 `:149`。
+
+原因很现实：`itemsKey` 不存在既可能表示“用户真清空了购物车”，也可能表示“Redis 故障把这份购物车弄丢了”。如果在第二种情况下还按常规对账把 MySQL 兜底数据一起删掉，就会出现 Redis 和 MySQL 双份全丢。
+
+所以当前实现明确选择了一个偏保守的策略：
+
+- 宁可留下部分陈旧 MySQL 行
+- 也不在 Redis key 缺失时贸然摧毁唯一兜底账本
+
+这个取舍很能说明购物车系统的真实优先级：**读视图可以接受少量陈旧持久化残影，但不能接受用户待购状态双份全灭。**
+
+## 购物车条目的“有效”为什么不等于“现在一定有货”
+
+还有一个很容易被误解的业务边界：购物车列表里的 `valid` 标记，并不是“这个商品现在一定可以结算”。`getCartList()` 里只会根据商品服务返回的 `SKU.status` 和 `SPU.status` 判断条目是否下架，见 `my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:430` 到 `:451`；它明确**不会**去看 `stock`，因为 product 侧的 `stock` 只是冗余占位值，真实库存要等 inventory/order 链路裁决。
+
+这意味着当前购物车页回答的问题其实是：
+
+- 这个待购条目在商品维度上还存不存在
+- 它在商品主数据维度上是不是已经失效
+
+而不是：
+
+- 这次提交订单时库存一定足够
+
+如果把 `valid=true` 误写成“可直接结算”，就会把商品有效性判断和库存可交易性判断混成一层。当前实现恰恰是把这两件事拆开的：cart 只兜商品骨架，order/inventory 再兜真实库存。
+
+## 写路径边界：下架 SKU 不能再进入购物车权威态
+
+当前加购和匿名合并在写入 Redis 前都会通过 `skuExists()` 检查商品状态；只有 `SKU.status=ON_SHELF` 才允许继续写入，见 `my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:605` 到 `:614`。这修复了“下架商品仍能加购、列表页再被标无效”的读写语义分裂。商品服务不可用时仍保留降级放行，避免商品服务短暂故障阻断购物车主写链，列表页和订单链继续承担后续防线。
+
+事件消费也有对应的乱序保护：如果 `CHECK` 事件先于 `ADD/UPDATE` 到达，`CartSyncConsumer` 现在只记录并跳过，不会凭空插入 `quantity=1` 的购物车行，见 `my-xhs-cart/src/main/java/com/myxhs/cart/consumer/CartSyncConsumer.java:221` 到 `:226`。
 
 ## 真实故障案例：为什么合并逻辑如果不区分“状态合并”和“操作叠加”，重试一次就会把用户意图放大
 
@@ -364,11 +410,17 @@
 - 购物车 Redis 三结构与权威态定义：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:31`
 - 合并策略与幂等说明：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:483`
 - 合并时的 SKU 存在性校验：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:508`、`my-xhs-cart/src/main/java/com/myxhs/cart/feign/ProductFeignClient.java:29`
+- 内部 Feign 自动注入 `X-Internal-Call`：`my-xhs-cart/src/main/java/com/myxhs/cart/feign/InternalCallFeignConfig.java:9`
+- 下架 SKU 写入前拦截：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:605`
+- 乱序 CHECK 不伪造购物车项：`my-xhs-cart/src/main/java/com/myxhs/cart/consumer/CartSyncConsumer.java:221`
 - 列表页第二层 `valid` 防御：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:430`
 - Lua 原子合并写入：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:516`
 - 已有条目不覆盖 checked、新条目默认 checked：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:531`
 - TTL 刷新保持活跃购物车：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:544`、`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:640`
 - MQ 事件与异步落 MySQL：`my-xhs-cart/src/main/java/com/myxhs/cart/dto/event/CartSyncEvent.java:12`、`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:659`、`my-xhs-cart/src/main/java/com/myxhs/cart/consumer/CartSyncConsumer.java:22`、`my-xhs-cart/src/main/java/com/myxhs/cart/consumer/CartSyncConsumer.java:91`
+- 同毫秒事件单调序列号防乱序误判：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:54`、`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:668`
+- Redis 丢失后从 MySQL 恢复并重读三结构：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:333`、`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:349`、`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:698`
+- 对账保守跳过删除场景（防双份全丢）：`my-xhs-cart/src/main/java/com/myxhs/cart/job/CartReconcileJob.java:140`
 
 ## 边界清单
 
@@ -389,3 +441,15 @@
 但它还没进入另一个同样关键的交易前置问题：购物车只是“准备买什么”，真正能不能便宜、便宜多少，还取决于优惠券生命周期怎样进入下单链。
 
 所以下一篇应该进入 `02-coupon-lifecycle.md`，去回答**优惠券从模板创建、用户领取、下单核销到取消退回，到底怎样在 Redis、MQ、MySQL 之间流动**。
+
+
+补：当前实现新增了 `cleared` 清空标记，避免 Redis 空购物车被 MySQL 残留误恢复；同时事件流水消费者对 `timestamp=null` 脏消息直接跳过。
+
+
+补：后续写路径成功时会主动清理 `cleared` 标记；对账也会识别该标记，把“用户真的清空了购物车”和“Redis 故障导致 itemsKey 丢失”区分开。
+
+
+补：`CLEAR` 事件现在会额外携带 clear barrier 时间戳，消费侧日志会保留这层屏障语义，便于后续继续收敛“清空后旧消息迟到”的排障与增强。
+
+
+补：`CartSyncConsumer` 现已把 clear barrier 升级为真实判定语义；`ADD/UPDATE/DELETE/CHECK/CHECK_ALL` 若时间落在最新 `CLEAR` 之前，会被直接跳过，防止清空后旧消息把 MySQL 购物车重新写回。

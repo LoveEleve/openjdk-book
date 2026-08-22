@@ -102,7 +102,7 @@ M16 不再新增领域概念，重点验证并收口已有能力：
 | `tests/learning-domain-cache.test.ts` | 缓存键、失效和降级测试 |
 | `tests/eval-large-repo.test.ts` | 大仓验证报告测试 |
 | `evals/large-repo-plan.json` | 可重复的大仓验证计划 |
-| `docs/progress/REPORT-M16.md` | M16 验证结果 |
+| `vol-agent/20-plans/REPORT-M16.md` | M16 验证结果 |
 
 ## 四、关键不变量
 

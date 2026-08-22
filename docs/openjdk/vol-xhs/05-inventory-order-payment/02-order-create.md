@@ -167,6 +167,8 @@
 
 这说明订单域并没有把“地址真相永远留在 user 服务再回头查询”当成默认前提。对订单来说，地址一旦进入交易，就必须变成订单自己的历史快照，而不是继续依赖外部 mutable 数据。
 
+但这里还有一个很重要、也很容易被漏写的工程边界：`resolveAddressSnapshot()` 拿不到地址时，并不会直接让下单失败，而是降级写入空快照继续往下走，见 `my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:345` 到 `:364`。这说明当前实现优先保护的是“订单主链可成立”，而不是“地址快照必须完整无缺”；地址服务短时失败时，系统宁可让订单带着空快照先成立，再留给后续人工/客服链处理，也不愿意把整条交易主链在这里硬性打断。
+
 ### 5. 先试算券折扣，但不在这一步提前核销
 
 金额计算里，订单会先算 `totalAmount`，再调 coupon 服务算折扣，见 `my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:186` 到 `:193`。
@@ -285,6 +287,8 @@
 
 这说明订单域不仅在创建交易，还在为后续查询、回放、分片路由和故障恢复铺路。
 
+尤其是订单号映射表这一层，不能被误看成普通辅助查询表。`OrderNoMappingRepository` 在 `my-xhs-order/src/main/java/com/myxhs/order/repository/OrderNoMappingRepository.java:13` 到 `:17` 已经把职责写明：它存放在不分片的公共库里，专门解决“通过订单号反查 `user_id`”这类非分片键路由问题。支付回调、超时关单、补偿消费者、按订单号查询订单，这些链路都在靠它把 `orderNo/orderId` 重新映射回正确分片。也就是说，下单创建后补写映射，不是锦上添花，而是在给后续所有跨服务回调和兜底任务补一条能回到正确分片的路。
+
 ## 为什么下单编排的核心不是“查了多少服务”，而是“外部真相和本地事实在哪一刻绑定”
 
 到这里很容易被表面的 Feign 调用数量带偏，以为下单复杂只是因为“调了 user / product / inventory / coupon 很多服务”。
@@ -297,6 +301,14 @@
 - 库存校验在什么时候升级成库存预扣？
 
 这几条“从外部真相到订单事实”的绑定时刻，才是下单编排真正的骨架。
+
+而且订单域拿不同外部真相的方式，并不是“统一拉一个大对象”那么简单，而是沿着不同微服务边界取不同粒度的数据：
+
+- `product` 侧只给批量 `SkuInfoDTO`，重点是 `skuId/spuId/price/image/spuStatus` 这些交易最小真值，见 `my-xhs-order/src/main/java/com/myxhs/order/feign/ProductFeignClient.java:12` 到 `:27`
+- `coupon` 侧只接受单个券的试算和核销，见 `my-xhs-order/src/main/java/com/myxhs/order/feign/CouponFeignClient.java:23` 到 `:44`
+- `user` 侧只给地址原始字段，订单域自己把它压成地址快照 JSON，见 `my-xhs-order/src/main/java/com/myxhs/order/feign/UserFeignClient.java:11` 到 `:25`
+
+这说明订单域不是在“组装几个下游完整对象”，而是在不同边界上只拿自己当前阶段真正需要的那部分真相，再把它们冻结成订单自己的事实。
 
 ## 真实故障案例：为什么“订单已创建但库存未扣”是下单链里最危险的失败模式
 
@@ -370,11 +382,14 @@
 - 下单入口：`my-xhs-order/src/main/java/com/myxhs/order/controller/OrderController.java:46`
 - 幂等键与分布式锁：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:127`、`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:135`
 - 商品真相、库存真相、地址快照和券折扣的前置拉取：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:147`、`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:171`、`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:201`、`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:341`、`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:186`
+- 订单域按不同边界拉不同粒度真相：`my-xhs-order/src/main/java/com/myxhs/order/feign/ProductFeignClient.java:12`、`my-xhs-order/src/main/java/com/myxhs/order/feign/CouponFeignClient.java:15`、`my-xhs-order/src/main/java/com/myxhs/order/feign/UserFeignClient.java:11`
 - 事务消息 6 步流程：`my-xhs-order/src/main/java/com/myxhs/order/listener/OrderTransactionListener.java:20`
 - 本地事务真实写入内容：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderTransactionService.java:41`
 - 订单事件链：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderEventService.java:34`
 - 订单创建后真正核销优惠券：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:243`
 - 延时关单与快照/映射：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:278`、`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:295`、`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:298`
+- 订单号映射表作为非分片键路由锚点：`my-xhs-order/src/main/java/com/myxhs/order/repository/OrderNoMappingRepository.java:13`
+- 地址快照失败时的降级写空：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:345`
 
 ## 边界清单
 

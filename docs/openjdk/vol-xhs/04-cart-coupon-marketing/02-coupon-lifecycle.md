@@ -219,11 +219,21 @@ MQ 再把结果推进到 MySQL
 
 在同一轮 Redis 脚本里一起收敛。
 
+
+
+### 2.5 Redis 库存未初始化时，会先从 MySQL 补一次再重试
+
+当前实现还显式处理了一种很容易被漏写的冷启动/缓存丢失场景：Lua 领券脚本返回 `-3`，表示 Redis 里的券库存 key 还没初始化。此时 `claimCoupon()` 不会直接报“售罄”或“系统错误”，而是先执行 `initStockFromDb(template)`，再把同一轮领券操作重试一次，见 `my-xhs-coupon/src/main/java/com/myxhs/coupon/service/CouponService.java:236` 到 `:260` 和 `:521` 到 `:528`。
+
+这说明当前领券链不是简单依赖“Redis 先天已完整就绪”，而是把“库存缓存未初始化”当成一个可恢复的运行时分支处理。它的业务意义很直接：券库存 key 丢了，不等于这张券真的已经领完；系统应该优先尝试把 Redis 状态补齐，而不是把一次缓存层缺失直接升级成用户可见失败。
+
 ### 3. Redis 成功后，同步发送领券事件到 MQ
 
 见 `my-xhs-coupon/src/main/java/com/myxhs/coupon/service/CouponService.java:225` 到 `:263` 和 `:540` 到 `:568`。
 
 这里必须强调：**同步发送 MQ，并不等于 MySQL 和 Redis 在同一个本地事务里。** 它真正的语义是：Redis 已经扣减成功，但只有 MQ 发送成功，系统才认为“这次领券可以继续推进到持久化”；一旦 MQ 发送失败，就立刻回滚 Redis 库存，见 `my-xhs-coupon/src/main/java/com/myxhs/coupon/service/CouponService.java:228` 到 `:230` 和 `:578` 到 `:586`。
+
+而且这里的 Outbox 语义比“有一张待补发表”更细。`sendClaimEventSync()` 是先写 Outbox，再 `syncSend`；只有 `SEND_OK` 才会 `markOutboxSent(claimNo)`。如果 `SendStatus` 非 `SEND_OK` 或直接抛异常，当前实现会**删除这条 Outbox 记录**，再配合 Redis 回滚一起收口，见 `my-xhs-coupon/src/main/java/com/myxhs/coupon/service/CouponService.java:543` 到 `:567`。也就是说，Outbox 在这里不是无条件兜底，而是只兜“消息已明确进入待补发状态”的那一类失败；对于发送端已经判断失败的分支，系统更偏向于立刻撤销本轮领券，而不是保留一条继续补发的待发送记录。
 
 ### 4. MQ 消费端再把用户券正式写进 MySQL
 
@@ -259,6 +269,8 @@ MQ 再把结果推进到 MySQL
 - 未来才生效的券
 
 这一步说明“可展示可用券”其实已经是一层业务视图，而不是原始表状态直接输出。
+
+而且这层用户视图还额外做了一个工程清洗：`batchToVO()` 在批量关联模板时，如果发现某张 `UserCoupon` 对应的模板已经不存在，会直接过滤掉这张孤儿券并记告警，见 `my-xhs-coupon/src/main/java/com/myxhs/coupon/service/CouponService.java:632` 到 `:652`。这说明当前“我的券/可用券”列表并不是机械地把 `t_user_coupon` 原样输出，而是会主动屏蔽模板已删后的脏前台条目。
 
 ### 折扣试算为什么要独立存在
 
@@ -486,3 +498,6 @@ MQ 再把结果推进到 MySQL
 但它还没进入营销栈里的最后一个问题：当购物车、优惠券都已经准备好之后，多个优惠和促销规则到底怎样叠加、怎样排优先级、怎样避免把最终支付金额算乱。
 
 所以下一篇应该进入 `03-promotion-rules.md`，去回答**营销规则到底怎样进入下单前试算，为什么“能用券”不等于“应该这样算价”**。
+
+
+补：当退券 Redis 回退失败、补偿 MQ 也发送失败时，当前实现还会把 `templateId:userId` 写入本地兜底集合，并由 `CouponOutboxSenderJob` 周期性重放，避免补偿链只剩日志没有可执行锚点。

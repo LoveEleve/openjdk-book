@@ -1,6 +1,7 @@
 # 卷 XHS · 小红书电商平台业务深度分析
 
 > 基于 `my-xhs` 微服务平台的业务梳理、故障修复与架构分析。
+> 当前模块正文统计：`62` 篇；主链已立住，正在进行横切目录收口与运行态证据补强。
 > 每个子目录按业务域组织，遵循 `WRITING-METHODOLOGY.md`、`WRITING-GUIDELINES.md` 与 `METHODOLOGY.md` 的方法论。
 
 ## 阅读入口
@@ -40,7 +41,8 @@ vol-xhs/
 3. 再读 `METHODOLOGY.md` 了解本卷的写作纪律、证据分级与故障案例要求
 4. 再读 `00-overview-architecture/` 建立全局心智模型
 5. 按业务主线：`01-user` → `03-product` → `04-cart` → `05-inventory-order-payment` → `06-search` → `07-im`
-6. 横切面：`08-gateway`、`09-data-model`、`10-async`、`11-failure`、`12-testing`
+6. 横切面：`08-gateway` → `09-data-model` → `10-async` → `11-failure` → `12-testing`
+7. 当前推荐优先阅读：`09-data-model-storage/`、`10-async-task-transaction/`、`11-runtime-failure-review/`、`12-testing-release-ops/`
 
 ## 项目源码位置
 

@@ -113,9 +113,11 @@
 
 如果把 Feed 推送也塞回同步事务，一旦消息系统或下游有短暂抖动，内容本体会被无辜拖死。从当前实现把 Feed 推送放到 `afterCommit` 且失败只留补偿锚点、不回滚 `t_note` 的选择来看，系统并不接受这个代价。
 
-## 第一步：发布前先经过 DFA 敏感词检测，而不是写入后再慢慢补救
+## 第一步：发布前先经过限流和 DFA 敏感词检测，而不是写入后再慢慢补救
 
-`NoteController.publishNote()` 在 `my-xhs-content/src/main/java/com/myxhs/content/controller/NoteController.java:34` 到 `:49` 暴露了发布入口，并明确说“发布前自动进行 DFA 敏感词检测”。
+`NoteController.publishNote()` 在 `my-xhs-content/src/main/java/com/myxhs/content/controller/NoteController.java:34` 到 `:49` 暴露了发布入口，并明确说"发布前自动进行 DFA 敏感词检测"。
+
+但 DFA 并不是发布入口的唯一门禁。同一个方法上还叠加了 `@RateLimit(windowSeconds = 60, maxRequests = 5, perUser = true)`——同一用户 1 分钟内最多发布 5 篇。这意味着当前发布链的入口拦截不是单层，而是"限流 → 敏感词 → 入库"三层串联。限流不是优化项，而是发布链的正式组成部分：它和 DFA 一样，都在内容入库之前起作用。
 
 真正的检测在 `NoteService.checkSensitiveWords()`，被 `publishNote()` 在第一步调用，见 `my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:88` 到 `:90`。
 
@@ -244,6 +246,8 @@
 
 这在后面做“发布少了”还是“分发坏了”的归因时会非常重要。
 
+但这里有一个很关键的工程边界：`recordNoteEvent()` 内部对写入失败做了 try-catch，失败时只记 error 日志，**不会阻塞发布主流程**（见 `my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:650` 到 `:666`，注释明确写着“写入失败仅告警不阻塞发布主流程”）。这是一个刻意的取舍：可观测性增强不能破坏核心链路。笔记发布成功的判断依据是 `t_note` 和 `LocalMessage` 已经写入，而不是 `NoteEvent` 也写入成功。如果把 NoteEvent 写入失败也变成回滚条件，那么一次事件流水表的抖动就会直接拖垮发布链——当前实现明确拒绝了这个代价。
+
 ## 真实故障案例：为什么“笔记已发布，但 Feed 没推到”比“发布失败”更危险
 
 当前发布链里最危险的失败，不一定是接口直接报错，而是内容链一半成功、一半掉队。
@@ -316,14 +320,16 @@
 
 这篇的关键判断主要由以下证据托底：
 
-- 发布入口与限流：`my-xhs-content/src/main/java/com/myxhs/content/controller/NoteController.java:34`
+- 发布入口与限流：`my-xhs-content/src/main/java/com/myxhs/content/controller/NoteController.java:34`（`@RateLimit` 5/user/60s）
 - 内容实体状态模型：`my-xhs-content/src/main/java/com/myxhs/content/entity/Note.java:44`
 - 发布链主流程：`my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:76`
 - NoteEvent 发布时点流水：`my-xhs-content/src/main/java/com/myxhs/content/entity/NoteEvent.java:12`
+- NoteEvent 写入失败不阻塞发布：`my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:650` 到 `:666`
 - DFA 敏感词过滤器与动态词库：`my-xhs-content/src/main/java/com/myxhs/content/filter/DFAFilter.java:20`、`my-xhs-content/src/main/java/com/myxhs/content/filter/DFAFilter.java:72`
 - 本地消息表与 afterCommit Feed 推送：`my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:107`、`my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:126`
 - Feed 推送补发任务：`my-xhs-content/src/main/java/com/myxhs/content/job/FeedMessageRetryJob.java:18`
 - 草稿保存与草稿发布链：`my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:159`、`my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:404`、`my-xhs-content/src/main/java/com/myxhs/content/controller/NoteController.java:127`
+- 批量详情接口（Feed 场景优化）：`my-xhs-content/src/main/java/com/myxhs/content/controller/NoteController.java:99`
 - 远程 MQ / 文件存储部署事实：`my-xhs-content/src/main/resources/application.yml:118`、`my-xhs-content/src/main/resources/application.yml:125`
 
 ## 边界清单

@@ -167,6 +167,8 @@
 
 其中最关键的是按订单维度写入的 `prededuct` 记录，因为后面的确认和释放都要靠它来找到“这笔订单当初占了哪些库存”。
 
+但当前实现还额外叠了一层经常被漏写的幂等锚点：在真正进入 Lua 预扣前，`preDeduct()` 先往 MySQL 写一条 `insertPredeductIdem(orderId, skuId)` 占位，见 `my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:218` 到 `:238`。它防的不是普通重复请求，而是更隐蔽的场景：Redis 里的 `predeductKey` 丢了、消息又重投进来，如果只靠 Redis 幂等，系统会把同一订单同一 SKU 再扣一遍。也就是说，当前库存链不是只押 Redis 预扣记录做幂等，而是用“Redis + MySQL 占位”双锚点一起兜住重复扣减。
+
 ### 预扣成功后为什么还要发 MQ
 
 预扣成功并不代表库存状态已经完全收敛。Redis 只是先把并发窗口守住了，MySQL 的持久状态还没跟上。
@@ -192,6 +194,8 @@
 3. **微服务问题**：库存域并不是被动响应订单链，它还在主动维护自己的可用性与自愈逻辑；否则订单链一旦继续向前，库存真相就会掉队。
 
 也就是说，库存域真正重的地方，不只是“状态机有三段”，而是**这三段状态机还要在 Redis 失真、桶扩容和消息重投这些工程现实里继续成立。**
+
+这里还值得把热点扩容那条工程线再点透一层。`HotSkuDetector` 本身只是用滑动窗口把热点 SKU 检出来，见 `my-xhs-inventory/src/main/java/com/myxhs/inventory/hot/HotSkuDetector.java:11` 到 `:20`；真正决定系统能不能安全扩容的是 `InventoryService` 在扩容窗口里写入 `inventory:paused:{skuId}` 暂停标记，并通过抛 `ResizeInProgressException` 让预扣/确认/释放延迟重试，见 `my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:242` 到 `:246`、`:387` 到 `:390`、`:452` 到 `:457`。这说明“热点扩容”不是后台静默调大桶数那么简单，而是一次需要主动阻断库存写流、避免继续写旧桶的短暂暂停窗口。
 
 ## 第二级：确认扣减在支付成功之后推进
 
@@ -248,7 +252,7 @@
 
 `PreDeductTimeoutJob` 在 `my-xhs-inventory/src/main/java/com/myxhs/inventory/job/PreDeductTimeoutJob.java:28` 到 `:32` 里已经把原因讲明：Redis Key 过期不保证精确时刻删除，如果没人来主动释放，库存可能被“幽灵锁定”。
 
-同样地，查询库存时系统也不敢盲目把 MySQL 回填回 Redis。`InventoryService.getStock()` 在 `my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:489` 到 `:550` 已经特别处理了这一点：Redis miss 时，宁可直接返回 MySQL 持久值，也不因为“看见数据库里还有 available_stock”就盲目重建 Redis 总库存，否则在途预扣会被覆盖，反而制造超卖。
+同样地，查询库存时系统也不敢盲目把 MySQL 回填回 Redis。`InventoryService.getStock()` 在 `my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:489` 到 `:550` 已经特别处理了这一点：Redis miss 时，宁可直接返回 MySQL 持久值，也不因为“看见数据库里还有 available_stock”就盲目重建 Redis 总库存，否则在途预扣会被覆盖，反而制造超卖。这里最关键的边界不是“缓存 miss 了”，而是**MySQL 在库存链里只是 L2 账本，不一定反映 Redis 里尚未落库的在途预扣**。如果把它当成随时可回填的真相来源，系统会把已经预扣但尚未持久化的库存重新放回可卖池。
 
 所以库存域自己再跑一层超时扫描，把即将过期的预扣记录找出来，回退库存并补发 `RELEASE` 事件。这个机制说明：**释放不只是订单取消动作的副产品，它是库存域为了保证可卖池最终收敛而主动维护的一层修复能力。**
 
@@ -387,8 +391,11 @@
 - 订单创建前的库存前置校验：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:171`
 - 支付成功后的确认扣减：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:716`、`my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:346`、`my-xhs-inventory/src/main/java/com/myxhs/inventory/consumer/InventoryDeductConsumer.java:136`
 - 取消/超时后的释放：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:499`、`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:775`、`my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:413`、`my-xhs-inventory/src/main/java/com/myxhs/inventory/consumer/InventoryDeductConsumer.java:151`
-- 退款回补：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:798`、`my-xhs-inventory/src/main/java/com/myxhs/inventory/controller/InventoryController.java:103`
+- 退款回补：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:798`、`my-xhs-inventory/src/main/java/com/myxhs/inventory/controller/InventoryController.java:103`、`my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:687`
+- 预扣前 MySQL 幂等占位：`my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:218`
+- 热点检测与扩容暂停窗口：`my-xhs-inventory/src/main/java/com/myxhs/inventory/hot/HotSkuDetector.java:11`、`my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:242`、`my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:275`
 - Redis miss 时谨慎回读 MySQL、不盲目回填：`my-xhs-inventory/src/main/java/com/myxhs/inventory/service/InventoryService.java:489`
+- Canal UPDATE 被视为 L1 回声而跳过删缓存：`my-xhs-inventory/src/main/java/com/myxhs/inventory/consumer/InventoryCacheEvictConsumer.java:180`
 - 超时扫描释放：`my-xhs-inventory/src/main/java/com/myxhs/inventory/job/PreDeductTimeoutJob.java:17`
 - L3 对账修复：`my-xhs-inventory/src/main/java/com/myxhs/inventory/job/InventoryReconcileJob.java:16`
 
@@ -411,3 +418,18 @@
 但它还没回答下一个更具体的问题：库存状态机已经成立之后，订单创建本身到底怎样编排地址、SKU、优惠券、库存和本地事务，才能把整条交易主链真正拉起来？
 
 所以下一篇应该进入 `02-order-create.md`，去回答**订单创建为什么不是一次 insert，而是一场把多域真相临时拉进同一条执行链的编排过程**。
+
+
+补：当前 `inventory` 的管理/内部 token 已改为启动期 fail-fast；同时 `skuExists` 在自愈/预扣相关分支里已对齐商品上架语义，不再把下架 SKU 视作可继续建立库存真相的对象。
+
+
+补：`initStock()` 现在用独立初始化锁保护，并把 `total/bucketCount` 放到最后写入，避免只写了 `totalKey` 但桶未完整建立时被误判成“已初始化”的半状态残留。
+
+
+补：`rebuildStockFromDb()` 现在改用 Redisson 分布式锁并把租期放大到 30 秒，避免慢 Redis / 大库存重建时 10 秒短锁过期，导致同一 SKU 并发重建进入重入窗口。
+
+
+补：`sendInventoryEvent()` 在 `PRE_DEDUCT/RELEASE` 发送异常或非 `SEND_OK` 时，现已不再删除 Outbox，而是保留未发送记录交由 `InventoryOutboxSenderJob` 补发，避免发送端误判失败时丢失唯一补偿锚点。
+
+
+补：预扣超时释放任务现在不再用纯 `asyncSend` 发 `RELEASE`，而是会写 Outbox 并同步发送；失败时保留未发送 Outbox 交给 `InventoryOutboxSenderJob` 补发，避免 Redis 已释放但 MySQL locked_stock 长期掉队。

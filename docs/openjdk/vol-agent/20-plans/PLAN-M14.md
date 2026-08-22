@@ -8,7 +8,7 @@
 
 ## 一、M14 目标
 
-根据 `docs/product/02-mvp-scope.md` 第143行：
+根据 `../vol-agent/10-product/02-mvp-scope.md` 第143行：
 
 ```
 | M14 大库 | FTS5 降级链+WAL+租约(19/20) | 50 章全书检索 | 腾讯A/美团F 考点 |
@@ -166,7 +166,7 @@
 
 ## 五、面试考点
 
-根据 `docs/product/02-mvp-scope.md`：
+根据 `../vol-agent/10-product/02-mvp-scope.md`：
 
 ### 腾讯A 考点
 - **存储**：SQLite/WAL 实现
@@ -236,8 +236,8 @@
 
 ## 九、参考文档
 
-- `docs/product/02-mvp-scope.md`：M14 定义
-- `docs/product/05-数据契约.md`：事件契约
-- `docs/product/06-系统技术设计.md`：系统设计
+- `../vol-agent/10-product/02-mvp-scope.md`：M14 定义
+- `../vol-agent/10-product/05-数据契约.md`：事件契约
+- `../vol-agent/10-product/06-系统技术设计.md`：系统设计
 - `src/core/event-log.ts`：当前事件日志实现
 - `src/knowledge/conclusions.ts`：当前结论库实现

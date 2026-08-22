@@ -1,7 +1,7 @@
 # HANDOFF-XHS — 小红书电商平台业务深度分析交接文档
 
-> **状态**: 2026-08-18 | 代码修复阶段完结，业务梳理阶段待启动
-> **交接范围**: `my-xhs` 微服务平台（16+ 服务）的代码修复 + 运行状态恢复 + 业务深度分析规划
+> **状态**: 2026-08-22 | 代码修复阶段已多轮收口，业务深度分析正文已大面积落稿
+> **交接范围**: `my-xhs` 微服务平台（16+ 服务）的代码修复 + 运行状态恢复 + 业务深度分析正文与方法论收束
 > **接收者**: 新 AI —— 读本文件即可继续，不要依赖旧会话记忆
 
 ---
@@ -10,9 +10,9 @@
 
 **项目**: 小红书（my-xhs）微服务平台，Spring Cloud + Nacos + RocketMQ + MySQL + Redis + ES + SkyWalking 全栈电商系统。
 
-**当前状态**: 代码级 bug 修复与服务恢复已完结；核心业务端口 `19000/01/02/03/04/08/09/10/11/12/13/14/15/16` 全通；关键服务已重启到新代码。
+**当前状态**: 代码级 bug 修复已继续推进并补出多轮真实修复；核心业务端口 `19000/01/02/03/04/08/09/10/11/12/13/14/15/16` 全通；`vol-xhs` 已从目录规划推进到大部分目录组存在正文与模块专章。
 
-**下一步（阶段转折）**: 代码修复阶段完结 → **重头梳理业务**。在 `vol-xhs/` 下 13 个子目录逐域做深度梳理，从全局架构（`00-overview`）开始，沿主交易链（`03-product → 04-cart-coupon → 05-inventory-order-payment`）推进，最终覆盖全部业务域。详见 §〇·五。
+**下一步（阶段转折）**: 业务梳理主骨架已建立，下一阶段从“起稿”转为**横切目录收口 + 运行态证据补强**。优先继续 `09-data-model-storage → 10-async-task-transaction → 11-runtime-failure-review → 12-testing-release-ops`。详见 §〇·五。
 
 **铁律**: ① 读源码再写，不凭记忆；② 每篇必须有"读者困惑→机制拆解→设计取舍"主线；③ 删掉代码后文章主线仍能成立；④ 故障案例必须有根因→修复→验证三段。
 
@@ -27,17 +27,18 @@
 - 14 个核心服务的运行状态恢复（端口全通、启动日志正常）
 - 可观测性全链路闭环（SkyWalking/Prometheus/Grafana/ES 日志）
 
-**代码修复阶段到此完结。下一阶段是"重头梳理业务"。**
+**代码修复阶段已多轮收口。当前阶段是"横切目录收口 + 运行态证据补强"。**
 
 ### 下一阶段目标
 
-在 `/data/workspace/source-code/openjdk-book/docs/openjdk/vol-xhs/` 下，按业务域逐个做深度梳理，产出可阅读、可交接的技术文档。
+在 `/data/workspace/source-code/openjdk-book/docs/openjdk/vol-xhs/` 下，继续把剩余横切目录系统收口，并同步把已修代码问题、运行态证据和交接口径持续对齐。
 
 这不是"把源码抄一遍"，而是：
-- 把每个业务域的**核心流程**讲清楚（用户怎么下单、库存怎么扣减、优惠券怎么核销）
+- 把每个业务域和横切目录的**核心流程**讲清楚（用户怎么下单、库存怎么扣减、补偿怎么收口）
 - 把每个域的**设计取舍**讲清楚（为什么用三级扣减而不是直接扣、为什么用事务消息而不是本地事务）
-- 把每个域的**真实故障案例**讲清楚（端口冲突、死信消息、Feign 超时）
-- 把跨域的**依赖关系**讲清楚（order 怎么编排 inventory/coupon/payment）
+- 把每个域的**真实故障案例**讲清楚（端口冲突、死信消息、Feign 超时、启动失败）
+- 把跨域的**依赖关系**讲清楚（order 怎么编排 inventory/coupon/payment，gateway/common 怎么影响全站）
+- 把**代码修复状态、文档结论、运行态证据**持续收成一致口径
 
 ### 执行路径
 
@@ -210,7 +211,9 @@ vol-xhs/
 │   ├── 01-note-publish.md        — 笔记发布（图文/视频）
 │   ├── 02-feed-flow.md           — Feed 流（推拉混合）
 │   ├── 03-interaction.md         — 点赞/收藏/评论/分享
-│   └── 04-content-moderation.md  — 内容审核与风控
+│   ├── 04-content-moderation.md  — 内容审核与风控
+│   ├── 05-analytics-social-graph.md — analytics 关系真相层
+│   └── 06-counter-view.md        — counter 计数展示层
 │
 ├── 03-product-sku-catalog/       — 商品、SKU、类目
 │   ├── 01-spu-sku-model.md       — SPU/SKU 数据模型
@@ -235,19 +238,24 @@ vol-xhs/
 │   ├── 01-es-search.md           — ES 全文搜索
 │   ├── 02-recommend-pipeline.md  — 推荐 Pipeline
 │   ├── 03-hot-search.md          — 热搜滑动窗口
-│   └── 04-home-bff.md            — 首页 BFF 聚合
+│   ├── 04-home-bff.md            — 首页 BFF 聚合
+│   ├── 05-search-module.md       — search 模块专章
+│   └── 06-home-module.md         — home 模块专章
 │
 ├── 07-im-notification-message/   — IM、通知、消息
 │   ├── 01-websocket-im.md        — WebSocket IM 架构
 │   ├── 02-sse-notification.md    — SSE 推送
 │   ├── 03-message-aggregation.md — 消息聚合与未读计数
-│   └── 04-cross-instance.md      — 跨实例消息路由
+│   ├── 04-cross-instance.md      — 跨实例消息路由
+│   ├── 05-im-module.md           — im 模块专章
+│   └── 06-notification-module.md  — notification 模块专章
 │
 ├── 08-gateway-security-observability/ — 网关、安全、可观测
 │   ├── 01-gateway-routing.md     — 路由与过滤器链
 │   ├── 02-jwt-hmac.md            — JWT + HMAC 签名
 │   ├── 03-sentinel-limit.md      — Sentinel 限流熔断
-│   └── 04-observability.md       — SkyWalking + Prometheus + Grafana
+│   ├── 04-observability.md       — SkyWalking + Prometheus + Grafana
+│   └── 05-gateway-module.md      — gateway 模块专章
 │
 ├── 09-data-model-storage/        — 数据模型与存储
 │   ├── 01-mysql-sharding.md      — MySQL 分库分表（ShardingSphere）
@@ -273,11 +281,22 @@ vol-xhs/
 │   ├── 03-deploy-pipeline.md     — 部署流程
 │   └── 04-monitoring-alert.md    — 监控告警
 │
+├── 13-common-cross-cutting/      — common 横切基础设施
+│   ├── 01-common-infrastructure.md — common 横切能力总览
+│   └── 02-common-module.md       — common 模块专章
+
 ├── HANDOFF-XHS.md                — 本交接文档
 └── README.md                     — 卷级总览
 ```
 
-### 3.2 每篇写作要求
+### 3.2 当前进度快照（2026-08-22）
+
+- `00` 到 `12` 各目录都已存在主稿
+- `02`、`06`、`07`、`08`、`13` 已补出模块专章（如 `analytics/counter`、`search/home`、`im/notification`、`gateway/common`）
+- `09`、`10`、`11`、`12` 也已经建立主骨架，不再是空白目录
+- `SUMMARY.md` 当前模块正文统计已更新到 `62` 篇；另有 7 篇入口/方法论/交接文件
+
+### 3.3 每篇写作要求
 
 每篇文档必须包含：
 
@@ -288,28 +307,18 @@ vol-xhs/
 5. **故障案例**：真实的 bug/故障及其修复
 6. **桥接下一篇**：悬念引向下一个主题
 
-### 3.3 写作优先级建议
+### 3.4 写作优先级建议
 
-**P0（核心交易链，最先写）**：
-- `00-overview-architecture/` — 全局心智模型
-- `05-inventory-order-payment/` — 主交易链
-- `04-cart-coupon-marketing/` — 交易前置
-
-**P1（用户可见功能）**：
-- `01-user-account-auth/` — 用户入口
-- `03-product-sku-catalog/` — 商品基础
-- `06-search-recommendation-home/` — 流量入口
-
-**P2（支撑功能）**：
-- `02-content-feed-interaction/` — 内容生态
-- `07-im-notification-message/` — 消息触达
-- `08-gateway-security-observability/` — 基础设施
-
-**P3（横切面）**：
+**当前优先级已经转移到横切目录收口**：
 - `09-data-model-storage/` — 数据层
 - `10-async-task-transaction/` — 异步机制
 - `11-runtime-failure-review/` — 故障复盘
 - `12-testing-release-ops/` — 工程实践
+
+**次优先级**：
+- 回头补 `07-im-notification-message/` 多实例运行态证据
+- 回头补 `06-search-recommendation-home/` 的容量热点与运行态风险
+- 把最新代码修复同步回更多测试 / 故障 /交接文档
 
 ---
 

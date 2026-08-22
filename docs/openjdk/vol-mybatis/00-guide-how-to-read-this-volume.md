@@ -136,3 +136,18 @@
 
 - 系统理解 MyBatis 本体 + Spring/Boot 接桥
 - 为后续生产层专题打地基
+## 本卷在四卷体系中的位置
+
+本卷是四卷体系的第二阶段——ORM 层入口：
+
+```
+第一阶段（数据源层）：
+  vol-hikaricp（9篇）← 建立连接池的参照系
+    └──→ vol-druid（9篇）← 以 HikariCP 为对照基准
+
+第二阶段（ORM 层）：
+  vol-mybatis（11篇）← 入口，先建立 MyBatis 原生体系
+    └──→ vol-mybatis-plus（8篇）← 以 MyBatis 为阅读前提
+```
+
+本卷与 MyBatis-Plus 的关系：本卷是 `vol-mybatis-plus` 的阅读前提。MP 的所有增强机制（Configuration 替换、SQL 注入、Wrapper 等）都建立在 MyBatis 原生体系之上。建议先读本卷，再读 `vol-mybatis-plus`。本卷与 `vol-hikaricp` / `vol-druid` 正交，无交叉引用。

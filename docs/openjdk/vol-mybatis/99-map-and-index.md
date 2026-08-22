@@ -93,3 +93,10 @@ mybatis-config.xml / mapper resources
   - 懒加载线程/生命周期边界
 
 这意味着：本卷已经能回答“系统如何工作”，但“线上故障如何按专题排”仍是下一阶段补层。
+## 七、跨卷位置
+
+本卷是四卷体系第二阶段的入口：
+
+- 本卷覆盖：MyBatis 原生体系（配置启动、MapperProxy、SqlSession、Executor、缓存、动态 SQL、类型映射、Cursor、XML/注解双入口、Spring/Boot 集成）
+- 后续卷：`vol-mybatis-plus` — 以本卷为阅读前提，展开 MP 增强机制
+- 无关卷：`vol-hikaricp` / `vol-druid` — ORM 与连接池正交，无交叉引用

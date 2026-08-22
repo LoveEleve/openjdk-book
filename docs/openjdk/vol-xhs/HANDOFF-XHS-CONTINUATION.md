@@ -204,9 +204,12 @@
 2. `02-content-feed-interaction/02-feed-flow.md`
 3. `02-content-feed-interaction/03-interaction.md`
 4. `02-content-feed-interaction/04-content-moderation.md`
+5. `02-content-feed-interaction/05-analytics-social-graph.md`
+6. `02-content-feed-interaction/06-counter-view.md`
 
 当前状态：
 - 内容主链已立住：发布 → Feed → 互动 → 审核边界
+- 互动链已补出两个单独的关系/计数视角：`analytics` 持有社交关系真相，`counter` 持有计数展示视图
 - 审核篇已经明确：当前实现是 DFA 前置 + 审核语义预留，不是完整人工审核平台
 
 ### 03-product-sku-catalog
@@ -251,11 +254,13 @@
 2. `06-search-recommendation-home/02-recommend-pipeline.md`
 3. `06-search-recommendation-home/03-hot-search.md`
 4. `06-search-recommendation-home/04-home-bff.md`
+5. `06-search-recommendation-home/05-search-module.md`
+6. `06-search-recommendation-home/06-home-module.md`
 
 当前状态：
-- 流量入口组四篇已经起稿
+- 流量入口组已经补到 6 篇
 - 搜索、推荐、热搜、BFF 的主线都立住了
-- 推荐和热搜仍可继续补运行态证据，但骨架已在
+- 已新增 search / home 两个模块专章，并补入真实故障案例与修复前后对比
 
 ### 07-im-notification-message
 
@@ -263,11 +268,13 @@
 2. `07-im-notification-message/02-sse-notification.md`
 3. `07-im-notification-message/03-message-aggregation.md`
 4. `07-im-notification-message/04-cross-instance.md`
+5. `07-im-notification-message/05-im-module.md`
+6. `07-im-notification-message/06-notification-module.md`
 
 当前状态：
-- IM / SSE 通知 / 通知聚合与未读数 / 跨实例路由四篇已齐
+- IM / SSE 通知 / 通知聚合与未读数 / 跨实例路由四篇主线已齐
+- 已新增 `im` / `notification` 两个模块专章，并补入真实故障案例
 - “通知 ≠ IM”的边界已经比较清楚
-- 07 组当前已完成一轮系统深审，可继续补更多跨实例运行态证据
 
 ---
 
@@ -313,7 +320,6 @@
 
 ### P2：还没真正系统开写或仅起了局部骨架
 
-- `08-gateway-security-observability/`
 - `09-data-model-storage/`
 - `10-async-task-transaction/`
 - `11-runtime-failure-review/`
@@ -323,7 +329,6 @@
 
 尤其要注意：
 
-- `08` 会把 JWT/HMAC/Sentinel/Gateway 路由和可观测性统一串起来
 - `09` 会把分库分表、Redis、ES、MQ Topic 这些基础数据结构串起来
 - `10` 会把异步/事务/补偿统一成一组跨域机制
 - `11` 会把端口冲突、死信、Feign 超时、启动失败这些真实故障系统复盘
@@ -331,23 +336,51 @@
 
 ---
 
-## 八、建议的后续推进顺序
+## 八、当前最新代码修复与剩余风险
 
-### 方案 A：继续沿当前用户感知链推进（推荐）
+### 已落代码修复（本轮新增）
 
-如果新 AI 要延续当前写作节奏，建议：
+1. `my-xhs-home/src/main/java/com/myxhs/home/job/FeedCleanupJob.java`
+   - 修复清理任务限速计数器作用域，恢复“每 100 条 sleep 50ms”节流
+2. `my-xhs-search/src/main/java/com/myxhs/search/job/IncrementalIndexSyncJob.java`
+   - Redis 补偿集合改原子 `pop()`，避免多实例重复补偿
+3. `my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java`
+   - 支付成功改成先 Feign 通知订单，再发结果 MQ，缩小乱序窗口
+4. `my-xhs-im/src/main/java/com/myxhs/im/handler/ImWebSocketHandler.java`
+   - 心跳续期前先校验本地 session 仍存在且 `isOpen()`
+5. `my-xhs-analytics/src/main/java/com/myxhs/analytics/service/FollowService.java`
+   - 共同关注改成 `intersectAndStore + range`，避免把完整交集先拉回 JVM
+6. `my-xhs-counter/src/main/java/com/myxhs/counter/dto/CounterBatchRequest.java`
+   - 批量计数查询增加输入上限
+7. `my-xhs-user/src/main/java/com/myxhs/user/controller/UserController.java`
+   - 新增批量公开用户信息接口
+8. `my-xhs-home/src/main/java/com/myxhs/home/service/FeedService.java`
+   - 作者信息改成单次批量 Feign；大 V 关注列表增加 5 分钟缓存
+9. `my-xhs-payment/src/main/java/com/myxhs/payment/consumer/PayResultConsumer.java`
+   - 空壳消费者默认关闭，不再默认订阅后只打日志
+10. `my-xhs-payment/src/main/java/com/myxhs/payment/consumer/RefundResultConsumer.java`
+    - 空壳消费者默认关闭，不再默认订阅后只打日志
+11. `my-xhs-content/src/main/java/com/myxhs/content/mapper/CommentMapper.java`
+    - 去掉 MySQL 8 窗口函数依赖，改成 MySQL 5.7 兼容写法
+12. `my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java`
+    - `getOrderPayAmount()` 只对待支付订单返回金额，和支付补偿链语义对齐
+13. `my-xhs-search/src/main/java/com/myxhs/search/service/RecommendService.java`
+    - 修复用户偏好分计算：改为按 `userId + category` 真正参与精排
+14. `my-xhs-common/src/main/java/com/myxhs/common/aspect/ReadWriteRoutingInterceptor.java`
+    - `SELECT ... FOR UPDATE` 不再误路由到从库
 
-1. 进入 `08-gateway-security-observability/`
-2. 再转 `09 / 10 / 11 / 12` 横切专题
-3. 继续回头用部署/运行态事实补强 `07-im-notification-message/` 的跨实例与离线补投证据
+### 仍有风险但未继续硬改
 
-优点：
-- 当前上下文连续
-- 不会突然从用户感知链跳到纯存储层，认知切换更顺
+- `my-xhs-search/src/main/java/com/myxhs/search/recommend/ContentRecallStrategy.java`
+  - 标签召回仍靠 MySQL `LIKE`，数据量上来后会是慢查询热点；这更像读模型容量上限，后续宜迁到 ES / 倒排视图，而不是继续在现有表上做 SQL 小修补
+- `my-xhs-home/src/main/java/com/myxhs/home/service/FeedService.java`
+  - 大关注集第一次缓存未命中时，仍会全量扫关注 ZSet
+- `my-xhs-common` 多处 Redis 故障时仍采取降级放行策略
+  - 属于平台级风险窗口，不是单点 bug
 
-### 方案 B：回到横切面，把主链统一收口
+## 九、建议的后续推进顺序
 
-如果希望尽快建立“全卷第二层框架”，可转入：
+### 方案 A：转入真正还没写透的横切目录（推荐）
 
 1. `09-data-model-storage/01-mysql-sharding.md`
 2. `09-data-model-storage/02-redis-strategy.md`
@@ -355,14 +388,20 @@
 4. `11-runtime-failure-review/01-port-conflict.md`
 
 优点：
+- 现在 `08`、`13` 也已经补出模块专章，用户可感知链和入口控制层都不再是空白
 - 可以把前面多篇反复出现的技术机制统一收束
-- 方便后续所有篇章引用
 
-当前更推荐 **方案 A**，因为前面的用户/内容/搜索/通知感知链刚写顺，继续推进最自然。
+### 方案 B：回头继续打磨运行态热点
+
+1. 深挖 `ContentRecallStrategy` 的标签 `LIKE` 召回容量边界
+2. 继续补 `07-im-notification-message/` 的多实例运行态证据
+3. 继续把已修代码问题同步进更多测试文档 / 故障文档
+
+当前更推荐 **方案 A**，因为现在最欠缺的已经不是用户主链正文，而是 `09~12` 这些横切目录的系统收束。
 
 ---
 
-## 九、接手后最容易犯的错（务必避免）
+## 十、接手后最容易犯的错（务必避免）
 
 1. **把“有字段/有枚举/有接口”误写成“完整能力已落地”**
    - 典型例子：
@@ -395,7 +434,7 @@
 
 ---
 
-## 十、下一位 AI 的开场动作
+## 十一、下一位 AI 的开场动作
 
 接手后建议按这个顺序开工：
 
@@ -412,20 +451,21 @@
 
 优先候选：
 
-1. `08-gateway-security-observability/01-gateway-routing.md`（如果转入横切基础设施）
-2. `09-data-model-storage/01-mysql-sharding.md`（如果转入数据模型横切）
-3. 回头补强 `07-im-notification-message/04-cross-instance.md` 的多实例运行态证据（如果继续打磨通知/IM 链）
+1. `09-data-model-storage/01-mysql-sharding.md`
+2. `09-data-model-storage/02-redis-strategy.md`
+3. `10-async-task-transaction/01-async-event.md`
+4. 回头补强 `07-im-notification-message/04-cross-instance.md` 的多实例运行态证据
 
 当前更推荐：
 
-**`08-gateway-security-observability/01-gateway-routing.md`**
+**`09-data-model-storage/01-mysql-sharding.md`**
 
 原因：
-- 用户入口 / 会话 / 权限 / 搜索 / 内容 / 通知 / IM 都已经写到一定程度
-- 现在开始写 Gateway，会把前面很多零散出现的入口、白名单、鉴权、HMAC、路由、限流重新收成一个更高层的总图
+- `08-gateway-security-observability/` 和 `13-common-cross-cutting/` 已经补出模块专章，不再是最空白的位置
+- 现在最需要的是把前面交易链、支付链、搜索链、通知链里反复出现的分库分表与 Redis/ES/MQ 数据平面统一收束
 
 ---
 
-## 十一、一句话交接
+## 十二、一句话交接
 
 当前 `vol-xhs` 已经完成了“方法论收口 + 多个核心业务域正文起稿并多轮 review 收敛”的关键阶段，最重要的交易主链、商品链、用户会话链、搜索推荐链和内容/通知感知链都已立住主骨架。下一位 AI 不要重头再铺总览，而应在**继续写未完成目录**和**回头用部署/运行态事实补强已有篇章**之间，沿着当前方法论继续推进。

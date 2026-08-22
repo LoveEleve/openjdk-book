@@ -180,6 +180,13 @@
 
 这说明营销前置链在工程上也不是一个整体原子块，而是：**商品待购集合是强依赖，可用券候选是弱依赖。** 这对后面理解“为什么购物车页能打开但当前没有推荐可用券”非常重要。
 
+这里再补一个和 cart 强相关、但文档里之前还没写透的边界：购物车页当前展示的是“可买候选集合”，不是“最终可结算集合”。`CartService.getCartList()` 只会根据 `SKU.status` 和 `SPU.status` 把条目标成 `valid=false`，见 `my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:430` 到 `:451`；它**不会**在这个阶段去查真实库存。也就是说：
+
+- cart 阶段回答的是“这个商品骨架现在还在不在卖”
+- inventory/order 阶段才回答“它现在有没有货、这次能不能真正下单”
+
+如果把购物车页上的 `valid` 误读成“已经可结算”，后面就会误判整条营销前置链已经包含了库存裁决。实际上当前实现刻意把“商品有效性”和“库存可交易性”拆在两个阶段。
+
 ## 当前实现里的第三层：coupon 域只负责单券规则，不负责多规则编排
 
 这层是当前系统最容易被高估的地方。
@@ -212,6 +219,8 @@ coupon 域当前的规则入口仍然是单张券：
 ```
 
 它没有承担“多张券之间如何比较、如何叠加、如何互斥”的职责。
+
+这里要再强调一次：这不是因为文档写法保守，而是因为输入边界本身就只允许单券。`OrderCreateRequest` 只有一个 `couponId`，coupon 服务试算和核销也都是单券接口，所以“当前营销栈的折扣输入点只有一个”不是推论，而是代码接口签名直接钉死的事实。
 
 ## 当前实现里的第四层：order 域把单券结果和总价收敛成最终支付金额
 
@@ -391,6 +400,7 @@ coupon 域拿到的是 `orderAmount`，不是购物车原始条目集合，也�
 这篇的关键判断主要由以下证据托底：
 
 - 购物车聚合时并行拉可用券：`my-xhs-home/src/main/java/com/myxhs/home/service/CartAggService.java:25`、`my-xhs-home/src/main/java/com/myxhs/home/service/CartAggService.java:66`
+- cart 阶段只按 SKU/SPU 状态标有效，不查真实库存：`my-xhs-cart/src/main/java/com/myxhs/cart/service/CartService.java:430`
 - 可用券当前只是候选集，聚合层不做优先级计算：`my-xhs-home/src/main/java/com/myxhs/home/dto/CartAggVO.java:43`、`my-xhs-home/src/main/java/com/myxhs/home/service/CartAggService.java:129`
 - 可用券候选过滤：`my-xhs-coupon/src/main/java/com/myxhs/coupon/service/CouponService.java:434`
 - 优惠券模板规则类型：`my-xhs-coupon/src/main/java/com/myxhs/coupon/entity/CouponTemplate.java:13`

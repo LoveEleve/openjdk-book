@@ -290,6 +290,18 @@ DFA 规则前置通过 → 直接视为审核通过并发布
 
 这个案例说明，**内容审核最容易让人误判的，不是算法能力本身，而是模型层“看起来像有审核平台”，结果发布主链实际仍停在规则前置拦截阶段。**
 
+## 文件上传安全：审核不只是文本，还有文件本身
+
+前面讲的 DFA 审核都是针对文本内容（标题、正文、评论）。但笔记发布还涉及图片上传，而 `LocalFileStorageService` 在 `my-xhs-content/src/main/java/com/myxhs/content/service/LocalFileStorageService.java:29` 到 `:120` 中，对文件上传做了三层递进的安全校验：
+
+1. **Content-Type 白名单**：只允许 `image/jpeg`、`image/png`、`image/gif`、`image/webp` 四种类型
+2. **文件大小限制**：最大 5MB，且在读取文件内容之前就检查——避免大文件 `getBytes()` 导致 OOM
+3. **文件头魔数校验**：读取前 12 字节，验证 JPEG（`FF D8`）、PNG（`89 50 4E 47`）、GIF（`47 49 46 38`）、WebP（`RIFF...WEBP`）的魔数签名，防止 Content-Type 伪造
+
+这三层的顺序很重要：先查声明类型，再查大小，最后才读文件头。如果反过来先读文件头，一个 100MB 的伪造文件会先被读进内存再被拒绝——当前实现明确避免了这个代价。
+
+文件名也不信任客户端：扩展名从服务端校验过的 Content-Type 推导，文件名用 UUID 生成，存储路径按日期分层。这说明当前系统的文件审核不只是"检测内容违规"，还包括"防止文件类型伪造和存储安全"。
+
 ## 这一篇先收束成一张总图
 
 ```text
@@ -328,6 +340,7 @@ DFA 规则前置通过 → 直接视为审核通过并发布
 - `AUDITING` 被状态流转逻辑识别：`my-xhs-content/src/main/java/com/myxhs/content/enums/NoteStatus.java:29`、`my-xhs-content/src/main/java/com/myxhs/content/service/NoteService.java:413`
 - 评论链当前为规则前置拦截：`my-xhs-content/src/main/java/com/myxhs/content/service/CommentService.java:67`
 - NoteEvent 记录发布/审核时点：`my-xhs-content/src/main/java/com/myxhs/content/entity/NoteEvent.java:12`
+- 文件上传三层安全校验（白名单+大小+魔数）：`my-xhs-content/src/main/java/com/myxhs/content/service/LocalFileStorageService.java:37`、`:43`、`:66`
 
 ## 边界清单
 
@@ -335,6 +348,7 @@ DFA 规则前置通过 → 直接视为审核通过并发布
 - 当前审核核心是 DFA 规则前置；是否接入更复杂的人工审核流、风控模型或机器审核平台，本文没有源码证据，不能外推。
 - `rejectReason`、`AUDITING`、`REJECTED` 等字段和状态说明模型层已预留扩展空间，但不等于当前主链已使用它们。
 - 本篇不展开敏感词词库来源、运营后台如何管理动态词库，这属于后续运维/平台专题。
+- 文件上传安全已在本篇补充，因为它是内容审核的另一面——不只是文本要审，文件本身也要防伪造和恶意上传。
 - `ai-app`、`ai-mcp`、`ai-tools` 不进入本篇分析线。
 
 ## 这篇解决了什么，还留下什么问题

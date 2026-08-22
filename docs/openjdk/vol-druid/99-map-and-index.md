@@ -80,3 +80,10 @@ Web application + enabled=true
 - HikariCP 重点是连接生命史、`ConcurrentBag`、HouseKeeper、诊断与可观测。
 - Druid 重点是固定数组 + Lock/Condition、维护扫描、Filter 链、SQL 解析/统计/安全和 Boot 装配。
 - 两卷共享“连接不是静态容器，而是生命周期系统”的抽象，但不应把一个项目的并发或验证实现套到另一个项目。
+## 七、跨卷位置
+
+本卷是四卷体系第一阶段的第二卷：
+
+- 本卷覆盖：Druid 连接池（池本体、Filter 链、SQL 解析/统计/安全、Boot 装配）
+- 前置对照卷：`vol-hikaricp` — 建议先读，建立连接池参照系
+- 无关卷：`vol-mybatis` / `vol-mybatis-plus` — 连接池与 ORM 正交，无交叉引用

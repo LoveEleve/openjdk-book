@@ -128,6 +128,8 @@
 
 以 `PaymentNotifyCompensateJob` 为例：它不会因为一次 Feign 失败就盲目重试，而是先扫支付成功记录，再通过 `getOrderPayAmount` 间接判断订单当前是否仍需要这次支付事实；只有当返回结果表明订单侧仍保留“待支付”缺口时，才重新调用 `notifyPaySuccess`。也就是说，这里补的不是“某次 HTTP 失败”，而是“支付结果尚未被订单状态机吸收”这一条缺口。`my-xhs-payment/src/main/java/com/myxhs/payment/job/PaymentNotifyCompensateJob.java:128`
 
+这里值得补一条最新修正：`OrderService.getOrderPayAmount()` 过去会对所有存在的订单都返回 `payAmount`，和补偿任务注释里的“只有待支付才返回金额”语义其实不一致；现在已经改成仅待支付订单返回金额，其余统一返回 `null`。因此这条 timeout/补偿链的状态判断终于和代码语义对齐了，不再依赖注释大于实现。`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:1208`
+
 退款补偿也是一样：先查退款成功记录，再问订单域当前状态，如果仍然缺这次退款事实，就重新通知；若订单服务不可达或状态异常，则累加 Redis 计数、等待下一轮；超过阈值，再暴露人工边界。`my-xhs-payment/src/main/java/com/myxhs/payment/job/RefundNotifyCompensateJob.java:81`
 
 这说明在 `my-xhs` 里，Feign timeout 不是靠“网络恢复后自动成功”去理解的，而是靠“现在系统里还有没有一条状态缺口没补上”去理解的。只有把 timeout 解释成状态缺口，补偿任务的存在才是合理的。

@@ -339,3 +339,27 @@
 - 首页聚合为什么会把搜索、内容、用户和通知重新拼在一起
 
 所以下一篇应该进入 `02-recommend-pipeline.md`，去回答**推荐链如何从用户行为和内容特征里继续召回与排序，而不是只靠搜索关键词**。
+
+
+补：笔记索引同步消费者现在不再把这类异常静默吞掉，而是会把失败 `noteId` 记入 Redis 集合并抛异常触发重试；即使最终重试耗尽，也还有增量索引补偿任务可以继续收尾。
+
+## ES 索引 Mapping 设计
+
+`my-xhs-search/src/main/java/com/myxhs/search/config/IndexInitializer.java:66` 定义了三个 ES 索引的 Mapping：
+
+- **note_index**：3 分片 1 副本，`title` 用 `ik_max_word` 分词 + `ik_smart` 搜索，`content` 用 `ik_smart`，`likeCount/collectCount/commentCount` 为 `long` 类型，`createdAt` 支持多种日期格式
+- **product_index**：3 分片 1 副本，`price` 用 `scaled_float`（scaling_factor=100）避免浮点精度问题，`name` 用 `ik_max_word` + `ik_smart`
+- **suggest_index**：1 分片 1 副本，`keyword` 用 `completion` 类型（FST 数据结构），配合 `SuggestService` 的 Completion Suggester 实现输入联想
+
+## ES 索引增量补偿
+
+`my-xhs-search/src/main/java/com/myxhs/search/job/IncrementalIndexSyncJob.java:55` 是 Canal 同步失败后的分钟级补偿任务：
+
+- `NoteIndexSyncConsumer`/`ProductIndexSyncConsumer` 在 ES 通信异常时将失败 docId 写入 Redis Set（`myxhs:es:sync:failed:note` / `myxhs:es:sync:failed:product`）
+- `IncrementalIndexSyncJob` 每 5 分钟扫描这些 Set，从 MySQL 查询最新数据，通过 ES Bulk API 批量重索引
+- 使用 `updated_at` 毫秒时间戳作为 `ExternalGte` 版本，与 Canal 的 `ts` 版本域统一，避免补偿巨值版本永久拦截后续 Canal 增量（P1-4 修复）
+- 商品查询跨库 `my_xhs_product.t_spu`，与 `search` 默认数据源 `my_xhs_content` 不同（P1-5 修复需显式库前缀）
+
+## 点赞计数同步到 ES
+
+`my-xhs-search/src/main/java/com/myxhs/search/consumer/LikeCountSyncConsumer.java:34` 监听 `SOCIAL_TOPIC:LIKE/UNLIKE`，读取 analytics 侧 Redis Set 的 SCARD（而非 counter 侧 key，避免并行消费时序竞争），通过 ES partial update 只更新 `likeCount` 字段，不重写全量文档。

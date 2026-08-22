@@ -141,6 +141,8 @@ Search After 的核心要求是：服务端排序值必须稳定、可序列化�
 
 `my-xhs-search` 的 `application.yml` 里明确保留了 `search.rebuild.batch-size=500` 和凌晨 4 点的 cron 配置，这本身就是一种非常清楚的信号：作者从来没有把增量链当成“永不漂移”的真理，而是默认需要全量重建来做周期性校正。`my-xhs-search/src/main/resources/application.yml:126`
 
+这里还要把这轮新修的一点补进去：推荐精排里的“用户偏好维度”之前其实是名义存在、实际失效的——旧实现错误地用 `noteId` 去拼用户标签 key，最终又固定返回 `0.5`，等于索引和特征明明都在，精排却没有真正吸收用户兴趣。现在已经修成按 `userId + category` 读取 `RECOMMEND_USER_TAGS` 权重，这再次说明：搜索/推荐这套 ES 读模型系统，危险点不只在“索引有没有同步”，也在“读链后半段是不是真的把这些索引与特征用起来了”。`my-xhs-search/src/main/java/com/myxhs/search/service/RecommendService.java:389`
+
 这条设计的意义非常大。因为增量链只要出现一次 Canal 延迟、MQ 堵塞、Consumer 补全失败、字段覆盖错误、版本冲突，ES 投影就会慢慢偏离 MySQL 真相。如果没有全量重建，偏差只能靠人工纠错或单条补偿去慢慢修；而定时 rebuild 的意义，就是定期让“查询视图”回到“主数据当前应有的样子”。
 
 这也解释了为什么项目历史材料经常把 `IndexRebuildJob` 写成“凌晨 4 点全量兜底”。它不是浪费资源的重复工作，而是对异步投影链天然漂移风险的承认。
@@ -209,6 +211,8 @@ L2 运行态证据：
 第三，当前可以明确写出 Search After 修复后曾做到 3 页无重复，但不能把它写成“任意排序组合都已经永远安全”。分页协议的正确性仍依赖排序字段选择与序列化实现，不是一次修复后永久免疫。
 
 第四，当前可以明确写出 `_id` tiebreaker 和 Search After 序列化都曾引发真实故障，但不能因此把 ES 整体写成“不稳定组件”。更准确的说法是：ES 读写链的边界比单库查询复杂，必须持续用排序、分页、版本与补偿纪律去约束。
+
+第五，当前可以明确写出推荐里的 `ContentRecallStrategy` 仍对 `t_item_feature.tags` 做 MySQL `LIKE` 召回，这在数据量上来后会成为容量热点；但不能把它仓促写成“立刻可以用几行 SQL 安全修掉”的确定性 bug。更稳妥的口径是：它属于当前读模型设计的容量上限，后续更适合迁到 ES 或独立倒排视图，而不是在现有表上继续打补丁。`my-xhs-search/src/main/java/com/myxhs/search/recommend/ContentRecallStrategy.java:61`
 
 ## 收网：这篇 ES Index 真正建立了什么
 

@@ -23,6 +23,8 @@
 
 但前面关注的是这些扩展“被使用时做了什么”，没有回答它们“是怎么被找到、创建、包装和注入的”。
 
+这里要先切换一个视角：**本篇不是讲某个扩展自己怎么工作，而是讲 Dubbo 为什么能把这些扩展动态拼出来。**
+
 本篇把视角反过来：不再从某个 Protocol 或 Filter 的业务行为出发，而是从 `ExtensionLoader` 出发，解释 Dubbo 如何把一组类装配成前面那些运行链。
 
 ## 三、先走三条失败的路
@@ -86,6 +88,9 @@ Lifecycle.initialize()
 Adaptive 和 Activate 是两条不同的旁路：
 
 ```text
+getExtension(name)
+    → 固定名称，拿一个明确实现
+
 getAdaptiveExtension()
     → URL key / protocol → getExtension(realName)
 
@@ -93,6 +98,13 @@ getActivateExtension(url, key, group)
     → group / value / onClass / order → 条件扩展列表
 ```
 
+这里先做一个路标：Dubbo 至少有三条“扩展入口”，而不是同一种加载方式的三个小变体。
+
+- `getExtension(name)`：你已经知道想要哪个名字。  
+- `getAdaptiveExtension()`：你现在还不知道名字，要等 URL 在调用时告诉你。  
+- `getActivateExtension(...)`：你不是要拿一个实现，而是要按条件组装一批实现。  
+
+后面整篇文章其实都在解释这三条入口为什么必须并存。
 ## 五、`@SPI` 与 `ExtensionDirector`：扩展契约和作用域
 
 ### 5.1 扩展接口必须声明 `@SPI`
@@ -187,6 +199,8 @@ Loader 内部同时缓存：
 
 这几类缓存服务于不同阶段：类缓存解决扫描，名称缓存解决查找，实例缓存解决复用，wrapper 后的最终实例则代表真正交给业务运行的对象。
 
+这里要特别把“原始实例缓存”和“最终实例缓存”钉死。它们不能合并成一个 Map，因为同一个实现类和同一个扩展名，最后未必对应同一个最终对象：原始实例可能只是 `DubboProtocol`，而最终返回给调用方的对象可能已经是 `ProtocolListenerWrapper(ProtocolFilterWrapper(DubboProtocol))`。也就是说，缓存的不只是“这个类实例化过没有”，还要缓存“这个名字最终被组装成什么运行对象”。
+
 ## 七、固定扩展与 Adaptive 扩展
 
 ### 7.1 `getExtension(name)`：固定选择
@@ -280,7 +294,17 @@ url.protocol=injvm → InjvmProtocol
 `Protocol.java:81` — Adaptive export
 `Protocol.java:99` — Adaptive refer
 
-### 8.4 参数对象也可以提供 URL
+### 8.4 把 Protocol、LoadBalance、Dispatcher 三个例子并排看
+
+到这里最好把三个最常见的 Adaptive 场景并排看一次：
+
+- **Protocol**：按 `url.getProtocol()` 选协议，比如 `dubbo`、`tri`、`injvm`。  
+- **LoadBalance**：按 URL 参数 `loadbalance` 选实现，比如 `random`、`roundrobin`。  
+- **Dispatcher**：按 `dispatcher` / `dispather` / `channel.handler` 这些兼容 key 选线程派发策略。
+
+它们共同说明了一件事：Adaptive 的本质不是“返回默认实现”，而是“把调用期上下文里的 URL 信息翻译成扩展名，再去拿真正实现”。只不过 Protocol 更看重 `protocol` 字段，LoadBalance/Dispatcher 更看重参数键。
+
+### 8.5 参数对象也可以提供 URL
 
 Adaptive 方法的参数不一定直接就是 URL。如果参数对象有 `getUrl()`，生成器会调用它取得 URL。
 
@@ -492,6 +516,10 @@ loadbalance=roundrobin
 ### 误解五：扩展实例是全局单例
 
 不一定。`ExtensionDirector` 按 ScopeModel 管理 Loader，Framework/Application/Module scope 可能拥有不同的扩展上下文和实例缓存。
+
+### 误解六：wrapper 只是语法糖，不影响最终运行对象的语义层次
+
+不是。wrapper 改的不是打印日志这种表面行为，而是最终运行对象的结构本身。调用方拿到的可能根本不是原始实现，而是“原始实现 + Filter wrapper + Listener wrapper + 注入后的依赖 + 生命周期初始化”之后的组合体。忽略 wrapper，就等于忽略 Dubbo 运行时真实对象的语义层次。
 
 ## 十三、收网总结：SPI 是 Dubbo 的运行时组装器
 

@@ -1,13 +1,13 @@
 # MySQL Server 与 InnoDB 架构：一条 SQL 真正穿过的，不是“数据库”这一个黑盒，而是连接线程、Server 层、Handler 契约、Buffer Pool、日志、后台线程和文件层这整条分层流水线
 
 > 主题：MySQL｜第 1 篇
-> 前置文章：`docs/openjdk/vol-os-kernel/14-page-cache-io-path.md`、`docs/openjdk/vol-os-kernel/19-kernel-boot-debug.md`、`docs/openjdk/vol-system-performance/01-methodology-foundation.md`
+> 前置文章：无
 > 本篇后续：`02-redo-wal-lsn.md`
 > 一句话困惑：执行一条 `SELECT` 或 `UPDATE` 时，MySQL 为什么不是“解析 SQL → 直接读写磁盘文件”这么简单，而要在 Server 层、存储引擎、Buffer Pool、日志和后台线程之间绕这么多层？
 > 一句话顿悟：因为 SQL 语义、缓存命中、持久化安全、索引访问、后台刷脏和元数据一致性根本不是同一个问题；MySQL 先用 Server 层/Handler 契约把“怎么理解请求”和“怎么在磁盘上存”分开，再由 InnoDB 用 Buffer Pool、日志和后台线程把这条流水线组织起来。
 > 依赖分类：
 > - 硬依赖：读者至少知道 SQL 查询、事务提交和“磁盘比内存慢很多”这三个最小常识；否则本篇无法解释为什么数据库一定会长出缓存层和后台落盘。
-> - 软依赖：`vol-os-kernel/14-page-cache-io-path.md`、`vol-os-kernel/19-kernel-boot-debug.md`、`vol-system-performance/01-methodology-foundation.md` 中关于页缓存、后台线程与系统分层的结论；本篇会复用这些直觉，但不要求先把内核细节读完。
+> - 软依赖：页缓存、后台线程与系统分层这类操作系统直觉会帮助理解 Buffer Pool、刷脏和前后台分工，但不是本文成立的前提；本篇会复用这些直觉，不要求先读其他卷。
 > - 导航依赖：下一篇 `02-redo-wal-lsn.md` 会把“为什么写操作不能直接写数据页”进一步推进到 Redo/WAL、LSN、Checkpoint 与恢复边界；本篇只建立总图，不提前透支完整持久化细节。
 > 版本说明：本文讨论 MySQL 8.x 常见的 Server 层 / InnoDB 架构稳定心智模型，重点是连接线程、解析/优化/执行、Handler 契约、Buffer Pool、后台线程、Doublewrite、Change Buffer、AHI、事务型数据字典与字符集/Collation 语义。具体 THD 字段、Handler 接口细节、数据字典表结构、AHI/Change Buffer 策略、线程模型、刷脏调度与配置默认值会随 MySQL 版本、构建选项和工作负载变化。本文不把某一版源码中的结构体大小、函数拆分或默认参数写成跨版本契约，而把重点放在“为什么 MySQL 要这样分层，以及一条 SQL 究竟怎样在这些层之间流动”。
 

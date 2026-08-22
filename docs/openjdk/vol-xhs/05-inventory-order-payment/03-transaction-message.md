@@ -217,9 +217,13 @@
 
 也就是说，本地消息表补发不是“重新执行订单逻辑”，而是**继续推进那条已经在本地事务中被证明成立的外部消息链。**
 
+而且这里必须把语义说得更硬一点：这条补发链默认就是 **at-least-once**，不是恰好一次。`LocalMessageRetryJob` 在 `my-xhs-order/src/main/java/com/myxhs/order/job/LocalMessageRetryJob.java:74` 到 `:76` 已经明确写了这一点；与之配套的，是库存侧 `OrderTransactionConsumer` 同时做了消费者层 `msgId` 去重和 `InventoryService.preDeduct()` 里的预扣幂等兜底，见 `my-xhs-inventory/src/main/java/com/myxhs/inventory/consumer/OrderTransactionConsumer.java:25` 到 `:33`。这说明当前实现并不是幻想“消息只会发一次”，而是承认补发和重投会真实发生，再要求下游必须能把重复消息吞掉。
+
 但必须把边界说清：补发默认是 **at-least-once**，不是恰好一次。`LocalMessageRetryJob` 在 `my-xhs-order/src/main/java/com/myxhs/order/job/LocalMessageRetryJob.java:74` 到 `:76` 已经明确写了这一点：消费端必须保证幂等，因为事务消息可能已经 `Commit` 成功、消费者也可能已经消费过一次。也正因为如此，库存侧 `OrderTransactionConsumer` 才同时做了消费者层 `msgId` 去重和 `InventoryService.preDeduct()` 里的预扣幂等兜底，见 `my-xhs-inventory/src/main/java/com/myxhs/inventory/consumer/OrderTransactionConsumer.java:25` 到 `:33`。
 
 这让系统具备了一个很关键的能力：**即使订单创建时 MQ 当场没彻底推进出去，只要 MySQL 还活着，库存最终仍有机会看见这笔订单。**
+
+这里再补一个经常被写散的分布式协作点：`LocalMessageRetryJob` 和库存侧的事务消息消费幂等，并不是各自为战。上游 order 明确接受“本地消息补发 = at-least-once”，见 `my-xhs-order/src/main/java/com/myxhs/order/job/LocalMessageRetryJob.java:74`；下游 inventory 则通过 `OrderTransactionConsumer` 的 `msgId` 去重和 `InventoryService.preDeduct()` 的 MySQL 幂等占位一起把重复消息吞掉，见 `my-xhs-inventory/src/main/java/com/myxhs/inventory/consumer/OrderTransactionConsumer.java:25` 到 `:33`。也就是说，这条链真正成立，不是因为某一端 magically 做到了恰好一次，而是因为上游敢补发、下游能收敛，双方在语义上事先对齐了。
 
 ## 补偿消息解决的又是另一类失败
 
@@ -377,3 +381,6 @@ Inventory OrderTransactionConsumer
 但它还没进入下一步更贴近用户感知的问题：支付真正接入之后，订单状态、库存确认、退款回补和支付状态到底怎样闭环，系统又怎样把“钱”和“货”的状态对齐？
 
 所以下一篇应该进入 `04-payment-flow.md`，去回答**支付链是怎样接住订单、又怎样把最终结果反推回订单和库存的**。
+
+
+补：当 `ORDER_COMPENSATION_TOPIC` 本身发送失败时，当前实现会把补偿动作写入本地兜底集合，并由 `OrderCloseJob` 周期性重放 `RELEASE_STOCK / RETURN_COUPON / CLOSE_ORDER` 三类补偿，避免补偿链只剩日志没有可执行锚点。

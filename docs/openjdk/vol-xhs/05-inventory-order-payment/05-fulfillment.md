@@ -203,6 +203,8 @@
 
 这说明退款不是“订单还没成立”的回滚，而是**已成立交易进入售后收口的分支**。
 
+这里还要补一个微服务边界：支付成功、支付失败、退款成功这些入口在 `OrderController` 里都不是面向前端的公开接口，而是通过 `X-Internal-Call` 保护的内部回调接口，见 `my-xhs-order/src/main/java/com/myxhs/order/controller/OrderController.java:175` 到 `:253`。这说明支付域和订单域之间的关系不是“前台再打一枪订单接口”，而是由内部回调直接推进订单状态机。
+
 ### 退款成功后到底要收什么尾
 
 `onRefundSuccess()` 后续做了四件事：
@@ -244,7 +246,7 @@
 - 中间态有没有收干净
 - 最终态需不需要真正回补库存
 
-这说明退款不是“沿着原路径往回走一遍”，而是一条专门的收口链。
+这说明退款不是“沿着原路径往回走一遍”，而是一条专门的收口链。当前实现里同时调用 `releaseInventory()` 和 `restoreStockOnRefund()`，不是因为同一批库存要“加回两次”，而是因为它在兜两种不同语义：前者负责清掉可能还残留的预扣中间态，后者负责把已经确认扣减过的真实成交库存重新放回可卖池。也就是说，退款链不是单一回滚动作，而是“先收中间态，再补最终态”的双路径收尾。
 
 ## Event Sourcing 和快照在履约链里到底解决什么
 
@@ -347,6 +349,7 @@
 - 已付款状态作为履约起点：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:665`
 - 退款成功收口：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:1087`
 - 退款回补库存：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:791`
+- 支付/退款回调是内部接口：`my-xhs-order/src/main/java/com/myxhs/order/controller/OrderController.java:175`
 - 事件到状态映射：`my-xhs-order/src/main/java/com/myxhs/order/service/OrderEventService.java:34`
 
 ## 边界清单

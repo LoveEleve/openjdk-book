@@ -197,4 +197,6 @@ L2 运行态 / 交付实证：
 
 更重要的是，本篇把一个特别容易被讲轻的事实钉住了：**在 `my-xhs` 里，部署失败很多时候不是命令没执行，而是部署包没有把系统真正依赖的那些前提条件完整地带过去。**
 
+这也正好和 `02-startup-script.md`、`04-monitoring-alert.md` 形成同一个主题：启动脚本、部署包和监控平台，其实都在回答同一个问题——**系统不能只是真的工作，还得能被正确地确认"它正在工作"。** 部署篇讲的是"环境层面的假就绪"，启动脚本篇讲的是"进程层面的假恢复"，监控篇讲的是"平台层面的假闭环"。三者共同构成 `my-xhs` 里"平台假成功"这一类故障的完整图景。
+
 下一篇如果继续沿 `12-testing-release-ops/` 推进，最自然的顺序就是进入 `docs/openjdk/vol-xhs/12-testing-release-ops/04-monitoring-alert.md`，把前面 scattered 出现的 Prometheus / Grafana / Alertmanager / 规则名与埋点对齐问题统一收束。

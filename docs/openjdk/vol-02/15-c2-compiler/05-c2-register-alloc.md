@@ -19,7 +19,9 @@ C1 到了后端，会把值压成 Interval，然后用 LinearScan 单趟把它�
 
 先把答案压成一句话：**C2 不用 LinearScan，不是因为它嫌单遍扫描不够时髦，而是因为它前面已经把图优化到了值得认真安排资源的位置。于是它先把值压成 LRG，再把“同时活着”的关系编码成 IFG，用 simplify/select 着色；颜色不够时也不满足于永久 spill，而是 split live range、重建 liveness/IFG、再来一轮，直到全局活跃关系能塞进有限寄存器。**
 
-## 先试两个最自然的办法，看看为什么都不够
+---
+
+## 1. 先试两个最自然的办法，看看为什么都不够
 
 ### 误解一：C2 完全可以沿用 C1 的 LinearScan
 
@@ -52,23 +54,27 @@ LinearScan 当然仍然能分配，但它更擅长“沿指令顺序做局部决
 
 如果一 spill 就永久住栈，你等于把“局部寄存器压力太高”升级成“整个方法都不再值得用寄存器保存这个值”。这通常过于保守。
 
-所以 C2 的真正补救方式不是“spill 后就认输”，而是**把 live range 拆短，允许它在某段时间住栈，在别的段落重新抢回寄存器。** 这正是 split/recycle 存在的理由。
+所以 C2 的真正补救方式不是“spill 后就认输”，而是**把 live range 拆短，允许它在某段时间住栈，在别的段落重新抢回寄存器。**
 
-## LRG 与 IFG：为什么先要把“同时活着”编码成图
+---
+
+## 2. LRG 与 IFG：为什么先要把“同时活着”编码成图
 
 C2 后端不是直接对 Node 或 MachNode 染色，而是先把它们压缩成 LRG（Live Range Group）。你可以把 LRG 理解为“后端眼里应该共同分配资源的一组活跃关系单元”。
 
 要给 LRG 分寄存器，先得知道谁和谁不能同色。这就是 IFG（Interference Graph）的职责。
 
-`build_ifg_virtual()` 的注释把建图方式写得非常清楚：它对每个基本块做一次逆向扫描，从 live-out 集出发，遇到定义就让“当前定义值”与“此刻 live 集里的所有值”产生干涉，然后把定义移出 live 集，把输入加入 live 集。`share/opto/ifg.cpp:311`、`share/opto/ifg.cpp:317`、`share/opto/ifg.cpp:325`、`share/opto/ifg.cpp:329`
+`build_ifg_virtual()` 的注释把建图方式写得非常清楚：它对每个基本块做一次逆向扫描，从 live-out 集出发，遇到定义就让“当前定义值”与“此刻 live 集里的所有值”产生干涉，然后把定义移出 live 集，把输入加入 live 集。`ifg.cpp:311-329`
 
 这个过程特别值得理解，因为它说明 IFG 不是“额外造一张图”而已，而是把寄存器冲突这个动态时间问题静态编码成图边：**两个 LRG 只要在某个点同时活着，就不能拿同一个寄存器颜色。**
 
 更重要的是，IFG 比“单个区间的首尾”更贴合 C2 的值关系。C2 前面经历过 Phi 合并、循环变换、向量打包、matcher 重写，真正需要保护的是“谁会与谁同时活着”，而不只是“这个值从哪到哪活着”。IFG 把这种全局重叠关系直接变成邻接边，后面 simplify/select 看到的是资源冲突图，而不是一串线性区间。
 
-还有一个关键特例：copy 不定义新值，因此不产生新的干涉。这恰恰为后面的 coalesce 提供了空间——如果 copy 两端没有真正冲突，后端就有机会把它们染成同色，连这条 copy 本身都省掉。现稿已经抓住这一点，它是整套 C2 RA 哲学的支点之一。
+还有一个关键特例：copy 不定义新值，因此不产生新的干涉。这恰恰为后面的 coalesce 提供了空间——如果 copy 两端没有真正冲突，后端就有机会把它们染成同色，连这条 copy 本身都省掉。
 
-## 为什么 LRG 里不仅有“谁干涉我”，还要记 `_cost/_area/_copy_bias`
+---
+
+## 3. 为什么 LRG 里不仅有“谁干涉我”，还要记 `_cost/_area/_copy_bias`
 
 寄存器分配不只是一个纯图问题，还是一个代价问题。
 
@@ -83,17 +89,19 @@ C2 后端不是直接对 Node 或 MachNode 染色，而是先把它们压缩成 
 
 所以 IFG 给的是约束，`score()` 给的是代价偏好，两者一起才构成后面的 simplify/select 决策基础。
 
-## Simplify：为什么低度节点天然适合先压栈
+---
 
-`Simplify()` 的核心思想其实很朴素：如果某个 LRG 的干涉度数已经低到小于可用寄存器数，那它在最终着色时天然更容易找到颜色。所以先把这种“低度节点”摘掉压到 `_simplified` 栈里，再让剩余图继续缩小。`share/opto/chaitin.cpp:1199`、`share/opto/chaitin.cpp:1202`、`share/opto/chaitin.cpp:1206`、`share/opto/chaitin.cpp:1217`、`share/opto/chaitin.cpp:1229`、`share/opto/chaitin.cpp:1232`
+## 4. Simplify：为什么低度节点天然适合先压栈
 
-当低度列表空了，而高干涉节点还没处理完时，算法才开始挑“潜在 spill 候选”。源码写得很坦白：这时候是 `Time to pick a potential spill guy`。也就是说，它不是宣布“这个值已经必 spill”，而是先在约简栈里把它当作最可能被牺牲的对象压下去，等 Select 阶段再看是不是真的走到那一步。`share/opto/chaitin.cpp:1263`、`share/opto/chaitin.cpp:1266`、`share/opto/chaitin.cpp:1267`、`share/opto/chaitin.cpp:1273`
+`Simplify()` 的核心思想很朴素：如果某个 LRG 的干涉度数已经低到小于可用寄存器数，那它在最终着色时天然更容易找到颜色。所以先把这种“低度节点”摘掉压到 `_simplified` 栈里，再让剩余图继续缩小。`chaitin.cpp:1199-1273`
+
+当低度列表空了，而高干涉节点还没处理完时，算法才开始挑“潜在 spill 候选”。源码写得很坦白：这时候是 `Time to pick a potential spill guy`。也就是说，它不是宣布“这个值已经必 spill”，而是先在约简栈里把它当作最可能被牺牲的对象压下去，等 Select 阶段再看是不是真的走到那一步。
 
 这就是图着色寄存器分配最值得抓住的直觉：**先靠图约简找出“容易染色”的顺序，再在真正分颜色时回头做决定。**
 
-所以 simplify 的作用，不是“已经决定谁 spill”，而是把难题推迟到“图已经尽量被削薄”的那一刻。
+---
 
-## coalesce：为什么寄存器分配还要顺手消 copy
+## 5. coalesce：为什么寄存器分配还要顺手消 copy
 
 如果寄存器分配只管着色，不管 copy，那么很多虚拟 copy 会在后端变成真 move。这会让前面好不容易压缩好的数据流关系再次膨胀成机器级搬运。
 
@@ -101,40 +109,40 @@ C2 后端不是直接对 Node 或 MachNode 染色，而是先把它们压缩成 
 
 这和 `_copy_bias` 的存在是同一套哲学：如果两个 live range 没有真正冲突，那后端当然希望它们共用一个颜色，这样等价于把 copy 关系在分配阶段就消掉。
 
-所以 coalesce 不是可有可无的小修饰，而是“减少 move、减少 spill 压力、提高寄存器利用率”的关键配套动作。
+---
 
-## Select：真正分颜色时在做什么
+## 6. Select：真正分颜色时在做什么
 
-`Select()` 会从 `_simplified` 栈顶逆序弹出 LRG，重新把它插回 IFG，再从邻居已占颜色中扣掉不可用色，然后调用 `choose_color()` 选一个还能用的寄存器颜色。`share/opto/chaitin.cpp:1447`、`share/opto/chaitin.cpp:1452`、`share/opto/chaitin.cpp:1468`、`share/opto/chaitin.cpp:1482`、`share/opto/chaitin.cpp:1503`、`share/opto/chaitin.cpp:1528`、`share/opto/chaitin.cpp:1529`
+`Select()` 会从 `_simplified` 栈顶逆序弹出 LRG，重新把它插回 IFG，再从邻居已占颜色中扣掉不可用色，然后调用 `choose_color()` 选一个还能用的寄存器颜色。`chaitin.cpp:1447-1540`
 
-这里有一个很容易被忽略的细节：栈槽本身也被当作一种“颜色空间”，而且 `AllStack` live range 还会按 chunk 滚动到下一块 stack color 区域。这说明在 C2 RA 里，“着色失败”的含义不是只有“寄存器没了”，还包括“退到另一个资源池里找位置”。`share/opto/chaitin.cpp:1471`、`share/opto/chaitin.cpp:1536`、`share/opto/chaitin.cpp:1538`、`share/opto/chaitin.cpp:1540`
+这里有一个很容易被忽略的细节：栈槽本身也被当作一种“颜色空间”，而且 `AllStack` live range 还会按 chunk 滚动到下一块 stack color 区域。这说明在 C2 RA 里，“着色失败”的含义不是只有“寄存器没了”，还包括“退到另一个资源池里找位置”。
 
 所以 Select 的任务不是简单地给每个值填一个寄存器号，而是：**在图约简顺序已经确定后，尽可能把值放回最好的颜色空间；实在不行，再把问题交给 split。**
 
-## Split：为什么 C2 不接受“一 spill 就长期住栈”
+---
+
+## 7. Split：为什么 C2 不接受“一 spill 就长期住栈”
 
 真正体现 C2 风格的地方，在 spill 之后。
 
 `Register_Allocate()` 里第一次 `Select()` 如果有 spill，不是直接收工，而是进入 `while (spills)` 的 `spill-split-recycle` 大循环。每轮都会：
 
-- `Split()` 把需要 spill 的 LRG  everywhere 拆短；
+- `Split()` 把需要 spill 的 LRG everywhere 拆短；
 - `compact()` 重新压缩 LRG 编号；
 - 重建 liveness；
 - 重建 IFG；
 - 必要时再做一轮保守 coalesce；
-- 再 `Simplify()`、再 `Select()`。 `share/opto/chaitin.cpp:517`、`share/opto/chaitin.cpp:519`、`share/opto/chaitin.cpp:521`、`share/opto/chaitin.cpp:534`、`share/opto/chaitin.cpp:542`、`share/opto/chaitin.cpp:544`、`share/opto/chaitin.cpp:558`、`share/opto/chaitin.cpp:566`、`share/opto/chaitin.cpp:578`、`share/opto/chaitin.cpp:582`
+- 再 `Simplify()`、再 `Select()`。 `chaitin.cpp:517-582`
 
 这条链的含义非常重要：**C2 不接受“寄存器不够，那这个值以后都住栈”的粗糙结局。**
 
 它更愿意做的是：把这个活跃关系拆短，让部分使用点重新有机会拿回寄存器，或者让某些段干脆重物化，而不是长期背着一个高频 spill 值。
 
-这也是为什么 split/recycle 是整套算法的关键，而不是后补救火。没有它，图着色分配就会在第一次颜色不够时迅速退化成大量永久 spill，前面全局优化获得的好处会被后端粗糙分配吞掉。换句话说，split 不是单纯为了“让算法继续跑下去”，而是为了守住前面 IGVN、EA、循环优化和向量化已经替代码赢回来的寄存器局部性与访存质量。
-
-源码里 `_trip_cnt` 的 24/27 次上限，也很能说明它的工程味：算法并不是理论上无限重试，而是靠一条工程预算线防止 spill-split-recycle 发疯。`share/opto/chaitin.cpp:521`、`share/opto/chaitin.cpp:523`、`share/opto/chaitin.cpp:525`、`share/opto/chaitin.cpp:526`
-
 所以 Split 的真正角色可以压成一句话：**它让 spill 从“终身判决”变成“阶段性让位”。**
 
-## 这套高成本 RA，为什么仍然符合 C2 的总体哲学
+---
+
+## 8. 这套高成本 RA，为什么仍然符合 C2 的总体哲学
 
 看到这里，可能会反过来问：既然 spill-split-recycle 这么重，C2 为什么愿意花这笔时间？
 
@@ -148,16 +156,22 @@ C2 后端不是直接对 Node 或 MachNode 染色，而是先把它们压缩成 
 
 所以 C2 愿意在 RA 阶段付出更多时间，本质上是在贯彻它一以贯之的哲学：**既然前面已经做了全局优化，那后面也值得做更全局的资源安排。**
 
-## 收网：C2 的 RA 不是单遍扫描，而是全局活跃关系图上的着色与拆分
+---
 
-现在可以把整篇压成一张总图了。
+## 9. 误解澄清与收网
 
-Matcher 之后，C2 先用 `PhaseLive` 算出值在图上的活跃关系，再用 `build_ifg_virtual`/`build_ifg_physical` 把“同时活着”编码成 IFG；LRG 里保存 `cost/area/copy_bias/score` 这些分配偏好；`Simplify` 先把低度节点压栈、把高干涉节点延后；`Select` 再逆序着色；若颜色仍不够，就不接受永久住栈，而是进入 `spill-split-recycle`：拆短 live range、重建 liveness 和 IFG、再跑一轮 coalesce/simplify/select，直到图终于能塞进有限寄存器。`share/opto/chaitin.cpp:336`、`share/opto/ifg.cpp:317`、`share/opto/chaitin.cpp:360`、`share/opto/chaitin.cpp:409`、`share/opto/chaitin.cpp:425`、`share/opto/chaitin.cpp:515`、`share/opto/chaitin.cpp:519`、`share/opto/chaitin.cpp:521`、`share/opto/chaitin.cpp:578`
+1. **C2 完全可以沿用 C1 的 LinearScan 吗?** 能工作，但会把前面全局优化赢来的很多局部性和 copy 消除机会又还给 spill 和 move。
+2. **spill 之后就住栈，不必再 split 吗?** 不行。那会把局部寄存器压力升级成整个方法的长期损失。
+3. **coalesce 只是锦上添花吗?** 不是。它和 `_copy_bias` 一起决定 copy 能否在分配阶段直接消失。
+4. **IFG 只是“多造一张图”吗?** 不是。它把“同时活着”的动态时间关系静态编码成资源冲突边。
+5. **Split 只是为了让算法继续跑下去吗?** 不只是。它是为了守住前面全局优化换回来的寄存器局部性和访存质量。
 
-所以，这一篇最核心的一句话不是“C2 用 Chaitin 图着色寄存器分配”，而是：
+把这一篇压成三句话：
 
-**C2 的寄存器分配已经不再是局部顺序问题，而是全局活跃关系图上的着色与拆分问题；spill 也不是终局，而是通过 split/recycle 反复换空间。**
+- **C2 的寄存器分配已经不是局部顺序问题，而是全局活跃关系图上的着色问题。**
+- **IFG 给约束，LRG 给代价，Simplify/Select 做着色，Coalesce 减 copy，Split/Recycle 让 spill 不是终局。**
+- **C2 在 RA 阶段愿意花更多时间，是因为前面全局优化已经把图变得值得认真安排资源。**
 
-只要这句抓住了，下一篇 `Matcher + Code Generation` 就好理解了：寄存器终于安排妥当，C2 才能把这些机器节点和寄存器结果真正落成 x86 指令与 nmethod。
+下一篇: `Matcher + Code Generation`——寄存器终于安排妥当后，C2 怎样把这些机器节点真正落成 x86 指令与 nmethod。
 
 > → [15-c2-compiler/06 — `Matcher + Code Generation`：DFA 指令选择 → x86 机码](06-c2-codegen.md)

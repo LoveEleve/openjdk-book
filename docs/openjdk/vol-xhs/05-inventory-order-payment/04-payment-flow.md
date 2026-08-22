@@ -134,6 +134,8 @@
 
 这说明支付单不是订单表上的一个附加字段，而是一份独立的资金侧状态记录。
 
+而且支付单创建前还有一道经常被忽略的业务门：`PaymentService.pay()` 会先回查订单当前必须仍是待付款状态，见 `my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:159` 到 `:189`。这不是简单的重复查询，而是在支付域自己的边界上再次确认“这笔钱现在还有没有合法的承载订单”，防止订单已取消或已经支付后仍然创建新的支付尝试。
+
 为什么必须独立？因为支付域需要单独回答：
 
 - 这笔支付是否已经发起
@@ -155,6 +157,8 @@
 3. 记录支付成功事件，见 `my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:344` 到 `:347`
 
 这一步说明：**支付域先对“钱”负责，把自己这边的状态坐实。**
+
+这里的“坐实”也不是只更新一行 `t_payment`：当前实现会同时更新 Redis 支付状态缓存，并追加支付成功事件，见 `my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:323` 到 `:347`。因此支付域内部至少同时维护三种投影：支付表状态、Redis 快速查询状态、append-only 支付事件。
 
 ### 然后才把结果推回订单域
 
@@ -240,6 +244,8 @@
 
 这说明退款不是支付状态上的一个小分支，而是一套独立记录、独立幂等、独立回调的状态机。
 
+同时，退款成功也不是“收到一次成功回调就把订单改成已退款”。支付域会根据退款单累计金额判断是否已经全额退款，只有全额退款时才通知订单域进入 `notifyRefundSuccess()`，见 `my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:566` 到 `:627`。这条金额累计和全额判定是当前支付业务里非常关键的边界：部分退款可以先停留在支付域，不能提前把整笔订单推进到最终退款状态。
+
 ### 退款成功之后，为什么订单和库存还要再收一次尾
 
 `handleRefundSuccessInternal()` 在 `my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:566` 到 `:627` 中，会：
@@ -289,6 +295,8 @@
   → 还要再问订单域：
      这张订单现在有没有资格承认自己已付款
 ```
+
+这里的失败分类也很重要：如果订单返回的是明确的业务拒绝（例如订单已经取消/状态不允许），支付域会主动发起退款；如果只是订单服务暂时不可用，则不能简单把它当成业务拒绝，而要保留重试/补偿机会，见 `my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:352` 到 `:377`。支付域因此不仅是结果发布者，还承担了“钱已成功但订单拒绝承接”时的逆向止损责任。
 
 从分布式角度看，支付真相和订单真相不是“通知一次就结束”的单向关系，而是两套状态机在关键竞态点互相裁决。支付侧因此必须保留自动退款与补偿任务，否则就会留下“钱已成功、订单却不能推进”的高危半成功状态。
 
@@ -376,6 +384,10 @@ order 收敛货侧状态
 - 支付失败回推订单取消：`my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:380`、`my-xhs-order/src/main/java/com/myxhs/order/controller/OrderController.java:206`
 - 退款流程与退款成功收敛：`my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:410`、`my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:566`
 - 支付域通知订单域的 Feign 契约：`my-xhs-payment/src/main/java/com/myxhs/payment/feign/OrderFeignClient.java:29`、`my-xhs-payment/src/main/java/com/myxhs/payment/feign/OrderFeignClient.java:53`、`my-xhs-payment/src/main/java/com/myxhs/payment/feign/OrderFeignClient.java:87`
+- 支付前订单状态回查：`my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:159`
+- 支付成功的表/缓存/事件三重投影：`my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:323`
+- 业务拒绝触发自动退款：`my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:352`
+- 全额退款判定后才通知订单：`my-xhs-payment/src/main/java/com/myxhs/payment/service/PaymentService.java:566`
 
 ## 边界清单
 
@@ -396,3 +408,15 @@ order 收敛货侧状态
 但它还没进入交易主链的最后一个问题：一笔订单最终怎样结束、怎样履约、怎样退款完成，以及这条链在“用户收到货”之后怎样进入真正的终态。
 
 所以下一篇应该进入 `05-fulfillment.md`，去回答**履约、确认收货、售后退款和最终完成状态到底怎样把整个交易主链收口**。
+
+
+补：支付回调解析现在要求有效 `paymentNo/tradeNo`，解析失败直接返回 `fail`，不再生成伪流水号后把未知回调返回成功；部分退款时 Redis 支付状态也保持“已支付”，只有累计全额退款才写“已退款”，退款补偿通知键改为按 `refundNo` 粒度。
+
+
+补：支付模拟器现在在回调处理成功后才删除待回调 key，处理失败会保留 key 等下一轮重试；退款回调模拟也增加了按 `refundNo` 的分布式锁，避免多实例重复发送同一退款回调。
+
+
+补：支付/退款模拟回调现在改为严格读取 `trade_status/result_code/status/refund_status` 字段，不再用任意文本包含 `success` 判断结果；待回调 Redis 标记 TTL 也延长到 24 小时，降低支付服务短时故障导致模拟回调丢失的窗口。
+
+
+补：支付超时扫描锁已从固定 30 秒延长到 5 分钟，覆盖批量扫描和逐条状态更新耗时；支付对账触发 `notifyPaySuccess` 后现在会检查返回结果并记录失败，不再把通知失败静默吞掉。

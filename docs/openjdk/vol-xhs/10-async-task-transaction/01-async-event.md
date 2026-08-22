@@ -139,6 +139,8 @@ Task13 的真实运行态验证已经把这个误解彻底打穿：团队是从�
 
 `PaymentNotifyCompensateJob` 的类注释把场景写得非常清楚：支付成功后，本来应该通过 MQ 通知订单服务更新状态；但如果 Broker 宕机、订单服务消费失败、网络分区等问题让这条链没收敛，就由补偿任务扫描支付成功但超过 5 分钟仍未被订单侧确认的记录，再通过 Feign 去查询订单状态、必要时重新通知。`my-xhs-payment/src/main/java/com/myxhs/payment/job/PaymentNotifyCompensateJob.java:20`
 
+而且这条链这轮又补了一次语义收口：`OrderService.getOrderPayAmount()` 现在只有在订单仍处于待支付状态时才返回金额，映射不存在、订单不存在或状态已推进时统一返回 `null`。这让支付补偿任务终于能把“订单服务不可达”和“订单已经不需要补偿”分开判断，不再把 mapping 缺失 / 非待支付状态误落到异常分支里。`my-xhs-order/src/main/java/com/myxhs/order/service/OrderService.java:1208`
+
 这里最重要的设计判断是：从当前实现可以看出，作者并没有把 MQ 当成唯一真理，而是把它看作**第一条后半段执行通道**。一旦这条通道失败，系统还愿意绕到另一条通道（Feign + Job）去继续收敛。这比“MQ 重试几次就算了”要积极得多，也更接近真正的最终一致性工程。
 
 同样的思路也体现在退款补偿上。退款成功通知不是只有一条消息再赌消费者，而是被视作一条必须最终交付给订单状态机的业务事实。MQ、回调、Job 都只是不同阶段的执行者。
